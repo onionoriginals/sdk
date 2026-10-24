@@ -671,6 +671,14 @@ export const demo = {
       'This browser can’t keep your work on this device, so it isn’t saved across restarts. Keep this page open, and download its evidence before you leave.'
   },
   hosting: {
+    /** Published and verified, but not yet in the account's list (G3). Said apart from publication. */
+    notListed:
+      'Published, and anyone can verify it. It isn’t in your account’s list yet, so your other devices won’t show it until it is.',
+    retryListing: 'Add to my list',
+    indexFull:
+      'Your account’s list of published Originals is full, so this one can’t be added. It is still published, and anyone can verify it.',
+    indexUnavailable:
+      'We couldn’t add this Original to your account’s list. It is still published, and anyone can verify it. Try again in a moment.',
     rateLimited:
       'Publishing is temporarily limited. Wait a few seconds and try again. Your signed Original is still in this tab.',
     unavailable:

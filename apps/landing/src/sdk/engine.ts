@@ -81,6 +81,12 @@ export interface DemoAssetState {
    * `layer` is `did:webvh` only when complete.
    */
   publication: "none" | "incomplete" | "complete";
+  /**
+   * Whether a complete publication is listed in the account's index for the
+   * author's other clients (G3), reported apart from publication itself.
+   * Unset when this engine keeps no index.
+   */
+  accountIndex?: "listed" | "not-listed";
   webvhDid?: string;
   webvhLogUrl?: string;
   webvhResolved?: boolean;
@@ -158,6 +164,25 @@ export class PublicationNotVerifiedError extends Error {
   constructor(public readonly reasons: string[]) {
     super(`Uploaded, but a reader can't verify it yet (${reasons.join("; ") || "unreadable"}). Publish again to resume.`);
     this.name = "PublicationNotVerifiedError";
+  }
+}
+
+/**
+ * The account index (G3) refused or missed a write. Publication is complete
+ * without it; this only says the Original isn't yet listed for the author's
+ * other clients. `status` is the HTTP status when there was one (507: the
+ * account's index is full).
+ */
+export class AccountIndexError extends Error {
+  constructor(public readonly status: number | null, message: string) {
+    super(message);
+    this.name = "AccountIndexError";
+  }
+
+  static from(error: unknown): AccountIndexError {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = /failed:\s*(\d{3})\b/.exec(message)?.[1];
+    return new AccountIndexError(status ? Number(status) : null, message);
   }
 }
 
@@ -466,14 +491,27 @@ export class DemoEngine {
       await read(didWebvhLogUrl(entry.alias), { maxBytes: FETCH_LIMITS.maxBytes, timeoutMs: FETCH_LIMITS.timeoutMs, signal: AbortSignal.timeout(FETCH_LIMITS.timeoutMs) }),
     );
     const alias: AliasEvidence = { did: entry.alias, log: aliasLog };
-    this.alias = alias;
-    this.did = did;
-    const synced = await this.sdk!.sync(did, this.sharedHost());
+    const synced = await this.sdk!.sync(did, this.sharedHost(alias.did));
     if (synced.status === "conflict") throw new Error("The host's history of this Original diverges from this browser's; it is kept as a conflict, and nothing was chosen.");
     await this.store!.putAuthorEvidence(alias);
-    this.view = synced.original;
-    await this.verifyPublished(entry.alias, read);
-    await this.recordPublication({ alias, state: "complete" });
+    // The host may move on between the sync and the read-back: readBack
+    // follows a head that descends, and never one that diverges (P2.1, P4.5).
+    let view: OriginalView;
+    try {
+      view = await this.readBack(did, alias.did, read, synced.original);
+    } catch (error) {
+      // The host's log is in this store now. Its record says so, listed but
+      // not complete, so opening it later offers to finish (G4); this page
+      // takes nothing on until the read-back succeeds.
+      await this.records().putPublication(did, { alias, state: "uploaded", indexed: true });
+      throw error;
+    }
+    const record: PublicationRecord = { alias, state: "complete", indexed: true };
+    await this.records().putPublication(did, record);
+    this.did = did;
+    this.alias = alias;
+    this.view = view;
+    this.publication = record;
     await this.refresh();
     this.emit("asset:restored", `Restored ${short(did)} from the host at ${short(this.view.checkpoint)}`, { did, checkpoint: this.view.checkpoint });
     return this.snapshot();
@@ -497,6 +535,8 @@ export class DemoEngine {
     // The listed alias, else the one an interrupted publication built before its entry (G4).
     this.alias = alias?.log !== undefined ? { did: alias.did, log: alias.log, ...(alias.witness === undefined ? {} : { witness: alias.witness }) } : (record?.alias ?? null);
     await this.refresh();
+    // Published but not yet listed for the author's other clients: try again (G3).
+    if (record?.state === "complete" && record.indexed === false && this.publicationState() === "complete") await this.tryAccountIndex();
     this.emit("asset:opened", `Opened ${short(did)} at ${short(view.checkpoint)}`, { did, checkpoint: view.checkpoint });
     return this.snapshot();
   }
@@ -580,13 +620,13 @@ export class DemoEngine {
   }
 
   /** The published Original's shared host. */
-  private sharedHost(): SharedHost {
+  private sharedHost(aliasDid: string = this.alias!.did): SharedHost {
     const target = this.target ?? this.accountTarget();
     const transport = target.upload;
     if (typeof transport.submit !== "function") throw new Error("This host does not take saves for published Originals.");
     return landingSharedHost({
       sdk: this.sdk!,
-      aliasDid: this.alias!.did,
+      aliasDid,
       transport: { submit: (key, body) => transport.submit!(key, body) },
       read: target.read ?? publicRead,
     });
@@ -702,14 +742,46 @@ export class DemoEngine {
     });
     this.alias = result.alias;
     await this.recordPublication({ alias: result.alias, state: "uploaded" });
-    this.view = await this.sdk.get(this.did);
-    await this.readBack(result.alias.did, target.read ?? publicRead);
-    // Listed for the author's other clients (G3); the index is a list, never evidence.
-    if (typeof target.upload.recordOriginal === "function") {
-      await target.upload.recordOriginal({ did: this.did, title: this.view.state.name, resourceHash: hexOfDigest(this.view.state.resources[0].digest), alias: result.alias.did });
-    }
-    await this.recordPublication({ alias: result.alias, state: "complete" });
+    this.view = await this.readBack(this.did, result.alias.did, target.read ?? publicRead, await this.sdk.get(this.did));
+    // Complete on the stranger's read-back alone (G5). Listing it for the
+    // author's other clients (G3) is a separate step, retried and reported
+    // on its own: the index is a list, never evidence.
+    const indexed = typeof target.upload.recordOriginal === "function";
+    await this.recordPublication({ alias: result.alias, state: "complete", ...(indexed ? { indexed: false } : {}) });
+    if (indexed) await this.tryAccountIndex();
     return { alias: result.alias.did, baseUrl: result.baseUrl };
+  }
+
+  /**
+   * List the current, completely published Original in the account's index
+   * (G3), and record that it is listed. Throws AccountIndexError on failure.
+   */
+  private async recordInAccountIndex(): Promise<void> {
+    const index = (this.target ?? this.accountTarget()).upload;
+    const record = this.publication;
+    if (!this.did || !this.view || record?.state !== "complete" || typeof index.recordOriginal !== "function") return;
+    try {
+      await index.recordOriginal({ did: this.did, title: this.view.state.name, resourceHash: hexOfDigest(this.view.state.resources[0].digest), alias: record.alias.did });
+    } catch (error) {
+      throw AccountIndexError.from(error);
+    }
+    await this.recordPublication({ ...record, indexed: true });
+  }
+
+  /** The index step, best effort: a failure is reported in the snapshot, never thrown. */
+  private async tryAccountIndex(): Promise<void> {
+    try {
+      await this.recordInAccountIndex();
+    } catch (error) {
+      this.emit("account:index-failed", "Published, but not yet listed for your other devices", { error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  /** Retry listing a published Original in the account's index; throws AccountIndexError when it still fails. */
+  async retryAccountIndex(): Promise<DemoAssetState> {
+    if (this.publicationState() !== "complete") throw new Error("Publish the Original first");
+    await this.recordInAccountIndex();
+    return this.snapshot();
   }
 
   /**
@@ -720,15 +792,15 @@ export class DemoEngine {
    * history (`imported`). A host that diverges is a fork: kept as a branch,
    * reported, never accepted (P2.1, P4.5, P6.6).
    */
-  private async readBack(aliasDid: string, read: HostedFetch): Promise<void> {
+  private async readBack(did: string, aliasDid: string, read: HostedFetch, view: OriginalView): Promise<OriginalView> {
     try {
-      await this.verifyPublished(aliasDid, read);
-      return;
+      await this.verifyPublished(aliasDid, read, view.checkpoint);
+      return view;
     } catch (error) {
       if (!(error instanceof PublicationNotVerifiedError)) throw error;
       let synced: Awaited<ReturnType<OriginalsSDK["sync"]>>;
       try {
-        synced = await this.sdk!.sync(this.did!, this.sharedHost());
+        synced = await this.sdk!.sync(did, this.sharedHost(aliasDid));
       } catch {
         throw error;
       }
@@ -736,10 +808,9 @@ export class DemoEngine {
         throw new PublicationNotVerifiedError([...error.reasons, "the host's history diverges from this copy; it is kept as a branch, and no branch is chosen (P6.6)"]);
       }
       if (synced.status !== "imported") throw error;
-      this.view = synced.original;
-      await this.refresh();
-      this.emit("asset:synced", `The host's version ${short(this.view.checkpoint)} (${synced.status})`, { checkpoint: this.view.checkpoint });
-      await this.verifyPublished(aliasDid, read);
+      this.emit("asset:synced", `The host's version ${short(synced.original.checkpoint)} (${synced.status})`, { checkpoint: synced.original.checkpoint });
+      await this.verifyPublished(aliasDid, read, synced.original.checkpoint);
+      return synced.original;
     }
   }
 
@@ -748,14 +819,14 @@ export class DemoEngine {
    * key, no store and no cookie (G5). Complete only if the hosted snapshot
    * verifies at this checkpoint with every byte (P3.6, P7.3).
    */
-  private async verifyPublished(aliasDid: string, read: HostedFetch): Promise<void> {
+  private async verifyPublished(aliasDid: string, read: HostedFetch, checkpoint: string): Promise<void> {
     const stranger = OriginalsSDK.create({ store: new MemoryStore(), authors: [] });
     let reasons: string[];
     try {
       const r = await stranger.loadPublished(aliasDid, read);
       reasons = [
         ...(r.verified ? [] : ["the snapshot does not verify", ...r.reasons.map(String)]),
-        ...(r.report.validAsOf?.checkpoint === this.view!.checkpoint ? [] : [`the host serves ${r.report.validAsOf?.checkpoint ?? "no checkpoint"}, not ${this.view!.checkpoint}`]),
+        ...(r.report.validAsOf?.checkpoint === checkpoint ? [] : [`the host serves ${r.report.validAsOf?.checkpoint ?? "no checkpoint"}, not ${checkpoint}`]),
         ...(r.report.resources.status === "available" ? [] : [`resources are ${r.report.resources.status}`]),
       ];
     } catch (error) {
@@ -947,6 +1018,7 @@ export class DemoEngine {
       layer: btco ? "did:btco" : publication === "complete" ? "did:webvh" : "did:vh",
       did: this.did,
       publication,
+      ...(publication === "complete" && this.publication?.indexed !== undefined ? { accountIndex: this.publication.indexed ? ("listed" as const) : ("not-listed" as const) } : {}),
       ...(alias ? { webvhDid: alias, webvhLogUrl: didWebvhLogUrl(alias) } : {}),
       ...(btco ? { btcoDid: btco } : {}),
       ...(this.anchoring ? { anchoring: { ...this.anchoring, unpublished: this.unpublished(this.anchoring.status) } } : {}),

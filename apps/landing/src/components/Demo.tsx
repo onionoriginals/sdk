@@ -998,6 +998,31 @@ export function Demo() {
                 {asset?.notKeptAcrossRestarts && (
                   <p className="demo-step-note" role="status">{demo.storage.notKeptAcrossRestarts}</p>
                 )}
+                {/* G3: published and verified, but not yet in the account's
+                    list. Reported apart from publication, with a retry. */}
+                {asset?.accountIndex === 'not-listed' && (
+                  <div className="demo-step-note" role="status">
+                    <p>{demo.hosting.notListed}</p>
+                    <button
+                      type="button"
+                      className="btn demo-step-btn"
+                      disabled={busy}
+                      onClick={() => {
+                        void runExclusive(runningRef, async () => {
+                          setError(null);
+                          try {
+                            setAsset(await (await getEngine()).retryAccountIndex());
+                          } catch (err) {
+                            console.error('[originals-demo]', err);
+                            setError(demoFailureMessage(err));
+                          }
+                        });
+                      }}
+                    >
+                      {demo.hosting.retryListing}
+                    </button>
+                  </div>
+                )}
                 {asset && (
                   <div className="demo-evidence">
                     <button

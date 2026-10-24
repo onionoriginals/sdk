@@ -60,6 +60,12 @@ export function storeName(subOrgId: string): string {
 export interface PublicationRecord {
   alias: AliasEvidence;
   state: "started" | "uploaded" | "complete";
+  /**
+   * Whether the account's index lists it (G3), apart from `state`: an index
+   * failure never makes a verified publication incomplete. Absent when the
+   * engine keeps no index.
+   */
+  indexed?: boolean;
 }
 
 /** A store that also keeps publication records. */
