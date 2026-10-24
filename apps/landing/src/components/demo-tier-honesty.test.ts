@@ -162,8 +162,9 @@ describe('completion state', () => {
 
 describe('the published log’s durability (R7)', () => {
   test('an anonymous visitor gets the temporary-log caveat; a signed-in one does not', () => {
-    expect(publishDurabilityNote(false)).toBe(demo.hosting.temporaryNote);
-    expect(publishDurabilityNote(true)).toBeNull();
+    expect(publishDurabilityNote(false, true)).toBe(demo.hosting.temporaryNote);
+    expect(publishDurabilityNote(false, false)).toBe(demo.hosting.temporaryNoteNoPublish);
+    expect(publishDurabilityNote(true, true)).toBeNull();
   });
 
   test('the caveat names both halves: the key is discarded, and sign-in is how to keep it (#976 B5)', () => {
@@ -192,7 +193,7 @@ describe('the published log’s durability (R7)', () => {
 
   test('the anonymous resolved heading does not promise a permanent home', () => {
     expect(resolvedCopy(false).heading).not.toBe(resolvedCopy(true).heading);
-    expect(resolvedCopy(false).heading).toMatch(/for now|temporar/i);
+    expect(resolvedCopy(false).heading).toMatch(/this page only/i);
     expect(resolvedCopy(true).heading).toMatch(/available on this site/i);
   });
 });
