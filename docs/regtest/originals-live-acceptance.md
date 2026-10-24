@@ -186,3 +186,20 @@ A later signet stage would need an ord signet node the owner runs, plus
   Bitcoin holds only the signed history.
 - **4 MiB submit limit.** An Original whose evidence package is larger cannot
   be anchored through the landing (PROVISIONAL).
+
+
+## Private library recovery follow-up (#975, PR 10c)
+
+The landing now supplies `/me` independently of public Explore/publication
+gates. Account-scoped IndexedDB retains drafts, committed SDK state and
+uncertain pairs across refresh; the authenticated server library discovers
+anchoring and hosted evidence even without summaries. Reopening verifies
+history, author binding, identity evidence and resources, and checks Bitcoin
+separately when its reader is available. A saved copy is never labelled a
+freshly accepted Bitcoin head merely because it imported successfully.
+
+Evidence and precise limits: [2026-10-24 library report](originals-library-975-2026-10-24.md),
+with the local-key browser and disposable Core/ord receipts linked there.
+This follow-up did not reuse Stage A's production Turnkey authorization or
+credentials. A new live Turnkey fresh-profile run, public-host proof and stage C
+mainnet receipt still require the owner's explicit authorization.

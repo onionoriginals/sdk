@@ -1,10 +1,13 @@
+import { BrowserOriginalsStore } from '../sdk/browser-store';
+import { fetchLibraryEvidence, recoverLegacySubmissions } from '../sdk/library';
+import { navigate } from '../router';
 import { contentByteLength, contentText, resourceDataUrl, resourceMatchesSource, textMediaType, type ResourceContent } from '../sdk/resource-view';
 import { MAX_SOURCE_BYTES, readAssetFile, SourceFileError } from '../sdk/source-file';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DepositPanel } from './DepositPanel';
 import { DepositFeeNotice } from './DepositFeeNotice';
 import { explorerTxUrl } from '../sdk/explorer';
-import { demo } from '../content';
+import { demo, library as libraryCopy } from '../content';
 import type { DemoAssetState, DemoEngine } from '../sdk/engine';
 import { engineIdentity } from '../sdk/engine';
 import { btcNetwork, demoTier, btcoExplorerUrl } from '../sdk/network-flag';
@@ -78,10 +81,9 @@ function useEngine(authed: boolean, subOrgId?: string) {
   const getEngine = useCallback(async (): Promise<DemoEngine> => {
     if (engineRef.current) return engineRef.current;
     loading.current ??= import('../sdk/engine').then(({ DemoEngine }) => {
-      // The engine registers itself as window.__originalsDemo so skeptics can
-      // inspect it from the devtools console. Signed-in ⇒ durable hosting under
-      // the user's own per-user slug (subOrgId).
-      const engine = new DemoEngine({ authed, subOrgId });
+      // Signing identity and browser storage share the same account scope.
+      const store = new BrowserOriginalsStore(authed ? subOrgId : undefined);
+      const engine = new DemoEngine({ authed, subOrgId, store, localAuthor: () => store.localAuthor() });
       engineRef.current = engine;
       return engine;
     });
@@ -123,7 +125,7 @@ interface CommittedSource {
   written: string;
 }
 
-export function Demo() {
+export function Demo({ openDid }: { openDid?: string } = {}) {
   const [phase, setPhase] = useState<Phase>('idle');
   const { isAuthenticated, bitcoin, user, signing, signingNotice, reauth, beginReauth } = useAuth();
   // Read at each signature, not when the click started (anchoring checks it before every one).
@@ -243,6 +245,61 @@ export function Demo() {
   });
   const { getEngine, discardEngine } = useEngine(isAuthenticated, user?.subOrgId);
   const logRef = useRef<HTMLDivElement>(null);
+  const [opening, setOpening] = useState(!!openDid);
+  useEffect(() => {
+    if (!openDid) return;
+    let live = true;
+    setOpening(true);
+    void (async () => {
+      const engine = await getEngine();
+      if (isAuthenticated && user?.subOrgId && bitcoin?.fundingAddress) await recoverLegacySubmissions(user.subOrgId, bitcoin.fundingAddress);
+      let warning: string | null = null;
+      if (isAuthenticated) {
+        try {
+          const bytes = await fetchLibraryEvidence(openDid);
+          if (bytes) await engine.importEvidence(bytes, openDid);
+        } catch (e) { warning = (e as Error).message; }
+      }
+      const saved = await engine.open(openDid);
+      if (anchoringOn && saved.btcoDid) {
+        try { await engine.anchoringStatus(); } catch { warning = libraryCopy.bitcoinStatusUnavailable; }
+      }
+      const state = await engine.verifyBitcoin();
+      const pending = await engine.pendingHandOff();
+      if (!live) return;
+      const title = state.history.at(-1)?.name ?? 'Original';
+      const uploaded = { name: state.resource.id, content: state.resource.content, contentType: state.resource.contentType };
+      setTitle(title);
+      setSourceKind('upload');
+      setUploaded(uploaded);
+      setCommitted({ title, style, nonce, sourceKind: 'upload', uploaded, written: '' });
+      setAsset(state);
+      setPhase(state.btcoDid ? 'inscribed' : state.webvhDid ? 'published' : 'created');
+      setPendingHandOff(pending);
+      setError(warning);
+    })().catch((e) => { if (live) setError((e as Error).message); }).finally(() => { if (live) setOpening(false); });
+    return () => { live = false; };
+  }, [openDid, getEngine, isAuthenticated, bitcoin?.fundingAddress]);
+  useEffect(() => () => cancelRef.current?.abort(), []);
+
+
+  const [draftReady, setDraftReady] = useState(false);
+  useEffect(() => {
+    let live = true;
+    if (openDid) { setDraftReady(true); return; }
+    void new BrowserOriginalsStore(isAuthenticated ? user?.subOrgId : undefined).getForm<CommittedSource>('new').then((draft) => {
+      if (!live) return;
+      if (draft) { setTitle(draft.title); setStyle(draft.style); setNonce(draft.nonce); setSourceKind(draft.sourceKind); setUploaded(draft.uploaded); setWritten(draft.written); }
+      setDraftReady(true);
+    }).catch(() => { if (live) { setError(libraryCopy.draftSaveError); setDraftReady(true); } });
+    return () => { live = false; };
+  }, [openDid, isAuthenticated, user?.subOrgId]);
+  useEffect(() => {
+    if (!draftReady || openDid) return;
+    const store = new BrowserOriginalsStore(isAuthenticated ? user?.subOrgId : undefined);
+    // IDB keeps binary uploads as bytes. A quota failure stays visible.
+    void store.putForm('new', asset ? null : { title, style, nonce, sourceKind, uploaded, written }).catch(() => setError(libraryCopy.draftSaveError));
+  }, [draftReady, openDid, isAuthenticated, user?.subOrgId, asset, title, style, nonce, sourceKind, uploaded, written]);
 
   // Preload the SDK chunk when the demo scrolls near the viewport, so the
   // first click is instant but first paint stays light.
@@ -460,6 +517,7 @@ export function Demo() {
 
   /** One anchoring step through the engine: cancellable, and checked against the session before each signature. */
   const anchorStep = async (engine: DemoEngine) => {
+    if (await engine.pendingHandOff()) return engine.inscribe();
     const blocked = signingGateMessage(gate, network, signing);
     if (blocked || !bitcoin) throw new DemoCopyError(blocked ?? demo.session.missingBody);
     const controller = new AbortController();
@@ -597,8 +655,6 @@ export function Demo() {
     setSourceError(null);
     setTitle(generateName(style, nextNonce));
     // Next run gets a fresh engine — fresh keys, fresh DIDs, fresh publisher.
-    // window.__originalsDemo keeps pointing at the old engine until the new
-    // one constructs and re-registers itself, so the hook is never dangling.
     discardEngine();
     void getEngine();
   };
@@ -630,7 +686,7 @@ export function Demo() {
   const doneView = inscribeDoneView(submitOutcome);
   const step = anchorFromLocal && phase === 'created' ? 2 : phaseToStep[phase];
   const busy =
-    phase === 'creating' || phase === 'publishing' || phase === 'inscribing' || updating;
+    !draftReady || opening || (!!openDid && !asset) || phase === 'creating' || phase === 'publishing' || phase === 'inscribing' || updating;
   // Revisable while the asset is authorable for free — did:cel and did:webvh.
   // Not once inscribed: that append is paid on-chain (see DemoEngine.update).
   // With anchoring, a revision after the anchor is committed locally and then
@@ -674,6 +730,27 @@ export function Demo() {
 
   return (
     <section className="section demo" id={demo.id} ref={rootRef}>
+      <div className="container">
+        <a href="/me" onClick={(e) => { e.preventDefault(); navigate('/me'); }}>{libraryCopy.title} →</a>
+        <p>{libraryCopy.localNote}</p>
+        {opening && <p role="status">{libraryCopy.opening}</p>}
+        {openDid && asset && <div className="library-verification">
+          <h2>{libraryCopy.saved}</h2>
+          <p>{libraryCopy.author} <code>{asset.author}</code></p>
+          <p>{libraryCopy.history} {(asset.provenance as { history: { status: string } }).history.status} · {libraryCopy.binding} {(asset.provenance as { authorBinding: { status: string } }).authorBinding.status} · {libraryCopy.identity} {(asset.provenance as { identityEvidence: { status: string } }).identityEvidence.status} · {libraryCopy.resources} {(asset.provenance as { resources: { status: string } }).resources.status}</p>
+          <p>{libraryCopy.identityLimit}</p>
+          <p>{libraryCopy.savedHead} <code>{asset.history.at(-1)?.versionId}</code></p>
+          {asset.btcoDid ? <>
+            <p>{libraryCopy.bitcoin} {libraryCopy.bitcoinLabels[asset.bitcoinVerification?.anchoring?.status ?? ''] ?? libraryCopy.notChecked} · {libraryCopy.acceptedHead} <code>{(asset.bitcoinVerification?.anchoring?.status === 'anchored' ? asset.bitcoinVerification.head : null) ?? libraryCopy.notEstablished}</code></p>
+            <p>{libraryCopy.currentRead} {asset.bitcoinVerification?.current ? libraryCopy.yes : libraryCopy.no}</p>
+            {asset.bitcoinVerification?.ownership && <p>{libraryCopy.holder} <code>{asset.bitcoinVerification.ownership.output}</code></p>}
+            <p>{libraryCopy.bitcoinTrust}</p>
+            {asset.bitcoinReadError && <p role="status">{asset.bitcoinReadError}</p>}
+            <button className="btn" disabled={busy} onClick={() => { void runExclusive(runningRef, async () => { setUpdating(true); try { setAsset(await (await getEngine()).verifyBitcoin()); } finally { setUpdating(false); } }); }}>{libraryCopy.checkBitcoin}</button>
+          </> : <p>{libraryCopy.localCheckpoint}</p>}
+          {pendingHandOff && <p>{libraryCopy.pendingNote}</p>}
+        </div>}
+      </div>
       <div className="container">
         <Reveal className="section-head">
           <p className="eyebrow">{demo.eyebrow}</p>

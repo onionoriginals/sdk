@@ -571,7 +571,10 @@ describe('a hosted asset log changes only through the verifying submit route (P6
     for (const key of ['demo.example.com/user-sub-1', 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/extra', '../x/o-9xKpQ2mN4vR7tW1z', 'demo.example.com/user-sub-1/not-a-name']) {
       expect((await post(key, cookieFor('sub-1'))).status, key).toBe(400);
     }
-    expect((await post('demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z', cookieFor('sub-1'))).status).toBe(400);
+    // Nothing hosted there: answered before the body is read.
+    const missing = await post('demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z', cookieFor('sub-1'));
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: 'not_hosted' });
   });
 });
 

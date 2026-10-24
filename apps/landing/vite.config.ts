@@ -91,7 +91,7 @@ export default defineConfig({
   // (server/index.ts on :8787) without CORS and the httpOnly cookie works.
   server: {
     proxy: {
-      '/api': 'http://localhost:8787'
+      '/api': process.env.LANDING_API_ORIGIN ?? 'http://localhost:8787'
     }
   },
   resolve: {
