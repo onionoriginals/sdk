@@ -217,6 +217,16 @@ describe("C12-121 (anchored): an editor entry signed with a key removed from the
     }
     const editorEvidence = (versions: Inscribed[]): AuthorDidEvidence => ({ did: EDITOR_SAT, bitcoin: sat(versions, EDITOR_SAT) });
 
+    test("C12-170: P5.13: an unread inscription on the sat of a did:btco editor that signed nothing in the accepted state leaves its identity evidence complete", async () => {
+      const { alice, anchoring } = await setup();
+      const v1 = didVersion(5, withKey());
+      const unread = didVersion(7, withKey(), { content: new Uint8Array(), metadata: undefined, unsupported: "not-read" });
+      const r = await verify([alice, editorEvidence([v1, unread])], [sat([anchoring])]);
+      expect(r.anchoring?.status).toBe("anchored");
+      expect(r.identityEvidence.status, JSON.stringify(r.identityEvidence)).toBe("complete");
+      expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    });
+
     test("an entry naming a version whose key a later version preceding the inscription removed is rejected", async () => {
       const { alice, anchor, anchoring } = await setup();
       const v1 = didVersion(5, withKey());

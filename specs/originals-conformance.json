@@ -2320,6 +2320,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/vh/tests/bitcoin-editors.test.ts",
         "packages/vh/tests/btco-author.test.ts"
       ]
     },

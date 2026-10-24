@@ -25,7 +25,7 @@
  * Only anchoring settles a fork (P9.16, plan 011 PR 9).
  */
 import { OriginalsError, type ErrorCategory } from "../errors.js";
-import type { JsonObject } from "../json/index.js";
+import { isJsonObject, type JsonObject } from "../json/index.js";
 import {
   compactLineError,
   parseLog,
@@ -462,11 +462,17 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     input = assembly.entries;
   }
   const onBitcoin = assembly?.report.status === "anchored" ? assembly.report : null;
-  // The entries in the anchoring inscription depend on each signer's history up to it; without an
-  // anchor every entry may (P5.13).
+  // The entries in the anchoring inscription depend on their signer's history up to it; without an
+  // anchor every entry may. A DID that signed none of them leaves no accepted entry depending on the
+  // history past its gap; inscriptions after the anchor are unverifiable instead (P5.13, P9.15).
+  const anchorLog = onBitcoin ? assembly!.entries.slice(0, anchoringIndex(assembly!.entries) + 1) : Array.isArray(input) ? input : raw ?? [];
+  const signedBy = (did: string) => anchorLog.some((e) => {
+    const state = (e as { state?: unknown } | null)?.state;
+    return isJsonObject(state) && signerOf(state as unknown as EntryState).ref.did === did;
+  });
   for (const held of heldBack) {
     const at = onBitcoin ? assembly?.anchorPosition : undefined;
-    if (!at || chainOrder(at, held.before) >= 0) noteFailure(held.did, held.failure);
+    if (signedBy(held.did) && (!at || chainOrder(at, held.before) >= 0)) noteFailure(held.did, held.failure);
   }
   const supplied = (): Promise<LogVerification> =>
     typeof input === "string" ? verifyLogText(input, { ...verifyOptions, compactLines: true, lineRule: exactNumberError }) : verifyLog(input, verifyOptions);
