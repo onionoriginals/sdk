@@ -224,6 +224,29 @@ const actions = {
     await ctx.close();
   },
 
+  /**
+   * B3 on staging, C12-125: back on client A's profile, whose copy is now a
+   * revision behind B's. A save on its old parent is refused, never rebased.
+   */
+  async "client-a-stale"() {
+    const ctx = await launch(input.profile);
+    const page = ctx.pages()[0] ?? (await ctx.newPage());
+    await page.goto(base, { waitUntil: "domcontentloaded" });
+    await signIn(page);
+    await engineReady(page);
+    const { work1 } = input.prior;
+    await phase.check("b3-stale-parent", "client A, a revision behind, can't save on its old parent: refused, not rebased", async () => {
+      const opened = await must(page, "open", work1.did);
+      const parent = opened.history.at(-1).versionId;
+      const stale = await call(page, "update", "Acceptance harbor, stale copy", "Orbits", png(PNG_A));
+      assert(!stale.ok && stale.name === "StaleSaveError", "a save on a stale parent was not refused", stale);
+      const after = await must(page, "snapshot");
+      assertEqual(after.history.at(-1).versionId, parent, "client A's head after the refusal");
+      return { parent, refused: stale.name };
+    });
+    await ctx.close();
+  },
+
   /** B5: a signed-out, ephemeral page. */
   async "signed-out"() {
     const ctx = await launch(null);

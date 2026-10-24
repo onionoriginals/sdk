@@ -121,7 +121,14 @@ through the page's own modal.
   two key roles. Its secrets come from a custody file that stands in for
   Turnkey.
 - Each client is the landing engine in a fresh Bun process with its own
-  FileStore. A restart is a new process on the same store directory.
+  FileStore (`@originals/sdk/originals/fs`), not the browser's
+  `IndexedDbStore`. A restart is a new process on the same store directory.
+  So the dry run doesn't exercise `IndexedDbStore` itself: its schema,
+  upgrades and other-tab behaviour are covered by `src/sdk/idb-store.test.ts`
+  (fake-indexeddb), and by the staging run's real browser profiles.
+- The signed-out phase installs fake-indexeddb as the page's IndexedDB, so
+  "a signed-out page keeps nothing" is checked against a store that would
+  keep a signed-in account's work (Bun has none of its own).
 - The reader is a fresh Node process. It gets no directory and no secret, and
   reads the public URLs under the alias's own `Host`.
 
@@ -205,6 +212,15 @@ Automated:
    listed from the account's index and restored from the host (G3). A
    revision then continues from the explicit parent, the host's head.
 3. The B2 reader runs again and verifies the new checkpoint.
+4. **Stale parent** (C12-125). Back on client A's profile, whose copy is now a
+   revision behind B's, a save on its old parent is refused with a
+   stale-parent conflict (`StaleSaveError`), and client A's head doesn't move.
+   This runs on both targets (`b3-stale-parent`).
+5. **Another key** (dry run only). A client restoring with a key that isn't
+   the author's `#key-1` can't continue the work (`b3-restore-no-authority`).
+   It doesn't run on staging: there the page's only signer is the account's
+   own Turnkey session, and a second account has its own index and
+   namespace, so it never reaches this work.
 
 PASS when all of these hold:
 
