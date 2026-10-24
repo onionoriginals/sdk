@@ -23,6 +23,24 @@ describe('hostedPublication', () => {
     }
   });
 
+  test('the switch is ignored on a mainnet build, whatever its host', () => {
+    for (const host of ['staging.originals.build', 'originals.build']) {
+      expect(resolveFeatures({ VITE_ACCEPTANCE_HOSTED_PUBLICATION: '1', VITE_WEBVH_HOST: host, VITE_BTC_NETWORK: 'mainnet' }).hostedPublication).toBe(false);
+    }
+    // A non-mainnet network, or none, leaves the staging build on.
+    for (const net of ['testnet4', 'signet', 'regtest', 'off', undefined]) {
+      expect(resolveFeatures({ VITE_ACCEPTANCE_HOSTED_PUBLICATION: '1', VITE_WEBVH_HOST: 'staging.originals.build', VITE_BTC_NETWORK: net }).hostedPublication).toBe(true);
+    }
+  });
+
+  // B6 (scripts/acceptance/hosted-README.md): the production env, the VITE_*
+  // shape of .railway/railway.ts, with or without the switch.
+  test('the production env never turns it on', () => {
+    const production = { VITE_WEBVH_HOST: 'originals.build', VITE_BTC_NETWORK: 'mainnet' };
+    expect(resolveFeatures(production).hostedPublication).toBe(false);
+    expect(resolveFeatures({ ...production, VITE_ACCEPTANCE_HOSTED_PUBLICATION: '1' }).hostedPublication).toBe(false);
+  });
+
   test('the switch never turns on anything else', () => {
     const on = resolveFeatures({ VITE_ACCEPTANCE_HOSTED_PUBLICATION: '1', VITE_WEBVH_HOST: 'staging.originals.build' });
     expect(on.bitcoinAnchoring).toBe(false);

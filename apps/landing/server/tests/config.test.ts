@@ -491,6 +491,41 @@ describe('validateConfig — the did:webvh host is pinned, not inherited from th
 });
 
 
+/**
+ * #976 B, gap G7. The acceptance switch exists only for the staging run. The
+ * bundle ignores it on the production host and on mainnet (features.ts); the
+ * server reports it set there, so a mis-set variable is named at boot rather
+ * than discovered on the page.
+ */
+describe('validateConfig — the hosted acceptance switch is staging-only', () => {
+  const STAGING = { ...GOOD, VITE_WEBVH_HOST: 'staging.originals.build', VITE_ACCEPTANCE_HOSTED_PUBLICATION: '1' };
+
+  test('set on a non-mainnet, non-production instance, it is not reported', () => {
+    expect(keys(validateConfig({ env: STAGING, dataDir: mounted }))).not.toContain('VITE_ACCEPTANCE_HOSTED_PUBLICATION');
+  });
+
+  test('set with mainnet on either half, it is reported', () => {
+    for (const env of [
+      { ...STAGING, BTC_NETWORK: 'mainnet', VITE_BTC_NETWORK: 'mainnet', QUICKNODE_ENDPOINT: 'https://x.quiknode.pro/k/' },
+      { ...STAGING, VITE_BTC_NETWORK: 'mainnet' },
+    ]) {
+      const issues = errors(validateConfig({ env, dataDir: mounted }));
+      expect(keys(issues)).toContain('VITE_ACCEPTANCE_HOSTED_PUBLICATION');
+    }
+  });
+
+  test('set on the production host, it is reported', () => {
+    const issues = errors(validateConfig({ env: { ...STAGING, VITE_WEBVH_HOST: 'originals.build' }, dataDir: mounted }));
+    expect(keys(issues)).toContain('VITE_ACCEPTANCE_HOSTED_PUBLICATION');
+    expect(issues.find((i) => i.key === 'VITE_ACCEPTANCE_HOSTED_PUBLICATION')!.message).toContain('originals.build');
+  });
+
+  test('unset, nothing is reported', () => {
+    const env = { ...GOOD, VITE_WEBVH_HOST: 'originals.build', BTC_NETWORK: 'mainnet', VITE_BTC_NETWORK: 'mainnet', QUICKNODE_ENDPOINT: 'https://x.quiknode.pro/k/' };
+    expect(keys(validateConfig({ env, dataDir: mounted }))).not.toContain('VITE_ACCEPTANCE_HOSTED_PUBLICATION');
+  });
+});
+
 describe('block completion feed configuration', () => {
   test('defaults to the configured Bitcoin network and supports explicit opt-out', () => {
     expect(resolveBlockEventsUrl({ BTC_NETWORK: 'mainnet' })).toBe('wss://mempool.space/api/v1/ws');
