@@ -119,3 +119,86 @@ describe('IndexedDbStore: durable across a browser restart', () => {
     expect([line('1-a') + line('2-a'), line('1-a') + line('2-b')]).toContain(head);
   });
 });
+
+const rawOpen = (idb: IDBFactory, version: number, tables: string[], onblocked?: () => void) =>
+  new Promise<IDBDatabase>((resolve, reject) => {
+    const r = idb.open(storeName('suborg-a'), version);
+    r.onupgradeneeded = () => {
+      for (const name of tables) if (!r.result.objectStoreNames.contains(name)) r.result.createObjectStore(name);
+    };
+    r.onblocked = () => onblocked?.();
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+// The version 1 schema, as #976 G2 first shipped it.
+const V1_TABLES = ['originals', 'resources', 'authors', 'retained', 'branches', 'refused', 'pending'];
+
+// C12-99, P9.16: the anchor last reported for an anchored Original is kept, so
+// after a browser restart a changed anchor is still reported, never silent.
+describe('IndexedDbStore: retained anchors survive a restart', () => {
+  const anchor = { inscription: 'abc0i0', sat: '1234', owner: 'txid:0' };
+
+  test('a retained anchor round-trips across handles', async () => {
+    const idb = new IDBFactory();
+    const first = await IndexedDbStore.open('suborg-a', idb);
+    expect(await first.getRetainedAnchor(DID)).toBeUndefined();
+    await first.putRetainedAnchor(DID, anchor);
+    first.close();
+    const second = await IndexedDbStore.open('suborg-a', idb);
+    expect(await second.getRetainedAnchor(DID)).toEqual(anchor);
+    await second.putRetainedAnchor(DID, { ...anchor, owner: null });
+    expect(await second.getRetainedAnchor(DID)).toEqual({ ...anchor, owner: null });
+  });
+
+  test('a version 1 database upgrades by adding the table, keeping every Original', async () => {
+    const idb = new IDBFactory();
+    const v1 = await rawOpen(idb, 1, V1_TABLES);
+    await new Promise<void>((resolve, reject) => {
+      const tx = v1.transaction('originals', 'readwrite');
+      tx.objectStore('originals').put({ log: line('1-a') }, DID);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    v1.close();
+    const upgraded = await IndexedDbStore.open('suborg-a', idb);
+    expect((await upgraded.get(DID))?.log).toBe(line('1-a'));
+    await upgraded.putRetainedAnchor(DID, anchor);
+    expect(await upgraded.getRetainedAnchor(DID)).toEqual(anchor);
+  });
+
+  test('the SDK sees the optional methods, so it retains anchors', async () => {
+    const store: OriginalsStore = await IndexedDbStore.open('suborg-a', new IDBFactory());
+    expect(typeof store.getRetainedAnchor).toBe('function');
+    expect(typeof store.putRetainedAnchor).toBe('function');
+  });
+});
+
+describe('IndexedDbStore: opening is robust to other tabs', () => {
+  test('an open connection gives way to an upgrade in another tab, then says why it stopped', async () => {
+    const idb = new IDBFactory();
+    const store = await IndexedDbStore.open('suborg-a', idb);
+    let blocked = false;
+    const newer = await rawOpen(idb, 99, [], () => (blocked = true));
+    expect(blocked).toBe(false);
+    newer.close();
+    await expect(store.get(DID)).rejects.toThrow(/another tab/i);
+  });
+
+  test('a blocked open waits for the other tab instead of failing', async () => {
+    const idb = new IDBFactory();
+    // An old tab holding version 1, with no versionchange handler.
+    const old = await rawOpen(idb, 1, V1_TABLES);
+    const opening = IndexedDbStore.open('suborg-a', idb);
+    let settled = false;
+    void opening.then(() => (settled = true), () => (settled = true));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(settled).toBe(false);
+    old.close();
+    const store = await opening;
+    expect(await store.list()).toEqual([]);
+  });
+
+  test('without IndexedDB, opening fails by name', async () => {
+    await expect(IndexedDbStore.open('suborg-a', undefined as unknown as IDBFactory)).rejects.toThrow(/IndexedDB/);
+  });
+});

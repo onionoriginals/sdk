@@ -308,6 +308,8 @@ export const demo = {
    */
   unavailable: {
     badge: 'Coming back',
+    /** The publish step's badge when only sign-in is missing (#976 B5). */
+    signedOutBadge: 'Sign in to publish',
     hostedPublication:
       'Publishing to the web is being rebuilt on the Originals Protocol and returns soon. Your Original is complete without it: download its evidence to keep a copy anyone can check.',
     bitcoinAnchoring:
@@ -452,8 +454,11 @@ export const demo = {
   },
   resolved: {
     heading: 'Signed history—available on this site',
-    /** Signed-out heading. Publishing needs sign-in; see `hosting.temporaryNote`. */
-    temporaryHeading: 'Signed history—available here for now',
+    /**
+     * Signed-out heading. Publishing needs sign-in (#976 B5), so a signed-out
+     * history is only in this page; see `hosting.temporaryNote`.
+     */
+    temporaryHeading: 'Signed history—in this page only',
     resolvedBadge: 'Available ✓',
     pendingBadge: 'Available on the published site',
     linkLabel: 'Open the signed history',
@@ -660,6 +665,11 @@ export const demo = {
    * failed: 507` was reaching the page before this existed — a transport string
    * on screen, and a breach of the mechanical floor in GRADING.md.
    */
+  /** Where signed-in work is kept on this device (#976 B, G2). */
+  storage: {
+    notKeptAcrossRestarts:
+      'This browser can’t keep your work on this device, so it isn’t saved across restarts. Keep this page open, and download its evidence before you leave.'
+  },
   hosting: {
     rateLimited:
       'Publishing is temporarily limited. Wait a few seconds and try again. Your signed Original is still in this tab.',
@@ -675,7 +685,10 @@ export const demo = {
     // only on the log that comes back afterwards. It is the one thing an
     // anonymous visitor cannot find out later.
     temporaryNote:
-      'Signed out, this Original is signed by a key made in this page and discarded with it: nothing is saved, and it can’t be published or continued once you leave. Download its evidence to keep a copy anyone can verify. Sign in to publish it and keep editing.'
+      'Signed out, this Original is signed by a key made in this page and discarded with it: nothing is saved, and it can’t be published or continued once you leave. Download its evidence to keep a copy anyone can verify. Sign in to publish it and keep editing.',
+    /** The same caveat (G10) for a build where no one can publish yet. */
+    temporaryNoteNoPublish:
+      'Signed out, this Original is signed by a key made in this page and discarded with it: nothing is saved, and it can’t be continued once you leave. Download its evidence to keep a copy anyone can verify.'
   },
   /** Last resort: something we did not anticipate, said without a stack trace. */
   failure:
@@ -892,7 +905,7 @@ export const legal = {
           'When you inscribe, the signed commit and reveal transactions are stored before anything is broadcast. That copy is what lets the server finish an inscription for a browser tab that died between the two, and it stays on the volume afterwards — only a superseded pair that can no longer land has its signed transactions dropped. A per-account ceiling bounds how many of these records are kept, oldest spent ones first.',
           'When you anchor an Original on Bitcoin, the server keeps its own copy of the evidence you send with it: the Original’s signed history, your DID’s log, and the bytes of its files. It checks that copy before anything is broadcast, and keeps it, with the signed transactions, so it can finish or re-send an inscription later. Bitcoin itself holds only the signed history; that copy, and your own, are where the files live.',
           'The deposit address your account is bound to is stored too, along with the last balance read we could trust and any unresolved problem reading it, in a file named after your sub-organization id. That is what puts a warning on Your Originals after you have closed the tab.',
-          'The anonymous demo stores nothing durable. What it publishes goes to an in-memory store with a size budget and a time limit, and it is gone by the next deploy.'
+          'Signed out, nothing is published and the server stores nothing: publishing needs sign-in, and the Original stays in the page that made it.'
         ]
       },
       {

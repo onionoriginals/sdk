@@ -223,8 +223,22 @@ export function resolvedCopy(authenticated: boolean): {
  * the log that comes back from it: the key is page-scoped and discarded, and
  * publishing needs sign-in (#976 B5).
  */
-export function publishDurabilityNote(authenticated: boolean): string | null {
-  return authenticated ? null : demo.hosting.temporaryNote;
+export function publishDurabilityNote(authenticated: boolean, hostedPublication: boolean): string | null {
+  if (authenticated) return null;
+  // Shown in every build (G10). Where no build publishes, it doesn't invite a publish.
+  return hostedPublication ? demo.hosting.temporaryNote : demo.hosting.temporaryNoteNoPublish;
+}
+
+/**
+ * Why the publish step is locked, or null when it isn't (#976 B5). Hosted
+ * publication off (features.ts) locks it for everyone, and that is the reason
+ * given. Otherwise it needs sign-in: an Original's web address lives in the
+ * author's account, so publishing isn't available signed out.
+ */
+export function publishStepLock(o: { hostedPublication: boolean; authenticated: boolean }): 'unavailable' | 'signed-out' | null {
+  if (!o.hostedPublication) return 'unavailable';
+  if (!o.authenticated) return 'signed-out';
+  return null;
 }
 
 /**
@@ -623,10 +637,13 @@ export function stepButtonDisabled(opts: {
   updating: boolean;
   /** Any run in flight anywhere — a revision blocks the pipeline too. */
   anyRunning?: boolean;
+  /** Publishing needs sign-in (#976 B5), whatever state the step is in. */
+  authenticated: boolean;
 }): boolean {
   if (opts.state !== 'ready') return true;
   if (opts.anyRunning) return true;
   if (opts.index === 0) return opts.titleEmpty;
+  if (opts.index === 1 && !opts.authenticated) return true;
   // Publishing while the preview shows bytes nothing signed would publish
   // something other than what is on screen.
   if (opts.index === 1) return opts.pendingRevision || opts.updating;

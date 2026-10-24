@@ -24,6 +24,7 @@
 import { mkdirSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import { isLikelyDeployed } from './deploy-env';
+import { PRODUCTION_WEBVH_HOST } from '../src/sdk/features';
 import { isBitcoinConfigured, serverBtcNetwork, isLoopbackServiceUrl, serverAnchoringEnabled } from './bitcoin';
 
 /** Block notifications are hints; QuickNode still verifies commit confirmation. */
@@ -361,6 +362,26 @@ export function validateConfig(input: ConfigInput): ConfigIssue[] {
       report(
         'VITE_WEBVH_HOST',
         `VITE_WEBVH_HOST="${webvhHost}" is not a bare lowercase hostname — a did:webvh domain carries no scheme, port or path, and must be lowercase (e.g. "originals.build").`
+      );
+    }
+  }
+
+  // The hosted acceptance switch (#976 B, gap G7) exists only for the staging
+  // run. The bundle ignores it on the production host and on mainnet
+  // (src/sdk/features.ts); set there, it is a mis-set variable on the wrong
+  // instance, so it is named here. VITE_* values are Railway service variables,
+  // read at runtime here as they were at build.
+  if (env.VITE_ACCEPTANCE_HOSTED_PUBLICATION === '1') {
+    if (btcNetwork === 'mainnet' || env.VITE_BTC_NETWORK === 'mainnet') {
+      report(
+        'VITE_ACCEPTANCE_HOSTED_PUBLICATION',
+        'VITE_ACCEPTANCE_HOSTED_PUBLICATION=1 on a mainnet instance. The switch is for the staging acceptance run only (scripts/acceptance/hosted-README.md); the bundle ignores it on mainnet. Unset it here.'
+      );
+    }
+    if (env.VITE_WEBVH_HOST === PRODUCTION_WEBVH_HOST) {
+      report(
+        'VITE_ACCEPTANCE_HOSTED_PUBLICATION',
+        `VITE_ACCEPTANCE_HOSTED_PUBLICATION=1 with VITE_WEBVH_HOST=${PRODUCTION_WEBVH_HOST}, the production host. The switch is for the staging acceptance run only; the bundle ignores it here. Unset it.`
       );
     }
   }
