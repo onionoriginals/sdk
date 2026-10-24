@@ -19,6 +19,7 @@ import { readFileSync } from "node:fs";
 import { OriginalsError } from "@originals/vh";
 import { describeFreshness } from "@originals/vh/originals";
 import { MemoryStore, OriginalsSDK, readEvidence } from "./index.js";
+import { noticeLines, verdictLine } from "./verdict.js";
 
 const USAGE = "usage: originals verify <package.zip> [--json] [--now <ISO time>]\n       originals inspect <package.zip>\n";
 
@@ -60,7 +61,9 @@ async function main(argv: string[]): Promise<number> {
     if (rest.includes("--json")) {
       process.stdout.write(`${JSON.stringify({ ...report, reasons, manifest, verified })}\n`);
     } else {
-      process.stdout.write(`${verified ? "verified" : "not verified"}: ${report.original ?? "unknown Original"} at ${report.checkpoint ?? "no checkpoint"}\n`);
+      // Section 7, P9.15: notices go on the verdict line and are listed under it, never left off.
+      process.stdout.write(`${verdictLine(report, verified)}\n`);
+      for (const line of noticeLines(report)) process.stdout.write(`  ${line}\n`);
       for (const v of report.resources.versions) process.stdout.write(`  ${v.resource} v${v.version} ${v.digest} ${v.bytes}\n`);
       if (report.validAsOf) {
         process.stdout.write(`  valid as of ${report.validAsOf.checkpoint}, not current: not anchored (P7.10)\n`);

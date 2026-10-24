@@ -136,7 +136,7 @@ describe('resolution (did:btco method v0.2.0)', () => {
     expect(r.resolutionMetadata.versions).toEqual([v1.id]);
   });
 
-  test('finding 9, P5.13 (PROVISIONAL): a delegated or encoded inscription whose metadata is a version is a version; metadata not read is unresolvable, never skipped', async () => {
+  test('finding 9, P5.13 (originals-spec #51): a delegated or encoded inscription whose metadata is a version is a version; metadata not read is unresolvable, never skipped', async () => {
     for (const reason of ['delegated', 'content-encoding'] as const) {
       const v1 = version(10, doc('one'));
       const v2 = { ...publication(11, {}), body: { status: 'unsupported' as const, reason, mediaType: null, metadata: btcoDidInscription(doc('two')).metadata } };

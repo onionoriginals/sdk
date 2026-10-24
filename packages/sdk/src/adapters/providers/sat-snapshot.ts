@@ -341,7 +341,7 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
     const unread = (body: Publication['body']): { publication: Publication } => ({ publication: { ...observation, body } });
     // Observed, never taken as its own body: ord would serve another inscription's bytes, or encoded ones (P9.14).
     // Its own metadata is unaffected; a full read (`bodies: 'all'`, as did:btco reads use) reads it, since on a
-    // did:btco sat it could be a version (P5.13, PROVISIONAL). Not read, it is left absent, never taken as none.
+    // did:btco sat it could be a version (P5.13, originals-spec #51). Not read, it is left absent, never taken as none.
     if (info.delegate != null || info.content_encoding != null) {
       const reason = info.delegate != null ? 'delegated' as const : 'content-encoding' as const;
       if (limits.bodies === 'originals') return unread({ status: 'unsupported', reason, mediaType });

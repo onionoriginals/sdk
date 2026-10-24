@@ -39,8 +39,8 @@
  *   an editor entry and a revocation of its grant with the same parent
  *   (P5.17). Everything else is ignored and reported.
  * - An inscription counts from 1 confirmation on every network, mainnet
- *   included, with its depth reported (P9.5, D6; owner decision, spec PR #50
- *   (open)). There is no per-network confirmation policy.
+ *   included, with its depth reported (P9.5, D6; owner decision, originals-spec
+ *   #50, merged). There is no per-network confirmation policy.
  */
 import { OriginalsError } from "../errors.js";
 import { isJsonObject } from "../json/index.js";

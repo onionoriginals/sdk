@@ -42,13 +42,13 @@ export interface AuthorDidEvidence {
   witness?: unknown;
   /**
    * The URL this log was just retrieved from, with no redirects (P5.14,
-   * P7.8). Set by the retriever, never taken from a package. A log obtained at
-   * a location establishes the identity's freshness only when the DID's own
-   * witnesses approve its latest version, that version's `id` names the
-   * location, and it is where the latest entry this identity signed says the
-   * DID is; otherwise freshness is not established and the report states the
-   * location, when it was obtained and the latest versionId (owner decision,
-   * 23 Oct 2026).
+   * P7.8). Set by the retriever, or for a host-served did:webvh log its URL
+   * on the host; never taken from a package. A did:webvh log obtained at a
+   * location establishes the identity's freshness only when the DID's own
+   * witnesses approve its latest version and that version's `id` names the
+   * location; otherwise freshness is not established and the report states
+   * the location, when it was obtained and the latest versionId (owner
+   * decision, 23 Oct 2026; originals-spec #51).
    */
   retrievedFrom?: string;
   /**

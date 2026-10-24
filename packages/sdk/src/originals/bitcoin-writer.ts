@@ -181,10 +181,9 @@ export type Publication =
    * A recorded anchoring pair was submitted, but neither its commit nor its
    * reveal is observed: the node rejected or evicted it, or the provider
    * cannot see its mempool. Not pending acceptance: nothing shows Bitcoin has
-   * it. `catchUp` says whether to resume the same pair (P9.6). PROVISIONAL:
-   * P9.18 names one label, pending Bitcoin acceptance, until confirmation;
-   * this splits off the case where nothing shows the network has the pair
-   * (a spec question, see ORIGINALS.md).
+   * it. `catchUp` says whether to resume the same pair (P9.6). P9.18
+   * (originals-spec #51, merged) names this label apart from pending Bitcoin
+   * acceptance, so a rejected or evicted anchor is not reported as on its way.
    */
   | "submitted-unobserved"
   /** No anchor on Bitcoin and none known in flight. */

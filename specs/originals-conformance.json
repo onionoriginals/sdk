@@ -2507,6 +2507,7 @@
       "status": "covered",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts",
+        "packages/sdk/tests/unit/originals/verdict.test.ts",
         "packages/vh/tests/btco-author.test.ts"
       ]
     },

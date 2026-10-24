@@ -16,7 +16,7 @@ export const ORIGINALS_METHOD = "originals:1.0";
 /**
  * The profile's limits (P7.7, P14.13), decided by the owner on 21 October 2026
  * (D6; originals-spec #50, merged, which raises resources from 64 to 256). `nameLength`
- * is this SDK's own, PROVISIONAL.
+ * counts UTF-16 code units (P14.5, decided in originals-spec #51).
  */
 export const ORIGINALS_LIMITS = Object.freeze({
   entries: 10_000,

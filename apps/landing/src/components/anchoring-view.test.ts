@@ -33,6 +33,9 @@ describe('the anchoring panel (P9.18)', () => {
     expect(v.tone).toBe('ok');
     expect(v.noticeNote).toBe(demo.anchoring.noticeNote(1, 1));
     expect(v.noticeNote).toContain('cannot be checked yet');
+    // Each inscription is named: the unverifiable one with the signer version it needs, the waiting one with what it waits on.
+    expect(v.noticeItems).toEqual([demo.anchoring.unverifiableItem('u1i0', 'did:webvh:x:host', '4-q'), demo.anchoring.waitingItem('w1i0', 'u1i0')]);
+    expect(quiet.noticeItems).toEqual([]);
   });
 
   test('never current until Bitcoin shows the anchor (P7.10)', () => {

@@ -454,7 +454,7 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     expect(r.current).toBe(false);
   });
 
-  test("C12-169: finding 9, P5.13 (PROVISIONAL): a delegated or encoded inscription whose metadata is a version is a version; unread metadata fails closed", async () => {
+  test("C12-169: finding 9, P5.13 (originals-spec #51): a delegated or encoded inscription whose metadata is a version is a version; unread metadata fails closed", async () => {
     const { v1 } = await byA();
     // Metadata is the inscription's own, whatever its body's delegation or encoding.
     for (const unsupported of ["delegated", "content-encoding"] as const) {
