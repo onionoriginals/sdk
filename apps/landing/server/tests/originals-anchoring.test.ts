@@ -217,3 +217,25 @@ describe('reinscribing the Original\'s own sat (plan 011, PR 10b; P9.12, P9.13)'
     expect(chain.sent.length).toBe(sentBefore);
   });
 });
+
+test('durable library discovers anchoring without summaries and exports verified evidence per account (P7.5, P9.18)', async () => {
+  const { chain, dataDir, server } = setup();
+  const a = await authorWithOriginal();
+  const pair = await prepare(a, chain);
+  await server.submit(SUB, { did: a.did, evidence: await evidence(a), pair });
+  chain.mine();
+  const { createAnchoringLibrary } = await import('../originals-library');
+  const library = createAnchoringLibrary(dataDir);
+  expect(await library.list('another-account')).toEqual([]);
+  expect(await library.evidence('another-account', a.did)).toBeNull();
+  expect(await library.list(SUB)).toMatchObject([{ did: a.did, availability: 'server' }]);
+  const zip = await library.evidence(SUB, a.did);
+  const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [] });
+  const loaded = await reader.load(zip!);
+  expect(loaded.report.original).toBe(a.did);
+  expect(loaded.report.history.status).toBe('valid');
+  expect(loaded.report.authorBinding.status).toBe('valid');
+  expect(loaded.report.resources.status).toBe('available');
+  expect(chain.sent.length).toBe(2); // discovery/export never broadcast
+  await expect(library.list('../escape')).rejects.toThrow();
+});

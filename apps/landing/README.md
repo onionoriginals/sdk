@@ -93,36 +93,50 @@ If the feed repeatedly fails, set `BTC_BLOCKS_WS_URL=off` while diagnosing it;
 the hourly recovery path stays active. Public feed availability and QuickNode's
 view of confirmation determine how quickly a received block can lead to completion.
 
-### Public Explore collection
+### Your Originals and local recovery
 
-`/explore` lists active CEL 3 publications recorded by accounts on this host.
-It spans accounts and needs no session. It is a catalogue of this app's durable
-publications, not a network-wide Bitcoin index. `/explore/<encoded-did>` opens
-a public detail page with the controller identity, hosted logs and primary file.
+`/me` is the private library; `/me/<encoded-did>` reopens and verifies an Original.
+The navigation links to it on desktop and in the mobile menu. Public Explore,
+hosted publication and Bitcoin anchoring retain their independent release gates.
 
-`GET /api/explore` accepts `q` (title or identity, up to 150 characters), `limit`
-(1–48, default 24), and `offset` (default 0). Results sort by signed creation time,
-newest first, then DID; the response contains `originals`, `total`, and
-`nextOffset`. `GET /api/explore/original?did=…` returns a single entry or 404.
-The catalogue caches for 15 seconds and each client IP gets 60 requests/minute.
-New publications can therefore take up to 15 seconds to appear.
+Unsigned inputs, uploaded bytes, guest author keys and the SDK store are kept in
+IndexedDB. Signed-in accounts use separate database namespaces; guest work is
+separate and is not silently moved into an account. Local work survives refresh
+on this browser, not clearing browser data or switching devices. Signing out
+keeps the account's local data for its next sign-in and removes it from view.
+The SDK's atomic head comparison, retained checkpoints, branches, refused saves
+and pending saves are preserved, rather than serializing only the UI state.
 
-Account indexes supply candidate DIDs only. Discovery checks account ownership
-of the hosted artifacts, the signed CEL history and both directions of the
-WebVH identity binding. Account metadata and claimed Bitcoin status are omitted.
-The existing public artifact URLs remain public; account listing and writes stay
-authenticated. Discovery does not assert Bitcoin confirmation or sat possession.
-Browser previews hash the resource bytes before rendering an image-only blob;
-public detail independently verifies the hosted histories and primary file.
+Authenticated `GET /api/originals` combines private summary records with actual
+durable anchoring and hosted evidence. Records without summaries are discoverable;
+records without usable evidence remain explicitly incomplete. Authenticated
+`GET /api/originals/evidence?did=…` exports only the caller's evidence. Both
+responses are `no-store`. These read paths work with the writer disabled and
+never return recovery transaction bytes. The browser verifies every import
+with the SDK; importing does not grant authorship or ownership (P7.5, P8.4).
 
-To exercise the collection without production credentials or Bitcoin funds:
+Opening an anchored copy separately verifies a fresh Bitcoin sat read when
+available. Saved history/resources, identity binding, Bitcoin's accepted head,
+currentness and the single-provider/index trust limit remain separate. A failed
+Bitcoin read is incomplete, never proof that the saved head is current. Resource
+and signer DID evidence remain off Bitcoin (P9.18).
+
+Signed transaction pairs use account-scoped outboxes. An uncertain pair survives
+reload and any later auth, gate or validation failure until the server acknowledges
+the exact pair. Resume sends those bytes without signing, preparing a replacement
+or asking for another payment (P9.6). Old unscoped pairs are adopted only after
+verified author identity and the account's deposit address both match; unclaimed
+old records remain untouched.
+
+Local browser checks, without Turnkey or public Bitcoin:
 
 ```sh
-bun run landing:check
-bun apps/landing/scripts/explore-smoke.ts
+bun apps/landing/scripts/library-browser-fixture.ts
+LANDING_API_ORIGIN=http://127.0.0.1:3102 bun run --cwd apps/landing dev --port 3101
 ```
 
-The browser smoke creates 26 real signed publications in a temporary store,
-serves the built app, checks search/pagination, image and text previews,
-verification/tampering, retry and mobile layouts, then removes its data.
-Set `EXPLORE_SCREENSHOTS` to a directory to save visual evidence.
+The fixture listens only on loopback and uses local keys and a simulated chain.
+`library-browser-checks.ts` supplies reload, atomic commit and account-isolation
+assertions for the collaborative browser. Real Core/ord coverage, with disposable
+local keys, is in `scripts/regtest/landing-anchor.ts`. Neither establishes the
+owner's public-host or mainnet release gates.

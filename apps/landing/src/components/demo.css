@@ -158,45 +158,6 @@
   }
 }
 
-/* A signed-in author's Originals (#976 B3). */
-.demo-yours {
-  grid-column: 1 / -1;
-  display: grid;
-  gap: var(--sp-2);
-}
-
-.demo-yours-heading {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-}
-
-.demo-yours ul {
-  display: grid;
-  gap: var(--sp-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.demo-yours li {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-}
-
-.demo-yours-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.demo-yours-note {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-}
-
 .demo-form[data-disabled] {
   opacity: 0.55;
 }

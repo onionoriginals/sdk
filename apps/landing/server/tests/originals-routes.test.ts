@@ -118,6 +118,28 @@ describe('originals routes — auth gating', () => {
     expect((await shadow(`magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/authors/${hex}/did-witness.json`)).status).toBe(403);
   });
 
+  // #976 B, G1; P3.6: a did:webvh names the host it is fetched from. An
+  // instance serves only its own did:webvh hosts, so a write under any other
+  // host would be bytes no reader of that DID can fetch here.
+  test('with served hosts configured, refuses a write or a save under any other host (403)', async () => {
+    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore(), hosts: ['originals.build', 'magby.originals.build'] });
+    const put = (key: string) => {
+      const url = new URL(`http://h/api/originals/host/${encodeURIComponent(key)}`);
+      return routes.hostPut(new Request(url, { method: 'PUT', headers: { cookie: cookieFor('sub-1') }, body: '{"v":1}' }), url, '1.1.1.1');
+    };
+    const refused = await put('intruder.example.com/user-sub-1/did.jsonl');
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: 'forbidden_host' });
+    expect((await put('Originals.Build:443/user-sub-1/did.jsonl')).status).toBe(403);
+    expect((await put('originals.build/user-sub-1/did.jsonl')).status).toBe(200);
+    expect((await put('magby.originals.build/user-sub-1/did.jsonl')).status).toBe(200);
+
+    const submitUrl = new URL(`http://h/api/originals/submit/${encodeURIComponent('intruder.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z')}`);
+    const submitted = await routes.submit(new Request(submitUrl, { method: 'POST', headers: { cookie: cookieFor('sub-1') }, body: '{}' }), submitUrl, '1.1.1.1');
+    expect(submitted.status).toBe(403);
+    expect(await submitted.json()).toEqual({ error: 'forbidden_host' });
+  });
+
   test('rejects an oversized upload by Content-Length (413)', async () => {
     const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
     const url = new URL(`http://h/api/originals/host/${encodeURIComponent('h/user-sub-1/did.jsonl')}`);
@@ -571,7 +593,10 @@ describe('a hosted asset log changes only through the verifying submit route (P6
     for (const key of ['demo.example.com/user-sub-1', 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/extra', '../x/o-9xKpQ2mN4vR7tW1z', 'demo.example.com/user-sub-1/not-a-name']) {
       expect((await post(key, cookieFor('sub-1'))).status, key).toBe(400);
     }
-    expect((await post('demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z', cookieFor('sub-1'))).status).toBe(400);
+    // Nothing hosted there: answered before the body is read.
+    const missing = await post('demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z', cookieFor('sub-1'));
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: 'not_hosted' });
   });
 });
 

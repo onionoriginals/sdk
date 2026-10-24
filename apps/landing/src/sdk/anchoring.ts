@@ -71,15 +71,11 @@ export interface AnchoringTransport {
   status(did: string): Promise<AnchoringStatus>;
 }
 
-/** The server refused, or could not take, a pair. `definitive` refusals clear the outbox; the rest are retried. */
+/** The server refused, or could not take, a pair. The outbox stays until acknowledged. */
 export class AnchoringSubmitError extends Error {
   constructor(public readonly status: number, public readonly body: { error?: string; code?: string; message?: string }) {
     super(body.message ?? body.error ?? `The server answered ${status}`);
     this.name = 'AnchoringSubmitError';
-  }
-  /** A 4xx: this exact pair will never be taken, so it is not kept for a retry. */
-  get definitive(): boolean {
-    return this.status >= 400 && this.status < 500 && this.status !== 408 && this.status !== 429;
   }
 }
 
@@ -162,11 +158,13 @@ export interface AnchoringOutbox {
   get(did: string): Promise<OutboxEntry | undefined>;
   put(did: string, entry: OutboxEntry): Promise<void>;
   delete(did: string): Promise<void>;
+  list(): Promise<string[]>;
 }
 
 export function memoryOutbox(): AnchoringOutbox {
   const entries = new Map<string, OutboxEntry>();
   return {
+    list: () => Promise.resolve([...entries.keys()]),
     get: (did) => Promise.resolve(entries.has(did) ? structuredClone(entries.get(did)) : undefined),
     put: (did, entry) => Promise.resolve(void entries.set(did, structuredClone(entry))),
     delete: (did) => Promise.resolve(void entries.delete(did)),
@@ -201,6 +199,7 @@ export function indexedDbOutbox(name = 'originals-anchoring-outbox'): AnchoringO
     }
   };
   return {
+    list: async () => (await tx('readonly', (s) => s.getAllKeys())).filter((k): k is string => typeof k === 'string'),
     get: (did) => tx('readonly', (s) => s.get(did) as IDBRequest<OutboxEntry | undefined>),
     put: async (did, entry) => void (await tx('readwrite', (s) => s.put(entry, did))),
     delete: async (did) => void (await tx('readwrite', (s) => s.delete(did))),
@@ -236,19 +235,17 @@ export function httpAnchoringTransport(opts: { baseUrl?: string; fetchImpl?: typ
 }
 
 /**
- * Hand a pair to the server from the outbox. A definitive refusal clears it
- * (the server will never take those bytes); a lost answer or a server that
- * could not decide keeps it, to be sent again byte for byte.
+ * A later refusal says nothing about an earlier lost answer (P9.6). Only an
+ * acknowledgement removes signed transactions; auth, gate and validation
+ * errors preserve the identical pair for recovery, never prepare a new one.
  */
 async function deliver(transport: AnchoringTransport, outbox: AnchoringOutbox, did: string, entry: OutboxEntry): Promise<SubmitAnswer> {
-  try {
-    const sent = await transport.submit({ did, evidence: base64.decode(entry.evidence), pair: entry.pair });
-    await outbox.delete(did);
-    return sent;
-  } catch (error) {
-    if (error instanceof AnchoringSubmitError && error.definitive) await outbox.delete(did);
-    throw error;
+  const sent = await transport.submit({ did, evidence: base64.decode(entry.evidence), pair: entry.pair });
+  if (sent.commitTxId !== entry.pair.prepared.commitTxId || sent.revealTxId !== entry.pair.prepared.revealTxId || sent.versionId !== entry.pair.versionId) {
+    throw new Error('The server did not acknowledge the saved submission. It has been kept for recovery.');
   }
+  await outbox.delete(did);
+  return sent;
 }
 
 export interface PublishNextParams {

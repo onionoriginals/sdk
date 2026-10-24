@@ -207,12 +207,13 @@ async function main() {
     };
 
     const outbox = memoryOutbox();
+    const transport = httpAnchoringTransport({ baseUrl: base, fetchImpl: browserFetch, provider: new HttpOrdinalsProvider({ baseUrl: base, fetchImpl: browserFetch }) });
     const engine = new DemoEngine({
       networkFlag: 'regtest',
       features: { bitcoinAnchoring: true },
       author: await createLocalAuthor(),
       anchoring: {
-        transport: httpAnchoringTransport({ baseUrl: base, fetchImpl: browserFetch, provider: new HttpOrdinalsProvider({ baseUrl: base, fetchImpl: browserFetch }) }),
+        transport,
         outbox, satSigner: wallet.satSigner, network: 'regtest', index: 'ord@landing-regtest',
       },
     });
@@ -287,7 +288,14 @@ async function main() {
     await until('the restarted server resuming the reveal', async () => (await mempool()).includes(pending.prepared.revealTxId), 60_000);
     const resentHex = await rpc<string>('getrawtransaction', [pending.prepared.revealTxId]);
     assert.equal(resentHex, pending.prepared.revealTxHex, 'the identical reveal');
-    const retried = await engine.inscribe();
+    // New consumer engine, with no author or wallet signer: recover from the
+    // authenticated server library and resend the same outbox pair (P9.6).
+    const library = await getJson<{ originals: Array<{ did: string }> }>('/api/originals');
+    assert.ok(library.originals.some((o) => o.did === state.did));
+    const reopenedZip = new Uint8Array(await (await browserFetch(`/api/originals/evidence?did=${encodeURIComponent(state.did)}`)).arrayBuffer());
+    const reopened = new DemoEngine({ authed: true, subOrgId: SUB, features: { bitcoinAnchoring: true }, anchoring: { transport, outbox, network: 'regtest', index: SERVER_INDEX } });
+    await reopened.importEvidence(reopenedZip, state.did);
+    const retried = await reopened.inscribe();
     assert.equal(retried.anchoring!.lastSent!.outcome, 'recorded');
     assert.equal(retried.anchoring!.lastSent!.commitTxId, pending.prepared.commitTxId);
     assert.equal(await outbox.get(state.did), undefined);
@@ -296,6 +304,7 @@ async function main() {
     assert.equal(status.heads.accepted, secondEdit);
     const serverLog = await readFile(serverLogs.at(-1)!, 'utf8');
     assert.match(serverLog, /originals_anchor_resumed/);
+    record('reopened-from-account-library', { did: state.did, entries: retried.history.length, author: retried.author, signer: 'none', identicalPair: true });
     record('resumed-by-a-fresh-server', { reveal: pending.prepared.revealTxId, identicalBytes: true, browserRetry: 'recorded', acceptedHead: secondEdit });
 
     // 4. Reorg the reveal out and back.
@@ -316,7 +325,13 @@ async function main() {
     await env.mine(2);
 
     // 5. A fresh reader: an empty store, no author list, the package and the sat.
-    const zip = await engine.evidencePackage();
+    const zip = new Uint8Array(await (await browserFetch(`/api/originals/evidence?did=${encodeURIComponent(state.did)}`)).arrayBuffer());
+    const freshEngine = new DemoEngine({ authed: true, subOrgId: SUB, anchoring: { transport, outbox, network: 'regtest', index: SERVER_INDEX } });
+    await freshEngine.importEvidence(zip, state.did);
+    const consumer = await freshEngine.verifyBitcoin();
+    assert.equal(consumer.bitcoinVerification?.head, secondEdit);
+    assert.equal(consumer.bitcoinVerification?.resources.status, 'available');
+    record('fresh-consumer-reopen', { did: consumer.did, head: consumer.bitcoinVerification?.head, resources: consumer.bitcoinVerification?.resources.status, history: consumer.bitcoinVerification?.history.status, authorBinding: consumer.bitcoinVerification?.authorBinding.status, signer: 'none', index: SERVER_INDEX });
     const reader = OriginalsSDK.create({ store: await FileStore.open(await mkdtemp(join(tmpdir(), 'landing-reader-'))), authors: [] });
     const snapshot = await provider.getSatSnapshot(sat.sat, { bodies: 'originals' });
     const satpoint = snapshot.ownership.satpoint!;
