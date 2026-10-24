@@ -84,11 +84,7 @@ function createEmailAuthMockClient(overrides?: {
         overrides?.createSubOrganization ??
         mock(() =>
           Promise.resolve({
-            activity: {
-              result: {
-                createSubOrganizationResultV7: { subOrganizationId: 'sub_org_new' },
-              },
-            },
+            subOrganizationId: 'sub_org_new',
           })
         ),
     }),

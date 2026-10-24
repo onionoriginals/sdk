@@ -506,7 +506,9 @@ async function getOrCreateTurnkeySubOrgUnlocked(
     },
   });
 
-  const subOrgId = result.activity?.result?.createSubOrganizationResultV7?.subOrganizationId;
+  // The SDK exposes the completed command's result fields at the top level.
+  // Reading a versioned activity member breaks when its API version advances.
+  const subOrgId = result.subOrganizationId;
 
   if (!subOrgId) {
     throw new StructuredError(
