@@ -372,7 +372,7 @@ describe("the newest known signer DID version (P7.8, P9.15; originals-spec #47)"
     expect(r.current).toBe(true);
   });
 
-  test("a later inscription naming a version newer than any the verifier holds is reported unverifiable; the accepted head keeps its identity evidence (P9.12, P5.6; PROVISIONAL, spec question raised on #47 and not adopted)", async () => {
+  test("a later inscription naming a version newer than any the verifier holds is reported unverifiable; the accepted head keeps its identity evidence (P9.12, P9.15, P5.6)", async () => {
     const { alice, copy, anchor, anchoring } = await anchored();
     const older = alice.entries.slice();
     await alice.rotate([{ fragment: "orig", signer: KEY }, { fragment: "spare", signer: seeded(24) }]);
@@ -388,6 +388,36 @@ describe("the newest known signer DID version (P7.8, P9.15; originals-spec #47)"
     const fresh = await verifyOriginal({ log: [...copy, next], authors: [alice.evidence()], now: NOW, bytes: allBytes, bitcoin: [sat([anchoring(10), later])] });
     expect(fresh.head).toBe(next.versionId);
     expect(fresh.anchoring?.unverifiable).toEqual([]);
+  });
+
+  test("P9.15: a verifier that later verifies and accepts an inscription it reported unverifiable reports the change of head, never silently", async () => {
+    const { alice, copy, anchor, anchoring } = await anchored();
+    const older = alice.entries.slice();
+    await alice.rotate([{ fragment: "orig", signer: KEY }, { fragment: "spare", signer: seeded(24) }]);
+    const next = await updateOriginal(anchor, { versionTime: time(30), name: "Names a version the reader lacks", author: alice.ref("orig"), sign: alice.signer(KEY, "orig") });
+    const later = inscribe(next, 30);
+    const evidence = { log: [...copy, next], now: NOW, bytes: allBytes, bitcoin: [sat([anchoring(10), later])] };
+    const first = await verifyOriginal({ ...evidence, authors: [alice.evidence(older)] });
+    expect(first.head).toBe(anchor.versionId);
+    // The verifier retains what it reported unverifiable with the anchor.
+    expect(first.retain.anchor?.unverifiable).toEqual([later.id]);
+    expect(first.anchoring?.headChange).toBeNull();
+
+    const second = await verifyOriginal({ ...evidence, authors: [alice.evidence()], retained: first.retain });
+    expect(second.head).toBe(next.versionId);
+    expect(second.anchoring?.headChange).toEqual({
+      previous: anchor.versionId,
+      current: next.versionId,
+      verified: [expect.objectContaining({ inscription: later.id, versionId: next.versionId })],
+    });
+    expect(second.reasons).toContain("unverifiable-inscription-accepted");
+    expect(second.current).toBe(false);
+    expect(second.retain.anchor?.unverifiable).toBeUndefined();
+
+    // Reported once: the next verification with the same evidence is current.
+    const third = await verifyOriginal({ ...evidence, authors: [alice.evidence()], retained: second.retain });
+    expect(third.anchoring?.headChange).toBeNull();
+    expect(third.current, JSON.stringify(third.reasons)).toBe(true);
   });
 
   test("C12-64: when the verifier has retained a newer version than the evidence it is given, it cannot use the older one: stale, not current", async () => {
@@ -778,7 +808,7 @@ describe("resource bytes are not needed for the log to verify (P7.3, P7.4, P9.18
   });
 });
 
-describe("the sat's holder cannot make an anchored Original incomplete (P9.12, P9.15; PROVISIONAL, spec question raised on #47 and not adopted)", () => {
+describe("the sat's holder cannot make an anchored Original incomplete (P9.12, P9.15)", () => {
   const HOLDER = seeded(77);
 
   test("a hash-chained later inscription naming an author version that does not exist is reported unverifiable; the accepted head stays complete and current", async () => {

@@ -174,7 +174,7 @@ export class MemoryStore implements OriginalsStore {
 
   getRetainedAnchor(did: string): Promise<RetainedAnchor | undefined> {
     const anchor = this.anchors.get(did);
-    return Promise.resolve(anchor ? { ...anchor } : undefined);
+    return Promise.resolve(anchor ? { ...anchor, ...(anchor.unverifiable ? { unverifiable: [...anchor.unverifiable] } : {}) } : undefined);
   }
 
   putRetainedAnchor(did: string, anchor: RetainedAnchor): Promise<void> {

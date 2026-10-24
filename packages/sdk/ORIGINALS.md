@@ -887,23 +887,28 @@ received.report.ownership?.output;                           // compare with the
   against it and is not incomplete identity evidence. An entry before or at
   the anchor naming a version the verifier has no verified copy of is
   incomplete identity evidence (P5.6). After the anchor such an inscription
-  never downgrades the accepted head (P9.12; PROVISIONAL): one naming a
-  version numbered at or below the newest verified version of that DID, but
-  not in its history, is `invalid-entry` (`AUTHOR_VERSION_NOT_IN_HISTORY`);
-  one naming a newer version, or signed by a DID with no history here, is
-  `later-inscription-unverifiable`, listed in `anchoring.unverifiable` with
-  the signer DID and version it names, and the accepted head keeps its
-  identity evidence and stays current. The holder of the sat decides what is
-  inscribed but has no authority (P9.11, P9.12), so otherwise a hash-chained
-  junk entry naming a version that does not exist would make the Original
-  incomplete, never current, for good. A verifier that obtains the named
-  version verifies the inscription. Spec question (raised on #47 and not adopted at master 1039c471c, P9.15
-  and P5.6): add to P9.15 "An inscription after the anchoring inscription
-  whose signer DID version the verifier cannot verify is reported as
-  unverifiable. It does not make the identity evidence of the accepted
-  state incomplete, and it does not prevent that state from being current;
-  an inscription naming a version number the verifier holds under another
-  versionId is invalid." A retained
+  never downgrades the accepted head (P9.12, P9.15; owner decision of 23
+  October 2026): one naming a version the signer's history shows is not that
+  DID's is `invalid-entry` (`AUTHOR_VERSION_NOT_IN_HISTORY`, P5.13). For a
+  did:vh or did:webvh that is a version numbered at or below the newest
+  verified version but not in its history; for a did:btco whose sat was read
+  in full through the inscription (or which is deactivated), any versionId
+  that is not one of its versions. One naming a newer version, signed by a
+  DID with no history here, or by a did:btco whose sat was not read in full
+  through the inscription (an unread or disputed inscription before it, or a
+  tip below it), is `later-inscription-unverifiable`, listed in
+  `anchoring.unverifiable` with the signer DID and version it names, and the
+  accepted head keeps its identity evidence and stays current. The holder of
+  the sat decides what is inscribed but has no authority (P9.11, P9.12), so
+  otherwise a hash-chained junk entry naming a version that does not exist
+  would make the Original incomplete, never current, for good. A verifier
+  that obtains the named version verifies the inscription, and reports the
+  change of head rather than changing silently (P9.15, as P9.16 for an
+  anchor): the retained anchor (`retain.anchor`, kept by the store with
+  `putRetainedAnchor`) lists the inscriptions reported unverifiable, and
+  when one of them is accepted later `anchoring.headChange` gives the head
+  retained before, the head now and the inscriptions verified, with the
+  reason `unverifiable-inscription-accepted`, once. A retained
   versionId the evidence falls short of is `stale`, and the result is not
   current. The cost, accepted by the owner: a host that withholds a key
   removal can get later inscriptions accepted by readers who do not know of

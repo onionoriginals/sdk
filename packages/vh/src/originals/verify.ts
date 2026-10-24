@@ -240,7 +240,8 @@ export interface OriginalsReport {
    * The versionIds to retain after this verification, never lower than those
    * supplied, and unchanged by a fork or stale evidence; and, for an anchored
    * Original, the anchor reported, so a later change of anchor is reported
-   * rather than silent (P9.16).
+   * rather than silent (P9.16), with the inscriptions reported unverifiable,
+   * so accepting one later is a reported change of head (P9.15).
    */
   retain: { original: string | null; authors: Record<string, string>; anchor?: RetainedAnchor };
 }
@@ -368,7 +369,11 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   }
   if (onSats || (raw && anchoringIndex(raw) >= 0)) {
     const previousAnchor = options.retained?.anchor;
-    assembly = await assembleFromBitcoin(raw, options.bitcoin ?? [], (entries) => verifyLog(entries, verifyOptions), histories, previousAnchor ? { previousAnchor } : {});
+    const previousHead = options.retained?.original;
+    assembly = await assembleFromBitcoin(raw, options.bitcoin ?? [], (entries) => verifyLog(entries, verifyOptions), histories, {
+      ...(previousAnchor ? { previousAnchor } : {}),
+      ...(previousHead !== undefined ? { previousHead } : {}),
+    });
     input = assembly.entries;
   }
   const onBitcoin = assembly?.report.status === "anchored" ? assembly.report : null;
@@ -455,8 +460,10 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const versionUnavailable = assembly?.report.ignored.some((i) => i.reason === "author-version-unavailable" || i.code === "AUTHOR_VERSION_UNAVAILABLE") ?? false;
   const identityIncomplete =
     failure?.category === "incomplete-evidence" || identityFailures.length > 0 || !history || editors.some((e) => e.status === "incomplete") || versionUnavailable;
+  // With the anchor, the inscriptions reported unverifiable: one accepted later is a reported change of head (P9.15).
+  const unverifiableNow = onBitcoin?.unverifiable.map((u) => u.inscription) ?? [];
   const retainedAnchor: RetainedAnchor | undefined = onBitcoin
-    ? { inscription: onBitcoin.anchor!.inscription, sat: onBitcoin.sat, owner: assembly!.owner?.output ?? null }
+    ? { inscription: onBitcoin.anchor!.inscription, sat: onBitcoin.sat, owner: assembly!.owner?.output ?? null, ...(unverifiableNow.length > 0 ? { unverifiable: unverifiableNow } : {}) }
     : options.retained?.anchor;
   const report: OriginalsReport = {
     profile: ORIGINALS_METHOD,
@@ -534,6 +541,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   if (assembly && assembly.report.disputed.length > 0) reasons.push("bitcoin-placement-disputed");
   if (assembly?.ownerDisputed) reasons.push("ownership-indexes-disagree");
   if (assembly?.report.change) reasons.push("anchor-changed");
+  if (assembly?.report.headChange) reasons.push("unverifiable-inscription-accepted");
   if (assembly?.report.status === "anchored" && options.retained?.original !== undefined) {
     const retained = options.retained.original;
     if (!log.entries.some((v) => v.entry.versionId === retained)) reasons.push("authoritative-source-changed");

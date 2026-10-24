@@ -65,6 +65,10 @@ describe("FileStore: durable local commit (P6.2)", () => {
       await store.putRetainedAnchor(did, anchor);
       expect(await (await FileStore.open(dir)).getRetainedAnchor(did)).toEqual(anchor);
       expect(await store.getRetainedAnchor("did:vh:QmOther")).toBeUndefined();
+      // With the inscriptions reported unverifiable, so accepting one later is a reported change of head (P9.15).
+      const withUnverifiable = { ...anchor, unverifiable: [`${"f".repeat(64)}i0`] };
+      await store.putRetainedAnchor(did, withUnverifiable);
+      expect(await (await FileStore.open(dir)).getRetainedAnchor(did)).toEqual(withUnverifiable);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
