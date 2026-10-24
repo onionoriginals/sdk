@@ -172,6 +172,16 @@ jobs:
       - name: Typecheck, test and build the landing app against the built SDK
         run: bun run landing:check
 
+      # Typecheck, tests and a green build all passed while the production
+      # bundle blanked originals.build (chunk cycle: "Class extends value
+      # undefined"). Load the built page in Chromium and require #root to
+      # render with no uncaught error.
+      - name: Install Chromium for the boot check
+        run: bun run --cwd apps/landing playwright-core install --with-deps chromium
+
+      - name: Production bundle boots in a browser
+        run: bun run --cwd apps/landing check:boot
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest
