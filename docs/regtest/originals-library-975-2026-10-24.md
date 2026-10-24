@@ -94,3 +94,15 @@ checks use the newest verified DID history known to the reader, not proof that
 no newer DID version exists. The public-host and mainnet acceptance gates remain
 **pending**; hostedPublication/explore stay off and bitcoinAnchoring retains its
 existing explicit build/server gates.
+
+## PR #992 CI follow-up
+
+The first PR coverage job failed in `@originals/sdk` because the optional-file
+retrieval deadline test unexpectedly resolved, not because coverage fell below
+its threshold: the job reported 88.8% functions and 91.15% lines against 80%
+for each. A deterministic regression now delivers the request timer before the
+whole-operation timer while the sampled wall clock still precedes the deadline.
+It failed before the fix. When that request consumed the operation's remaining
+time allowance, its timeout is now terminal rather than an optional missing
+file; a separate test preserves recoverable per-request timeouts. Thresholds
+are unchanged. A dedicated changeset covers library recovery and this fix.

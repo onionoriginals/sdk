@@ -167,12 +167,21 @@ export class Retrieval {
       return undefined;
     };
 
-    const timeoutMs = Math.max(0, Math.min(this.limits.requestTimeoutMs, this.deadline - Date.now()));
+    const remainingMs = this.deadline - Date.now();
+    const timeoutMs = Math.max(0, Math.min(this.limits.requestTimeoutMs, remainingMs));
     const request = new AbortController();
     const abort = () => request.abort();
     this.controller.signal.addEventListener("abort", abort, { once: true });
     if (this.controller.signal.aborted) request.abort();
-    const timer = setTimeout(abort, timeoutMs);
+    const timer = setTimeout(() => {
+      // A deadline-limited request exhausts the operation even if its timer
+      // arrives just before the operation timer or the next wall-clock tick.
+      // Otherwise an optional timeout can be swallowed as a missing file.
+      if (remainingMs <= this.limits.requestTimeoutMs) {
+        this.timedOut = true;
+        this.controller.abort();
+      } else abort();
+    }, timeoutMs);
     // A fetcher that ignores the signal is not waited for.
     const stopped = new Promise<never>((_, reject) => {
       request.signal.addEventListener("abort", () => reject(new OriginalsError("unavailable-bytes", "FETCH_TIMEOUT", `${url} did not answer within ${timeoutMs} ms`)), { once: true });
