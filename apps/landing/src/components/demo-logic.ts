@@ -206,7 +206,7 @@ export function completionCopy(simulated: boolean, network: BtcNetworkFlag = 'ma
     : network === 'regtest' ? { ...demo.done.real, lead: demo.regtest.done, explorerLabel: null } : demo.done.real;
 }
 
-/** The published-log block. An anonymous log is served here only for a while. */
+/** The published-log block's copy. Publishing needs sign-in (#976 B5); signed out, the heading says the history is only in this browser. */
 export function resolvedCopy(authenticated: boolean): {
   heading: string;
   resolvedBadge: string;
@@ -582,7 +582,7 @@ export function demoFailureMessage(err: unknown): string {
   const raw = err instanceof Error ? err.message : '';
   if (/HostingStorageAdapter\.(?:put|get) failed/.test(raw)) {
     // 507 from the durable per-user store is a QUOTA, not a blip — "try again
-    // in a moment" would be a lie. The anonymous store no longer 507s at all.
+    // in a moment" would be a lie. Signed out, nothing is published, so no 507.
     if (/failed:\s*429\b/.test(raw)) return demo.hosting.rateLimited;
     if (/failed:\s*507\b/.test(raw)) return demo.hosting.quotaFull;
     return demo.hosting.unavailable;

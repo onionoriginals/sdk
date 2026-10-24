@@ -49,7 +49,7 @@ Railway dashboard. They are never written to source, to a log or to the receipt.
 | `TRUSTED_PROXY_HOPS` | `1` behind the Railway edge |
 | `VITE_WEBVH_HOST` | the staging hostname |
 | `VITE_BTC_NETWORK`, `BTC_NETWORK` | a non-mainnet network |
-| `VITE_ACCEPTANCE_HOSTED_PUBLICATION` | `1`, the G7 switch. It is ignored when `VITE_WEBVH_HOST` is the production host or `VITE_BTC_NETWORK` is `mainnet` |
+| `VITE_ACCEPTANCE_HOSTED_PUBLICATION` | `1`, the G7 switch. It is ignored when `VITE_WEBVH_HOST` is the production host or `VITE_BTC_NETWORK` is `mainnet`. Set with mainnet, the server refuses to boot (`server/config.ts`, fatal whatever `CONFIG_STRICT` says) |
 
 ### Railway IaC: never apply it to staging
 
@@ -356,7 +356,7 @@ shape as the section A receipt:
   ],
   "isolation": { "clients": [{ "name": "A", "userDataDir": "…", "launches": 3, "pids": [] }], "readers": [{ "pid": 0, "envNames": ["PATH", "…"], "cookies": 0 }] },
   "gates": { "B1-turnkey-create-revise-publish": "PASS", "B2-signed-out-reader": "PASS", "B3-restore-continue": "PASS",
-             "B4-interrupted-publication": "PASS", "B5-signed-out-ephemeral": "PASS", "B6-flag-off": "PASS" },
+             "B4-interrupted-publication": "PASS", "B5-signed-out-guest": "PASS", "B6-flag-off": "PASS" },
   "phases": [ /* { phase, started, finished, isolation, facts, checks: [{ id, title, status, detail|error }], status } */ ],
   "manual": [{ "step": "otp", "phase": "b1-client-a", "at": "…" }],   // never the code itself
   "artifacts": [{ "path": "…", "bytes": 0, "sha256": "…" }],
