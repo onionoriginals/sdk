@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { base58btcEncode, multibaseEncode, sha256 } from "../src/crypto/index.js";
+import { base58btcEncode, createProof, multibaseEncode, sha256 } from "../src/crypto/index.js";
 import { OriginalsError } from "../src/errors.js";
 import { parseJson, type JsonObject } from "../src/json/index.js";
 import { appendEntry, createLog, parseLog, serializeLog, signWith, verifyLog, type LogEntry, type Specialisation } from "../src/log/index.js";
@@ -485,21 +485,69 @@ describe("the derived DID document and generic resolvers (P3.5, P3.8)", () => {
     }
   });
 
-  test("C12-50: an asset log entry that sets a non-empty witness parameter is rejected; {} is a no-op (P9.8, P9.9)", async () => {
+  test("C12-50: an asset log entry that sets a non-empty witness parameter is rejected; so is {} (P9.8, P9.9, P14.1)", async () => {
     const { alice, log, sign } = await harbor();
     const witnesses = { threshold: 2, witnesses: [5, 6, 7].map((n) => ({ id: `did:key:${seeded(n).publicKeyMultibase}` })) };
     const witnessed = await resign(log[2], { ...log[2].state, transitions: [] }, sign, { witness: witnesses });
     failedWith(await report([...log, witnessed], [alice]), 3, "WITNESS_NOT_PERMITTED", "invalid-evidence");
+    // P14.1: an author entry's parameters are exactly {}, so even `witness: {}` is rejected.
     const empty = await resign(log[2], { ...log[2].state, transitions: [] }, sign, { witness: {} });
-    const r = await report([...log, empty], [alice], {});
-    expect(r.history.status).toBe("valid");
-    expect(r.ordering).toBe("claimed");
+    failedWith(await report([...log, empty], [alice]), 3, "PARAMETER_MEMBERS", "invalid-evidence");
   });
 
   test("digests are multibase base58btc sha2-256 multihashes (PROVISIONAL, D4)", () => {
     const d = resourceDigest(bytes("abc"));
     expect(d).toBe(`z${base58btcEncode(new Uint8Array([0x12, 0x20, ...sha256(bytes("abc"))]))}`);
     expect(d.startsWith("zQm")).toBe(true);
+  });
+});
+
+describe("section 14: exact members (P14.1, P14.4, P14.8)", () => {
+  test("P14.1: genesis parameters are exactly method and scid", async () => {
+    const { alice, key, sign, ref } = await harbor();
+    const genesisWith = async (extra: JsonObject) => {
+      const base = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", resources: [photo(B1)], author: ref, sign });
+      const state = { ...base.state, id: "did:vh:{SCID}" };
+      return createLog({ versionTime: "2026-10-18T12:00:00.000Z", parameters: { method: ORIGINALS_METHOD, scid: "{SCID}", ...extra }, state, sign });
+    };
+    expect((await report([await genesisWith({})], [alice])).history.status).toBe("valid");
+    for (const extra of [{ ttl: 60 }, { watchers: ["https://w.example.com"] }, { witness: {} }, { deactivated: false }]) {
+      failedWith(await report([await genesisWith(extra)], [alice]), 0, "PARAMETER_MEMBERS", "invalid-evidence");
+    }
+    // Keys come from the author DID, and nothing is null (VH-Log; already rejected by the engine).
+    failedWith(await report([await genesisWith({ updateKeys: [key.publicKeyMultibase] })], [alice]), 0, "PARAMETER_FORBIDDEN", "invalid-evidence");
+    failedWith(await report([await genesisWith({ ttl: null })], [alice]), 0, "PARAMETER_NULL", "invalid-evidence");
+  });
+
+  test("P14.1: every later author entry has {} parameters; a deactivation exactly {\"deactivated\": true}", async () => {
+    const { alice, log, sign } = await harbor();
+    const same = { ...log[2].state, transitions: [] };
+    for (const parameters of [{ ttl: 60 }, { method: ORIGINALS_METHOD }, { deactivated: false }, { watchers: [] }]) {
+      failedWith(await report([...log, await resign(log[2], same, sign, parameters)], [alice]), 3, "PARAMETER_MEMBERS", "invalid-evidence");
+    }
+    const off = { ...log[2].state, operation: "deactivate", asset: { ...(log[2].state.asset as JsonObject), status: "deactivated" }, transitions: [] };
+    const deactivated = await report([...log, await resign(log[2], off, sign, { deactivated: true })], [alice]);
+    expect(deactivated.history.status, JSON.stringify(deactivated.history.failure)).toBe("valid");
+    failedWith(await report([...log, await resign(log[2], off, sign, { deactivated: true, ttl: 60 })], [alice]), 3, "PARAMETER_MEMBERS", "invalid-evidence");
+  });
+
+  test("P14.4, P14.8: a proof has exactly type, cryptosuite, verificationMethod, proofPurpose and proofValue", async () => {
+    const { alice, key, log, ref } = await harbor();
+    const same = { ...log[2].state, transitions: [] };
+    const base = { type: "DataIntegrityProof", cryptosuite: "eddsa-jcs-2022", verificationMethod: ref.verificationMethod, proofPurpose: "assertionMethod" } as const;
+    const signedWith = (extra: JsonObject) => async (unsigned: JsonObject) => [await createProof(unsigned, { ...base, ...extra } as never, key)];
+    expect((await report([...log, await appendEntry(log[2], { versionTime: "2026-10-18T12:30:00.000Z", parameters: {}, state: same, sign: signedWith({}) })], [alice])).history.status).toBe("valid");
+    // A proof @context changes what is verified, so that proof already fails its signature.
+    const withContext = await appendEntry(log[2], { versionTime: "2026-10-18T12:30:00.000Z", parameters: {}, state: same, sign: signedWith({ "@context": ["https://w3id.org/security/data-integrity/v2"] }) });
+    expect((await report([...log, withContext], [alice])).history.status).toBe("invalid");
+    const extras: JsonObject[] = [
+      { id: "urn:uuid:1" }, { created: "2026-10-18T12:30:00Z" }, { expires: "2027-10-18T12:30:00Z" },
+      { domain: "example.com" }, { challenge: "c" }, { nonce: "n" }, { previousProof: "urn:uuid:0" },
+    ];
+    for (const extra of extras) {
+      const entry = await appendEntry(log[2], { versionTime: "2026-10-18T12:30:00.000Z", parameters: {}, state: same, sign: signedWith(extra) });
+      failedWith(await report([...log, entry], [alice]), 3, "PROOF_MEMBERS", "invalid-evidence");
+    }
   });
 });
 

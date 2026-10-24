@@ -171,6 +171,8 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
       if (Object.keys(active.witness).length > 0) {
         fail("invalid-evidence", "WITNESS_NOT_PERMITTED", "Originals asset logs do not use witnesses; anchor on Bitcoin for proven ordering (owner decision Q14)");
       }
+      checkParameterMembers(entry.parameters, index);
+      for (const proof of entry.proof) checkProofMembers(proof);
       const used = usedThrough(history);
       const state = checkEntryState(entry.state, {
         scid,
@@ -184,6 +186,41 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
       usedIds.set(entry, resourceIdsThrough(state.asset, used));
     },
   };
+}
+
+/**
+ * P14.1: an entry's parameters have exactly the members its kind allows: the
+ * genesis entry `method` and `scid`; a deactivation exactly
+ * `{"deactivated": true}`; every other entry none. So `ttl`, `watchers`,
+ * `updateKeys`, `nextKeyHashes`, `witness: {}`, `deactivated: false` and a
+ * repeated `method` are rejected, as is any null value.
+ */
+function checkParameterMembers(parameters: JsonObject, index: number): void {
+  const keys = Object.keys(parameters).sort();
+  const exactly = (expected: string[]) => keys.length === expected.length && expected.every((k, i) => keys[i] === k);
+  const ok = index === 0
+    ? exactly(["method", "scid"]) && typeof parameters.method === "string" && typeof parameters.scid === "string"
+    : keys.length === 0 || (exactly(["deactivated"]) && parameters.deactivated === true);
+  if (!ok) {
+    fail("invalid-evidence", "PARAMETER_MEMBERS", index === 0
+      ? "the genesis entry's parameters are exactly method and scid (P14.1)"
+      : "an entry's parameters are exactly {} or, for a deactivation, {\"deactivated\": true} (P14.1)");
+  }
+}
+
+const PROOF_MEMBERS = ["cryptosuite", "proofPurpose", "proofValue", "type", "verificationMethod"];
+
+/**
+ * P14.4, P14.8: an entry proof has exactly type, cryptosuite,
+ * verificationMethod, proofPurpose and proofValue; `@context`, `id`,
+ * `created`, `expires`, `domain`, `challenge`, `nonce` and `previousProof`
+ * are rejected.
+ */
+function checkProofMembers(proof: unknown): void {
+  const keys = isJsonObject(proof) ? Object.keys(proof).sort() : [];
+  if (keys.length !== PROOF_MEMBERS.length || !PROOF_MEMBERS.every((k, i) => keys[i] === k)) {
+    fail("invalid-evidence", "PROOF_MEMBERS", `an entry proof has exactly ${PROOF_MEMBERS.join(", ")} (P14.4, P14.8)`);
+  }
 }
 
 export function originalsSpecialisation(authors: Iterable<AuthorHistory>): Specialisation {

@@ -132,6 +132,16 @@ on; it never reports an unanchored Original as current (P7.10). The
   any one time (removing one makes room for another), 32 editor grants and
   1,000 versions of one signer DID. Exceeding one is `limit-exceeded`
   (`STATE_TOO_MANY_RESOURCES` for resources).
+- **Exact members (P14.1, P14.4, P14.8).** An entry's `parameters` are
+  exactly `method` and `scid` at genesis, exactly `{"deactivated": true}` for
+  a deactivation, and `{}` for every other entry; anything else (`ttl`,
+  `watchers`, `witness: {}`, `deactivated: false`, a repeated `method`) is
+  `invalid-evidence` (`PARAMETER_MEMBERS`); `updateKeys` and `nextKeyHashes`
+  stay `PARAMETER_FORBIDDEN` and a null value `PARAMETER_NULL`. An entry
+  proof has exactly `type`, `cryptosuite`, `verificationMethod`,
+  `proofPurpose` and `proofValue` (`PROOF_MEMBERS`): `created`, `expires`,
+  `id`, `domain`, `challenge`, `nonce`, `previousProof` and `@context` are
+  rejected.
 - **Versions (P4.4).** Resource versions are derived from history. A caller's
   counter is rejected, and an unchanged digest does not advance a version. A
   resource added after genesis starts at version 1.
@@ -386,7 +396,9 @@ const reader = OriginalsSDK.create({ store, authors: [], identityFetch: async (u
 ## No witnesses (owner decision Q14)
 
 Asset logs never activate VH witnesses: an entry that sets the witness
-parameter to anything but `{}` is rejected (`WITNESS_NOT_PERMITTED`). On the
+parameter to anything but `{}` is rejected (`WITNESS_NOT_PERMITTED`), and
+`{}` too, since an entry's parameters have exact members (P14.1,
+`PARAMETER_MEMBERS`). On the
 local and web layers an Original is author-signed with claimed ordering.
 Accepted consequences: a stolen author key can make a branch before its
 removal, which is historically authorized only once the key is removed
