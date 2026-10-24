@@ -12,7 +12,7 @@ import { localSigner } from "@originals/vh/crypto";
 import { createLog, serializeLog, signWith, vhHash } from "@originals/vh/log";
 import { resourceDigest, type AliasEvidence } from "@originals/vh/originals";
 import { didWebvhFilesUrl, didWebvhLogUrl } from "@originals/vh/webvh";
-import { MemoryStore, OriginalsSDK, hostedFiles, readZip, writeZip, type HostedFetch } from "../../../src/originals/index.js";
+import { MemoryStore, OriginalsSDK, hostedFiles, readZip, signerPath, writeZip, type HostedFetch } from "../../../src/originals/index.js";
 import { WebvhIdentity, bytes, clock, seed } from "./helpers.js";
 
 const B1 = bytes("harbor at dawn, first crop");
@@ -324,6 +324,32 @@ describe("C12-134: identity retrieval is bounded and follows only the identity's
     };
     return { ...env, alias, files, hosted };
   }
+
+  test("P7.8: a did:webvh signer log a host serves is judged as fetched from the host's location, so the location rule applies", async () => {
+    const env = await movedAndRotated();
+    const key = localSigner("Ed25519", seed(61));
+    const k = key.publicKeyMultibase;
+    const g = await createLog({
+      versionTime: "2026-10-18T10:00:00Z",
+      parameters: { method: "did:webvh:1.0", scid: "{SCID}", updateKeys: [k], portable: true },
+      state: { id: "did:webvh:{SCID}:example.com:photos", alsoKnownAs: [env.did] },
+      sign: signWith(key, { cryptosuite: "eddsa-jcs-2022", verificationMethod: `did:key:${k}#${k}` }),
+    });
+    const alias: AliasEvidence = { did: g.state.id as string, log: serializeLog([g]) };
+    await env.sdk.publish(env.did, { parent: env.head, author: env.after, signer: env.alice.signer(env.after, K2), alias });
+    const files = await hostedFiles(env.sdk, env.did, alias);
+    const base = didWebvhFilesUrl(alias.did);
+    const hosted: HostedFetch = (url) => {
+      const data = url.startsWith(base) ? files.get(url.slice(base.length)) : undefined;
+      return data ? Promise.resolve(data.slice()) : Promise.reject(new OriginalsError("unavailable-bytes", "FETCH_STATUS", `${url} answered 404`));
+    };
+    const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")) });
+    const r = await reader.loadPublished(alias.did, hosted);
+    expect(r.report.identityEvidence).toMatchObject({
+      status: "complete", freshness: "not-established",
+      obtained: { location: `${base}originals/${signerPath(env.alice.did)}/did.jsonl`, source: "host" },
+    });
+  });
 
   test("loadPublished's deadline and the caller's signal bound identity requests", async () => {
     const { alias, hosted } = await publishedMoved();

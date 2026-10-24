@@ -246,6 +246,12 @@ describe("C12-134: author freshness after a move (P5.14, P7.8)", () => {
     expect(r.reasons).toContain("historically-authorized-only");
     expect(r.identityEvidence.latestVersionId).toBe(alice.versionId);
     expect(r.identityEvidence.freshness).toBe("not-established");
+    // P5.14: the move is reported, and that the log where it points was not obtained.
+    expect(r.identityEvidence.obtained).toMatchObject({ movedTo: alice.location, movedLog: "not-obtained" });
+    expect(describeFreshness(alice.did, r.identityEvidence)).toContain(`now at ${alice.location}`);
+    // A package has no fetch location: the moved-identity rule does not apply to its log (P7.8).
+    const packaged = await verify(log, [{ ...alice.evidence(), source: "package" }]);
+    expect(packaged.identityEvidence.obtained.movedTo).toBeUndefined();
   });
 
   test("a retrieved log shorter than the retained versionId is stale, whatever its source", async () => {

@@ -111,6 +111,13 @@ export interface IdentityObtained {
   latestVersionId: string | null;
   /** Whether the DID's own witnesses approve that version. */
   witnessed: boolean;
+  /**
+   * A did:webvh log fetched from a location whose latest version names
+   * another: where the DID now is, by that version's `id` (P5.14, P7.8).
+   */
+  movedTo?: string;
+  /** With `movedTo`: the log there was not obtained, so freshness is not established. */
+  movedLog?: "not-obtained";
 }
 
 /** A signer DID a result relies on: the latest versionId used, and when and where that history was obtained (P7.8, P7.10). */
@@ -312,7 +319,20 @@ function obtained(did: string | null, authors: AuthorDidEvidence[], histories: A
     source: evidence?.source ?? null,
     latestVersionId: latest?.versionId ?? null,
     witnessed: latest?.witnessed === true,
+    ...movedFrom(evidence, latest?.document.id),
   };
+}
+
+/**
+ * P5.14, P7.8: a did:webvh log fetched from a location whose latest version's
+ * `id` names another shows the identity moved; the log there was not obtained,
+ * or it would be the one reported. A package or a host has no such location
+ * (owner decisions on #993's review).
+ */
+function movedFrom(evidence: AuthorDidEvidence | undefined, latestId: unknown): Pick<IdentityObtained, "movedTo" | "movedLog"> {
+  if (!evidence?.retrievedFrom || evidence.source === "host" || evidence.source === "package") return {};
+  if (typeof latestId !== "string" || !latestId.startsWith("did:webvh:")) return {};
+  return logUrl(latestId) === evidence.retrievedFrom ? {} : { movedTo: latestId, movedLog: "not-obtained" };
 }
 
 const SOURCE_TEXT: Record<EvidenceSource, string> = {
@@ -339,7 +359,8 @@ export function describeFreshness(
   const where = o.location ?? (o.source ? SOURCE_TEXT[o.source] : "an unstated source");
   const when = o.obtainedAt ?? "an unstated time";
   if (o.latestVersionId === null) return `No verified history of ${did} was obtained (from ${where} at ${when}).`;
-  const seen = `The history of ${did} was obtained from ${where} at ${when}; its latest version there is ${o.latestVersionId}.`;
+  const moved = o.movedTo ? ` That version says the DID is now at ${o.movedTo}; its log there was not obtained.` : "";
+  const seen = `The history of ${did} was obtained from ${where} at ${when}; its latest version there is ${o.latestVersionId}.${moved}`;
   if (freshness === "established") return `${seen} That version is approved by the DID's own witnesses, which establishes its freshness.`;
   const newer = "The DID may have a newer version, for example one that removes a key, that this verifier has not seen.";
   if (freshness === "stale") return `${seen} It is older than version ${evidence.retainedVersionId ?? "unknown"}, which this verifier has seen before. ${newer}`;

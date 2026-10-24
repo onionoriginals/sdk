@@ -241,7 +241,7 @@ describe("C12-118: an editor entry and a revoking author entry on the same paren
 });
 
 describe("C12-134: a moved author whose latest asset entry is an editor entry, read by a fresh reader", () => {
-  test("author freshness is not established: the editor entry does not reveal where the author moved, and the log found there is unwitnessed", async () => {
+  test("author freshness is not established: the editor entry does not reveal where the author moved", async () => {
     const alice = await WebvhIdentity.create("old.example.com", [{ fragment: "orig-1", secret: KA }]);
     const bob = await Author.create([{ fragment: "edit", secret: KB }]);
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async (d) => (d === alice.did ? alice.evidence() : d === bob.did ? bob.evidence() : undefined), clock: clock() });
@@ -262,9 +262,10 @@ describe("C12-134: a moved author whose latest asset entry is an editor entry, r
     const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [], identityFetch: fetcher, clock: clock(Date.parse("2026-10-18T13:00:00Z")) });
     const r = (await reader.load(pkg.bytes)).report;
     expect(seen[0]).toBe(didWebvhLogUrl(alice.did));
-    // The editor entry does not say where Alice moved, but the log the package carries for her does,
-    // so the reader asks there too (P5.14 SHOULD, originals-spec #51); unwitnessed, it establishes nothing.
-    expect(seen).toContain(didWebvhLogUrl(alice.location));
+    // The editor entry does not say where Alice moved. The log the package carries for her does, but
+    // a package has no fetch location, so its log sends the reader nowhere (P7.8; owner decision on
+    // #993's review).
+    expect(seen).not.toContain(didWebvhLogUrl(alice.location));
     expect(r.history.status).toBe("valid");
     expect(r.identityEvidence.freshness).toBe("not-established");
     expect(r.current).toBe(false);
