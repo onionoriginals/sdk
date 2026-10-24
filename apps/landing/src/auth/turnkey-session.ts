@@ -26,6 +26,23 @@ import { bech32 } from '@scure/base';
  */
 export const SESSION_EXPIRATION_SECONDS = 12 * 60 * 60;
 
+/** The shortest session a regtest build may ask for: three minutes, so the 60 s margin leaves two to sign in. */
+export const REGTEST_MIN_SESSION_SECONDS = 180;
+
+/**
+ * The session length to request. Always SESSION_EXPIRATION_SECONDS, except on
+ * a regtest build that sets VITE_TURNKEY_SESSION_SECONDS: a shorter session
+ * (at least REGTEST_MIN_SESSION_SECONDS) lets the owner's live acceptance run
+ * watch one expire mid-anchoring and retry (#975 stage A). Any other network,
+ * or any other value, gets the default: a production build cannot shorten it.
+ */
+export function sessionExpirationSeconds(env: Record<string, string | undefined> = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {}): number {
+  if (env.VITE_BTC_NETWORK !== 'regtest') return SESSION_EXPIRATION_SECONDS;
+  const raw = env.VITE_TURNKEY_SESSION_SECONDS;
+  const n = raw && /^\d+$/.test(raw) ? Number(raw) : NaN;
+  return Number.isSafeInteger(n) && n >= REGTEST_MIN_SESSION_SECONDS && n < SESSION_EXPIRATION_SECONDS ? n : SESSION_EXPIRATION_SECONDS;
+}
+
 /**
  * Report expiry this far early. A signature started at T-10s can land at
  * Turnkey after the window closes; refusing early keeps expiry a UI state

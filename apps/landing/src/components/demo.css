@@ -1246,3 +1246,19 @@
     padding: var(--sp-4) var(--sp-3);
   }
 }
+
+/* Anchoring an Original on Bitcoin (plan 011, PR 10b; behind bitcoinAnchoring). */
+.demo-anchoring,
+.demo-anchoring-notice {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.demo-anchoring-offchain {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+}
+.demo-anchoring[data-tone='problem'] .demo-deposit-head strong {
+  color: var(--danger, #b42318);
+}

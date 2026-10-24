@@ -1,4 +1,5 @@
 import * as btc from '@scure/btc-signer';
+import { hex } from '@scure/base';
 import { schnorr } from '@noble/curves/secp256k1.js';
 import { equalBytes } from '@noble/curves/utils.js';
 import { OutOrdinalReveal, parseInscriptions } from 'micro-ordinals';
@@ -26,6 +27,10 @@ export interface PreparedInscriptionOnSat {
 export type InscriptionBroadcastState = 'commit_broadcast' | 'reveal_broadcast' |
   'commit_broadcast_unknown' | 'reveal_broadcast_unknown';
 
+/** Every state a persisted record may be in. */
+export const INSCRIPTION_RECORD_STATES: ReadonlyArray<InscriptionRecoveryRecord['broadcast']> =
+  ['prepared', 'commit_broadcast', 'reveal_broadcast', 'commit_broadcast_unknown', 'reveal_broadcast_unknown'];
+
 export interface InscriptionRecoveryRecord {
   /** The locally computed commit txid. */
   recoveryId: string;
@@ -37,6 +42,8 @@ export interface InscriptionRecoveryStore {
   /** Atomically persist the complete record. Resolve only once it survives process termination. */
   save(record: InscriptionRecoveryRecord): Promise<void>;
   load(recoveryId: string): Promise<InscriptionRecoveryRecord | undefined>;
+  /** The recovery ids of every stored record, when the store can list them (`catchUp` uses it after a restart). */
+  list?(): Promise<string[]>;
 }
 
 function samePrepared(a: PreparedInscriptionOnSat, b: PreparedInscriptionOnSat): boolean {
@@ -55,7 +62,7 @@ function invalid(message: string): never {
 /** Validate the writer's single-leaf inscription spend; txids do not commit witness bytes. */
 export function validateInscriptionReveal(commit: btc.Transaction, reveal: btc.Transaction): void {
   if (reveal.inputsLength !== 1 || reveal.getInput(0).index !== 0 ||
-      Buffer.from(reveal.getInput(0).txid!).toString('hex') !== commit.id) {
+      hex.encode(reveal.getInput(0).txid!) !== commit.id) {
     invalid('Recovery reveal must spend output zero of the exact commit.');
   }
   const witness = reveal.getInput(0).finalScriptWitness;
@@ -81,8 +88,12 @@ export function validateInscriptionReveal(commit: btc.Transaction, reveal: btc.T
   if (!schnorr.verify(signature, message, publicKey)) invalid('Recovery reveal signature is invalid.');
 }
 
-/** Check persisted identities and funding order before using stored spending bytes. */
-function validate(prepared: PreparedInscriptionOnSat): void {
+/**
+ * Check persisted identities and funding order before using stored spending
+ * bytes: the declared txids and inscription id must be the ones the stored hex
+ * computes to. Throws `INVALID_INSCRIPTION_RECOVERY` (a StructuredError).
+ */
+export function validatePreparedInscriptionOnSat(prepared: PreparedInscriptionOnSat): void {
   if (!prepared || prepared.version !== 1 || !['mainnet', 'testnet', 'regtest', 'signet'].includes(prepared.network) ||
       !validateSatoshiNumber(prepared.satoshi).valid || !Array.isArray(prepared.fundingUtxos) || !prepared.fundingUtxos.length) {
     invalid('Invalid prepared inscription schema.');
@@ -92,22 +103,22 @@ function validate(prepared: PreparedInscriptionOnSat): void {
       if (typeof hex !== 'string' || !/^(?:[0-9a-fA-F]{2})+$/.test(hex)) invalid('Recovery transactions must be exact hexadecimal bytes.');
     }
     const options = { allowUnknownInputs: true, allowUnknownOutputs: true };
-    const commit = btc.Transaction.fromRaw(Buffer.from(prepared.signedCommitHex, 'hex'), options);
-    const reveal = btc.Transaction.fromRaw(Buffer.from(prepared.revealTxHex, 'hex'), options);
+    const commit = btc.Transaction.fromRaw(hex.decode(prepared.signedCommitHex), options);
+    const reveal = btc.Transaction.fromRaw(hex.decode(prepared.revealTxHex), options);
     if (commit.id !== prepared.commitTxId || reveal.id !== prepared.revealTxId || prepared.inscriptionId !== `${reveal.id}i0`) {
       invalid('Recovery identities do not match the locally computed transaction ids.');
     }
     if (reveal.inputsLength !== 1 || reveal.getInput(0).index !== 0 ||
-        Buffer.from(reveal.getInput(0).txid!).toString('hex') !== commit.id) {
+        hex.encode(reveal.getInput(0).txid!) !== commit.id) {
       invalid('Recovery reveal must spend output zero of the exact commit.');
     }
     if (commit.inputsLength !== prepared.fundingUtxos.length || prepared.fundingUtxos.some((utxo, index) => {
       const input = commit.getInput(index);
-      return Buffer.from(input.txid!).toString('hex') !== utxo.txid.toLowerCase() || input.index !== utxo.vout;
+      return hex.encode(input.txid!) !== utxo.txid.toLowerCase() || input.index !== utxo.vout;
     })) invalid('Recovery funding order does not match the identity input.');
     const outpoints = prepared.fundingUtxos.map((u) => `${u.txid.toLowerCase()}:${u.vout}`);
     if (new Set(outpoints).size !== outpoints.length) invalid('Recovery funding inputs contain duplicates.');
-    if (reveal.outputsLength !== 1 || Buffer.from(reveal.getOutput(0).script!).toString('hex') !==
+    if (reveal.outputsLength !== 1 || hex.encode(reveal.getOutput(0).script!) !==
         scriptPubKeyForAddress(prepared.changeAddress, prepared.network)) invalid('Recovery reveal destination does not match.');
     validateInscriptionReveal(commit, reveal);
   } catch (error) {
@@ -226,18 +237,18 @@ export async function submitPreparedInscriptionOnSat(params: {
 }): Promise<InscribeOnSatResult> {
   const { provider, recoveryStore } = params;
   const prepared = structuredClone(params.prepared);
-  validate(prepared);
+  validatePreparedInscriptionOnSat(prepared);
   if (!recoveryStore && typeof provider.submitInscription !== 'function') {
     throw new StructuredError('INSCRIPTION_RECOVERY_REQUIRED', 'Direct inscription broadcasting requires a durable recoveryStore.');
   }
   let record: InscriptionRecoveryRecord = { recoveryId: prepared.commitTxId, prepared, broadcast: 'prepared' };
   const saved = await recoveryStore?.load(record.recoveryId);
   if (saved) {
-    validate(saved.prepared);
+    validatePreparedInscriptionOnSat(saved.prepared);
     if (saved.recoveryId !== record.recoveryId || !samePrepared(saved.prepared, prepared)) {
       invalid('A different signed pair or identity is already stored under this recovery id.');
     }
-    if (!['prepared', 'commit_broadcast', 'reveal_broadcast', 'commit_broadcast_unknown', 'reveal_broadcast_unknown'].includes(saved.broadcast)) {
+    if (!INSCRIPTION_RECORD_STATES.includes(saved.broadcast)) {
       invalid('Invalid persisted broadcast state.');
     }
     record = structuredClone(saved);

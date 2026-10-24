@@ -48,6 +48,11 @@ export function buildRoutes(deps: {
     routes['POST /api/btc/inscribe'] = deps.bitcoin.inscribe;
     routes['GET /api/btc/inscribe'] = deps.bitcoin.inscribeList;
     routes['POST /api/btc/inscribe/rebroadcast'] = deps.bitcoin.inscribeRebroadcast;
+    // Anchoring Originals (plan 011, PR 10b): answer bitcoin_anchoring_off unless the server enables it.
+    routes['POST /api/btc/originals/submit'] = deps.bitcoin.originalsSubmit;
+    routes['GET /api/btc/originals/status'] = deps.bitcoin.originalsStatus;
+    routes['GET /api/btc/tx'] = deps.bitcoin.txStatus;
+    routes['GET /api/btc/inscription-time'] = deps.bitcoin.inscriptionTime;
   }
   if (deps.originals) {
     routes['POST /api/originals'] = deps.originals.record;

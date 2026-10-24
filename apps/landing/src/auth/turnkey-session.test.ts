@@ -13,6 +13,8 @@ import {
  */
 import {
   SESSION_EXPIRATION_SECONDS,
+  REGTEST_MIN_SESSION_SECONDS,
+  sessionExpirationSeconds,
   SESSION_STORAGE_KEY,
   signingStatus,
   readSessionMeta,
@@ -563,5 +565,16 @@ describe('U1: what a page load does with what it found', () => {
     expect(afterReload).toBeNull();
     expect(restoreDecision(afterReload, '02abc', t0)).toBe('none');
     expect(signingStatus(afterReload, t0)).toBe('none');
+  });
+});
+
+describe('a short session for the live regtest acceptance run (#975 stage A)', () => {
+  test('only a regtest build may shorten the session, and not below three minutes', () => {
+    expect(sessionExpirationSeconds({})).toBe(SESSION_EXPIRATION_SECONDS);
+    expect(sessionExpirationSeconds({ VITE_BTC_NETWORK: 'mainnet', VITE_TURNKEY_SESSION_SECONDS: '300' })).toBe(SESSION_EXPIRATION_SECONDS);
+    expect(sessionExpirationSeconds({ VITE_BTC_NETWORK: 'regtest', VITE_TURNKEY_SESSION_SECONDS: '300' })).toBe(300);
+    expect(sessionExpirationSeconds({ VITE_BTC_NETWORK: 'regtest', VITE_TURNKEY_SESSION_SECONDS: '60' })).toBe(SESSION_EXPIRATION_SECONDS);
+    expect(sessionExpirationSeconds({ VITE_BTC_NETWORK: 'regtest', VITE_TURNKEY_SESSION_SECONDS: '5m' })).toBe(SESSION_EXPIRATION_SECONDS);
+    expect(REGTEST_MIN_SESSION_SECONDS).toBe(180);
   });
 });

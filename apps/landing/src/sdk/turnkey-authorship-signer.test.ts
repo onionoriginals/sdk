@@ -109,6 +109,18 @@ describe('turnkeyAuthorshipSigner', () => {
     const signer = turnkeyAuthorshipSigner({ client: stubClient(), subOrgId: 'sub-1', signWith: SOLANA_ADDRESS, verificationMethod: vm });
     await expect(signer.sign({ entry: entry as never, proofOptions, summary: {} as never })).rejects.toThrow(/cannot sign raw payloads/i);
   });
+
+  test('an existing author signer uses the renewed browser session after expiry (P5.3)', async () => {
+    let current = stubClient({ signRawPayload: async () => { throw new Error('expired api key'); } });
+    const signer = turnkeyAuthorshipSigner({ client: async () => current, subOrgId: 'sub-1', signWith: SOLANA_ADDRESS, verificationMethod: vm });
+    const request = { entry: entry as never, proofOptions, summary: {} as never };
+    await expect(signer.sign(request)).rejects.toThrow('expired api key');
+    const seen: { payload?: string } = {};
+    current = signing(seen);
+    const signature = await signer.sign(request);
+    expect(seen.payload).toBe('0x' + hex.encode(proofHashData(entry as never, proofOptions)));
+    expect(verifyProof(entry as never, { ...proofOptions, proofValue: multibaseEncode(signature) }, author.publicKeyMultibase)).toBe(true);
+  });
 });
 
 describe('ensureAuthorshipAccount', () => {

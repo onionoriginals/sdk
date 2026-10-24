@@ -24,6 +24,9 @@ import type { InscriptionsStore, InscriptionRecord, InscriptionStatus } from './
 import { createMoneyLogger, type MoneyLogger } from './money-log';
 import { createInscriptionReconciler, reclaimOutpoint, rotate } from './bitcoin-reconciliation';
 import { encodeSatSnapshot } from './sat-snapshot-codec';
+import type { OriginalsAnchoring } from './originals-anchoring';
+import type { PreparedEntryInscription } from '@originals/sdk/originals/bitcoin';
+import type { InscriptionClock } from '@originals/sdk/originals';
 
 /**
  * The server-side network flag: BTC_NETWORK=mainnet|testnet4|regtest (default testnet4).
@@ -48,6 +51,16 @@ export function isBitcoinConfigured(
     !!env.BTC_FAUCET_ADDRESS &&
     (!!env.BTC_FAUCET_WIF || !!env.BTC_FAUCET_WALLET_ID)
   );
+}
+
+/**
+ * The server half of `bitcoinAnchoring` (plan 011, PR 10b): off unless
+ * ORIGINALS_BITCOIN_ANCHORING is exactly "1". The bundle's half is
+ * VITE_ORIGINALS_BITCOIN_ANCHORING; config.ts reports a disagreement, and
+ * reports a deployment that turns it on (the owner's release gate, #975).
+ */
+export function serverAnchoringEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  return env.ORIGINALS_BITCOIN_ANCHORING === '1';
 }
 
 // Provider surface these routes use (a superset of OrdinalsProvider — the
@@ -637,6 +650,13 @@ export type FaucetTxSigner = (tx: btc.Transaction) => Promise<string>;
 // inscriptions burn the creator's fee and our QuickNode bandwidth.
 const MAX_INSCRIBE_BODY_BYTES = 100 * 1024;
 
+/**
+ * Ceiling on POST /api/btc/originals/submit: the pair plus the author's
+ * evidence package, which carries the resource bytes the Original holds.
+ * PROVISIONAL: an Original whose package is larger cannot be anchored here.
+ */
+const MAX_ORIGINALS_SUBMIT_BYTES = 4 * 1024 * 1024;
+
 /** Bitcoin Core's RPC -27 ("already in chain/mempool"), independent of wording. */
 const RPC_TRANSACTION_ALREADY_IN_CHAIN = -27;
 
@@ -770,6 +790,18 @@ export function createBitcoinRoutes(deps: {
    * nothing left to recover from.
    */
   recoveryConfirmations?: number;
+  /**
+   * Bitcoin anchoring of signed-in authors' Originals (plan 011, PR 10b).
+   * ABSENT unless the server enables it (ORIGINALS_BITCOIN_ANCHORING): the
+   * anchoring routes then answer `bitcoin_anchoring_off`.
+   */
+  anchoring?: OriginalsAnchoring;
+  /**
+   * The server's inscription clock (P9.15): durable and reorg-aware. The
+   * browser's prepare asks it for inscription times instead of walking every
+   * header from genesis through this server. The route is 501 without it.
+   */
+  clock?: Pick<InscriptionClock, 'at'>;
 }): {
   funding: Handler;
   sat: Handler;
@@ -782,6 +814,10 @@ export function createBitcoinRoutes(deps: {
   inscribe: Handler;
   inscribeList: Handler;
   inscribeRebroadcast: Handler;
+  originalsSubmit: Handler;
+  originalsStatus: Handler;
+  txStatus: Handler;
+  inscriptionTime: Handler;
   sweepInscriptions: () => Promise<{ processed: number; unreadable: string[] }>;
 } {
   const faucetSats = deps.faucetSats ?? 20_000;
@@ -987,7 +1023,8 @@ export function createBitcoinRoutes(deps: {
     if (!/^(0|[1-9]\d*)$/.test(satoshi) || !validateSatoshiNumber(satoshi).valid) return json({ error: 'bad_request' }, 400);
     if (typeof provider.getSatSnapshot !== 'function') return json({ error: 'sat_snapshot_unsupported' }, 501);
     try {
-      const snapshot = await provider.getSatSnapshot(satoshi);
+      // The anchoring writer asks for Originals bodies only (P9.12): the holder's other inscriptions cost no body reads.
+      const snapshot = await provider.getSatSnapshot(satoshi, url.searchParams.get('bodies') === 'originals' ? { bodies: 'originals' } : undefined);
       return json(encodeSatSnapshot(snapshot));
     } catch {
       return json({ error: 'sat_snapshot_unavailable' }, 502);
@@ -1609,6 +1646,197 @@ export function createBitcoinRoutes(deps: {
     revealRebroadcastAfterMs: REVEAL_REBROADCAST_AFTER_MS,
   });
 
+  /** A refusal on the money path: logged with its reason, then served. */
+  type Refuse = (reason: string, body: Record<string, unknown>, status: number) => Response;
+  type DeclaredUtxo = { txid?: string; vout?: number; value?: number };
+
+  /**
+   * The commit spends EXACTLY the declared funding set, IN ORDER (the sat an
+   * inscription lands on is the first sat of input 0, so a reordered input
+   * moves it), with at most two outputs (commit output + optional change).
+   */
+  function parseCommit(signedCommitHex: string, outpoints: string[], refuse: Refuse): btc.Transaction | Response {
+    const commit = parseRawTx(signedCommitHex);
+    if (!commit) return refuse('bad_commit_tx', { error: 'bad_commit_tx' }, 400);
+    if (commit.inputsLength !== outpoints.length || commit.outputsLength < 1 || commit.outputsLength > 2) {
+      return refuse('commit_invariant_violation', { error: 'commit_invariant_violation', message: 'Commit must spend exactly the declared funding UTXOs and have 1-2 outputs.' }, 400);
+    }
+    const inputsMatch = outpoints.every((expected, i) => {
+      const input = commit.getInput(i);
+      const txid = input.txid ? hex.encode(input.txid).toLowerCase() : '';
+      return `${txid}:${input.index}` === expected;
+    });
+    if (!inputsMatch) {
+      return refuse('commit_inputs_mismatch', { error: 'commit_invariant_violation', message: 'Commit inputs do not match the declared funding UTXOs (in order).' }, 400);
+    }
+    return commit;
+  }
+
+  /** The reveal spends the commit's vout 0, and nothing else. */
+  function parseReveal(revealTxHex: string, commitTxId: string, refuse: Refuse): btc.Transaction | Response {
+    const reveal = parseRawTx(revealTxHex);
+    if (!reveal) return refuse('bad_reveal_tx', { error: 'bad_reveal_tx' }, 400);
+    // Shape before indexing: getInput(0) throws on an input-less tx. No raw
+    // hex can currently reach here with zero inputs (fromRaw rejects it — the
+    // 0x00 input count is read as the segwit marker), so this is defensive
+    // only, kept symmetric with the commit path above.
+    if (reveal.inputsLength !== 1) {
+      return refuse('reveal_invariant_violation', { error: 'reveal_invariant_violation', message: 'Reveal must spend the commit transaction output 0.' }, 400);
+    }
+    const revealInput = reveal.getInput(0);
+    const revealInputTxid = revealInput?.txid ? hex.encode(revealInput.txid).toLowerCase() : '';
+    if (revealInputTxid !== commitTxId.toLowerCase() || revealInput.index !== 0) {
+      return refuse('reveal_invariant_violation', { error: 'reveal_invariant_violation', message: 'Reveal must spend the commit transaction output 0.' }, 400);
+    }
+    return reveal;
+  }
+
+  /**
+   * Where the money goes (#493): step 5b never looked at output 1, so a signer that
+   * redirected the change passed every check. The reveal's output (the inscribed sat) is built to changeAddress too.
+   * Returns the bound address's script.
+   */
+  function checkDestinations(
+    sub: string,
+    store: InscriptionsStore,
+    commit: btc.Transaction,
+    reveal: btc.Transaction,
+    changeAddress: string,
+    refuse: Refuse
+  ): string | Response {
+    const network = deps.network ?? 'testnet';
+    if (!isValidBitcoinAddress(changeAddress, network)) {
+      return refuse('bad_change_address', { error: 'bad_request', message: `changeAddress must be a ${network} address.` }, 400);
+    }
+    // Change and the inscribed sat go to the account's BOUND deposit address, never one a client merely names.
+    let bound: string | null;
+    try {
+      bound = store.depositBinding(sub, network);
+    } catch {
+      return refuse('binding_unreadable', { error: 'deposit_binding_unreadable' }, 503);
+    }
+    // Fail CLOSED on an unbound account. `bound && …` skipped the check
+    // entirely when nothing was bound, and nothing forces the deposit route
+    // (the only thing that binds, `bindDepositAddress` above) to run first — so
+    // a caller could go straight to this route, never bind, and name any
+    // change address it liked. That is precisely the browser-shaped adversary
+    // this route exists to stop, so an absent binding is a refusal, not a pass.
+    if (bound !== changeAddress) {
+      return refuse(
+        'change_address_not_bound',
+        {
+          error: 'address_not_bound',
+          message: bound
+            ? 'changeAddress is not the deposit address bound to this account.'
+            : 'No deposit address is bound to this account yet — read your deposit address before inscribing.'
+        },
+        403
+      );
+    }
+    let changeScript: string;
+    try {
+      changeScript = p2wpkhScriptHex(changeAddress, network);
+    } catch (e) {
+      return refuse('bad_change_address', { error: 'bad_request', message: (e as Error).message }, 400);
+    }
+    if (commit.outputsLength === 2 && hex.encode(commit.getOutput(1).script ?? new Uint8Array()) !== changeScript) {
+      return refuse('commit_change_redirected', { error: 'commit_invariant_violation', message: 'Commit change output must pay changeAddress.' }, 400);
+    }
+    // Exactly one output, not merely "at least one" (hostile-audit M07): an
+    // extra reveal output is an undeclared, unchecked place for value to go —
+    // the amount check below only looks at output 0.
+    if (reveal.outputsLength !== 1 || hex.encode(reveal.getOutput(0).script ?? new Uint8Array()) !== changeScript) {
+      return refuse('reveal_output_redirected', { error: 'reveal_invariant_violation', message: 'Reveal must have exactly one output, paying changeAddress.' }, 400);
+    }
+    return changeScript;
+  }
+
+  /**
+   * Reconstruct funding independently of client-declared values and bound the
+   * fees both transactions pay (#493/M07). Null when the pair is economic.
+   */
+  async function checkEconomics(
+    commit: btc.Transaction,
+    reveal: btc.Transaction,
+    declared: DeclaredUtxo[],
+    changeScript: string,
+    refuse: Refuse
+  ): Promise<Response | null> {
+    if (!indexer) {
+      return refuse('economics_unavailable', { error: 'economics_check_unavailable', message: 'Funding value verification is not configured.' }, 503);
+    }
+    const totalInputSats = await resolveFundingValues(
+      declared.map((u) => ({ txid: u.txid!, vout: u.vout! })), changeScript
+    );
+    if (totalInputSats === null) {
+      return refuse('funding_value_unavailable', {
+        error: 'funding_value_unavailable',
+        message: 'Could not independently verify funding values at the bound deposit address.',
+      }, 503);
+    }
+
+    let reasonableFeeRate: number;
+    try {
+      reasonableFeeRate = await currentFeeRate(1);
+    } catch (e) {
+      return refuse('fee_estimate_unavailable', { error: 'fee_estimate_unavailable', message: (e as Error).message }, 502);
+    }
+    // Generous but bounded: absorbs a real fee-rate move between quote and
+    // broadcast without letting a signer relabel skimmed change as "fee".
+    const maxFeeRateSatVb = Math.min(MAX_FEE_RATE_SAT_VB, Math.max(reasonableFeeRate, 1) * MAX_FEE_RATE_TOLERANCE_MULTIPLIER);
+
+    const commitOutput0Amount = commit.getOutput(0).amount ?? 0n;
+    const commitChangeAmount = commit.outputsLength === 2 ? (commit.getOutput(1).amount ?? 0n) : 0n;
+    if (commitOutput0Amount + commitChangeAmount > totalInputSats) {
+      return refuse(
+        'commit_outputs_exceed_inputs',
+        { error: 'commit_invariant_violation', message: 'Commit outputs exceed the independently verified funding value.' },
+        400
+      );
+    }
+    const commitFeeSats = totalInputSats - commitOutput0Amount - commitChangeAmount;
+    const commitVsize = safeCommitVsize(commit);
+    const maxCommitFeeSats = BigInt(Math.ceil(maxFeeRateSatVb * commitVsize));
+    if (commitFeeSats > maxCommitFeeSats) {
+      return refuse(
+        'commit_fee_excessive',
+        { error: 'commit_invariant_violation', message: 'Commit pays an unreasonably high fee for its size; change may have been redirected to fee.' },
+        400
+      );
+    }
+    if (commit.outputsLength === 1) {
+      // No change output at all: legitimate only when the true surplus, after
+      // a reasonable fee, would not clear dust. Otherwise a signer could
+      // simply DROP the change output and let the whole surplus become fee.
+      const reasonableFeeSats = BigInt(Math.ceil(reasonableFeeRate * commitVsize));
+      const undisclosedSurplus = commitFeeSats > reasonableFeeSats ? commitFeeSats - reasonableFeeSats : 0n;
+      if (undisclosedSurplus >= BigInt(POSTAGE_SATS)) {
+        return refuse(
+          'commit_change_omitted',
+          { error: 'commit_invariant_violation', message: 'Commit omits a change output despite a spendable surplus above dust.' },
+          400
+        );
+      }
+    } else if (commitChangeAmount > 0n && commitChangeAmount < BigInt(POSTAGE_SATS)) {
+      return refuse('commit_change_dust', { error: 'commit_invariant_violation', message: 'Commit change output is below the dust limit.' }, 400);
+    }
+
+    // The reveal's input value is CRYPTOGRAPHICALLY bound to commit output 0's
+    // amount — validateInscriptionReveal above verified the Schnorr signature
+    // over exactly that amount — so only its allocation between the creator's
+    // output and fee is still unverified.
+    const revealOutput0Amount = reveal.getOutput(0).amount ?? 0n;
+    if (revealOutput0Amount > commitOutput0Amount) {
+      return refuse('reveal_outputs_exceed_input', { error: 'reveal_invariant_violation', message: 'Reveal output exceeds its input value.' }, 400);
+    }
+    const revealFeeSats = commitOutput0Amount - revealOutput0Amount;
+    const maxRevealFeeSats = BigInt(Math.ceil(maxFeeRateSatVb * reveal.vsize));
+    if (revealFeeSats > maxRevealFeeSats) {
+      return refuse('reveal_fee_excessive', { error: 'reveal_invariant_violation', message: 'Reveal pays an unreasonably high fee.' }, 400);
+    }
+    return null;
+  }
+
   /**
    * POST /api/btc/inscribe — the stranded-funds fix. Accepts the SIGNED commit
    * and reveal, re-checks the SDK's step-5b invariants server-side (a client
@@ -1630,7 +1858,6 @@ export function createBitcoinRoutes(deps: {
     const bodyText = await readBodyCapped(req, MAX_INSCRIBE_BODY_BYTES);
     if (bodyText === null) return json({ error: 'payload_too_large' }, 413);
 
-    type DeclaredUtxo = { txid?: string; vout?: number; value?: number };
     let body: {
       signedCommitHex?: string;
       revealTxHex?: string;
@@ -1677,19 +1904,8 @@ export function createBitcoinRoutes(deps: {
       return json(body, status);
     };
 
-    const commit = parseRawTx(signedCommitHex);
-    if (!commit) return refuse('bad_commit_tx', { error: 'bad_commit_tx' }, 400);
-    if (commit.inputsLength !== outpoints.length || commit.outputsLength < 1 || commit.outputsLength > 2) {
-      return refuse('commit_invariant_violation', { error: 'commit_invariant_violation', message: 'Commit must spend exactly the declared funding UTXOs and have 1-2 outputs.' }, 400);
-    }
-    const inputsMatch = outpoints.every((expected, i) => {
-      const input = commit.getInput(i);
-      const txid = input.txid ? hex.encode(input.txid).toLowerCase() : '';
-      return `${txid}:${input.index}` === expected;
-    });
-    if (!inputsMatch) {
-      return refuse('commit_inputs_mismatch', { error: 'commit_invariant_violation', message: 'Commit inputs do not match the declared funding UTXOs (in order).' }, 400);
-    }
+    const commit = parseCommit(signedCommitHex, outpoints, refuse);
+    if (commit instanceof Response) return commit;
     const commitTxId = commit.id;
     // Cached approval applies only to retained signed bytes, including witnesses.
     let existingByCommitId: InscriptionRecord | null;
@@ -1701,20 +1917,8 @@ export function createBitcoinRoutes(deps: {
       throw e;
     }
 
-    const reveal = parseRawTx(revealTxHex);
-    if (!reveal) return refuse('bad_reveal_tx', { error: 'bad_reveal_tx' }, 400);
-    // Shape before indexing: getInput(0) throws on an input-less tx. No raw
-    // hex can currently reach here with zero inputs (fromRaw rejects it — the
-    // 0x00 input count is read as the segwit marker), so this is defensive
-    // only, kept symmetric with the commit path above.
-    if (reveal.inputsLength !== 1) {
-      return refuse('reveal_invariant_violation', { error: 'reveal_invariant_violation', message: 'Reveal must spend the commit transaction output 0.' }, 400);
-    }
-    const revealInput = reveal.getInput(0);
-    const revealInputTxid = revealInput?.txid ? hex.encode(revealInput.txid).toLowerCase() : '';
-    if (revealInputTxid !== commitTxId.toLowerCase() || revealInput.index !== 0) {
-      return refuse('reveal_invariant_violation', { error: 'reveal_invariant_violation', message: 'Reveal must spend the commit transaction output 0.' }, 400);
-    }
+    const reveal = parseReveal(revealTxHex, commitTxId, refuse);
+    if (reveal instanceof Response) return reveal;
     const revealTxId = reveal.id;
     const signedPair = { commit: signedCommitHex.toLowerCase(), reveal: revealTxHex.toLowerCase() };
 
@@ -1783,52 +1987,8 @@ export function createBitcoinRoutes(deps: {
     const pairMismatch = checkRecordedPair(existingByCommitId);
     if (pairMismatch) return pairMismatch;
 
-    // Where the money goes (#493): step 5b never looked at output 1, so a signer that
-    // redirected the change passed every check. The reveal's output (the inscribed sat) is built to changeAddress too.
-    const network = deps.network ?? 'testnet';
-    if (!isValidBitcoinAddress(changeAddress, network)) {
-      return refuse('bad_change_address', { error: 'bad_request', message: `changeAddress must be a ${network} address.` }, 400);
-    }
-    // Change and the inscribed sat go to the account's BOUND deposit address, never one a client merely names.
-    let bound: string | null;
-    try {
-      bound = store.depositBinding(sub, network);
-    } catch {
-      return refuse('binding_unreadable', { error: 'deposit_binding_unreadable' }, 503);
-    }
-    // Fail CLOSED on an unbound account. `bound && …` skipped the check
-    // entirely when nothing was bound, and nothing forces the deposit route
-    // (the only thing that binds, `bindDepositAddress` above) to run first — so
-    // a caller could go straight to this route, never bind, and name any
-    // change address it liked. That is precisely the browser-shaped adversary
-    // this route exists to stop, so an absent binding is a refusal, not a pass.
-    if (bound !== changeAddress) {
-      return refuse(
-        'change_address_not_bound',
-        {
-          error: 'address_not_bound',
-          message: bound
-            ? 'changeAddress is not the deposit address bound to this account.'
-            : 'No deposit address is bound to this account yet — read your deposit address before inscribing.'
-        },
-        403
-      );
-    }
-    let changeScript: string;
-    try {
-      changeScript = p2wpkhScriptHex(changeAddress, network);
-    } catch (e) {
-      return refuse('bad_change_address', { error: 'bad_request', message: (e as Error).message }, 400);
-    }
-    if (commit.outputsLength === 2 && hex.encode(commit.getOutput(1).script ?? new Uint8Array()) !== changeScript) {
-      return refuse('commit_change_redirected', { error: 'commit_invariant_violation', message: 'Commit change output must pay changeAddress.' }, 400);
-    }
-    // Exactly one output, not merely "at least one" (hostile-audit M07): an
-    // extra reveal output is an undeclared, unchecked place for value to go —
-    // the amount check below only looks at output 0.
-    if (reveal.outputsLength !== 1 || hex.encode(reveal.getOutput(0).script ?? new Uint8Array()) !== changeScript) {
-      return refuse('reveal_output_redirected', { error: 'reveal_invariant_violation', message: 'Reveal must have exactly one output, paying changeAddress.' }, 400);
-    }
+    const changeScript = checkDestinations(sub, store, commit, reveal, changeAddress, refuse);
+    if (changeScript instanceof Response) return changeScript;
 
     // Transaction ids exclude witness bytes. Validate the committed script and
     // reveal signature before persisting or exposing the parent to the network.
@@ -1869,78 +2029,8 @@ export function createBitcoinRoutes(deps: {
       existingByCommitId.signedCommitHex?.toLowerCase() === signedPair.commit &&
       existingByCommitId.revealTxHex?.toLowerCase() === signedPair.reveal;
     if (!alreadyVerified) {
-      if (!indexer) {
-        return refuse('economics_unavailable', { error: 'economics_check_unavailable', message: 'Funding value verification is not configured.' }, 503);
-      }
-      const totalInputSats = await resolveFundingValues(
-        declared.map((u) => ({ txid: u.txid!, vout: u.vout! })), changeScript
-      );
-      if (totalInputSats === null) {
-        return refuse('funding_value_unavailable', {
-          error: 'funding_value_unavailable',
-          message: 'Could not independently verify funding values at the bound deposit address.',
-        }, 503);
-      }
-
-      let reasonableFeeRate: number;
-      try {
-        reasonableFeeRate = await currentFeeRate(1);
-      } catch (e) {
-        return refuse('fee_estimate_unavailable', { error: 'fee_estimate_unavailable', message: (e as Error).message }, 502);
-      }
-      // Generous but bounded: absorbs a real fee-rate move between quote and
-      // broadcast without letting a signer relabel skimmed change as "fee".
-      const maxFeeRateSatVb = Math.min(MAX_FEE_RATE_SAT_VB, Math.max(reasonableFeeRate, 1) * MAX_FEE_RATE_TOLERANCE_MULTIPLIER);
-
-      const commitOutput0Amount = commit.getOutput(0).amount ?? 0n;
-      const commitChangeAmount = commit.outputsLength === 2 ? (commit.getOutput(1).amount ?? 0n) : 0n;
-      if (commitOutput0Amount + commitChangeAmount > totalInputSats) {
-        return refuse(
-          'commit_outputs_exceed_inputs',
-          { error: 'commit_invariant_violation', message: 'Commit outputs exceed the independently verified funding value.' },
-          400
-        );
-      }
-      const commitFeeSats = totalInputSats - commitOutput0Amount - commitChangeAmount;
-      const commitVsize = safeCommitVsize(commit);
-      const maxCommitFeeSats = BigInt(Math.ceil(maxFeeRateSatVb * commitVsize));
-      if (commitFeeSats > maxCommitFeeSats) {
-        return refuse(
-          'commit_fee_excessive',
-          { error: 'commit_invariant_violation', message: 'Commit pays an unreasonably high fee for its size; change may have been redirected to fee.' },
-          400
-        );
-      }
-      if (commit.outputsLength === 1) {
-        // No change output at all: legitimate only when the true surplus, after
-        // a reasonable fee, would not clear dust. Otherwise a signer could
-        // simply DROP the change output and let the whole surplus become fee.
-        const reasonableFeeSats = BigInt(Math.ceil(reasonableFeeRate * commitVsize));
-        const undisclosedSurplus = commitFeeSats > reasonableFeeSats ? commitFeeSats - reasonableFeeSats : 0n;
-        if (undisclosedSurplus >= BigInt(POSTAGE_SATS)) {
-          return refuse(
-            'commit_change_omitted',
-            { error: 'commit_invariant_violation', message: 'Commit omits a change output despite a spendable surplus above dust.' },
-            400
-          );
-        }
-      } else if (commitChangeAmount > 0n && commitChangeAmount < BigInt(POSTAGE_SATS)) {
-        return refuse('commit_change_dust', { error: 'commit_invariant_violation', message: 'Commit change output is below the dust limit.' }, 400);
-      }
-
-      // The reveal's input value is CRYPTOGRAPHICALLY bound to commit output 0's
-      // amount — validateInscriptionReveal above verified the Schnorr signature
-      // over exactly that amount — so only its allocation between the creator's
-      // output and fee is still unverified.
-      const revealOutput0Amount = reveal.getOutput(0).amount ?? 0n;
-      if (revealOutput0Amount > commitOutput0Amount) {
-        return refuse('reveal_outputs_exceed_input', { error: 'reveal_invariant_violation', message: 'Reveal output exceeds its input value.' }, 400);
-      }
-      const revealFeeSats = commitOutput0Amount - revealOutput0Amount;
-      const maxRevealFeeSats = BigInt(Math.ceil(maxFeeRateSatVb * reveal.vsize));
-      if (revealFeeSats > maxRevealFeeSats) {
-        return refuse('reveal_fee_excessive', { error: 'reveal_invariant_violation', message: 'Reveal pays an unreasonably high fee.' }, 400);
-      }
+      const uneconomic = await checkEconomics(commit, reveal, declared, changeScript, refuse);
+      if (uneconomic) return uneconomic;
     }
 
     // Ordinal safety here too, not only on the deposit route (#493): a stale bundle or hostile
@@ -1957,7 +2047,7 @@ export function createBitcoinRoutes(deps: {
       const fees = await classifySpendableUtxos(declaredUtxos.slice(1), deps.ordinals, declaredUtxos.length);
       // Spending an inscribed input would continue an anchored Original on its
       // sat. That authorization is rebuilt on the Originals Protocol with
-      // Bitcoin anchoring (plan 011, PR 10); until then it is always refused.
+      // Bitcoin anchoring (plan 011, PR 10b); until then it is always refused.
       return refuse('funding_outpoint_inscribed', { error: 'funding_outpoint_inscribed', message: 'Inscribed inputs cannot be spent here yet; fee inputs must carry no inscriptions.' }, 400);
     }
 
@@ -2482,6 +2572,259 @@ export function createBitcoinRoutes(deps: {
     return json({ commitTxId, revealTxId, inscriptionId, status: 'reveal_broadcast' });
   };
 
+  /**
+   * POST /api/btc/originals/submit { did, evidence, pair } — anchor or
+   * reinscribe a signed-in author's Original (plan 011, PR 10b). The pair was
+   * prepared and signed in the browser: the author key signed the entry, the
+   * deposit key the commit, the SDK's ephemeral key the reveal. Here it passes
+   * the same money-path checks as /api/btc/inscribe (shape, bound address,
+   * reveal signature, economics), then the one ordinal rule that differs:
+   * input 0 may carry inscriptions only when all of them are on the sat the
+   * pair inscribes, the Original's own sat. Fee inputs carry none. Then the
+   * writer's checked submit (originals-anchoring.ts) verifies again, persists
+   * and broadcasts (P9.6, P9.18).
+   */
+  const originalsSubmit: Handler = async (req, _url, clientIp) => {
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    const limited = rateLimited(clientIp) ?? quotaCapped(sub);
+    if (limited) return limited;
+    if (!deps.anchoring) return json({ error: 'bitcoin_anchoring_off', message: 'Anchoring on Bitcoin is not open on this server.' }, 404);
+    if (!deps.inscriptions) return json({ error: 'inscriptions_unavailable' }, 503);
+    const store = deps.inscriptions;
+
+    const bodyText = await readBodyCapped(req, MAX_ORIGINALS_SUBMIT_BYTES);
+    if (bodyText === null) return json({ error: 'payload_too_large' }, 413);
+    let body: { did?: unknown; evidence?: unknown; pair?: PreparedEntryInscription };
+    try {
+      body = JSON.parse(bodyText) as typeof body;
+    } catch {
+      return json({ error: 'bad_request' }, 400);
+    }
+    const { did, pair } = body;
+    const prepared = pair?.prepared;
+    const hexRe = /^(?:[0-9a-fA-F]{2})+$/;
+    let evidence: Uint8Array;
+    try {
+      evidence = base64.decode(typeof body.evidence === 'string' ? body.evidence : '');
+    } catch {
+      return json({ error: 'bad_request', message: 'evidence must be the base64 evidence package.' }, 400);
+    }
+    if (
+      typeof did !== 'string' || evidence.length === 0 || !prepared ||
+      typeof prepared.signedCommitHex !== 'string' || !hexRe.test(prepared.signedCommitHex) ||
+      typeof prepared.revealTxHex !== 'string' || !hexRe.test(prepared.revealTxHex) ||
+      typeof prepared.changeAddress !== 'string' || typeof prepared.satoshi !== 'string' ||
+      !Array.isArray(prepared.fundingUtxos) || prepared.fundingUtxos.length === 0 ||
+      prepared.fundingUtxos.some((u) => !u || typeof u.txid !== 'string' || typeof u.vout !== 'number' || typeof u.value !== 'number')
+    ) {
+      return json({ error: 'bad_request' }, 400);
+    }
+    const declared = prepared.fundingUtxos;
+    const outpoints = declared.map((u) => `${u.txid.toLowerCase()}:${u.vout}`);
+    if (new Set(outpoints).size !== outpoints.length) return json({ error: 'bad_request', message: 'Duplicate funding outpoint.' }, 400);
+    const refuse: Refuse = (reason, b, status) => {
+      money('originals_anchor_refused', { sub, did, reason, inputs: outpoints.length });
+      return json(b, status);
+    };
+
+    const commit = parseCommit(prepared.signedCommitHex, outpoints, refuse);
+    if (commit instanceof Response) return commit;
+    const reveal = parseReveal(prepared.revealTxHex, commit.id, refuse);
+    if (reveal instanceof Response) return reveal;
+    // The record the writer keeps is keyed and checked by these ids (P9.6): they must be the bytes' own.
+    if (prepared.commitTxId !== commit.id || prepared.revealTxId !== reveal.id || prepared.inscriptionId !== `${reveal.id}i0`) {
+      return refuse('pair_ids_mismatch', { error: 'pair_ids_mismatch', message: 'The pair\'s declared transaction ids are not its bytes\'.' }, 400);
+    }
+    const changeScript = checkDestinations(sub, store, commit, reveal, prepared.changeAddress, refuse);
+    if (changeScript instanceof Response) return changeScript;
+    try {
+      validateInscriptionReveal(commit, reveal);
+    } catch {
+      return refuse('invalid_inscription_reveal', { error: 'invalid_inscription_reveal', message: 'Reveal must open the committed inscription output with a valid signature.' }, 400);
+    }
+    // A pair already on record (a lost answer, retried) is answered from it,
+    // byte-compared, before the checks that need its inputs unspent (P9.6).
+    const known = await deps.anchoring.recorded(sub, did, pair!);
+    if (known) {
+      if (!known.ok) {
+        const { ok: _ok, httpStatus, ...refusal } = known;
+        return json(refusal, httpStatus);
+      }
+      const { ok: _ok, ...sent } = known;
+      return json(sent);
+    }
+    const perUser = inscribeUserLimiter.check(sub);
+    if (!perUser.allowed) {
+      return json({ error: 'inscribe_user_cap' }, 429, { 'Retry-After': String(Math.ceil(perUser.retryAfterMs / 1000)) });
+    }
+    const uneconomic = await checkEconomics(commit, reveal, declared, changeScript, refuse);
+    if (uneconomic) return uneconomic;
+
+    // Every input still unspent at the bound address. A pair spending an output
+    // already spent elsewhere can never land, and once recorded it would block
+    // every later pair for its entry (PAIR_IN_FLIGHT, P9.6): refuse it unrecorded.
+    if (!indexer) return refuse('funding_check_unavailable', { error: 'funding_check_unavailable', message: 'Funding outputs cannot be checked on this server.' }, 503);
+    let unspent: Set<string>;
+    try {
+      const utxos = await fetchAddressUtxos({ ...indexer, address: prepared.changeAddress, network: deps.network ?? 'testnet', fetchImpl: deps.fetchImpl });
+      unspent = new Set(utxos.confirmed.map((u) => `${u.txid.toLowerCase()}:${u.vout}`));
+    } catch {
+      return refuse('funding_check_unavailable', { error: 'funding_check_unavailable', message: 'Could not confirm the funding outputs are unspent.' }, 503);
+    }
+    if (outpoints.some((o) => !unspent.has(o))) {
+      return refuse('funding_input_spent', { error: 'funding_input_spent', message: 'An input of this pair is spent or unconfirmed; prepare it again from the current deposit.' }, 409);
+    }
+    // Fee inputs: strictly free of inscriptions, as on /api/btc/inscribe (R26).
+    const fees = await classifySpendableUtxos(declared.slice(1), deps.ordinals, declared.length);
+    if (!fees.ok) {
+      return refuse('ordinal_check_unavailable', { error: 'ordinal_check_unavailable', message: 'Could not confirm the fee inputs carry no inscription.' }, 503);
+    }
+    if (fees.ordinalBearing > 0) {
+      return refuse('fee_input_inscribed', { error: 'fee_input_inscribed', message: 'Fee inputs must carry no inscriptions; only the Original\'s own sat may be spent with one.' }, 400);
+    }
+    // Input 0 holds the sat the pair inscribes at offset 0 (the writer checks
+    // that sat is the Original's and still there: WRONG_SAT, SAT_MOVED). Any
+    // inscription in it must be on that sat: an inscription on another sat
+    // in the same output would move with the spend or burn as fee.
+    let onInput0: string[];
+    try {
+      if (!deps.ordinals) throw new Error('no ordinal lookup configured');
+      onInput0 = await deps.ordinals.outpointInscriptions({ txid: declared[0].txid, vout: declared[0].vout });
+    } catch {
+      return refuse('ordinal_check_unavailable', { error: 'ordinal_check_unavailable', message: 'Could not read the inscriptions on the sat-holding input.' }, 503);
+    }
+    if (onInput0.length > 0) {
+      let onSat: Set<string>;
+      try {
+        if (typeof provider.getSatSnapshot !== 'function') throw new Error('no sat reads');
+        onSat = new Set((await provider.getSatSnapshot(prepared.satoshi, { bodies: 'originals' })).publications.map((p) => p.id));
+      } catch {
+        return refuse('ordinal_check_unavailable', { error: 'ordinal_check_unavailable', message: 'Could not read the Original\'s sat.' }, 503);
+      }
+      if (onInput0.some((id) => !onSat.has(id))) {
+        return refuse('funding_outpoint_inscribed_foreign', {
+          error: 'funding_outpoint_inscribed_foreign',
+          message: 'The sat-holding input carries an inscription on another sat; it cannot be spent here.',
+        }, 400);
+      }
+    }
+
+    // The Original's sat must be input 0's FIRST sat (P9.12): anywhere else in
+    // the output it would move to the commit's change or fee, and the entry
+    // would be inscribed on another sat. The writer checks which output holds
+    // the sat, not where in it.
+    let first: string;
+    try {
+      if (typeof provider.getFirstSatOfOutput !== 'function') throw new Error('no sat reads');
+      first = await provider.getFirstSatOfOutput({ txid: declared[0].txid, vout: declared[0].vout });
+    } catch {
+      return refuse('sat_check_unavailable', { error: 'sat_check_unavailable', message: 'Could not read the first sat of the sat-holding input.' }, 503);
+    }
+    if (first !== prepared.satoshi) {
+      return refuse('sat_not_first', { error: 'sat_not_first', message: 'The Original\'s sat is not the first sat of input 0; spending it here would move it to change or fees.' }, 409);
+    }
+
+    const result = await deps.anchoring.submit(sub, { did, evidence, pair: pair! });
+    if (!result.ok) {
+      const { ok: _ok, httpStatus, ...refusal } = result;
+      return json(refusal, httpStatus);
+    }
+    const { ok: _ok, ...sent } = result;
+    return json(sent);
+  };
+
+  /**
+   * GET /api/btc/originals/status?did= — the Original's anchoring, as this
+   * server's writer sees it: publication label, next step, the three heads
+   * and the sat's holder, reported apart (P9.4, P9.11, P9.18). `satUtxo` is
+   * the output holding the sat when it is at this account's bound address:
+   * the next inscription's input 0. Null otherwise: whoever holds the sat
+   * inscribes next (P9.12). Never transaction bytes.
+   */
+  const originalsStatus: Handler = async (req, url, clientIp) => {
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    const limited = rateLimited(clientIp) ?? quotaCapped(sub);
+    if (limited) return limited;
+    if (!deps.anchoring) return json({ error: 'bitcoin_anchoring_off', message: 'Anchoring on Bitcoin is not open on this server.' }, 404);
+    const result = await deps.anchoring.status(sub, url.searchParams.get('did') ?? '');
+    if ('ok' in result && result.ok === false) {
+      const { ok: _ok, httpStatus, ...refusal } = result;
+      return json(refusal, httpStatus);
+    }
+    const status = result as Exclude<typeof result, { ok: false }>;
+    let satUtxo: { txid: string; vout: number; value: number } | null = null;
+    let heldByThisAccount: boolean | null = null;
+    const network = deps.network ?? 'testnet';
+    const bound = (() => { try { return deps.inscriptions?.depositBinding(sub, network) ?? null; } catch { return null; } })();
+    // Who holds the sat is the sat read's (P9.11): the address it names. The
+    // address's unspent list only supplies the output's value, and leaves out
+    // an output a pending reinscription is already spending.
+    if (status.ownership?.address && bound) heldByThisAccount = status.ownership.address === bound;
+    if (status.ownership && heldByThisAccount !== false && indexer && bound) {
+      try {
+        const utxos = await fetchAddressUtxos({ ...indexer, address: bound, network, fetchImpl: deps.fetchImpl });
+        const found = utxos.confirmed.find((u) => `${u.txid}:${u.vout}` === status.ownership!.output);
+        if (found) satUtxo = { txid: found.txid, vout: found.vout, value: found.value };
+      } catch {
+        // No value read: the next inscription waits for one; the holder is still reported.
+      }
+    }
+    return json({ ...status, satUtxo, heldByThisAccount });
+  };
+
+  /** GET /api/btc/tx?txid= — a transaction's status, for the browser's sat reads. */
+  const txStatus: Handler = async (req, url, clientIp) => {
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    const limited = rateLimited(clientIp) ?? quotaCapped(sub);
+    if (limited) return limited;
+    const txid = url.searchParams.get('txid') ?? '';
+    if (!/^[0-9a-f]{64}$/i.test(txid)) return json({ error: 'bad_txid' }, 400);
+    try {
+      const st = await provider.getTransactionStatus(txid);
+      return json({
+        confirmed: st.confirmed,
+        ...(st.confirmations !== undefined ? { confirmations: st.confirmations } : {}),
+        ...(st.blockHeight !== undefined ? { blockHeight: st.blockHeight } : {}),
+        ...(st.blockHash !== undefined ? { blockHash: st.blockHash } : {}),
+        ...(st.inMempool !== undefined ? { inMempool: st.inMempool } : {}),
+      });
+    } catch {
+      return json({ error: 'tx_status_unavailable' }, 502);
+    }
+  };
+
+  /**
+   * GET /api/btc/inscription-time?height=&hash= — the inscription time at a
+   * block (P9.15), from this server's clock: the greatest header timestamp
+   * of the block and its ancestors, epoch milliseconds. Given the hash, a
+   * block no longer on the active chain is refused with the clock's own code
+   * (BLOCK_NOT_ON_CHAIN). The browser's sat reads all come through this
+   * server; the server's own check before broadcast does not depend on them.
+   */
+  const inscriptionTime: Handler = async (req, url, clientIp) => {
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    const limited = rateLimited(clientIp) ?? quotaCapped(sub);
+    if (limited) return limited;
+    const raw = url.searchParams.get('height') ?? '';
+    const hash = url.searchParams.get('hash') ?? undefined;
+    if (!/^(0|[1-9]\d{0,7})$/.test(raw)) return json({ error: 'bad_height' }, 400);
+    if (hash !== undefined && !/^[0-9a-f]{64}$/i.test(hash)) return json({ error: 'bad_hash' }, 400);
+    if (!deps.clock) return json({ error: 'clock_unsupported' }, 501);
+    try {
+      return json({ height: Number(raw), time: await deps.clock.at(Number(raw), hash) });
+    } catch (e) {
+      const err = e as { category?: string; code?: string; message?: string };
+      if (typeof err.code === 'string' && typeof err.category === 'string') {
+        return json({ error: 'inscription_time_refused', category: err.category, code: err.code, message: err.message }, err.code === 'BLOCK_NOT_ON_CHAIN' ? 409 : 502);
+      }
+      return json({ error: 'inscription_time_unavailable' }, 502);
+    }
+  };
+
   return {
     funding,
     sat,
@@ -2494,6 +2837,10 @@ export function createBitcoinRoutes(deps: {
     inscribe,
     inscribeList,
     inscribeRebroadcast,
+    originalsSubmit,
+    originalsStatus,
+    txStatus,
+    inscriptionTime,
     sweepInscriptions: reconciler.sweepInscriptions,
   };
 }

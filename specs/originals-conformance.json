@@ -374,6 +374,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts",
         "packages/vh/tests/bitcoin.test.ts"
       ]
     },
@@ -400,6 +401,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts",
         "packages/vh/tests/bitcoin.test.ts"
       ]
     },
@@ -517,6 +519,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts",
         "packages/vh/tests/bitcoin.test.ts"
       ]
     },
@@ -1362,7 +1365,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts"
+      ]
     },
     {
       "id": "C12-101",
@@ -1479,6 +1485,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts",
         "packages/vh/tests/bitcoin.test.ts"
       ]
     },
@@ -1516,12 +1523,12 @@
       "phases": [
         4
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts",
         "packages/sdk/tests/unit/originals/bitcoin.test.ts",
         "packages/vh/tests/bitcoin.test.ts"
-      ],
-      "note": "Verifier part covered: a larger inscription is rejected. The SDK's refusal to anchor a log over the limit belongs to the Bitcoin writer (plan 011 PR 10)."
+      ]
     },
     {
       "id": "C12-113",
@@ -1678,6 +1685,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts",
         "packages/vh/tests/bitcoin-editors.test.ts"
       ]
     },

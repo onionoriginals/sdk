@@ -568,7 +568,7 @@ Once hosted, an asset log changes only through the submit route: an upload
 never roll it back or advance it unverified; a signer's DID log and witness
 file only grow.
 
-## Bitcoin anchoring and ownership — phase 4 (verifier implemented; writer in PR 10)
+## Bitcoin anchoring and ownership — phase 4 (implemented in the SDK; the landing's path, PR 10b, is behind `bitcoinAnchoring`, off)
 
 The representation is [plan 012](../../plans/012-bitcoin-representation.md)
 (owner decision Q15). An Original can be anchored from the local or the web
@@ -576,7 +576,43 @@ layer, once, terminally, to one sat (P9.10):
 
 ```ts
 await sdk.anchor(did, { parent, author, signer, sat: "did:btco:reg:5000000000" }); // the anchoring entry
-// The writer (PR 10) inscribes it on the sat. A reader then passes what an adapter read from the sat:
+// (refused with ANCHORING_LOG_TOO_LARGE, nothing committed, if the log through it would exceed 350,000 bytes)
+// Publish the next committed entry on the anchoring sat (`@originals/sdk/originals/bitcoin`, kept out
+// of the browser-first entry). The first funding UTXO must hold the sat at offset 0. Until Bitcoin shows
+// the anchor, the inscription is the whole stored log from genesis through the anchoring entry; then one
+// entry, the one after Bitcoin's head. `versionId` names it explicitly; it is refused unless it is next
+// (HEAD_NOT_NEXT). Every read names the index serving it (`index`, P9.11); `indexes` adds independent
+// ones, whose reads are compared (P9.10 SHOULD: an index you run, or two independent ones):
+const read = { provider, clock, index: "ord@node-a", indexes: [{ provider: other, index: "ord@node-b" }] };
+// recoveryStore is required: a pair for the same entry that can still land refuses a second one
+// (PAIR_IN_FLIGHT) unless `replaces: [recoveryId]` says it is a deliberate replacement (P9.6).
+// `recoveryStore: null` skips that check deliberately (pair.inFlightGuard: "skipped").
+const pair = await prepareEntryInscription({ sdk, did, fundingUtxos: [satUtxo, feeUtxo], satSigner, changeAddress, feeRate, network, ...read, recoveryStore });
+pair.carries;   // the versionIds in the body: genesis..anchoring entry, or the one entry
+pair.offChain;  // what Bitcoin will not hold: { resources, identities (did:vh/did:webvh signers), onBitcoin, replication: "not-guaranteed" }
+// Send it: re-reads the sat and verifies through the entry again (still next, no other pair in flight, the indexes
+// agree, the sat still in the pair's funding input; P9.6, P9.10, P9.18), then persists before each broadcast.
+// A replacement keeps the `replaces` it was prepared with (pair.replaces).
+await submitEntryInscription({ sdk, did, pair, ...read, provider, recoveryStore });
+// after a crash: resumeEntryInscription({ sdk, did, ...read, recoveryStore, recoveryId }) sends the same pair once catchUp
+// says to (re-verified, P9.18). submitPreparedInscriptionOnSat and resumeInscriptionOnSat, also exported, are the
+// unchecked low-level calls: they broadcast stored bytes without any Originals check.
+const published = await readAnchored(sdk, did, { ...read, recoveryStore });  // what Bitcoin shows: the durable boundary (P9.4)
+published.publication; // "pending-bitcoin-acceptance" while the anchor is observed but not shown; then "anchored" (P9.18)
+published.recoveryIssues; // damaged or inconsistent recovery records, skipped: [{ recoveryId, code, message }]
+const pending = await nextPendingEntry(sdk, did, read); // { committed, accepted, acceptedHeight, next, queue, remaining, publication }
+// Catching up, one step at a time, from a fresh read and the recorded pairs. A store with `list()`
+// (Node: fileRecoveryStore(dir) from `@originals/sdk/originals/fs`) finds them itself after a restart;
+// otherwise pass `recoveryIds` (their commit txids):
+const plan = await catchUp({ sdk, did, ...read, recoveryStore });
+// plan.action: "prepare" (prepareEntryInscription, then submit) | "resume" (resumeEntryInscription(plan.recoveryId))
+//            | "wait-for-confirmation" (a pair for the next entry is out) | "done"
+//            | "wait-for-evidence" (the pair is on the sat, but this writer lacks the signer DID version it names,
+//              plan.signer at plan.signerVersionId: supply that history; nothing is prepared over it)
+//            | "wait-for-bitcoin" (indexes disagree on the sat or its holder: nothing is prepared, sent or resumed;
+//              prepare and submit refuse INDEXES_DISAGREE) | "refused" (the recorded pair no longer
+//              verifies, P9.18: nothing is sent; plan.commit and plan.ifRevealed say what broadcasting it would do)
+// Or by hand: pass what an adapter read from the sat:
 // Running max of header times (P9.15), reorg-aware. `prev` is Core's previousblockhash: give it.
 const clock = new InscriptionClock(async (height) => ({ time, hash, prev: previousblockhash }));
 // A server: batched headers, a durable store and budgets (see "Inscription time at scale" below).
@@ -587,8 +623,145 @@ const view = await sdk.get(did, { bitcoin: [evidence] });                     //
 view.report.anchoring; // anchor, conflicting anchors, accepted, ignored and disputed inscriptions, indexes, copy, change, tip
 view.report.ownership; // { status: "provisional", sat, output, confirmations, indexes: ["ord@node-a"] }
 // Without any copy of the log: verifyOriginal({ bitcoin: [evidence], authors }) (P9.17, P9.18).
+// Transferring the sat: hand the recipient what Bitcoin does not hold, through the head Bitcoin accepts
+// ({ through: "committed" } for the committed head); the recipient checks it against the sat it received.
+const handoff = await transferHandoff(sdk, did, read);       // { package (evidence package), offChain }
+const received = await verifyHandoff(recipientSdk, handoff.package.bytes, { ...read, expectedSat: "did:btco:reg:5000000000" });
+received.report.ownership?.output;                           // compare with the output the sat was received in
 ```
 
+- Three heads are kept apart. The committed head is the stored log's last
+  entry, signed locally. A prepared or pending publication is a pair in the
+  recovery store, built or broadcast; it never advances anything (P9.4). The
+  accepted head is the last entry Bitcoin shows on the sat under the
+  1-confirmation policy, re-read every time. Entries between the accepted head
+  and the committed head are published in order, each inscribed verbatim (the
+  stored signed line, the same versionId and parent), never re-signed or
+  rebased (P9.6). `catchUp` keeps one publication in flight: it resumes a
+  recorded pair for the next entry rather than preparing another, waits while
+  its reveal is unconfirmed or not yet indexed, skips records for entries
+  Bitcoin already accepted, and prepares a replacement only when Bitcoin
+  confirmed and ignored the earlier inscription for good (`replaces`; one the
+  read shows unconfirmed or disputed is waited on, and so is one it reports
+  `later-inscription-unverifiable`, whose signer DID version the writer has
+  no verified copy of: `wait-for-evidence` names the signer and version, P9.12,
+  P9.15, P5.6). A pair can still land
+  only while the sat read shows the sat in its funding input or its own
+  outputs, before the anchor is accepted as after; among several the one
+  furthest along on the network wins, then the lowest recovery id. A
+  broadcast pair the provider reports in neither its mempool nor the chain
+  (`inMempool: false`, evicted or rejected) is resumed as the same pair on
+  that read: resubmitting identical bytes is idempotent and spends nothing
+  new. Before a resume the log is verified through the entry again (P9.18);
+  a pair that no longer verifies is `refused`, never broadcast, with
+  `commit: "not-observed" | "mempool" | "confirmed"` (a confirmed commit
+  holds the sat until its reveal spends it, and that reveal would be
+  `ifRevealed: "ignored-by-bitcoin"`, or `"unverified"` when only evidence is
+  missing). Reads compare every index given (`indexes`); while they
+  disagree on the sat (`unverified` or `disputed` inscriptions) or on the
+  output holding it (`holders`), nothing is prepared, submitted or resumed:
+  `catchUp` says `wait-for-bitcoin` before looking at any recorded pair (so a
+  pair the sat may have left is never labelled `resume`), and
+  `prepareEntryInscription` and `submitEntryInscription` refuse with
+  `INDEXES_DISAGREE` (`incomplete-evidence`). Each recovery record is validated (its
+  declared txids must be its bytes'); a damaged one is skipped and listed in
+  `recoveryIssues`, so one bad file in a shared directory blocks nothing. So each accepted
+  inscription lands in a later block than the one before (P9.13), and a
+  reorganisation re-derives the queue from the head Bitcoin shows. A head
+  Bitcoin shows that the store does not hold is refused
+  (`BITCOIN_HEAD_NOT_STORED`); nothing is rebased onto it. `catchUp` reads
+  the recorded pairs from the store's optional `list()`; for a store without
+  one, the caller passes the recovery ids it saved (`RECOVERY_IDS_REQUIRED`
+  otherwise). `fileRecoveryStore(dir)` (Node) keeps one file per pair, written
+  to a temporary file, fsynced and renamed, so a record survives the process
+  being killed and a write torn by a crash is never read. Its records hold
+  signed spending transactions: keep the directory private. The regtest
+  restart journey kills a writer between commit and reveal and resumes the
+  identical pair in a fresh process (#975).
+- **What is inscribed (P9.17).** Until Bitcoin shows the anchor, the next
+  inscription is the whole stored log from genesis through the anchoring
+  entry: the exact stored lines, in order, the anchoring entry last
+  (`pair.carries`). After the anchor, each inscription is exactly one entry,
+  the successor of Bitcoin's accepted head. Entries committed after the
+  anchoring entry before the anchor is accepted are not in the anchoring
+  inscription; they go one per later block once it is accepted. No metadata.
+  A body over 350,000 bytes is refused (`ANCHORING_LOG_TOO_LARGE` for the
+  anchoring inscription, also by `sdk.anchor` before it commits; a single
+  later entry over it is `INSCRIPTION_TOO_LARGE`).
+- **Verified before inscribing (P9.18).** `prepareEntryInscription` packages
+  the stored log through the entry it publishes and verifies it as a fresh
+  reader would: history, author binding, the identity evidence of every signer
+  through it, the author and each editor, and the signing key still in its
+  signer's latest DID state (Bitcoin would refuse it otherwise, P9.15). Any
+  failure refuses to build the pair: `ANCHORING_NOT_VERIFIED` for the
+  anchoring inscription, `ENTRY_NOT_VERIFIED` for a later one, with
+  `details.problems` and the report; missing identity evidence is
+  `incomplete-evidence`. Resource availability does not gate it: missing
+  bytes are listed, never a reason to refuse (P7.4). Freshness is not gated
+  either; it stays a reported policy. Time passes before the pair is sent, so
+  `submitEntryInscription` checks again before the first broadcast: the entry
+  is still the next one Bitcoin can accept (`HEAD_NOT_NEXT`), no other pair
+  for it can still land (`PAIR_IN_FLIGHT`; the `replaces` the pair was
+  prepared with still apply), the indexes agree (`INDEXES_DISAGREE`), the sat
+  read still shows the sat in the pair's funding input (`SAT_MOVED`, or
+  `SAT_HOLDER_UNKNOWN` when neither the read nor the funding output shows it;
+  ord names no holder for a sat without an inscription, so the funding output
+  is asked for its first sat), the pair inscribes the
+  stored bytes (`PAIR_BODY_MISMATCH`) and the log still verifies through it.
+  `submitPreparedInscriptionOnSat` and `resumeInscriptionOnSat` skip all of
+  that: send a pair promptly through them only right after preparing it, or
+  to force a rebroadcast deliberately.
+- **Pending Bitcoin acceptance (P9.18).** Between broadcast and acceptance the
+  anchor's checks depend on its position (P5.13, P9.15, P9.16), so the result
+  is labelled `publication: "pending-bitcoin-acceptance"` on `readAnchored`,
+  `nextPendingEntry` and every `catchUp` step, as long as the recovery store
+  holds a pair of the anchoring body that can still land and that the node
+  shows: its commit or reveal confirmed (a confirmed reveal not yet indexed
+  included), or in its mempool where the provider reports `inMempool`
+  (`RegtestProvider` does; `QuickNodeProvider` reports mempool entries). A
+  pair submitted but not observed (rejected, evicted, or a provider without a
+  mempool view) is `submitted-unobserved`, never pending acceptance.
+  PROVISIONAL, and a spec question: P9.18 names a single label, "pending
+  Bitcoin acceptance", from inscribing until confirmation. The SDK is
+  stricter and splits off `submitted-unobserved` for a pair nothing shows the
+  network holding, so a rejected or evicted anchor is not reported as on its
+  way. Proposed fix: P9.18 to allow (or require) distinguishing a submitted
+  inscription that is not observed on the network from one that is. Once
+  Bitcoin shows it the label is `anchored` and the Original verifies as
+  anchored. Without a recovery store the label cannot see the pair and reads
+  `not-anchored`; `unverified` means Bitcoin evidence is missing or
+  disputed.
+- **What Bitcoin will not hold (P9.18).** `pair.offChain` lists every resource
+  version the log through the entry commits to (inscriptions carry only their
+  descriptors) and every did:vh or did:webvh signer DID, author and editors,
+  whose history a reader needs (did:btco signers are on Bitcoin and listed in
+  `onBitcoin`). Each says whether this SDK holds it. The profile does not
+  replicate them or guarantee their availability: keep them, publish them on
+  the web layer, or give them to the sat's next holder. An author who wants
+  Bitcoin to be all a reader needs uses a did:btco author DID and grants only
+  did:btco editors (P5.15).
+- **Transfer handoff (P9.18).** Selling or giving the Original is moving the
+  sat; it needs nothing from the author. `transferHandoff(sdk, did, read)`
+  returns an evidence package (the log, the off-chain signer DID histories and
+  the resource bytes this SDK holds; did:btco histories are listed as missing,
+  being on Bitcoin) with its `offChain` notice, for the sender to give the
+  recipient. By default it runs through the head Bitcoin accepts, read from
+  the sat: entries committed locally but not inscribed are not the
+  recipient's Original (P9.12). `{ through: "committed" }` includes them, for
+  a recipient who will inscribe them; `{ checkpoint }` names an exact entry.
+  Before the anchor is on Bitcoin there is no accepted head
+  (`NOT_ANCHORED_ON_BITCOIN`). Called without options it refuses
+  (`SAT_READ_REQUIRED`) rather than guess which head to hand over. The recipient's SDK should verify it rather
+  than trust it: `verifyHandoff(sdk, zip, { ...read, expectedSat })` reads
+  the sat the recipient received and refuses a package anchored to any other
+  (`HANDOFF_SAT_MISMATCH`), then verifies the package against it, reporting
+  history, binding, identity evidence and resource availability separately,
+  and stores nothing. Ownership is the sat's holder, reported separately:
+  compare `report.ownership.output` with the output the sat was received in.
+  Nothing guarantees the recipient ever gets the evidence.
+- **Editor entries** are published like author entries: the sat's holder
+  inscribes them, and the pre-inscription check covers the editor's identity
+  evidence (P5.16, P9.12).
 - The anchoring entry is an ordinary update that adds the sat's did:btco alias
   (`did:btco:<sat>` on mainnet, `:sig:`, `:test:`, `:reg:` elsewhere, P14.12;
   the did:btco method does not yet define the prefixes, proposed upstream as
@@ -603,7 +776,7 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   log: a stored or packaged copy is only compared (`anchoring.copy`), and one
   that differs is ignored. Entries before the anchoring entry are checked
   against the versions they name, with claimed ordering (P9.15). The writer
-  (PR 10) must inscribe the full log when anchoring.
+  inscribes exactly that (see "What is inscribed" above).
 - Placement rests on the index (P9.10): an inscription counts for a sat only
   when every index read supplied reports it on that sat number on that
   network. Indexes that disagree leave it `disputed`
@@ -653,7 +826,8 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   read, pass `getSatSnapshot(sat, { bodies: 'originals' })`: only
   `application/vnd.originals.vh+jsonl` bodies of at most 350,000 bytes and
   their metadata are fetched, and every other inscription is reported
-  `not-requested`, so the holder's other inscriptions cost no body reads. The
+  `not-requested`, so the holder's other inscriptions cost no body reads (the
+  Bitcoin writer's sat reads do this). The
   default, `bodies: 'all'`, reads every body and its metadata, as a did:btco
   read needs (P5.13). The reader's budget (`snapshotBudget` on
   `RegtestProvider` and `QuickNodeProvider`): `maxRequests` defaults to 7 + 5

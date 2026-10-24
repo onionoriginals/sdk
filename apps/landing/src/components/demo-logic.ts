@@ -1,5 +1,6 @@
 /** Shared creator decisions and request helpers, independent of React rendering. */
 import { contentByteLength, type ResourceContent } from '../sdk/resource-view';
+import { anchoringFailureMessage } from './anchoring-view';
 import { demo } from '../content';
 import { featureEnabled } from '../sdk/features';
 import { ANON_IDENTITY } from '../sdk/engine-identity';
@@ -562,6 +563,8 @@ export class DemoCopyError extends Error {
  */
 export function demoFailureMessage(err: unknown): string {
   if (err instanceof DemoCopyError) return err.message;
+  const anchoring = anchoringFailureMessage(err);
+  if (anchoring) return anchoring;
   const raw = err instanceof Error ? err.message : '';
   if (/HostingStorageAdapter\.(?:put|get) failed/.test(raw)) {
     // 507 from the durable per-user store is a QUOTA, not a blip — "try again

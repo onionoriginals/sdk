@@ -52,6 +52,7 @@ import {
   verifyAuthorHistory,
   verifyOriginal,
   parseBtcoAlias,
+  ORIGINALS_INSCRIPTION_MAX_BYTES,
   type AliasEvidence,
   type AliasReport,
   type AssetState,
@@ -879,6 +880,15 @@ export class OriginalsSDK {
   }
 
   /**
+   * The committed log of a stored Original, exactly as stored and not
+   * verified: the committed head is its last line. The Bitcoin writer
+   * inscribes these exact lines (P9.17); read state through `get`.
+   */
+  async committedLog(did: string): Promise<string> {
+    return this.stored(did);
+  }
+
+  /**
    * The verified state of a stored Original, at its head or an exact
    * checkpoint (P3.2). For an anchored Original, pass what an adapter read
    * from the anchoring sat (`satEvidence`): Bitcoin then decides the log from
@@ -1025,7 +1035,10 @@ export class OriginalsSDK {
    * The anchoring entry (P9.10; plan 012 §3.1): an ordinary update that adds
    * the sat's did:btco alias. It counts only once inscribed on that sat; until
    * then reads report the Original as unverified on Bitcoin. Inscribing it is
-   * the Bitcoin writer's job (plan 011, PR 10).
+   * the Bitcoin writer's job (plan 011, PR 10). The anchoring inscription
+   * carries the whole log through this entry, so an Original whose log would
+   * then exceed 350,000 bytes is refused before anything is committed
+   * (ANCHORING_LOG_TOO_LARGE, P9.17).
    */
   async anchor(did: string, input: { parent: string; author: AuthorRef; signer: OriginalsSigner; sat: string }): Promise<CommitResult> {
     exactKeys(input, ["parent", "author", "signer", "sat"], "anchor input");
@@ -1033,7 +1046,14 @@ export class OriginalsSDK {
     const aliases = (await this.get(did)).state.aliases;
     if (aliases.some((a) => a.startsWith("did:btco:"))) sdkError("invalid-evidence", "ALREADY_ANCHORED", `${did} is already anchored (P9.10)`);
     const draft = await this.prepareUpdate(did, { parent: input.parent, author: input.author }, [...aliases, input.sat]);
-    return this.commit(draft, input.signer);
+    // The anchoring inscription carries the whole log through the anchoring entry, so a log
+    // over the inscription limit cannot be anchored: refuse before committing it (P9.17).
+    const candidate = await this.sign(draft, input.signer);
+    const size = new TextEncoder().encode((await this.stored(did)) + serializeLog([candidate.entry])).length;
+    if (size > ORIGINALS_INSCRIPTION_MAX_BYTES) {
+      sdkError("limit-exceeded", "ANCHORING_LOG_TOO_LARGE", `the log of ${did} through the anchoring entry would be ${size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, { size, limit: ORIGINALS_INSCRIPTION_MAX_BYTES });
+    }
+    return this.commitCandidate(candidate);
   }
 
   // ---------------------------------------------------------------- committing

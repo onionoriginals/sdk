@@ -85,3 +85,25 @@ test('sat snapshots retain raw metadata and derive reveal order from active Core
   expect(snapshot.publications[0].body).toEqual({ status: 'complete', mediaType: 'image/png', bytes: new Uint8Array([0, 255, 1]), metadata: new Uint8Array([161, 99, 108, 111, 103, 128]) });
   expect(snapshot.ownership).toEqual({ owner: 'holder', satpoint: txid + ':0:0' });
 });
+
+test('transaction status says whether an unconfirmed transaction is in the mempool (inMempool)', async () => {
+  const pooled = 'a'.repeat(64), reorged = 'b'.repeat(64), unknown = 'c'.repeat(64);
+  server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(req) {
+    if (req.method === 'GET') return Response.json({ chain: 'regtest', sat_index: true, address_index: true });
+    const { method, params } = await req.json() as { method: string; params: string[] };
+    const missing = Response.json({ result: null, error: { code: -5, message: 'No such mempool or blockchain transaction' } });
+    if (method === 'getblockchaininfo') return Response.json({ result: { chain: 'regtest', blocks: 1, bestblockhash: 'f'.repeat(64) } });
+    if (method === 'getrawtransaction') {
+      if (params[0] === pooled) return Response.json({ result: { confirmations: 0 } });
+      // -txindex still finds a transaction whose block was reorganised out.
+      if (params[0] === reorged) return Response.json({ result: { confirmations: 0, blockhash: 'e'.repeat(64) } });
+      return missing;
+    }
+    if (method === 'getmempoolentry') return params[0] === pooled ? Response.json({ result: { vsize: 100 } }) : missing;
+    return Response.json({ result: null, error: { code: -32601, message: 'unexpected' } });
+  } });
+  const provider = new RegtestProvider({ rpcUrl: server.url.href, ordUrl: server.url.href, rpcAuth: 'test:only' });
+  expect(await provider.getTransactionStatus(pooled)).toEqual({ confirmed: false, confirmations: 0, inMempool: true });
+  expect(await provider.getTransactionStatus(reorged)).toEqual({ confirmed: false, confirmations: 0, inMempool: false });
+  expect(await provider.getTransactionStatus(unknown)).toEqual({ confirmed: false, confirmations: 0, inMempool: false });
+});

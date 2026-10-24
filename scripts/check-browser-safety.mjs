@@ -22,9 +22,11 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 /**
  * Every JavaScript entry of the @originals/sdk export map, so a new subpath is
  * guarded the moment it is published. `originals/index.js` is the browser-first
- * Originals workflow; the other SDK entries reach Node-only paths lazily.
+ * Originals workflow, and `originals/bitcoin-writer.js` the Bitcoin writer the
+ * landing runs in the browser to prepare and sign an Original's inscription
+ * (plan 011, PR 10b); the other SDK entries reach Node-only paths lazily.
  */
-const SDK_BROWSER_FIRST = new Set(['originals/index.js']);
+const SDK_BROWSER_FIRST = new Set(['originals/index.js', 'originals/bitcoin-writer.js']);
 const sdkExports = JSON.parse(readFileSync(resolve(ROOT, 'packages/sdk/package.json'), 'utf8')).exports ?? {};
 const SDK_ENTRIES = Object.values(sdkExports)
   .filter((value) => typeof value === 'object' && value !== null && typeof value.import === 'string' && value.import.endsWith('.js'))

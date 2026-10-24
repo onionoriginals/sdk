@@ -663,7 +663,7 @@ export class QuickNodeProvider implements OrdinalsProvider {
     return result;
   }
 
-  async getTransactionStatus(txid: string): Promise<{ confirmed: boolean; blockHeight?: number; blockHash?: string; confirmations?: number }> {
+  async getTransactionStatus(txid: string): Promise<{ confirmed: boolean; blockHeight?: number; blockHash?: string; confirmations?: number; inMempool?: boolean }> {
     if (typeof txid !== 'string' || !/^[0-9a-fA-F]{64}$/.test(txid)) {
       throw new StructuredError(
         'QUICKNODE_INVALID_TXID',
@@ -686,7 +686,8 @@ export class QuickNodeProvider implements OrdinalsProvider {
     if (!tx) return { confirmed: false };
     const confirmations = typeof tx.confirmations === 'number' ? tx.confirmations : 0;
     if (confirmations < 1) {
-      return { confirmed: false, confirmations };
+      // Verbose getrawtransaction without a block hash is a mempool entry.
+      return { confirmed: false, confirmations, ...(tx.blockhash ? {} : { inMempool: true }) };
     }
     // Verbose getrawtransaction reports blockhash but not height; resolve it
     // via getblockheader when available. Height is optional in the provider
