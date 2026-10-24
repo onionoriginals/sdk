@@ -113,7 +113,27 @@ const KEEP_CODES = new Set(['SAT_READ_INCOMPLETE', 'BLOCK_TIME_UNAVAILABLE', 'fu
 const REFUSED_CODES = new Set([
   'original_forked', 'signed_pair_mismatch', 'SAT_MOVED', 'sat_not_first', 'payload_too_large', 'INSCRIPTION_TOO_LARGE',
   'bad_request', 'evidence_not_verified', 'commit_fee_excessive', 'commit_change_omitted',
+  // Round-2 decision: the writer's and route's other permanent codes.
+  'ANCHORING_LOG_TOO_LARGE', 'WRONG_SAT', 'HANDOFF_SAT_MISMATCH', 'PAIR_BODY_MISMATCH', 'NETWORK_MISMATCH',
+  'NOTHING_TO_INSCRIBE', 'ENTRY_NOT_STORED', 'evidence_mismatch',
 ]);
+
+/**
+ * A kept pair that gets the same unknown code-bearing 4xx this many times in
+ * a row is marked refused, so an unknown permanent code cannot leave it stuck
+ * with no way to abandon it (round-2 decision; P9.6).
+ */
+export const UNKNOWN_REFUSAL_LIMIT = 3;
+
+/** How an answer is treated: refused now, an unknown code-bearing 4xx (counted), or kept. */
+function classify(error: unknown): 'refused' | 'unknown' | 'keep' {
+  if (!(error instanceof AnchoringSubmitError)) return 'keep';
+  if (KEEP_STATUSES.has(error.status) || error.status >= 500 || error.status < 400) return 'keep';
+  const { error: routeError, code, category } = error.body;
+  if ((category && KEEP_CATEGORIES.has(category)) || [routeError, code].some((c) => c !== undefined && KEEP_CODES.has(c))) return 'keep';
+  if ([routeError, code].some((c) => c !== undefined && REFUSED_CODES.has(c))) return 'refused';
+  return routeError !== undefined || code !== undefined ? 'unknown' : 'keep';
+}
 
 /**
  * True only for a refusal of this pair itself, judged by the server's
@@ -121,12 +141,10 @@ const REFUSED_CODES = new Set([
  * network errors, transient categories and codes, and unknown codes are not.
  */
 export function isPairRefusal(error: unknown): error is AnchoringSubmitError {
-  if (!(error instanceof AnchoringSubmitError)) return false;
-  if (KEEP_STATUSES.has(error.status) || error.status >= 500 || error.status < 400) return false;
-  const { error: routeError, code, category } = error.body;
-  if ((category && KEEP_CATEGORIES.has(category)) || [routeError, code].some((c) => c !== undefined && KEEP_CODES.has(c))) return false;
-  return [routeError, code].some((c) => c !== undefined && REFUSED_CODES.has(c));
+  return classify(error) === 'refused';
 }
+
+const answerCode = (e: AnchoringSubmitError) => `${e.status}:${e.body.code ?? e.body.error ?? ''}`;
 
 /**
  * The server refused this pair (for example `original_forked`,
@@ -216,6 +234,8 @@ export interface OutboxEntry {
   savedAt: string;
   /** Set when the server refused this pair itself: kept for recovery, never resent automatically. */
   refused?: PairRefusal;
+  /** The same unknown code-bearing 4xx answered in a row, counted toward UNKNOWN_REFUSAL_LIMIT. */
+  strikes?: { answer: string; count: number };
 }
 
 export interface AnchoringOutbox {
@@ -348,7 +368,20 @@ async function deliver(transport: AnchoringTransport, outbox: AnchoringOutbox, d
   try {
     sent = await transport.submit({ did, evidence: base64.decode(entry.evidence), pair: entry.pair });
   } catch (error) {
-    if (!isPairRefusal(error)) throw error;
+    const kind = classify(error);
+    if (kind !== 'refused') {
+      if (kind === 'unknown') {
+        const answer = answerCode(error as AnchoringSubmitError);
+        const count = entry.strikes?.answer === answer ? entry.strikes.count + 1 : 1;
+        if (count < UNKNOWN_REFUSAL_LIMIT) { await outbox.put(did, { ...entry, strikes: { answer, count } }); throw error; }
+      } else {
+        // Any other answer breaks the row; the pair itself is untouched (P9.6).
+        if (entry.strikes) { const { strikes: _strikes, ...rest } = entry; await outbox.put(did, rest); }
+        throw error;
+      }
+    }
+    if (!(error instanceof AnchoringSubmitError)) throw error;
+    const { strikes: _strikes, ...kept } = entry;
     const refused: PairRefusal = {
       status: error.status,
       ...(error.body.error ? { error: error.body.error } : {}),
@@ -357,7 +390,7 @@ async function deliver(transport: AnchoringTransport, outbox: AnchoringOutbox, d
       message: error.body.message ?? `The server answered ${error.status}${error.body.error ? ` (${error.body.error})` : ''}.`,
       at: new Date().toISOString(),
     };
-    await outbox.put(did, { ...entry, refused });
+    await outbox.put(did, { ...kept, refused });
     throw new AnchoringRefusedError(refused);
   }
   if (sent.commitTxId !== entry.pair.prepared.commitTxId || sent.revealTxId !== entry.pair.prepared.revealTxId || sent.versionId !== entry.pair.versionId) {

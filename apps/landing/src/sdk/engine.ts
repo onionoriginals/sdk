@@ -120,6 +120,8 @@ export interface DemoAssetState {
    * and anchor are refused while it is set.
    */
   fork?: OriginalsFork;
+  /** Set with `fork` when Bitcoin accepted the branch this copy is not on (P9.13, P9.16). */
+  bitcoinOtherBranch?: boolean;
   /** The verification report of the current checkpoint. */
   provenance: unknown;
   bitcoinVerification?: OriginalsReport;
@@ -151,8 +153,10 @@ export class StaleSaveError extends Error {
  * branches stay kept. The category is the spec's `fork` (section 6).
  */
 export class ForkUnresolvedError extends OriginalsError {
-  constructor(public readonly fork: OriginalsFork) {
-    super("fork", "FORK_UNRESOLVED", "Fork unresolved — no current branch. This Original has two valid histories and neither was chosen, so it cannot be revised, published or anchored here. Both are kept; keep an evidence export.", { fork });
+  constructor(public readonly fork: OriginalsFork, public readonly bitcoinOtherBranch = false) {
+    super("fork", "FORK_UNRESOLVED", bitcoinOtherBranch
+      ? "Bitcoin accepted the other branch. This copy's latest versions are on a branch Bitcoin dropped, so it cannot be revised or anchored here. Both are kept; keep an evidence export."
+      : "Fork unresolved — no current branch. This Original has two valid histories and neither was chosen, so it cannot be revised, published or anchored here. Both are kept; keep an evidence export.", { fork, bitcoinOtherBranch });
     this.name = "ForkUnresolvedError";
   }
 }
@@ -368,12 +372,31 @@ export class DemoEngine {
     if (!view.report.fork) return;
     if (this.btcoAlias() && !this.settledOnBitcoin()) await this.verifyBitcoin();
     const fork = this.unsettledFork();
-    if (fork) throw new ForkUnresolvedError(fork);
+    if (fork) throw new ForkUnresolvedError(fork, this.bitcoinOtherBranch());
   }
 
   /** The last fresh Bitcoin read accepted the anchor: its branch is the Original's history (P9.16). */
   private settledOnBitcoin(): boolean {
+    return this.anchoredOnBitcoin() && this.bitcoinHeadIsLocal();
+  }
+
+  private anchoredOnBitcoin(): boolean {
     return this.bitcoinVerification?.anchoring?.status === "anchored";
+  }
+
+  /**
+   * Bitcoin's accepted head is on this copy's branch: the local head is it, or
+   * the local log extends it. Otherwise Bitcoin accepted the other branch, and
+   * extending this one would build on what Bitcoin dropped (P9.13, P9.16).
+   */
+  private bitcoinHeadIsLocal(): boolean {
+    const head = this.bitcoinVerification?.head;
+    return !!head && this.logEntries.some((e) => e.versionId === head);
+  }
+
+  /** Bitcoin settled the fork, but for the branch this copy is not on. */
+  private bitcoinOtherBranch(): boolean {
+    return !!this.view?.report.fork && this.anchoredOnBitcoin() && !this.bitcoinHeadIsLocal();
   }
 
   /** The fork that stands: the store's, unless Bitcoin has settled it (P6.6, P9.16). */
@@ -829,6 +852,7 @@ export class DemoEngine {
       credentials: 0,
       history: this.history(),
       ...(this.unsettledFork() ? { fork: this.unsettledFork() } : {}),
+      ...(this.bitcoinOtherBranch() ? { bitcoinOtherBranch: true } : {}),
       provenance: view.report,
       bitcoinVerification: this.bitcoinVerification,
       bitcoinReadError: this.bitcoinReadError,

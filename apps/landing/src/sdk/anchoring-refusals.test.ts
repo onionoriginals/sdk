@@ -44,6 +44,15 @@ const refusals: Array<[string, number, Body]> = [
   ['evidence_not_verified', 422, { error: 'evidence_not_verified', code: 'COMMIT_VERIFICATION_FAILED', category: 'invalid-evidence', message: 'Does not verify.' }],
   ['commit_fee_excessive', 400, { error: 'commit_fee_excessive', message: 'Fee too high.' }],
   ['commit_change_omitted', 400, { error: 'commit_change_omitted', message: 'Change missing.' }],
+  // Round-2 decision: the writer's and route's other permanent codes.
+  ['ANCHORING_LOG_TOO_LARGE', 413, { error: 'not_sendable', code: 'ANCHORING_LOG_TOO_LARGE', category: 'limit-exceeded', message: 'Log too large.' }],
+  ['WRONG_SAT', 422, { error: 'not_sendable', code: 'WRONG_SAT', category: 'invalid-evidence', message: 'Wrong sat.' }],
+  ['HANDOFF_SAT_MISMATCH', 422, { error: 'not_sendable', code: 'HANDOFF_SAT_MISMATCH', category: 'invalid-evidence', message: 'Sat mismatch.' }],
+  ['PAIR_BODY_MISMATCH', 422, { error: 'not_sendable', code: 'PAIR_BODY_MISMATCH', category: 'invalid-evidence', message: 'Body mismatch.' }],
+  ['NETWORK_MISMATCH', 422, { error: 'not_sendable', code: 'NETWORK_MISMATCH', category: 'invalid-evidence', message: 'Network mismatch.' }],
+  ['NOTHING_TO_INSCRIBE', 422, { error: 'not_sendable', code: 'NOTHING_TO_INSCRIBE', category: 'invalid-evidence', message: 'Nothing to inscribe.' }],
+  ['ENTRY_NOT_STORED', 422, { error: 'not_sendable', code: 'ENTRY_NOT_STORED', category: 'invalid-evidence', message: 'Entry not stored.' }],
+  ['evidence_mismatch', 422, { error: 'evidence_mismatch', message: 'Evidence for another Original.' }],
 ];
 
 describe('a pair-permanent refusal is kept, marked refused, and not resent (decision A; P9.6)', () => {
@@ -97,6 +106,7 @@ describe('a pair whose answer may still come is kept unchanged and resent (decis
     ['HEAD_NOT_NEXT', () => new AnchoringSubmitError(409, { error: 'not_sendable', code: 'HEAD_NOT_NEXT', category: 'stale-parent' })],
     ['403 address_not_bound', () => new AnchoringSubmitError(403, { error: 'address_not_bound' })],
     ['an unknown 4xx code', () => new AnchoringSubmitError(422, { error: 'not_sendable', code: 'SOMETHING_NEW' })],
+    ['a transient code overrides a permanent route error', () => new AnchoringSubmitError(400, { error: 'bad_request', code: 'HEAD_NOT_NEXT' })],
     ['network error', () => new TypeError('Failed to fetch')],
   ];
   for (const [name, error] of keeps) {
@@ -108,12 +118,14 @@ describe('a pair whose answer may still come is kept unchanged and resent (decis
       const thrown = await resendWaiting(t, outbox, DID).catch((e) => e);
       expect(thrown).not.toBeInstanceOf(AnchoringRefusedError);
       expect(isPairRefusal(thrown)).toBe(false);
-      expect(await outbox.get(DID)).toEqual(saved);
+      // The signed pair and its evidence are unchanged, and it is not marked refused.
+      const same = (kept?: OutboxEntry) => { expect(kept?.pair).toEqual(saved.pair); expect(kept?.evidence).toBe(saved.evidence); expect(kept?.refused).toBeUndefined(); };
+      same(await outbox.get(DID));
       await resendWaiting(t, outbox, DID).catch(() => undefined);
       expect(calls()).toBe(2);
       // Abandoning is only for a refused pair: an uncertain one may already be on its way.
       await expect(abandonRefused(outbox, DID)).rejects.toThrow();
-      expect(await outbox.get(DID)).toEqual(saved);
+      same(await outbox.get(DID));
     });
   }
 });
@@ -136,5 +148,66 @@ describe('abandoning is one check-and-delete (P9.6)', () => {
     };
     await expect(abandonRefused(racing, DID)).rejects.toThrow(/may still be accepted/);
     expect((await inner.get(DID))?.refused).toBeUndefined();
+  });
+});
+
+describe('safety valve: the same unknown code-bearing 4xx three times in a row (round-2 review; P9.6)', () => {
+  const unknown = () => new AnchoringSubmitError(422, { error: 'not_sendable', code: 'SOMETHING_NEW', message: 'A new permanent refusal.' });
+
+  test('is kept and resent twice, then marked refused so it can be abandoned', async () => {
+    const outbox = memoryOutbox();
+    const saved = entry();
+    await outbox.put(DID, saved);
+    const { t, calls } = transport(() => Promise.reject(unknown()));
+    for (const _ of [1, 2]) {
+      const thrown = await resendWaiting(t, outbox, DID).catch((e) => e);
+      expect(thrown).not.toBeInstanceOf(AnchoringRefusedError);
+      expect((await outbox.get(DID))?.refused).toBeUndefined();
+    }
+    const third = await resendWaiting(t, outbox, DID).catch((e) => e);
+    expect(third).toBeInstanceOf(AnchoringRefusedError);
+    expect((third as AnchoringRefusedError).refusal).toMatchObject({ status: 422, code: 'SOMETHING_NEW', message: 'A new permanent refusal.' });
+    expect((await outbox.get(DID))?.pair).toEqual(saved.pair);
+    await expect(resendWaiting(t, outbox, DID)).rejects.toBeInstanceOf(AnchoringRefusedError);
+    expect(calls()).toBe(3);
+    expect(await abandonRefused(outbox, DID)).toBe(true);
+  });
+
+  test('a different answer in between restarts the count', async () => {
+    const outbox = memoryOutbox();
+    await outbox.put(DID, entry());
+    const answers = [unknown(), unknown(), new TypeError('Failed to fetch'), unknown(), unknown()];
+    const { t } = transport(() => Promise.reject(answers.shift()));
+    for (let i = 0; i < 5; i++) await resendWaiting(t, outbox, DID).catch(() => undefined);
+    expect((await outbox.get(DID))?.refused).toBeUndefined();
+  });
+
+  test('transient codes never trip it', async () => {
+    const outbox = memoryOutbox();
+    await outbox.put(DID, entry());
+    const { t } = transport(() => Promise.reject(new AnchoringSubmitError(409, { error: 'not_sendable', code: 'HEAD_NOT_NEXT' })));
+    for (let i = 0; i < 5; i++) await resendWaiting(t, outbox, DID).catch(() => undefined);
+    expect((await outbox.get(DID))?.refused).toBeUndefined();
+  });
+});
+
+describe('the IndexedDB outbox (fake-indexeddb)', () => {
+  test('deleteIf keeps an entry that does not match, and deletes one that does, in one transaction', async () => {
+    const { IDBFactory } = await import('fake-indexeddb');
+    const { indexedDbOutbox } = await import('./anchoring');
+    const g = globalThis as { indexedDB?: unknown };
+    const saved = g.indexedDB;
+    g.indexedDB = new IDBFactory();
+    try {
+      const outbox = indexedDbOutbox('outbox-test');
+      await outbox.put(DID, entry());
+      await expect(abandonRefused(outbox, DID)).rejects.toThrow(/may still be accepted/);
+      expect(await outbox.get(DID)).toEqual(entry());
+      expect(await outbox.deleteIf(DID, () => false)).toBe('kept');
+      await outbox.put(DID, { ...entry(), refused: { status: 409, code: 'original_forked', message: 'm', at: 'now' } });
+      expect(await abandonRefused(outbox, DID)).toBe(true);
+      expect(await outbox.get(DID)).toBeUndefined();
+      expect(await outbox.deleteIf(DID, () => true)).toBe('absent');
+    } finally { g.indexedDB = saved; }
   });
 });

@@ -290,3 +290,42 @@ test('a fork Bitcoin has not settled still refuses a new pair, but resends an al
   await expect(engine.inscribe({ funding: funding([chain.fund(50_000)]) })).rejects.toBeInstanceOf(ForkUnresolvedError);
   expect(chain.sent.length).toBe(2);
 });
+
+test('Bitcoin accepting the other branch is not a settlement for this copy: editing and anchoring stay refused (round-2 review; P9.13, P9.16)', async () => {
+  const { postAnchorFork } = await import('../../server/tests/post-anchor-fork-fixture');
+  const f = await postAnchorFork();
+  await expect(f.a.importEvidence(f.branchB, f.did)).rejects.toThrow(/conflict/i);
+  await f.a.open(f.did);
+  const checked = await f.a.verifyBitcoin();
+  expect(checked.bitcoinVerification?.anchoring?.status).toBe('anchored');
+  expect(checked.bitcoinVerification?.head).toBe(f.v3b);
+  // The local head v3a is on the branch Bitcoin dropped: still a fork here, said as such.
+  expect(checked.history.at(-1)?.versionId).toBe(f.v3a);
+  expect(checked.fork).toBeDefined();
+  expect(checked.bitcoinOtherBranch).toBe(true);
+  const refused = await f.a.update('More on A', 'Orbits', 'more a').catch((e) => e);
+  expect(refused).toBeInstanceOf(ForkUnresolvedError);
+  expect((refused as Error).message).toMatch(/Bitcoin accepted the other branch/);
+  await expect(f.a.inscribe({ funding: { fundingUtxos: [f.chain.fund(50_000)], changeAddress: WALLET_ADDRESS } })).rejects.toBeInstanceOf(ForkUnresolvedError);
+  expect(f.a.snapshot().history.at(-1)?.versionId).toBe(f.v3a);
+});
+
+test('a fork whose sat cannot be read stays refused, and says Bitcoin could not be read (round-2 review; P6.6, P9.16)', async () => {
+  let broken = false;
+  const { chain, engine, funding, author } = await setup({ transport: (t) => ({ ...t, provider: new Proxy(t.provider, {
+    get: (target, key) => {
+      if (key === 'getSatSnapshot' && broken) return async () => { throw new Error('index down'); };
+      const value = Reflect.get(target, key) as unknown;
+      return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+    },
+  }) }) });
+  const stale = await staleBranch(engine, author);
+  await engine.inscribe({ funding: funding() });
+  chain.mine();
+  await expect(engine.importEvidence(stale, engine.snapshot().did)).rejects.toThrow(/conflict/i);
+  broken = true;
+  await expect(engine.update('Harbor at dusk', 'Orbits', 'dusk')).rejects.toBeInstanceOf(ForkUnresolvedError);
+  const state = engine.snapshot();
+  expect(state.fork).toBeDefined();
+  expect(state.bitcoinReadError).toMatch(/could not be checked/i);
+});
