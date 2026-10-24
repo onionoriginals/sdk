@@ -223,7 +223,11 @@ signer history is missing. Archive names are at most 255 UTF-8 bytes, for
 the reader and the writer (`ARCHIVE_PATH`; previously UTF-16 code units).
 
 Import bounds sizes and counts before extracting anything. It rejects absolute
-paths, `..` segments, symbolic links and duplicate entries. It never replaces a
+paths, `..` segments, symbolic links and duplicate entries, a name that is not
+valid UTF-8 in either header, and any entry whose Unix mode is not a regular
+file, an entry with no mode included (P14.10; owner decision on #993's
+review). The writer's sort, date, UTF-8 flag and mode rules bind it only; the
+reader ignores them otherwise. It never replaces a
 newer local history with an older prefix (P7.5). Loading a package never
 confers signing authority (P8.4).
 
@@ -249,7 +253,12 @@ or one from an evidence package is judged by its witnesses alone (P7.8, P5.14;
 owner decision of 23 October 2026; originals-spec #51, merged at master
 `19d3e82a0`). A log whose latest version names another location shows the
 identity moved: its verified versions are used, removals included, and the
-SDK also asks that location (P5.14). Watchers are not consulted, so a log
+SDK also asks that location (P5.14). Until that log is obtained,
+`obtained.movedTo` names where the DID now is and `movedLog` is
+`not-obtained`, and `describeFreshness` says so. A did:webvh signer log a host
+serves is judged as fetched from its URL on the host, so the location rule
+applies to it; a package's log has no fetch location, so the move rule does
+not (owner decisions on #993's review). Watchers are not consulted, so a log
 supported only by watchers is reported not established. Otherwise freshness is `not-established`
 (or `stale`), and the report states where, when and as of which version the
 history was obtained (`identityEvidence.obtained` and each editor's:
@@ -948,8 +957,9 @@ received.report.ownership?.output;                           // compare with the
   accepted head keeps its identity evidence and stays current. One that fails
   any check not depending on that version (it does not chain to the head, or
   breaks a state rule) is rejected instead, and so is one naming a did:vh or
-  did:webvh version past the 1,000-version limit or after a deactivated
-  version the verifier holds (`AUTHOR_VERSION_IMPOSSIBLE`). An entry in the
+  did:webvh versionId that is malformed, numbered below 1, past the
+  1,000-version limit or after a deactivated version the verifier holds
+  (`AUTHOR_VERSION_IMPOSSIBLE`), in the anchoring inscription as after it. An entry in the
   anchoring inscription naming a version its signer's history shows is not
   that DID's is rejected the same way. An unread or disputed inscription on a
   did:btco signer's sat is missing evidence only for entries whose check
@@ -959,9 +969,14 @@ received.report.ownership?.output;                           // compare with the
   extending the head is unverifiable, a later publication extending the same
   head, or extending the unverifiable one, is ignored as
   `waiting-for-earlier-unverifiable` with `waitingOn` naming it; once that one
-  is verified it is accepted, or rejected and the next considered. A
-  current result is shown with `notices` (`unverifiable-inscriptions`,
-  `publications-waiting`), never without them (section 7). An entry naming a
+  is verified it is accepted, or rejected and the next considered. Each
+  candidate is judged in full first: one that would be rejected on its own (a
+  forged signature, a key removed before its inscription time) is rejected
+  while another blocks, and one unverifiable itself is listed in
+  `unverifiable` as well as waiting. A current result is shown with `notices`
+  (`head-changed`, `unverifiable-inscriptions`, `publications-waiting`), never
+  without them (section 7): the CLI's verdict line and the landing's anchoring
+  panel name each listed inscription. An entry naming a
   signer version that never exists leaves later publications from that head
   waiting for good; the owner accepted that risk (P9.15). The holder of
   the sat decides what is inscribed but has no authority (P9.11, P9.12), so
@@ -974,11 +989,12 @@ received.report.ownership?.output;                           // compare with the
   when the head moves because an inscription's verifiability changed,
   `anchoring.headChange` gives the head retained before, the head now, the
   inscriptions accepted past it (`verified`), those reported unverifiable
-  before that no longer are (`resolved`), and those accepted before that are
-  unverifiable now (`unverified`, as when a did:btco gap is found later), with
-  the reasons `unverifiable-inscription-accepted`,
-  `unverifiable-inscription-resolved` and `accepted-inscription-unverifiable`,
-  once. A retained
+  before that no longer are (`resolved`), those accepted before that are
+  unverifiable now (`unverified`, as when a did:btco gap is found later; the
+  retained anchor keeps the accepted ids), and blockers the sat no longer
+  carries (`vanished`, a reorganization, P9.5). The result stays current and
+  carries the notice `head-changed`, once (owner decision on #993's review).
+  A retained
   versionId the evidence falls short of is `stale`, and the result is not
   current. The cost, accepted by the owner: a host that withholds a key
   removal can get later inscriptions accepted by readers who do not know of
