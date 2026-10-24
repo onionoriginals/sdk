@@ -5,7 +5,7 @@
  * off-chain notice are separate lines (section 7, P9.18): none of them
  * stands in for another.
  */
-import { demo } from '../content';
+import { demo, library } from '../content';
 import type { DemoAssetState } from '../sdk/engine';
 
 export interface AnchoringView {
@@ -94,6 +94,10 @@ export function anchoringFailureMessage(err: unknown): string | null {
   const name = (err as { name?: string } | null)?.name;
   if (name === 'AnchoringCancelledError') return demo.anchoring.cancelled;
   if (name === 'SigningSessionExpiredError') return demo.anchoring.sessionExpired;
+  // Owner decision, 23 October 2026: the server's reason, and that the pair is kept (P9.6).
+  if (name === 'AnchoringRefusedError') return demo.anchoring.refused((err as { refusal: { message: string } }).refusal.message);
+  // P6.6, P9.16: neither branch is extended or anchored without the author choosing it.
+  if (name === 'ForkUnresolvedError') return (err as { bitcoinOtherBranch?: boolean }).bitcoinOtherBranch ? library.forkOtherBranch : library.forkUnresolved;
   if (name === 'AnchoringSubmitError') {
     const e = err as { body?: { message?: string; code?: string; error?: string } };
     return e.body?.message ?? e.body?.code ?? e.body?.error ?? null;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { demo } from '../content';
+import { demo, library } from '../content';
 import type { AnchoringStatus } from '../sdk/anchoring';
 import { AnchoringCancelledError, AnchoringSubmitError, SigningSessionExpiredError } from '../sdk/anchoring';
 import { anchoringFailureMessage, anchoringInMotion, anchoringView, offChainPreview } from './anchoring-view';
@@ -79,5 +79,17 @@ describe('the anchoring panel (P9.18)', () => {
     expect(anchoringFailureMessage(new SigningSessionExpiredError())).toBe(demo.anchoring.sessionExpired);
     expect(anchoringFailureMessage(new AnchoringSubmitError(409, { code: 'SAT_MOVED', message: 'the sat moved' }))).toBe('the sat moved');
     expect(anchoringFailureMessage(new Error('other'))).toBeNull();
+  });
+
+  test('a refused pair names the reason and that it is kept; a fork says no branch is current (owner decision, 23 October 2026; P6.6, P9.6)', async () => {
+    const { AnchoringRefusedError } = await import('../sdk/anchoring');
+    const { ForkUnresolvedError } = await import('../sdk/engine');
+    const refused = anchoringFailureMessage(new AnchoringRefusedError({ status: 409, code: 'original_forked', message: 'The copies diverge.', at: '2026-10-23T00:00:00Z' }));
+    expect(refused).toBe(demo.anchoring.refused('The copies diverge.'));
+    expect(refused).toMatch(/kept/);
+    expect(anchoringFailureMessage(new ForkUnresolvedError({ version: 2, branches: [{ source: 'supplied', versionId: '2-a' }, { source: 'local', versionId: '2-b' }] }))).toBe(library.forkUnresolved);
+    expect(library.forkUnresolved).toMatch(/Fork unresolved — no current branch/);
+    // Round-2 review: Bitcoin accepted the other branch is said as such, not as an unresolved fork.
+    expect(anchoringFailureMessage(new ForkUnresolvedError({ version: 3, branches: [] }, true))).toBe(library.forkOtherBranch);
   });
 });
