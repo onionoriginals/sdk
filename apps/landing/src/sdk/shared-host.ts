@@ -11,7 +11,9 @@
  *   409 { status: "stale-parent", head }
  * Anything else (400, 401, 403, 404, 413, 422, 429, 5xx) is an error, never an answer.
  * 403 means the signed-in account is neither the namespace owner nor one whose
- * landing DID the head state names as author or editor.
+ * landing DID the head state names as author or editor. A byte-identical retry
+ * is answered already-accepted to an account allowed at that entry's parent,
+ * even after its grant was revoked (P6.7, C12-128).
  *
  * The host's accepted log is read back the way any reader reads it: through
  * the alias's public URLs (`OriginalsSDK.retrieveHosted`), and the SDK

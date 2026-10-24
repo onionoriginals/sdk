@@ -720,9 +720,84 @@ describe('who may submit: the namespace owner, or an account whose landing DID t
     expect(await res.json()).toEqual({ error: 'caller_not_authorized' });
     expect(req.bodyUsed).toBe(false);
     expect(env.hostedLines()).toEqual(before);
-    // A byte-identical retry of an accepted entry is no way in either.
+    // C12-128 does not open the route to a stranger: a byte-identical retry of someone else's accepted
+    // entry gets the same refusal as a new entry, so it cannot probe whether the entry exists.
     expect((await env.a.submit(candidate, env.hostA)).status).toBe('accepted');
-    expect((await env.post({ original: env.did, entry: candidate.line, resources: {}, identities: [] }, COLLAB)).status).toBe(403);
+    const retry = new Request(`http://app.local/api/originals/submit/${encodeURIComponent(env.siteKey)}`, { method: 'POST', headers: { cookie: cookieFor(COLLAB) }, body: encodeSubmission({ original: env.did, entry: candidate.line, resources: {}, identities: [] }) });
+    const retried = await env.h.serve(retry);
+    expect(retried.status).toBe(403);
+    expect(await retried.json()).toEqual({ error: 'caller_not_authorized' });
+    expect(retry.bodyUsed).toBe(false);
+  });
+
+  test('C12-128, P6.7: an editor\'s accepted entry retried after its grant was revoked returns its checkpoint and the current head; no append (owner decision of 23 October 2026)', async () => {
+    const editor = await landingDid(COLLAB);
+    const env = await shared({ editor: editor.evidence, start: Date.now() });
+    const { a, b, did } = env;
+    const own = await b.sign(await b.prepareEdit(did, { parent: env.parent, resources: [{ id: 'artwork.svg', bytes: MINE }], editor: editor.ref }), editor.signer);
+    // The host accepts the editor's save, but the answer never reaches the editor.
+    const lost = await env.post({ original: did, entry: own.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [editor.evidence] }, COLLAB);
+    expect(lost.status).toBe(200);
+    expect((await b.get(did)).checkpoint).toBe(env.parent);
+    // The author fetches the new head and revokes the editor's grant.
+    expect((await a.sync(did, env.hostA)).status).toBe('imported');
+    const revoke = await a.submit(await a.sign(await a.prepareEdit(did, { parent: (await a.get(did)).checkpoint, editors: null, author: env.author.ref }), env.author.signer), env.hostA);
+    if (revoke.status !== 'accepted') throw new Error('expected acceptance');
+    const lines = env.hostedLines().length;
+    // The editor retries the same bytes from its own account: already accepted, and committed locally.
+    const viaEditor = landingSharedHost({ sdk: b, aliasDid: env.aliasDid, transport: env.h.adapterFor(COLLAB), read: env.h.read });
+    const retry = await b.submit(own, viaEditor);
+    expect(retry).toMatchObject({ status: 'already-accepted', checkpoint: own.versionId, hostHead: revoke.checkpoint, behind: true });
+    const raw = await env.post({ original: did, entry: own.line, resources: {}, identities: [] }, COLLAB);
+    expect(raw.status).toBe(200);
+    expect(await raw.json()).toEqual({ status: 'already-accepted', checkpoint: own.versionId, head: revoke.checkpoint });
+    expect(env.hostedLines().length).toBe(lines);
+  });
+
+  test('C12-117: a revoked editor\'s account submitting a new entry is refused; only new appends are gated by the head (owner decision of 23 October 2026)', async () => {
+    const editor = await landingDid(COLLAB);
+    const env = await shared({ editor: editor.evidence, start: Date.now() });
+    const { a, b, did } = env;
+    const revoke = await a.submit(await a.sign(await a.prepareEdit(did, { parent: env.parent, editors: null, author: env.author.ref }), env.author.signer), env.hostA);
+    if (revoke.status !== 'accepted') throw new Error('expected acceptance');
+    const before = env.hostedLines();
+    // An editor entry signed against the parent the grant was still in: refused as a caller, not a stale parent.
+    const stale = await b.sign(await b.prepareEdit(did, { parent: env.parent, resources: [{ id: 'artwork.svg', bytes: MINE }], editor: editor.ref }), editor.signer);
+    const refused = await env.post({ original: did, entry: stale.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [editor.evidence] }, COLLAB);
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: 'caller_not_authorized' });
+    // An author's entry on the head, relayed by the revoked editor's account: refused too.
+    const relayed = await env.edit(a, NOON);
+    const relay = await env.post({ original: did, entry: relayed.line, resources: { [resourceDigest(NOON)]: NOON }, identities: [env.author.evidence] }, COLLAB);
+    expect(relay.status).toBe(403);
+    expect(await relay.json()).toEqual({ error: 'caller_not_authorized' });
+    expect(env.hostedLines()).toEqual(before);
+  });
+
+  test('C12-128: a retry is acknowledged only to a caller allowed at the matching entry\'s parent; otherwise the refusal is the one a new entry gets', async () => {
+    const editor = await landingDid(COLLAB);
+    const env = await shared({ start: Date.now() });
+    const { a, did } = env;
+    // An author entry accepted before the editor was granted anything.
+    const early = await a.submit(await env.edit(a, THEIRS), env.hostA);
+    if (early.status !== 'accepted') throw new Error('expected acceptance');
+    const earlyLine = env.hostedLines().at(-1) as string;
+    const grant = await a.submit(await a.sign(await a.prepareEdit(did, { parent: early.checkpoint, editors: [{ did: editor.evidence.did, name: false, metadata: false, resources: ['artwork.svg'] }], author: env.author.ref }), env.author.signer), env.hostA);
+    if (grant.status !== 'accepted') throw new Error('expected acceptance');
+    const revoke = await a.submit(await a.sign(await a.prepareEdit(did, { parent: grant.checkpoint, editors: null, author: env.author.ref }), env.author.signer), env.hostA);
+    if (revoke.status !== 'accepted') throw new Error('expected acceptance');
+    const before = env.hostedLines();
+    // The editor's account was named in the log, but not at the early entry's parent, nor as its signer.
+    const retried = await env.post({ original: did, entry: earlyLine, resources: {}, identities: [] }, COLLAB);
+    const fresh = await env.post({ original: did, entry: (await env.edit(a, MINE)).line, resources: { [resourceDigest(MINE)]: MINE }, identities: [env.author.evidence] }, COLLAB);
+    expect(retried.status).toBe(403);
+    expect(fresh.status).toBe(403);
+    expect(await retried.json()).toEqual(await fresh.json());
+    // The grant entry's parent did not name the editor either; the revoking entry's parent did.
+    expect((await env.post({ original: did, entry: before[before.length - 2], resources: {}, identities: [] }, COLLAB)).status).toBe(403);
+    const acknowledged = await env.post({ original: did, entry: before[before.length - 1], resources: {}, identities: [] }, COLLAB);
+    expect(await acknowledged.json()).toEqual({ status: 'already-accepted', checkpoint: revoke.checkpoint, head: revoke.checkpoint });
+    expect(env.hostedLines()).toEqual(before);
   });
 
   test('an account whose landing did:webvh is granted as editor saves its own entry, and may relay the author\'s (P5.15, P5.16)', async () => {

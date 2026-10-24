@@ -566,9 +566,15 @@ namespace owner's quota (owner decision of 22 October 2026). The caller must
 be the namespace owner, or an account whose landing DID the head state names
 as the author or a granted editor (P5.15): a did:webvh on the Original's host
 whose one path segment is the account's slug. Any other caller is refused
-(`403 { error: "caller_not_authorized" }`) before its body is read, and again
-against the head the save would extend. Accepted files stay the namespace
-owner's.
+(`403 { error: "caller_not_authorized" }`) against the head the save would
+extend. A byte-identical retry is acknowledged (P6.7, C12-128) to a caller
+allowed at the matching entry's parent, named by that parent's state or
+signing the entry itself, so an editor whose grant was revoked after its entry
+was accepted still gets `already-accepted` with the checkpoint and current head
+(owner decision of 23 October 2026). A caller that no line of the hosted log
+names is refused before its body is read, and every caller refusal is the same
+403, so it shows nobody whether an entry exists. Accepted files stay the
+namespace owner's.
 Once hosted, an asset log changes only through the submit route: an upload
 (PUT) may create it or repeat it byte for byte (a retried publication, P9.2),
 never roll it back or advance it unverified; a signer's DID log and witness
