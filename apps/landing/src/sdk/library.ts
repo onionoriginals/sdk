@@ -4,6 +4,7 @@ import { DurableHostingStorageAdapter } from './durable-hosting-adapter';
 import { OriginalsSDK } from '@originals/sdk/originals';
 import { BrowserOriginalsStore } from './browser-store';
 import { indexedDbOutbox, type OutboxEntry } from './anchoring';
+import { library as libraryCopy } from '../content';
 
 export interface LibraryItem {
   did: string;
@@ -16,8 +17,41 @@ export interface LibraryItem {
 }
 export const accountOutboxName = (account?: string) => account ? `originals-anchoring-outbox:account:${account}` : 'originals-anchoring-outbox:guest';
 
-export async function listLibrary(account?: string, fundingAddress?: string): Promise<{ items: LibraryItem[]; warning?: string }> {
+export interface ListLibraryOptions {
+  /** The engine that judges a forked anchored Original against Bitcoin (P9.16); for tests. */
+  engine?: (store: BrowserOriginalsStore) => DemoEngineLike;
+  /** How long a Bitcoin read may take before the fork is treated as unchecked. Default 8 s. */
+  bitcoinTimeoutMs?: number;
+}
+/** What listLibrary needs from DemoEngine, kept structural so this module does not import the engine eagerly. */
+interface DemoEngineLike {
+  open(did: string): Promise<unknown>;
+  verifyBitcoin(): Promise<{ fork?: unknown; bitcoinOtherBranch?: boolean; bitcoinReadError?: string }>;
+}
+
+/**
+ * Where a fork in an Original with a did:btco alias stands once judged
+ * against a fresh Bitcoin read. It is settled only when Bitcoin's accepted
+ * head is on this copy's branch (P9.13, P9.16). A read that fails or does not
+ * answer in time leaves it standing, said as unchecked: never a pass (section 7).
+ */
+async function forkProblem(did: string, store: BrowserOriginalsStore, options: ListLibraryOptions): Promise<string | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const engine = options.engine?.(store) ?? new (await import('./engine')).DemoEngine({ store });
+    const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Bitcoin read timed out')), options.bitcoinTimeoutMs ?? 8_000); });
+    const judged = await Promise.race([(async () => { await engine.open(did); return engine.verifyBitcoin(); })(), deadline]);
+    if (!judged.fork) return undefined;
+    if (judged.bitcoinOtherBranch) return libraryCopy.forkOtherBranch;
+    return judged.bitcoinReadError ? `${libraryCopy.forkUnresolved} ${libraryCopy.forkUnchecked}` : libraryCopy.forkUnresolved;
+  } catch { return `${libraryCopy.forkUnresolved} ${libraryCopy.forkUnchecked}`; }
+  finally { clearTimeout(timer); }
+}
+
+export async function listLibrary(account?: string, fundingAddress?: string, options: ListLibraryOptions = {}): Promise<{ items: LibraryItem[]; warning?: string }> {
   const rows = new Map<string, LibraryItem>();
+  // Outbox imports that conflicted: the store's own fork judgement below replaces their message.
+  const conflicted = new Set<string>();
   const store = new BrowserOriginalsStore(account);
   const reader = OriginalsSDK.create({ store, authors: [] });
   const outbox = indexedDbOutbox(accountOutboxName(account));
@@ -34,15 +68,26 @@ export async function listLibrary(account?: string, fundingAddress?: string): Pr
         const loaded = await reader.load(bytes);
         if (loaded.report.original !== did) throw new Error('Evidence mismatch');
         const imported = await reader.import(bytes);
-        if (imported.status === 'conflict') rows.set(did, { did, title: imported.original.state.name, local: true, server: false, pending: true, problem: 'Conflicting history is retained. No branch was chosen.' });
-      } catch { rows.set(did, { did, title: 'Submission needing recovery', local: true, server: false, pending: true, problem: 'This pending submission has incomplete evidence. Its transaction pair has been kept.' }); }
+        if (imported.status === 'conflict') conflicted.add(did);
+        if (imported.status === 'conflict') rows.set(did, { did, title: imported.original.state.name, local: true, server: false, pending: !waiting.refused, problem: 'Conflicting history is retained. No branch was chosen.' });
+      } catch { rows.set(did, { did, title: 'Submission needing recovery', local: true, server: false, pending: !waiting.refused, problem: 'This pending submission has incomplete evidence. Its transaction pair has been kept.' }); }
     }
     for (const did of await store.list()) {
+      const waiting = await outbox.get(did);
+      // A refused pair is kept for recovery, not awaiting an answer (owner decision, 23 October 2026; P9.6).
+      const pending = !!waiting && !waiting.refused;
+      const refused = waiting?.refused ? libraryCopy.refusedPair(waiting.refused.message) : undefined;
       try {
         const view = await reader.get(did);
-        rows.set(did, { did, title: view.state.name, local: true, server: false, pending: !!(await outbox.get(did)), bitcoin: !!view.report.anchoring, problem: rows.get(did)?.problem });
+        // Divergent valid branches: no current branch, so the row is never shown as fine (P6.6, P9.16).
+        // An anchored Original's fork is judged against Bitcoin first (P9.16).
+        const anchored = view.state.aliases.some((a) => a.startsWith('did:btco:'));
+        const fork = !view.report.fork ? undefined : anchored ? await forkProblem(did, store, options) : libraryCopy.forkUnresolved;
+        const earlier = conflicted.has(did) ? undefined : rows.get(did)?.problem;
+        const problem = [fork, refused, earlier].filter(Boolean).join(' ') || undefined;
+        rows.set(did, { did, title: view.state.name, local: true, server: false, pending, bitcoin: !!view.report.anchoring, problem });
       } catch {
-        rows.set(did, { did, title: 'Original needing recovery', local: true, server: false, pending: !!(await outbox.get(did)), problem: 'Saved evidence could not be verified. Nothing has been removed.' });
+        rows.set(did, { did, title: 'Original needing recovery', local: true, server: false, pending, problem: [libraryCopy.unverifiedLocal, refused].filter(Boolean).join(' ') });
       }
     }
   } catch { warning = 'Saved work in this browser could not be read. Please retry; nothing has been removed.'; }
@@ -63,6 +108,11 @@ export async function listLibrary(account?: string, fundingAddress?: string): Pr
 export async function fetchLibraryEvidence(did: string): Promise<Uint8Array | null> {
   const response = await fetch(`/api/originals/evidence?did=${encodeURIComponent(did)}`, { credentials: 'same-origin', cache: 'no-store' });
   if (response.status === 404) return null;
+  // Two histories, neither chosen (P6.6): said as such, never shown as "nothing saved".
+  if (response.status === 409) {
+    const body = (await response.json().catch(() => ({}))) as { message?: string };
+    throw new Error(body.message ?? libraryCopy.diverged);
+  }
   if (!response.ok) throw new Error('Your saved evidence could not be reached. Retry or import your recovery export.');
   const declared = Number(response.headers.get('content-length'));
   const max = 96 * 1024 * 1024;

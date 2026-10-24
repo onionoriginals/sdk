@@ -1,4 +1,4 @@
-import { BrowserOriginalsStore } from '../sdk/browser-store';
+import { BrowserOriginalsStore, pageStore } from '../sdk/browser-store';
 import { clearAcceptanceEngine, exposeAcceptanceEngine } from '../sdk/acceptance-hook';
 import { fetchLibraryEvidence, recoverLegacySubmissions } from '../sdk/library';
 import { navigate } from '../router';
@@ -85,8 +85,7 @@ function useEngine(authed: boolean, subOrgId?: string) {
     loading.current ??= import('../sdk/engine').then(({ DemoEngine }) => {
       // Signing identity and browser storage share the same account scope.
       // Without IndexedDB the engine keeps the work in memory and says so (#976 B, G2).
-      const store = globalThis.indexedDB ? new BrowserOriginalsStore(authed ? subOrgId : undefined) : null;
-      const engine = new DemoEngine({ authed, subOrgId, ...(store ? { store, localAuthor: () => store.localAuthor() } : {}) });
+      const engine = new DemoEngine({ authed, subOrgId, ...pageStore(authed ? subOrgId : undefined) });
       engineRef.current = engine;
       // The page's own engine, for the hosted acceptance driver, on a staging
       // acceptance build only (never production). Set here, not in the
@@ -141,6 +140,8 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
   signingRef.current = signing;
   const cancelRef = useRef<AbortController | null>(null);
   const [pendingHandOff, setPendingHandOff] = useState(false);
+  // A pair the server refused: kept, shown with its reason, abandoned only on request (owner decision, 23 October 2026; P9.6).
+  const [refusedHandOff, setRefusedHandOff] = useState<{ message: string } | null>(null);
   const network = btcNetwork();
   // R5: the real Bitcoin path follows AUTH, not the build flag alone. The
   // engine derives its provider from this same value, so an enabled money
@@ -268,12 +269,14 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
           if (bytes) await engine.importEvidence(bytes, openDid);
         } catch (e) { warning = (e as Error).message; }
       }
-      const saved = await engine.open(openDid);
+      // A 409 "diverged" from the account is said even when this browser holds no copy to open (P6.6).
+      const saved = await engine.open(openDid).catch((e: Error) => { throw warning ? new Error(warning) : e; });
       if (anchoringOn && saved.btcoDid) {
         try { await engine.anchoringStatus(); } catch { warning = libraryCopy.bitcoinStatusUnavailable; }
       }
       const state = await engine.verifyBitcoin();
       const pending = await engine.pendingHandOff();
+      const refused = await engine.refusedHandOff();
       if (!live) return;
       const title = state.history.at(-1)?.name ?? 'Original';
       const uploaded = { name: state.resource.id, content: state.resource.content, contentType: state.resource.contentType };
@@ -284,6 +287,7 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
       setAsset(state);
       setPhase(state.btcoDid ? 'inscribed' : state.webvhDid ? 'published' : 'created');
       setPendingHandOff(pending);
+      setRefusedHandOff(refused);
       setError(warning);
     })().catch((e) => { if (live) setError((e as Error).message); }).finally(() => { if (live) setOpening(false); });
     return () => { live = false; };
@@ -541,8 +545,28 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
     } finally {
       cancelRef.current = null;
       setPendingHandOff(await engine.pendingHandOff().catch(() => false));
+      setRefusedHandOff(await engine.refusedHandOff().catch(() => null));
     }
   };
+
+  /** The user's explicit abandon of a refused pair; never automatic (owner decision, 23 October 2026; P9.6). */
+  const abandonRefused = () =>
+    runExclusive(runningRef, async () => {
+      if (!window.confirm(demo.anchoring.abandonConfirm)) return;
+      setError(null);
+      setUpdating(true);
+      try {
+        const engine = await getEngine();
+        await engine.abandonRefusedHandOff();
+        setRefusedHandOff(await engine.refusedHandOff());
+        setPendingHandOff(await engine.pendingHandOff());
+      } catch (err) {
+        console.error('[originals-demo]', err);
+        setError(demoFailureMessage(err));
+      } finally {
+        setUpdating(false);
+      }
+    });
 
   const inscribeNext = () =>
     runExclusive(runningRef, async () => {
@@ -741,6 +765,8 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
       <div className="container">
         <a href="/me" onClick={(e) => { e.preventDefault(); navigate('/me'); }}>{libraryCopy.title} →</a>
         <p>{libraryCopy.localNote}</p>
+        {/* On /me/<did> the library above already says it: once per page. */}
+        {!isAuthenticated && !openDid && <p data-testid="guest-key-note">{libraryCopy.guestKey}</p>}
         {opening && <p role="status">{libraryCopy.opening}</p>}
         {openDid && asset && <div className="library-verification">
           <h2>{libraryCopy.saved}</h2>
@@ -748,6 +774,11 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
           <p>{libraryCopy.history} {(asset.provenance as { history: { status: string } }).history.status} · {libraryCopy.binding} {(asset.provenance as { authorBinding: { status: string } }).authorBinding.status} · {libraryCopy.identity} {(asset.provenance as { identityEvidence: { status: string } }).identityEvidence.status} · {libraryCopy.resources} {(asset.provenance as { resources: { status: string } }).resources.status}</p>
           <p>{libraryCopy.identityLimit}</p>
           <p>{libraryCopy.savedHead} <code>{asset.history.at(-1)?.versionId}</code></p>
+          {asset.fork && <div role="alert" data-testid="fork-unresolved">
+            <p><strong>{libraryCopy.forkHead}</strong></p>
+            <p>{asset.bitcoinOtherBranch ? libraryCopy.forkOtherBranch : libraryCopy.forkNote}</p>
+            <p>{libraryCopy.forkBranches} {asset.fork.version}: {asset.fork.branches.map((b, i) => <span key={`${b.source}-${b.versionId}`}>{i > 0 && ' · '}<code>{b.versionId}</code> ({b.source})</span>)}</p>
+          </div>}
           {asset.btcoDid ? <>
             <p>{libraryCopy.bitcoin} {libraryCopy.bitcoinLabels[asset.bitcoinVerification?.anchoring?.status ?? ''] ?? libraryCopy.notChecked} · {libraryCopy.acceptedHead} <code>{(asset.bitcoinVerification?.anchoring?.status === 'anchored' ? asset.bitcoinVerification.head : null) ?? libraryCopy.notEstablished}</code></p>
             <p>{libraryCopy.currentRead} {asset.bitcoinVerification?.current ? libraryCopy.yes : libraryCopy.no}</p>
@@ -755,7 +786,7 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
             <p>{libraryCopy.bitcoinTrust}</p>
             {asset.bitcoinReadError && <p role="status">{asset.bitcoinReadError}</p>}
             <button className="btn" disabled={busy} onClick={() => { void runExclusive(runningRef, async () => { setUpdating(true); try { setAsset(await (await getEngine()).verifyBitcoin()); } finally { setUpdating(false); } }); }}>{libraryCopy.checkBitcoin}</button>
-          </> : <p>{libraryCopy.localCheckpoint}</p>}
+          </> : asset.fork ? null : <p>{libraryCopy.localCheckpoint}</p>}
           {pendingHandOff && <p>{libraryCopy.pendingNote}</p>}
         </div>}
       </div>
@@ -991,11 +1022,10 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
                               ? i === 1 ? demo.unavailable.hostedPublication : demo.unavailable.bitcoinAnchoring
                               : i === 2 ? inscribeView.description : s.description}
                           </p>
-                          {/* R7, G10: signed out, a guest key is kept in this
-                              browser with the work, unencrypted, and publishing
-                              needs sign-in (owner decision of 23 October 2026).
-                              Said HERE — in the publish step, from first paint,
-                              in every build — before anything is signed with it. */}
+                          {/* R7: signed out, publishing needs sign-in. Said
+                              HERE, in the publish step, from first paint. The
+                              guest-key warning (G10) is the one guest-key-note
+                              above, shown in every build. */}
                           {i === 1 && durabilityNote && (
                             <p className="demo-step-note">{durabilityNote}</p>
                           )}
@@ -1127,6 +1157,16 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
                 )}
 
                 {error && <p className="demo-error" role="alert">{error}</p>}
+
+                {anchoringOn && refusedHandOff && (
+                  <div className="demo-anchoring" data-testid="anchoring-refused">
+                    <strong>{demo.anchoring.refusedHeading}</strong>
+                    <p className="demo-inscribe-note">{demo.anchoring.refused(refusedHandOff.message)}</p>
+                    <button type="button" className="btn demo-step-btn" disabled={busy} onClick={() => { void abandonRefused(); }}>
+                      {demo.anchoring.abandon}
+                    </button>
+                  </div>
+                )}
 
                 {phase === 'published' && inscribeView.simulated && (
                   <p className="demo-inscribe-note demo-sim-note">{demo.simulated.note}</p>

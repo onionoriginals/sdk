@@ -11,7 +11,7 @@
  * soon as another tab upgrades the schema (`versionchange`), and an open that
  * an older tab blocks waits for it instead of failing (#976 B, G2).
  */
-import { headOf, higherVersion, refusedVersionId, staleHead, type OriginalsStore, type CommitUpdate, type StoredOriginal, type StoredPending, type StoredRefused } from '@originals/sdk/originals';
+import { MemoryStore, headOf, higherVersion, refusedVersionId, staleHead, type OriginalsStore, type CommitUpdate, type StoredOriginal, type StoredPending, type StoredRefused } from '@originals/sdk/originals';
 import type { AuthorDidEvidence, RetainedAnchor } from '@originals/vh/originals';
 import { createLocalAuthor, restoreLocalAuthor, type LocalAuthor } from './local-author';
 
@@ -114,4 +114,18 @@ export class BrowserOriginalsStore implements OriginalsStore {
       r.onsuccess = () => done(r.result.filter((k): k is string => typeof k === 'string' && k.startsWith('log:')).map((k) => k.slice(4)));
     });
   }
+}
+
+/**
+ * The store the page gives its engine (#976 B, G2): this browser's own,
+ * signed in the account's database and signed out the guest's (owner
+ * decision of 23 October 2026), with its guest author. Without IndexedDB, a
+ * MemoryStore, and the page says the work isn't kept across restarts.
+ */
+export function pageStore(account?: string, factory: IDBFactory | undefined = globalThis.indexedDB):
+  | { store: BrowserOriginalsStore; localAuthor: () => Promise<LocalAuthor>; notKeptAcrossRestarts: false }
+  | { store: MemoryStore; notKeptAcrossRestarts: true } {
+  if (!factory) return { store: new MemoryStore(), notKeptAcrossRestarts: true };
+  const store = new BrowserOriginalsStore(account, factory);
+  return { store, localAuthor: () => store.localAuthor(), notKeptAcrossRestarts: false };
 }

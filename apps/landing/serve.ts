@@ -233,7 +233,7 @@ function buildApiRoutes(): {
     );
   }
   // Writes only under this instance's own did:webvh hosts (#976 B, G1; P3.6).
-  const originals = createOriginalsRoutes({ jwtSecret, store: originalsStore, library: createAnchoringLibrary(originalsDataDir, originalsStore), hosts: servedWebvhHosts(canonicalWebvhHost()) });
+  const originals = createOriginalsRoutes({ jwtSecret, store: originalsStore, library: createAnchoringLibrary(originalsDataDir, originalsStore, anchoring ? { bitcoin: anchoring.bitcoinEvidence } : {}), hosts: servedWebvhHosts(canonicalWebvhHost()) });
   return {
     routes: buildRoutes({ turnkey, sessions: createInMemorySessionStorage(), jwtSecret, bitcoin, originals }),
     originals,
