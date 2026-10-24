@@ -32,6 +32,7 @@ import {
   completionCopy,
   resolvedCopy,
   publishDurabilityNote,
+  publishStepLock,
   inscribeCostNote,
   selectFundingUtxos,
   depositDisclosure,
@@ -147,7 +148,7 @@ export function Demo() {
   // cannot drift apart (KTD9).
   const done = completionCopy(inscribeView.simulated, network);
   const resolved = resolvedCopy(isAuthenticated);
-  const durabilityNote = publishDurabilityNote(isAuthenticated);
+  const durabilityNote = publishDurabilityNote(isAuthenticated, featureEnabled('hostedPublication'));
   const costNote = inscribeCostNote(real);
   const [title, setTitle] = useState(demo.form.defaultTitle);
   const [style, setStyle] = useState<string>(getArtSeed().style);
@@ -880,9 +881,12 @@ export function Demo() {
                 <ol className="demo-steps">
                   {demo.steps.map((s, i) => {
                     // Publishing and anchoring wait on later phases (features.ts).
-                    const unavailable = (i === 1 && !featureEnabled('hostedPublication')) || (i === 2 && !featureEnabled('bitcoinAnchoring'));
+                    // Publishing also needs sign-in, in every build (#976 B5).
+                    const publishLock = i === 1 ? publishStepLock({ hostedPublication: featureEnabled('hostedPublication'), authenticated: isAuthenticated }) : null;
+                    const unavailable = publishLock === 'unavailable' || (i === 2 && !featureEnabled('bitcoinAnchoring'));
+                    const locked = unavailable || publishLock === 'signed-out';
                     const state =
-                      unavailable
+                      locked
                         ? 'locked'
                         : step > i
                           ? 'done'
@@ -914,10 +918,10 @@ export function Demo() {
                               <span className="dot" />
                               {s.label}
                             </span>
-                            {unavailable && (
+                            {locked && (
                               <span className="demo-sim-badge">
                                 <span className="dot" aria-hidden="true" />
-                                {demo.unavailable.badge}
+                                {unavailable ? demo.unavailable.badge : demo.unavailable.signedOutBadge}
                               </span>
                             )}
                             {!unavailable && i === 2 && inscribeView.simulated && (
@@ -934,14 +938,15 @@ export function Demo() {
                               ? i === 1 ? demo.unavailable.hostedPublication : demo.unavailable.bitcoinAnchoring
                               : i === 2 ? inscribeView.description : s.description}
                           </p>
-                          {/* R7: an anonymous publish is temporary and shares a
-                              demo path. Said HERE — in the publish step, from
-                              first paint — because after the log exists is too
-                              late to decide to sign in first. */}
-                          {i === 1 && !unavailable && durabilityNote && (
+                          {/* R7, G10: signed out, the key is made in this page
+                              and discarded with it, and publishing needs
+                              sign-in. Said HERE — in the publish step, from
+                              first paint, in every build — because once the
+                              page is gone it is too late to sign in first. */}
+                          {i === 1 && durabilityNote && (
                             <p className="demo-step-note">{durabilityNote}</p>
                           )}
-                          {state !== 'done' && !unavailable && (
+                          {state !== 'done' && !locked && (
                             // Step 3 in the simulated tier runs the SDK's mock
                             // provider for real — completable, not disabled —
                             // so its "this is not Bitcoin" signal is the
@@ -956,6 +961,7 @@ export function Demo() {
                                 pendingRevision,
                                 updating,
                                 anyRunning: busy,
+                                authenticated: isAuthenticated,
                               })}
                               data-busy={state === 'busy' || undefined}
                               onClick={stepActions[i]}
@@ -987,6 +993,11 @@ export function Demo() {
                   })}
                 </ol>
 
+                {/* #976 B, G2: signed in without IndexedDB, the work is in
+                    memory only. Said, never failed silently. */}
+                {asset?.notKeptAcrossRestarts && (
+                  <p className="demo-step-note" role="status">{demo.storage.notKeptAcrossRestarts}</p>
+                )}
                 {asset && (
                   <div className="demo-evidence">
                     <button

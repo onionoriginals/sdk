@@ -74,9 +74,11 @@ export interface DemoAssetState {
   layer: LayerId;
   did: string;
   /**
-   * The web publication (#976 B4): `incomplete` once an alias is built or
-   * listed but a stranger has not yet verified the hosted snapshot; `complete`
-   * only after one has. `layer` is `did:webvh` only when complete.
+   * The web publication (#976 B4): `incomplete` once an entry lists a
+   * did:webvh alias but a stranger has not yet verified the hosted snapshot;
+   * `complete` only after one has. An alias built for a publish whose entry
+   * was never signed is not listed, so it is `none`, and `webvhDid` is unset.
+   * `layer` is `did:webvh` only when complete.
    */
   publication: "none" | "incomplete" | "complete";
   webvhDid?: string;
@@ -125,6 +127,8 @@ export interface DemoAssetState {
   };
   /** The verification report of the current checkpoint. */
   provenance: unknown;
+  /** Signed in, but this browser has no IndexedDB, so the work is in memory only (#976 B, G2). */
+  notKeptAcrossRestarts?: true;
 }
 
 export interface AssetSource {
@@ -303,15 +307,28 @@ export class DemoEngine {
     this.authorEvidence.set(evidence);
   }
 
-  /** This engine's store: the account's durable one when signed in and the browser has IndexedDB. */
+  /**
+   * This engine's store: the account's durable one when signed in and the
+   * browser has IndexedDB. Signed in without IndexedDB, a MemoryStore, and the
+   * snapshot says the work isn't kept across restarts rather than failing
+   * silently. A failed open isn't cached, so the next action tries again.
+   */
   private openStore(): Promise<OriginalsStore> {
-    this.storeOpening ??= (
-      this.openStoreWith
-        ? this.openStoreWith()
-        : this.authed && this.subOrgId && globalThis.indexedDB
-          ? IndexedDbStore.open(this.subOrgId)
-          : Promise.resolve(new MemoryStore())
-    ).then((store) => (this.store = store));
+    if (this.storeOpening) return this.storeOpening;
+    const durable = this.authed && !!this.subOrgId;
+    const opening = this.openStoreWith
+      ? this.openStoreWith()
+      : durable && globalThis.indexedDB
+        ? IndexedDbStore.open(this.subOrgId!)
+        : Promise.resolve(new MemoryStore());
+    this.notKeptAcrossRestarts = !this.openStoreWith && durable && !globalThis.indexedDB;
+    this.storeOpening = opening.then(
+      (store) => (this.store = store),
+      (error: unknown) => {
+        this.storeOpening = null;
+        throw error;
+      },
+    );
     return this.storeOpening;
   }
 
@@ -324,6 +341,9 @@ export class DemoEngine {
     this.publication = record;
     await this.records().putPublication(this.did!, record);
   }
+
+  /** Signed in, but the work is in memory only: this browser has no IndexedDB. */
+  private notKeptAcrossRestarts = false;
 
   /** The author this engine signs as, set up once per engine. */
   private async author(): Promise<Authoring> {
@@ -533,10 +553,21 @@ export class DemoEngine {
     return this.features.hostedPublication && this.publicationState() === "complete" && !!this.alias && !!this.view?.state.aliases.includes(this.alias.did);
   }
 
+  /** The did:webvh alias the Original's state lists, if any (P3.6). Bitcoin aliases are terminal anchoring state, not web publication (P9.10). */
+  private listedWebvhAlias(): string | undefined {
+    return this.view?.state.aliases.find((did) => did.startsWith("did:webvh:"));
+  }
+
+  /**
+   * Published only once an entry lists a did:webvh alias. Listed, it is
+   * complete when a stranger verified the snapshot, and incomplete until
+   * then. A `started` record with no entry listing its alias published
+   * nothing (a cancelled signature, P9.2): it is kept only so the next
+   * publish reuses the alias, and the Original stays editable.
+   */
   private publicationState(): DemoAssetState["publication"] {
-    if (this.publication?.state === "complete") return "complete";
-    // Bitcoin aliases are terminal anchoring state, not unfinished web publication (P9.10).
-    return this.publication || this.view?.state.aliases.some((did) => did.startsWith("did:webvh:")) ? "incomplete" : "none";
+    if (!this.listedWebvhAlias()) return "none";
+    return this.publication?.state === "complete" ? "complete" : "incomplete";
   }
 
   /**
@@ -672,13 +703,44 @@ export class DemoEngine {
     this.alias = result.alias;
     await this.recordPublication({ alias: result.alias, state: "uploaded" });
     this.view = await this.sdk.get(this.did);
-    await this.verifyPublished(result.alias.did, target.read ?? publicRead);
+    await this.readBack(result.alias.did, target.read ?? publicRead);
     // Listed for the author's other clients (G3); the index is a list, never evidence.
     if (typeof target.upload.recordOriginal === "function") {
       await target.upload.recordOriginal({ did: this.did, title: this.view.state.name, resourceHash: hexOfDigest(this.view.state.resources[0].digest), alias: result.alias.did });
     }
     await this.recordPublication({ alias: result.alias, state: "complete" });
     return { alias: result.alias.did, baseUrl: result.baseUrl };
+  }
+
+  /**
+   * The G5 read-back, for a client that may be behind the host. Another
+   * client may have saved on the host since this one's entry (P6.7), so the
+   * host serves a later head. That head is synced to, and the read-back
+   * repeated at it, only when the SDK verified it as extending this client's
+   * history (`imported`). A host that diverges is a fork: kept as a branch,
+   * reported, never accepted (P2.1, P4.5, P6.6).
+   */
+  private async readBack(aliasDid: string, read: HostedFetch): Promise<void> {
+    try {
+      await this.verifyPublished(aliasDid, read);
+      return;
+    } catch (error) {
+      if (!(error instanceof PublicationNotVerifiedError)) throw error;
+      let synced: Awaited<ReturnType<OriginalsSDK["sync"]>>;
+      try {
+        synced = await this.sdk!.sync(this.did!, this.sharedHost());
+      } catch {
+        throw error;
+      }
+      if (synced.status === "conflict") {
+        throw new PublicationNotVerifiedError([...error.reasons, "the host's history diverges from this copy; it is kept as a branch, and no branch is chosen (P6.6)"]);
+      }
+      if (synced.status !== "imported") throw error;
+      this.view = synced.original;
+      await this.refresh();
+      this.emit("asset:synced", `The host's version ${short(this.view.checkpoint)} (${synced.status})`, { checkpoint: this.view.checkpoint });
+      await this.verifyPublished(aliasDid, read);
+    }
   }
 
   /**
@@ -877,7 +939,8 @@ export class DemoEngine {
     const meta = rest.find((r) => r.id === "metadata.json");
     const versionOf = (id: string) => view.resources.filter((r) => r.resource === id).length;
     const bytesOf = (digest: string) => this.bytes.get(digest) ?? new Uint8Array();
-    const alias = state.aliases.find((a) => a.startsWith("did:webvh:")) ?? this.publication?.alias.did;
+    // Only a listed alias: a `started` one published nothing, and its URL would 404 (P9.2).
+    const alias = this.listedWebvhAlias();
     const btco = state.aliases.find((a) => a.startsWith("did:btco:"));
     const publication = this.publicationState();
     return {
@@ -899,6 +962,7 @@ export class DemoEngine {
       credentials: 0,
       history: this.history(),
       provenance: view.report,
+      ...(this.notKeptAcrossRestarts ? { notKeptAcrossRestarts: true as const } : {}),
     };
   }
 
