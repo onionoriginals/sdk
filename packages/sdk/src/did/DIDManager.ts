@@ -1,10 +1,7 @@
 import { DIDDocument, OriginalsConfig, KeyPair, ExternalSigner, ExternalVerifier } from '../types/index.js';
 import { getBitcoinNetworkForWebVH } from '../types/network.js';
 import { BtcoDidResolver } from './BtcoDidResolver.js';
-import { OrdinalsClient } from '../bitcoin/OrdinalsClient.js';
 import { createBtcoDidDocument } from './createBtcoDidDocument.js';
-import { OrdinalsClientProviderAdapter } from './providers/OrdinalsClientProviderAdapter.js';
-import { OrdinalsProviderResolverAdapter } from './providers/OrdinalsProviderResolverAdapter.js';
 import { StructuredError } from '../utils/telemetry.js';
 import { multikey } from '../crypto/Multikey.js';
 import { WebVHManager } from './WebVHManager.js';
@@ -112,6 +109,11 @@ export function requireWebVHDomain(domain: string | undefined): string {
     );
   }
   return canonicalizeWebVHDomain(domain, { identity: true });
+}
+
+/** Methods whose documents can change without this instance's knowledge, so `mode: 'current'` reads them again. */
+function changesElsewhere(did: string): boolean {
+  return did.startsWith('did:webvh:') || did.startsWith('did:btco:');
 }
 
 export class DIDManager {
@@ -338,13 +340,14 @@ export class DIDManager {
   /**
    * Cross-network did:btco guard (issue #267). The configured ordinalsProvider
    * is pinned to one Bitcoin network, so a DID whose encoded network differs
-   * must be rejected — otherwise an attacker can inscribe "did:btco:reg:N"
-   * content on mainnet sat N and have it resolve as the regtest DID. This runs
+   * must be rejected — otherwise an attacker can inscribe a "did:btco:reg:N"
+   * document on mainnet sat N and have it resolve as the regtest DID. This runs
    * BEFORE the cache lookup: DIDCache supports a pluggable persistent storage
-   * adapter that may be shared between SDK instances on different networks (or
-   * populated via the bitcoinRpcUrl branch, which deliberately resolves any
-   * network), so a cached cross-network document must not bypass the guard
-   * (issue #312). It is a prefix parse of the DID string — no provider query.
+   * adapter that may be shared between SDK instances on different networks, so
+   * a cached cross-network document must not bypass the guard (issue #312). It
+   * is a prefix parse of the DID string — no provider query. Where the SDK's
+   * network is unknown, the resolver compares the DID with the sat read's own
+   * network, and a mismatch there fails the same way.
    */
   private assertBtcoNetworkMatchesProvider(did: string): void {
     if (!did.startsWith('did:btco:') || !this.config.ordinalsProvider) return;
@@ -403,13 +406,13 @@ export class DIDManager {
     }
 
     // `mode: 'current'` only actually makes `resolveDID` bypass its cache for
-    // did:webvh (the one method whose cache entry can go stale behind this
-    // instance's back — see the `requiresFreshResolution` gate above). For
-    // every other method, `resolveDID` may still legitimately serve a cached
-    // document even when 'current' was requested, so this must check the
-    // cache itself rather than assume a network read happened — otherwise a
-    // genuine cache hit gets mislabeled `source: 'network', fresh: true`.
-    const bypassesCache = options?.mode === 'current' && did.startsWith('did:webvh:');
+    // did:webvh and did:btco (the methods whose cache entry can go stale
+    // behind this instance's back — see `changesElsewhere`). For every other
+    // method, `resolveDID` may still legitimately serve a cached document even
+    // when 'current' was requested, so this must check the cache itself rather
+    // than assume a network read happened — otherwise a genuine cache hit gets
+    // mislabeled `source: 'network', fresh: true`.
+    const bypassesCache = options?.mode === 'current' && changesElsewhere(did);
 
     if (!bypassesCache) {
       const cached = await this.cache.getWithMetadata(did);
@@ -457,14 +460,15 @@ export class DIDManager {
 
       // Check cache first (unless skipCache is set, or the caller requested
       // `mode: 'current'` for a mutable method). did:webvh authority can be
-      // rotated/recovered by another process/host at any time; a verifier
+      // rotated/recovered by another process/host at any time, and a did:btco
+      // by whoever holds its sat inscribing a new version; a verifier
       // deciding whether a key is PRESENTLY authorized must not accept a
       // cached (however recent, and even pinned) pre-rotation document as
       // current-authority evidence — that cache can only be invalidated by
       // this same DIDManager instance's own mutations (issue #602). Other
       // methods are unaffected: did:key never populates this cache at all
       // (it is synthesized locally by DocumentLoader).
-      const requiresFreshResolution = options?.mode === 'current' && did.startsWith('did:webvh:');
+      const requiresFreshResolution = options?.mode === 'current' && changesElsewhere(did);
       if (!options?.skipCache && !requiresFreshResolution) {
         let cached: DIDDocument | null = null;
         try {
@@ -486,57 +490,25 @@ export class DIDManager {
         // did:peer is not a supported method; it falls through to the
         // unsupported-method null below like any other unknown method.
         if (did.startsWith('did:btco:')) {
-          if (this.config.ordinalsProvider) {
-            // Cross-network guard already enforced pre-cache by
-            // assertBtcoNetworkMatchesProvider (issues #267/#312).
-            //
-            // The configured ordinalsProvider is the source of truth for
-            // Bitcoin state (it performed the inscriptions), so resolution
-            // must go through it — not through a freshly constructed HTTP
-            // client pointed at some unrelated endpoint.
-            const adapter = new OrdinalsProviderResolverAdapter(this.config.ordinalsProvider);
-            const resolver = new BtcoDidResolver({ provider: adapter, fetchFn: adapter.fetchContent });
-            const resolved = await resolver.resolve(did);
-            result = resolved.didDocument || null;
-          } else if (this.config.bitcoinRpcUrl) {
-            const rpcUrl = this.config.bitcoinRpcUrl;
-            // The network is encoded in the DID itself (did:btco:reg:/did:btco:sig:,
-            // unprefixed = mainnet), so resolution must follow the DID, not the
-            // SDK-wide config — a signet DID handed to a mainnet-configured SDK
-            // must still be treated as a signet identifier.
-            const btcoPrefix = did.match(/^did:btco:(reg|sig|test):/)?.[1];
-            const network: 'mainnet' | 'testnet' | 'regtest' | 'signet' =
-              btcoPrefix === 'reg' ? 'regtest'
-              : btcoPrefix === 'sig' ? 'signet'
-              // The DID's own prefix determines the network, independent of SDK
-              // config — consistent with reg/sig. OrdinalsClient has no testnet
-              // variant, so the call below coerces testnet→signet (shared tb1
-              // params); BtcoDidResolver still validates the testnet prefix.
-              : btcoPrefix === 'test' ? 'testnet'
-              : 'mainnet';
-            // OrdinalsClient has no testnet variant; testnet4 shares signet's
-            // address params, so use signet for this RPC path (QuickNode is the
-            // real testnet provider — see QuickNodeProvider).
-            const client = new OrdinalsClient(rpcUrl, network === 'testnet' ? 'signet' : network);
-            const adapter = new OrdinalsClientProviderAdapter(client, rpcUrl);
-            // fetchContent pins content retrieval to the rpcUrl origin and
-            // refuses redirects. Without it the resolver would fetch whatever
-            // content_url the (untrusted) ord server returned via global
-            // fetch — any scheme/host, redirects followed (SSRF).
-            const resolver = new BtcoDidResolver({ provider: adapter, fetchFn: adapter.fetchContent });
-            const resolved = await resolver.resolve(did);
-            result = resolved.didDocument || null;
-          } else {
-            // No provider and no explicit RPC URL: fail loudly. Silently
-            // defaulting to http://localhost:3000 either fails far from the
-            // cause or — worse — trusts whatever unrelated service happens to
-            // listen there as the source of DID documents.
+          // Cross-network guard already enforced pre-cache by
+          // assertBtcoNetworkMatchesProvider (issues #267/#312). A did:btco is
+          // read as one complete sat snapshot, with its DID document in the
+          // inscription metadata (did:btco method v0.2.0; plan 011 PR 9c). A
+          // provider that cannot take one cannot resolve did:btco.
+          const provider = this.config.ordinalsProvider;
+          if (!provider?.getSatSnapshot) {
             throw new StructuredError(
               'ORD_PROVIDER_REQUIRED',
-              'Resolving did:btco requires an ordinalsProvider (or an explicit bitcoinRpcUrl) to be configured. ' +
-              'Provide an ordinalsProvider when creating the SDK. See README.md for configuration examples.'
+              'Resolving did:btco requires an ordinalsProvider that reads complete sat snapshots (getSatSnapshot), ' +
+              'such as RegtestProvider or QuickNodeProvider. See README.md for configuration examples.'
             );
           }
+          const resolver = new BtcoDidResolver({ satSnapshot: (sat) => provider.getSatSnapshot!(sat) });
+          const resolved = await resolver.resolve(did);
+          if (resolved.resolutionMetadata.error === 'networkMismatch') {
+            throw new StructuredError('BTCO_NETWORK_MISMATCH', `Cannot resolve ${did}: ${resolved.resolutionMetadata.message ?? 'the provider reads another network'}`);
+          }
+          result = resolved.didDocument || null;
         } else if (did.startsWith('did:webvh:')) {
           try {
             const mod = await import('didwebvh-ts') as {

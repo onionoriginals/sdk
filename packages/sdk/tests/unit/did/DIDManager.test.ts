@@ -197,7 +197,7 @@ import { BtcoDidResolver } from '../../../src/did/BtcoDidResolver';
 
 describe('DIDManager.resolveDID catch path', () => {
   test('returns null when resolver throws', async () => {
-    const sdk = createManagers({ keyStore: new MockKeyStore(), bitcoinRpcUrl: 'http://localhost:3000', network: 'mainnet' });
+    const sdk = createManagers({ keyStore: new MockKeyStore(), ordinalsProvider: { getSatSnapshot: () => Promise.reject(new Error('unused')) } as any, network: 'mainnet' });
     const spy = spyOn(BtcoDidResolver.prototype as any, 'resolve');
     spy.mockImplementationOnce(async () => { throw new Error('resolver failed'); });
     const res = await sdk.did.resolveDID('did:btco:123');
@@ -231,8 +231,9 @@ describe('DIDManager.resolveDID did:btco provider selection (issue #266)', () =>
         'insc-1',
         {
           inscriptionId: 'insc-1',
-          content: Buffer.from(JSON.stringify(didDoc), 'utf8'),
-          contentType: 'application/json',
+          content: new TextEncoder().encode(didDoc.id),
+          contentType: 'text/plain',
+          metadata: didDoc,
           txid: 'tx-1',
           vout: 0,
           satoshi: '123'
@@ -251,6 +252,42 @@ describe('DIDManager.resolveDID did:btco provider selection (issue #266)', () =>
     expect(res?.id).toBe('did:btco:123');
   });
 
+  test('mode: current reads a did:btco again: its sat can carry a newer version', async () => {
+    const { OrdMockProvider } = await import('../../../src/adapters/providers/OrdMockProvider');
+    const provider = new OrdMockProvider({
+      inscriptionsById: new Map([['insc-3', {
+        inscriptionId: 'insc-3', content: new TextEncoder().encode('did:btco:789'), contentType: 'text/plain',
+        metadata: { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:789' }, txid: 'tx-3', vout: 0, satoshi: '789',
+      }]]),
+      inscriptionsBySatoshi: new Map([['789', ['insc-3']]]),
+    });
+    let reads = 0;
+    const read = provider.getSatSnapshot.bind(provider);
+    provider.getSatSnapshot = (sat: string) => (reads++, read(sat));
+    const dm = new DIDManager({ network: 'mainnet', defaultKeyType: 'ES256K', ordinalsProvider: provider } as any);
+    await dm.resolveDID('did:btco:789');
+    await dm.resolveDID('did:btco:789');
+    expect(reads).toBe(1);
+    await dm.resolveDID('did:btco:789', { mode: 'current' });
+    expect(reads).toBe(2);
+    const fresh = await dm.resolveDIDWithFreshness('did:btco:789', { mode: 'current' });
+    expect(fresh.didResolutionMetadata.source).toBe('network');
+    expect(reads).toBe(3);
+  });
+
+  test('a did:btco whose network the provider does not read fails loudly with BTCO_NETWORK_MISMATCH', async () => {
+    const { OrdMockProvider } = await import('../../../src/adapters/providers/OrdMockProvider');
+    const provider = new OrdMockProvider({ inscriptionsById: new Map(), inscriptionsBySatoshi: new Map() });
+    const dm = new DIDManager({ network: 'mainnet', defaultKeyType: 'ES256K', ordinalsProvider: provider } as any);
+    // did:btco:test passes the prefix guard (no testnet config); the read's network decides.
+    await expect(dm.resolveDID('did:btco:test:789', { skipCache: true })).rejects.toMatchObject({ code: 'BTCO_NETWORK_MISMATCH' });
+  });
+
+  test('a bitcoinRpcUrl alone cannot resolve did:btco: it needs a sat snapshot (plan 011 PR 9c)', async () => {
+    const dm = new DIDManager({ network: 'mainnet', defaultKeyType: 'ES256K', bitcoinRpcUrl: 'http://unreachable.invalid:9999' } as any);
+    await expect(dm.resolveDID('did:btco:456', { skipCache: true })).rejects.toThrow(/getSatSnapshot/);
+  });
+
   test('ordinalsProvider takes precedence over bitcoinRpcUrl', async () => {
     const { OrdMockProvider } = await import('../../../src/adapters/providers/OrdMockProvider');
     const provider = new OrdMockProvider({
@@ -258,8 +295,9 @@ describe('DIDManager.resolveDID did:btco provider selection (issue #266)', () =>
         'insc-2',
         {
           inscriptionId: 'insc-2',
-          content: Buffer.from(JSON.stringify({ '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:456' }), 'utf8'),
-          contentType: 'application/json',
+          content: new TextEncoder().encode('did:btco:456'),
+          contentType: 'text/plain',
+          metadata: { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:456' },
           txid: 'tx-2',
           vout: 0,
           satoshi: '456'
@@ -289,18 +327,18 @@ describe('DIDManager.resolveDID did:btco provider selection (issue #266)', () =>
 
 describe('DIDManager.resolveDID covers btco method variants', () => {
   test('resolves did:btco:test:* via resolver', async () => {
-    const sdk = createManagers({ keyStore: new MockKeyStore(), bitcoinRpcUrl: 'http://x', network: 'mainnet' });
+    const sdk = createManagers({ keyStore: new MockKeyStore(), ordinalsProvider: { getSatSnapshot: () => Promise.reject(new Error('unused')) } as any });
     const spy = spyOn(BtcoDidResolver.prototype as any, 'resolve');
-    spy.mockResolvedValueOnce({ didDocument: { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:test:1' } });
+    spy.mockResolvedValueOnce({ didDocument: { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:test:1' }, resolutionMetadata: {}, didDocumentMetadata: {} });
     const res = await sdk.did.resolveDID('did:btco:test:1');
     expect(res?.id).toBe('did:btco:test:1');
     spy.mockRestore();
   });
 
   test('resolves did:btco:sig:* via resolver', async () => {
-    const sdk = createManagers({ keyStore: new MockKeyStore(), bitcoinRpcUrl: 'http://x', network: 'mainnet' });
+    const sdk = createManagers({ keyStore: new MockKeyStore(), ordinalsProvider: { getSatSnapshot: () => Promise.reject(new Error('unused')) } as any, network: 'signet' });
     const spy = spyOn(BtcoDidResolver.prototype as any, 'resolve');
-    spy.mockResolvedValueOnce({ didDocument: { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:sig:2' } });
+    spy.mockResolvedValueOnce({ didDocument: { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:btco:sig:2' }, resolutionMetadata: {}, didDocumentMetadata: {} });
     const res = await sdk.did.resolveDID('did:btco:sig:2');
     expect(res?.id).toBe('did:btco:sig:2');
     spy.mockRestore();
