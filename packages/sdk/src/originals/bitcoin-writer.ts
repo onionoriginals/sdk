@@ -8,8 +8,7 @@
  *   the anchoring pair is observed on the network (confirmed, or in the
  *   node's mempool) but Bitcoin does not show it, reads are labelled
  *   `pending-bitcoin-acceptance` (P9.18); submitted but not observed, they
- *   are `submitted-unobserved` (PROVISIONAL: stricter than P9.18's single
- *   pending label, see the spec question in ORIGINALS.md);
+ *   are `submitted-unobserved` (P9.18 as originals-spec #51, merged);
  * - the accepted head: the last entry Bitcoin shows on the anchoring sat
  *   under the 1-confirmation policy (decision D), read by `readAnchored`.
  *
@@ -18,7 +17,7 @@
  * anchoring entry last; every later inscription carries exactly one entry,
  * the successor of the head Bitcoin accepts. Media type
  * `application/vnd.originals.vh+jsonl`, no metadata, at most 350,000 bytes
- * (`ORIGINALS_INSCRIPTION_MAX_BYTES`; P14.12, decided, D6; spec PR #50 (open)). Entries committed after
+ * (`ORIGINALS_INSCRIPTION_MAX_BYTES`; P14.12, decided, D6; originals-spec #50, merged). Entries committed after
  * the anchoring entry before the anchor is accepted wait, and then go one per
  * later block.
  *
@@ -182,10 +181,9 @@ export type Publication =
    * A recorded anchoring pair was submitted, but neither its commit nor its
    * reveal is observed: the node rejected or evicted it, or the provider
    * cannot see its mempool. Not pending acceptance: nothing shows Bitcoin has
-   * it. `catchUp` says whether to resume the same pair (P9.6). PROVISIONAL:
-   * P9.18 names one label, pending Bitcoin acceptance, until confirmation;
-   * this splits off the case where nothing shows the network has the pair
-   * (a spec question, see ORIGINALS.md).
+   * it. `catchUp` says whether to resume the same pair (P9.6). P9.18
+   * (originals-spec #51, merged) names this label apart from pending Bitcoin
+   * acceptance, so a rejected or evicted anchor is not reported as on its way.
    */
   | "submitted-unobserved"
   /** No anchor on Bitcoin and none known in flight. */
@@ -562,7 +560,14 @@ export type CatchUpStep =
    * through `signerVersionId` and catch up again. Nothing is prepared over it,
    * since it may be accepted once that evidence is held (P9.6).
    */
-  | { action: "wait-for-evidence"; versionId: string; recoveryId: string; inscriptionId: string; signer: string; signerVersionId: string; pending: PendingEntries }
+  /**
+   * Also when the pair waits on an earlier inscription extending the same
+   * head that the writer cannot verify (`waiting-for-earlier-unverifiable`):
+   * `waitingOn` names it, and `signer`/`signerVersionId` are what that one
+   * needs. Chain order decides between them once it is verified (P9.15;
+   * originals-spec #51, merged).
+   */
+  | { action: "wait-for-evidence"; versionId: string; recoveryId: string; inscriptionId: string; signer: string; signerVersionId: string; waitingOn?: string; pending: PendingEntries }
   /**
    * The indexes disagree on what the sat holds (anchoring `unverified` or
    * `disputed` inscriptions, P9.10) or on which output holds it (`holders`,
@@ -619,6 +624,8 @@ interface Candidate {
   reveal: Seen;
   /** For a confirmed pair the read cannot verify yet: the signer DID version it lacks. */
   unverifiable?: { signer: string; signerVersionId: string };
+  /** The earlier unverifiable inscription this one waits on, if any (P9.15). */
+  waitingOn?: string;
 }
 
 /** What the recovery store holds for the next inscription. */
@@ -646,7 +653,7 @@ async function recoveryIdsOf(store: InscriptionRecoveryStore, given?: Iterable<s
  * (`later-inscription-unverifiable`: the reader lacks that evidence, P9.12,
  * P9.15, P5.6). Catch-up waits on these and never prepares a replacement.
  */
-const NOT_SETTLED = new Set(["unconfirmed", "placement-disputed", "after-disputed-placement", "later-inscription-unverifiable"]);
+const NOT_SETTLED = new Set(["unconfirmed", "placement-disputed", "after-disputed-placement", "later-inscription-unverifiable", "waiting-for-earlier-unverifiable"]);
 
 /** Ordering of live pairs: the one furthest along on the network first, then by recovery id. */
 const PROGRESS: Record<InscriptionRecoveryRecord["broadcast"], number> = {
@@ -684,6 +691,7 @@ async function loadRecord(store: InscriptionRecoveryStore, id: string): Promise<
 async function recorded(log: StoredLog, view: OriginalView, holding: string | undefined, content: Uint8Array, provider: ReadAnchoredOptions["provider"], store: InscriptionRecoveryStore, ids: string[]): Promise<Recorded> {
   const ignored = new Set((view.report.anchoring?.ignored ?? []).filter((i) => !NOT_SETTLED.has(i.reason)).map((i) => i.inscription));
   const unverifiable = new Map((view.report.anchoring?.unverifiable ?? []).map((u) => [u.inscription, { signer: u.signer, signerVersionId: u.signerVersionId }]));
+  const waiting = new Map((view.report.anchoring?.ignored ?? []).flatMap((i) => (i.reason === "waiting-for-earlier-unverifiable" && i.waitingOn ? [[i.inscription, i.waitingOn] as const] : [])));
   const found: Recorded = { indexed: [], live: [], inFlight: [], replaces: [], issues: [] };
   for (const id of ids) {
     const loaded = await loadRecord(store, id);
@@ -702,8 +710,9 @@ async function recorded(log: StoredLog, view: OriginalView, holding: string | un
       // Confirmed: Bitcoin either ignored it for good (a replacement is needed) or has not placed it yet.
       if (ignored.has(prepared.inscriptionId)) found.replaces.push(prepared.inscriptionId);
       else {
-        const missing = unverifiable.get(prepared.inscriptionId);
-        found.indexed.push({ record, commit: "confirmed", reveal, ...(missing ? { unverifiable: missing } : {}) });
+        const waitingOn = waiting.get(prepared.inscriptionId);
+        const missing = unverifiable.get(prepared.inscriptionId) ?? (waitingOn ? unverifiable.get(waitingOn) : undefined);
+        found.indexed.push({ record, commit: "confirmed", reveal, ...(missing ? { unverifiable: missing } : {}), ...(waitingOn ? { waitingOn } : {}) });
       }
       continue;
     }
@@ -797,7 +806,8 @@ export async function catchUp(params: CatchUpParams): Promise<CatchUpStep> {
   const [indexed] = found.indexed;
   if (indexed?.unverifiable) {
     const { signer, signerVersionId } = indexed.unverifiable;
-    return { action: "wait-for-evidence", versionId, recoveryId: indexed.record.recoveryId, inscriptionId: indexed.record.prepared.inscriptionId, signer, signerVersionId, pending };
+    const waitingOn = indexed.waitingOn ? { waitingOn: indexed.waitingOn } : {};
+    return { action: "wait-for-evidence", versionId, recoveryId: indexed.record.recoveryId, inscriptionId: indexed.record.prepared.inscriptionId, signer, signerVersionId, ...waitingOn, pending };
   }
   if (indexed) {
     return { action: "wait-for-confirmation", versionId, recoveryId: indexed.record.recoveryId, inscriptionId: indexed.record.prepared.inscriptionId, reason: "not-indexed", pending };

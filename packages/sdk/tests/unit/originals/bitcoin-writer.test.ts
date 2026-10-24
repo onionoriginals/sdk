@@ -410,6 +410,41 @@ describe("a confirmed inscription whose signer evidence the writer lacks is not 
   });
 });
 
+describe("C12-181, C12-188: the writer's inscription waiting on an earlier unverifiable one is not settled (P9.15; waiting-for-earlier-unverifiable)", () => {
+  test("catch-up waits for the evidence of the inscription it waits on, and prepares nothing over it", async () => {
+    const { alice, bob, store, sdk, did, asAlice, anchored, lines } = await edited();
+    // Elsewhere, Bob rotates and signs an edit on the anchored head naming his version 2.
+    await bob.rotate([{ fragment: "edit", secret: seed(31) }]);
+    const elsewhere = new MemoryStore();
+    await elsewhere.commit(did, { expectedHead: null, log: (await store.get(did))!.log });
+    const other = OriginalsSDK.create({ store: elsewhere, authors: async (d) => (d === alice.did ? alice.evidence() : d === bob.did ? bob.evidence() : undefined), freshness: "asserted", clock: clock() });
+    await other.edit(did, { parent: anchored, resources: [{ id: "photo", bytes: bytes("bob's") }], editor: bob.ref("edit"), signer: bob.signer("edit", seed(31)) });
+    const bobsLine = new TextDecoder().decode(readZip((await other.package(did)).bytes).get("asset/did.jsonl")!).trimEnd().split("\n")[3];
+    // Here, Alice edits the same head; the writer inscribes her entry.
+    await sdk.edit(did, { parent: anchored, name: "Harbor, renamed", ...asAlice });
+    const all = await lines();
+    const r = recovery();
+    const pair = await pairFor(sdk, did, node(snapshot([anchorBody(all, 2)])).provider);
+    expect(pair.versionId).toBe(idOf(all[3]));
+    r.put(pair.prepared, "reveal_broadcast");
+    // Bob's is mined first. A writer holding Bob's DID only through version 1 cannot verify it.
+    const bobs = `${"b0".repeat(32)}i0`;
+    const mined = snapshot([anchorBody(all, 2), { line: bobsLine, id: bobs, height: 11 }, { line: all[3], id: pair.prepared.inscriptionId, height: 12 }]);
+    const chain = node(mined, [pair.prepared.commitTxId, pair.prepared.revealTxId]);
+    const writer = OriginalsSDK.create({ store, authors: async (d) => (d === alice.did ? alice.evidence() : d === bob.did ? bob.evidence(bob.entries.slice(0, 1)) : undefined), freshness: "asserted", clock: clock() });
+    const view = await readAnchored(writer, did, { provider: chain.provider, clock: blocks(), index: INDEX });
+    expect(view.report.anchoring?.ignored).toEqual([
+      expect.objectContaining({ inscription: bobs, reason: "later-inscription-unverifiable" }),
+      expect.objectContaining({ inscription: pair.prepared.inscriptionId, reason: "waiting-for-earlier-unverifiable", waitingOn: bobs }),
+    ]);
+    expect(view.report.notices).toEqual(["unverifiable-inscriptions", "publications-waiting"]);
+    const plan = await step(writer, did, chain.provider, r);
+    expect(plan).toMatchObject({ action: "wait-for-evidence", versionId: idOf(all[3]), inscriptionId: pair.prepared.inscriptionId, waitingOn: bobs, signer: bob.did });
+    await expect(pairFor(writer, did, chain.provider, undefined, { recoveryStore: r.store, recoveryIds: r.ids() })).rejects.toMatchObject({ code: "PAIR_IN_FLIGHT" });
+    expect(chain.sent).toEqual([]);
+  });
+});
+
 describe("C12-112: the anchoring inscription is the log through the anchoring entry, at most 350,000 bytes (P9.17)", () => {
   test("the SDK refuses to anchor an Original whose log through the anchoring entry would be over the limit", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
@@ -612,7 +647,7 @@ describe("recovery review of the writer: retries, liveness and damaged records (
     }
   });
 
-  test("C12-100: a pair whose commit was rejected is submitted-unobserved, not pending Bitcoin acceptance; one never sent is not anchored (P9.4, P9.18)", async () => {
+  test("C12-100, C12-168, C12-176: a pair whose commit was rejected is submitted-unobserved, not pending Bitcoin acceptance; one never sent is not anchored (P9.4, P9.18)", async () => {
     const { sdk, did } = await original(btcoAlias("regtest", SAT), 1);
     const pair = await pairFor(sdk, did, node(snapshot([])).provider);
     const r = recovery();

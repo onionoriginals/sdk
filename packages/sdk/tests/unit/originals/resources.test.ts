@@ -199,7 +199,7 @@ describe("C12-159 through the API: transitions for an added and a removed resour
   });
 });
 
-describe("C12-160 through the API: 256 resources / 257 resources (P14.13; spec PR #50 (open))", () => {
+describe("C12-160 through the API: 256 resources / 257 resources (P14.13; originals-spec #50, merged)", () => {
   test("a create with 256 is committed; a 257th, at create or by an edit, is limit-exceeded and nothing is signed", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KA }]);
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: clock() });

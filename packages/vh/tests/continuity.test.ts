@@ -6,8 +6,8 @@
  * accepts. Nothing else makes two DIDs one identity.
  */
 import { describe, expect, test } from "bun:test";
-import type { LogEntry } from "../src/log/index.js";
-import { createOriginal, resourceDigest, updateOriginal, verifyAuthorHistory, verifyOriginal, type AuthorRef, type OriginalsReport } from "../src/originals/index.js";
+import { createWitnessProof, type LogEntry } from "../src/log/index.js";
+import { createOriginal, describeFreshness, resourceDigest, updateOriginal, verifyAuthorHistory, verifyOriginal, type AuthorRef, type OriginalsReport } from "../src/originals/index.js";
 import { didWebvhLogUrl } from "../src/webvh/index.js";
 import { NOW, VhAuthor, WebvhAuthor, bytes, clock, photo, seeded } from "./helpers/originals.js";
 
@@ -159,33 +159,105 @@ describe("C12-138: an author DID that changes DID method", () => {
 });
 
 describe("C12-134: author freshness after a move (P5.14, P7.8)", () => {
-  test("a log retrieved from the location in the latest entry's verification method establishes the author's freshness", async () => {
+  const OBTAINED = "2026-10-18T13:00:00.000Z";
+  const W = seeded(61);
+  const witnessList = { witness: { threshold: 1, witnesses: [{ id: `did:key:${W.publicKeyMultibase}` }] } };
+  const approve = async (versionId: string) => [{ versionId, proof: [await createWitnessProof(W, versionId)] }];
+
+  test("C12-166: a log retrieved from the latest entry's location, not approved by the DID's own witnesses, does not establish freshness; the report says where, when and which version (owner decision, 23 Oct 2026)", async () => {
     const { alice, at, log } = await moved();
     const rotated = await alice.rotate([{ fragment: "orig-2", signer: K2 }]);
     const after = alice.ref("orig-2", rotated);
     const next = await updateOriginal(log[1], { versionTime: at(), resources: [photo(B3)], author: after, sign: alice.signer(K2, after) });
     const entries = [...log, next];
-    // No retrieval and no assertion: freshness is not established, and the Original is not currently authorized.
+    // No retrieval: freshness is not established, and the Original is not currently authorized.
     const plain = await verify(entries, [alice.evidence()]);
     expect(plain.identityEvidence.freshness).toBe("not-established");
     expect(plain.current).toBe(false);
-    // Retrieved from where the latest entry's verification method says the DID is.
-    const found = await verify(entries, [{ ...alice.evidence(), retrievedFrom: didWebvhLogUrl(alice.location) }]);
-    expect(found.identityEvidence.freshness).toBe("retrieved");
-    // Established freshness still makes an unanchored Original only valid as of its checkpoint (P7.10).
+    // Retrieved from where the latest entry's verification method says the DID is: still not established.
+    const url = didWebvhLogUrl(alice.location);
+    const found = await verify(entries, [{ ...alice.evidence(), retrievedFrom: url, obtainedAt: OBTAINED, source: "fetched" }]);
+    expect(found.identityEvidence.freshness).toBe("not-established");
+    expect(found.identityEvidence.obtained).toEqual({ location: url, obtainedAt: OBTAINED, source: "fetched", latestVersionId: rotated, witnessed: false });
+    expect(found.validAsOf?.signers[0]).toMatchObject({ did: alice.did, location: url, obtainedAt: OBTAINED, versionId: rotated });
+    const text = describeFreshness(alice.did, found.identityEvidence);
+    expect(text).toContain(`obtained from ${url} at ${OBTAINED}`);
+    expect(text).toContain(rotated);
+    expect(text).toContain("may have a newer version");
+    expect(text).toContain("removes a key");
+    expect(text).toContain("not seen");
     expect(found.current).toBe(false);
     expect(found.validAsOf?.checkpoint).toBe(next.versionId);
+  });
+
+  test("C12-177: a witnessed log found where its own latest version's id points establishes freshness, though every asset entry was signed before the move (P7.8, P5.14)", async () => {
+    const { alice, log } = await moved();
+    const rotated = await alice.rotate([{ fragment: "orig-1", signer: K1 }], witnessList);
+    const url = didWebvhLogUrl(alice.location);
+    const r = await verify(log, [{ ...alice.evidence(), witness: await approve(rotated), retrievedFrom: url, obtainedAt: OBTAINED, source: "fetched" as const }]);
+    expect(r.identityEvidence.freshness).toBe("established");
+    // The same log fetched from the old host, whose latest version names the new one, is not.
+    const old = await verify(log, [{ ...alice.evidence(), witness: await approve(rotated), retrievedFrom: didWebvhLogUrl(alice.did), obtainedAt: OBTAINED, source: "fetched" as const }]);
+    expect(old.identityEvidence.freshness).toBe("not-established");
+  });
+
+  test("approved by the DID's own witnesses at its latest version, and retrieved where that version's id says, the log establishes freshness", async () => {
+    const { alice, at, log } = await moved();
+    const rotated = await alice.rotate([{ fragment: "orig-2", signer: K2 }], witnessList);
+    const after = alice.ref("orig-2", rotated);
+    const next = await updateOriginal(log[1], { versionTime: at(), resources: [photo(B3)], author: after, sign: alice.signer(K2, after) });
+    const entries = [...log, next];
+    const url = didWebvhLogUrl(alice.location);
+    const witnessed = { ...alice.evidence(), witness: await approve(rotated), retrievedFrom: url, obtainedAt: OBTAINED, source: "fetched" as const };
+    const r = await verify(entries, [witnessed]);
+    expect(r.identityEvidence.freshness).toBe("established");
+    expect(r.identityEvidence.obtained).toEqual({ location: url, obtainedAt: OBTAINED, source: "fetched", latestVersionId: rotated, witnessed: true });
+    expect(describeFreshness(alice.did, r.identityEvidence)).toContain("approved by the DID's own witnesses");
+    // Established freshness still makes an unanchored Original only valid as of its checkpoint (P7.10).
+    expect(r.current).toBe(false);
+    // P7.8: the location rule is for a did:webvh log fetched from a location; the same
+    // witnessed log from an evidence package establishes freshness (P7.8).
+    const packaged = await verify(entries, [{ ...witnessed, retrievedFrom: undefined, source: "package" }]);
+    expect(packaged.identityEvidence.freshness).toBe("established");
+    // Its latest version names the moved location: reported, never marking freshness worse.
+    expect(packaged.identityEvidence.obtained.movedTo).toBe(alice.location);
+    // A host's snapshot is a copy too: judged by its witnesses, not by the location rule.
+    const hosted = await verify(entries, [{ ...witnessed, retrievedFrom: undefined, source: "host" }]);
+    expect(hosted.identityEvidence.freshness).toBe("established");
+    // Unwitnessed, it does not.
+    const bare = await verify(entries, [{ ...alice.evidence(), source: "package" }]);
+    expect(bare.identityEvidence.freshness).toBe("not-established");
+    expect(describeFreshness(alice.did, packaged.identityEvidence)).toContain(`obtained from the evidence package at ${OBTAINED}`);
     // Retrieved anywhere else (the old location, which redirects or keeps a copy): not established.
-    const elsewhere = await verify(entries, [{ ...alice.evidence(), retrievedFrom: didWebvhLogUrl(alice.did) }]);
+    const elsewhere = await verify(entries, [{ ...witnessed, retrievedFrom: didWebvhLogUrl(alice.did) }]);
     expect(elsewhere.identityEvidence.freshness).toBe("not-established");
   });
 
-  test("when the latest entry was signed before the move, its location is the old one", async () => {
+  test("C12-167: a log whose latest version's id names another location is not the identity's latest where it was obtained, witnessed or not", async () => {
+    // The latest asset entry was signed before the move, at the old location; the log there says the DID has moved.
     const { alice, log } = await moved();
     const atOld = await verify(log, [{ ...alice.evidence(), retrievedFrom: didWebvhLogUrl(alice.did) }]);
-    expect(atOld.identityEvidence.freshness).toBe("retrieved");
+    expect(atOld.identityEvidence.freshness).toBe("not-established");
     const atNew = await verify(log, [{ ...alice.evidence(), retrievedFrom: didWebvhLogUrl(alice.location) }]);
     expect(atNew.identityEvidence.freshness).toBe("not-established");
+  });
+
+  test("C12-177: a log from the old host whose latest version moves the DID and removes a key: the removal is applied, and freshness is not established (P7.8)", async () => {
+    // The move version drops orig-1 for orig-2; the asset entries were signed with orig-1 before it.
+    const { alice, log } = await moved([{ fragment: "orig-2", signer: K2 }]);
+    const r = await verify(log, [{ ...alice.evidence(), retrievedFrom: didWebvhLogUrl(alice.did) }]);
+    // Every verified version is used, including the one that removes the key (P7.8, P7.9).
+    expect(r.historicallyAuthorizedOnly.map((h) => h.versionId)).toEqual(log.map((e) => e.versionId));
+    expect(r.reasons).toContain("historically-authorized-only");
+    expect(r.identityEvidence.latestVersionId).toBe(alice.versionId);
+    expect(r.identityEvidence.freshness).toBe("not-established");
+    // P5.14: the move is reported, and that the log where it points was not obtained.
+    expect(r.identityEvidence.obtained).toMatchObject({ movedTo: alice.location, movedLog: "not-obtained" });
+    expect(describeFreshness(alice.did, r.identityEvidence)).toContain(`now at ${alice.location}`);
+    // A package's log names the move too (P5.14): reported, but its freshness is judged as usual (P7.8).
+    const packaged = await verify(log, [{ ...alice.evidence(), source: "package" }]);
+    expect(packaged.identityEvidence.obtained).toMatchObject({ movedTo: alice.location, movedLog: "not-obtained" });
+    expect(packaged.identityEvidence.freshness).toBe("not-established");
   });
 
   test("a retrieved log shorter than the retained versionId is stale, whatever its source", async () => {

@@ -41,11 +41,14 @@ export interface AuthorDidEvidence {
   log?: string | unknown[];
   witness?: unknown;
   /**
-   * PROVISIONAL (P5.14, P7.8): the URL this log was just retrieved from, with
-   * no redirects. When it is where the latest entry that this identity signed
-   * says the DID is (the DID of that entry's verification method id), the
-   * identity's freshness is reported as `retrieved`. Set by the retriever,
-   * never taken from a package.
+   * The URL this log was just retrieved from, with no redirects (P5.14,
+   * P7.8). Set by the retriever; never taken from a package or a host's
+   * snapshot, which are copies. A did:webvh log obtained at a
+   * location establishes the identity's freshness only when the DID's own
+   * witnesses approve its latest version and that version's `id` names the
+   * location; otherwise freshness is not established and the report states
+   * the location, when it was obtained and the latest versionId (owner
+   * decision, 23 Oct 2026; originals-spec #51).
    */
   retrievedFrom?: string;
   /**
@@ -78,6 +81,8 @@ export interface AuthorVersion {
   deactivated: boolean;
   /** A did:btco version's chain position (P5.13). */
   position?: ChainPosition;
+  /** Approved by the witnesses of the DID's own log in effect for it (VH-Log witness threshold); never for did:btco (P7.8). */
+  witnessed?: boolean;
 }
 
 export interface AuthorHistory {
@@ -126,6 +131,7 @@ export async function verifyAuthorHistory(evidence: AuthorDidEvidence, options: 
     document: v.entry.state,
     updateKeys: v.active.updateKeys,
     deactivated: v.active.deactivated,
+    witnessed: v.witnessList !== null && v.witnessed,
   }));
   // P5.14: the log is the identity DID's own only if it verifies from genesis (verifyLog), has the
   // identity DID's SCID and, for did:webvh, the identity DID is one of its versions' ids, reached
@@ -174,8 +180,8 @@ function btcoHistory(evidence: AuthorDidEvidence, options: AuthorHistoryOptions)
     // Metadata not read could hold a version: the history stops before it, never skips it (M1).
     // A delegated or encoded inscription carries its own metadata, which delegation and body
     // encoding do not affect, so it is a version candidate like any other; metadata the reader
-    // did not establish for it (absent, not null) fails closed. Whether such an inscription
-    // counts as a did:btco version is open in P5.13: PROVISIONAL.
+    // did not establish for it (absent, not null) fails closed (P5.13, P14.12;
+    // originals-spec #51, merged).
     if (i.unsupported === "not-read" || (i.unsupported && i.metadata === undefined)) {
       unread = i;
       break;

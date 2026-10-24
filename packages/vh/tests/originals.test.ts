@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { base58btcEncode, multibaseEncode, sha256 } from "../src/crypto/index.js";
+import { base58btcEncode, createProof, multibaseEncode, sha256 } from "../src/crypto/index.js";
 import { OriginalsError } from "../src/errors.js";
 import { parseJson, type JsonObject } from "../src/json/index.js";
 import { appendEntry, createLog, parseLog, serializeLog, signWith, verifyLog, type LogEntry, type Specialisation } from "../src/log/index.js";
@@ -79,7 +79,7 @@ describe("C12-01: create, edit and verify in a fresh reader", () => {
     expect(r.history.status).toBe("valid");
     expect(r.identityEvidence.freshness).toBe("not-established");
     expect(r.current).toBe(false);
-    expect(r.validAsOf).toEqual({ checkpoint: r.head, signers: [{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt: null, source: null }] });
+    expect(r.validAsOf).toEqual({ checkpoint: r.head, signers: [{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt: null, source: null , location: null }] });
     expect(r.reasons).toEqual(["not-anchored"]);
   });
 
@@ -478,28 +478,162 @@ describe("the derived DID document and generic resolvers (P3.5, P3.8)", () => {
     const recreate = await resign(log[2], { ...log[2].state, transitions: [], operation: "create" }, sign);
     failedWith(await report([...log, recreate], [alice]), 3, "STATE_OPERATION");
     // There are no publish or migrate operations: publication and anchoring are updates that add an
-    // alias (P9.10; P14.4, PROVISIONAL, section 14), so any other operation is invalid evidence.
+    // alias (P9.10, P14.4), so any other operation is invalid evidence, never an unsupported profile.
     for (const operation of ["migrate", "publish"]) {
       const other = await resign(log[2], { ...log[2].state, transitions: [], operation }, sign);
       failedWith(await report([...log, other], [alice]), 3, "STATE_OPERATION", "invalid-evidence");
+      const asDeactivation = await resign(log[2], { ...log[2].state, transitions: [], operation }, sign, { deactivated: true });
+      failedWith(await report([...log, asDeactivation], [alice]), 3, "STATE_OPERATION", "invalid-evidence");
+      const genesis = await createLog({ versionTime: "2026-10-18T12:00:00.000Z", parameters: { method: ORIGINALS_METHOD, scid: "{SCID}" }, state: { ...log[0].state, id: "did:vh:{SCID}", operation }, sign });
+      failedWith(await report([genesis], [alice]), 0, "STATE_OPERATION", "invalid-evidence");
     }
   });
 
-  test("C12-50: an asset log entry that sets a non-empty witness parameter is rejected; {} is a no-op (P9.8, P9.9)", async () => {
+  test("C12-50: an asset log entry that sets a non-empty witness parameter is rejected; so is {} (P9.8, P9.9, P14.1)", async () => {
     const { alice, log, sign } = await harbor();
     const witnesses = { threshold: 2, witnesses: [5, 6, 7].map((n) => ({ id: `did:key:${seeded(n).publicKeyMultibase}` })) };
     const witnessed = await resign(log[2], { ...log[2].state, transitions: [] }, sign, { witness: witnesses });
     failedWith(await report([...log, witnessed], [alice]), 3, "WITNESS_NOT_PERMITTED", "invalid-evidence");
+    // P14.1: an author entry's parameters are exactly {}, so even `witness: {}` is rejected.
     const empty = await resign(log[2], { ...log[2].state, transitions: [] }, sign, { witness: {} });
-    const r = await report([...log, empty], [alice], {});
-    expect(r.history.status).toBe("valid");
-    expect(r.ordering).toBe("claimed");
+    failedWith(await report([...log, empty], [alice]), 3, "PARAMETER_MEMBERS", "invalid-evidence");
   });
 
-  test("digests are multibase base58btc sha2-256 multihashes (PROVISIONAL, D4)", () => {
+  test("digests are sha2-256 multihashes (P14.7) in multibase base58btc (the encoding PROVISIONAL, D4)", () => {
     const d = resourceDigest(bytes("abc"));
     expect(d).toBe(`z${base58btcEncode(new Uint8Array([0x12, 0x20, ...sha256(bytes("abc"))]))}`);
     expect(d.startsWith("zQm")).toBe(true);
+  });
+});
+
+describe("section 14: exact members (P14.1, P14.4, P14.8)", () => {
+  test("P14.1: genesis parameters are exactly method and scid", async () => {
+    const { alice, key, sign, ref } = await harbor();
+    const genesisWith = async (extra: JsonObject) => {
+      const base = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", resources: [photo(B1)], author: ref, sign });
+      const state = { ...base.state, id: "did:vh:{SCID}" };
+      return createLog({ versionTime: "2026-10-18T12:00:00.000Z", parameters: { method: ORIGINALS_METHOD, scid: "{SCID}", ...extra }, state, sign });
+    };
+    expect((await report([await genesisWith({})], [alice])).history.status).toBe("valid");
+    for (const extra of [{ ttl: 60 }, { watchers: ["https://w.example.com"] }, { witness: {} }, { deactivated: false }]) {
+      failedWith(await report([await genesisWith(extra)], [alice]), 0, "PARAMETER_MEMBERS", "invalid-evidence");
+    }
+    // Keys come from the author DID, and nothing is null (VH-Log; already rejected by the engine).
+    failedWith(await report([await genesisWith({ updateKeys: [key.publicKeyMultibase] })], [alice]), 0, "PARAMETER_FORBIDDEN", "invalid-evidence");
+    failedWith(await report([await genesisWith({ ttl: null })], [alice]), 0, "PARAMETER_NULL", "invalid-evidence");
+  });
+
+  test("P14.1: every later author entry has {} parameters; a deactivation exactly {\"deactivated\": true}", async () => {
+    const { alice, log, sign } = await harbor();
+    const same = { ...log[2].state, transitions: [] };
+    for (const parameters of [{ ttl: 60 }, { method: ORIGINALS_METHOD }, { deactivated: false }, { watchers: [] }]) {
+      failedWith(await report([...log, await resign(log[2], same, sign, parameters)], [alice]), 3, "PARAMETER_MEMBERS", "invalid-evidence");
+    }
+    const off = { ...log[2].state, operation: "deactivate", asset: { ...(log[2].state.asset as JsonObject), status: "deactivated" }, transitions: [] };
+    const deactivated = await report([...log, await resign(log[2], off, sign, { deactivated: true })], [alice]);
+    expect(deactivated.history.status, JSON.stringify(deactivated.history.failure)).toBe("valid");
+    failedWith(await report([...log, await resign(log[2], off, sign, { deactivated: true, ttl: 60 })], [alice]), 3, "PARAMETER_MEMBERS", "invalid-evidence");
+  });
+
+  test("C12-174: P14.4, P14.8: a proof has exactly type, cryptosuite, verificationMethod, proofPurpose and proofValue", async () => {
+    const { alice, key, log, ref } = await harbor();
+    const same = { ...log[2].state, transitions: [] };
+    const base = { type: "DataIntegrityProof", cryptosuite: "eddsa-jcs-2022", verificationMethod: ref.verificationMethod, proofPurpose: "assertionMethod" } as const;
+    const signedWith = (extra: JsonObject) => async (unsigned: JsonObject) => [await createProof(unsigned, { ...base, ...extra } as never, key)];
+    expect((await report([...log, await appendEntry(log[2], { versionTime: "2026-10-18T12:30:00.000Z", parameters: {}, state: same, sign: signedWith({}) })], [alice])).history.status).toBe("valid");
+    // A proof @context changes what is verified, so that proof already fails its signature.
+    const withContext = await appendEntry(log[2], { versionTime: "2026-10-18T12:30:00.000Z", parameters: {}, state: same, sign: signedWith({ "@context": ["https://w3id.org/security/data-integrity/v2"] }) });
+    expect((await report([...log, withContext], [alice])).history.status).toBe("invalid");
+    const extras: JsonObject[] = [
+      { id: "urn:uuid:1" }, { created: "2026-10-18T12:30:00Z" }, { expires: "2027-10-18T12:30:00Z" },
+      { domain: "example.com" }, { challenge: "c" }, { nonce: "n" }, { previousProof: "urn:uuid:0" },
+    ];
+    for (const extra of extras) {
+      const entry = await appendEntry(log[2], { versionTime: "2026-10-18T12:30:00.000Z", parameters: {}, state: same, sign: signedWith(extra) });
+      failedWith(await report([...log, entry], [alice]), 3, "PROOF_MEMBERS", "invalid-evidence");
+    }
+  });
+});
+
+describe("section 14: the asset log's form (P14.2)", () => {
+  test("versionTime ends in Z, with at most three fractional digits", async () => {
+    const { alice, log, sign } = await harbor();
+    const same = { ...log[2].state, transitions: [] };
+    for (const versionTime of ["2026-10-18T12:30:00.000+00:00", "2026-10-18T12:30:00+00:00", "2026-10-18T12:30:00.0001Z"]) {
+      failedWith(await report([...log, await resign(log[2], same, sign, {}, versionTime)], [alice]), 3, "VERSION_TIME_FORMAT", "invalid-evidence");
+    }
+    for (const versionTime of ["2026-10-18T12:30:00Z", "2026-10-18T12:30:00.5Z", "2026-10-18T12:30:00.123Z"]) {
+      expect((await report([...log, await resign(log[2], same, sign, {}, versionTime)], [alice])).history.status).toBe("valid");
+    }
+  });
+
+  test("C12-173, C12-179: each line of an asset log is compact JSON ending in one LF: a missing final LF, CRLF or whitespace between tokens is rejected", async () => {
+    const { alice, log } = await harbor();
+    const text = serializeLog(log);
+    expect((await report(text, [alice])).history.status).toBe("valid");
+    failedWith(await report(text.slice(0, -1), [alice]), 2, "LOG_LINE_FORMAT", "invalid-evidence");
+    failedWith(await report(text.replaceAll("\n", "\r\n"), [alice]), 0, "LOG_LINE_FORMAT", "invalid-evidence");
+    // The same entry with a space after a colon: valid JSON, the same versionId and proof, not compact.
+    const lines = text.split("\n");
+    lines[1] = lines[1].replace('"versionTime":', '"versionTime": ');
+    failedWith(await report(lines.join("\n"), [alice]), 1, "LOG_LINE_FORMAT", "invalid-evidence");
+    lines[1] = `${lines[1].replace('"versionTime": ', '"versionTime":')}\t`;
+    failedWith(await report(lines.join("\n"), [alice]), 1, "LOG_LINE_FORMAT", "invalid-evidence");
+    // Spaces inside strings are content, not whitespace.
+    expect(text).toContain("Harbor at dawn");
+  });
+
+  test("C12-179: P14.2: key order and string escapes in a line are not constrained, because hashes and proofs are over the JCS form", async () => {
+    const { alice, log } = await harbor();
+    const lines = serializeLog(log).split("\n");
+    // The same entry with its top-level members reversed, and a name escaped differently.
+    const entry = JSON.parse(lines[1]) as Record<string, unknown>;
+    lines[1] = JSON.stringify(Object.fromEntries(Object.entries(entry).reverse())).replace("Harbor", "\\u0048arbor");
+    expect(lines[1].startsWith('{"proof"')).toBe(true);
+    const r = await report(lines.join("\n"), [alice]);
+    expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
+    expect(r.head).toBe(log[log.length - 1].versionId);
+  });
+
+  test("C12-185: P14.5: a name of 1,024 UTF-16 code units is accepted and one of 1,025 rejected, a non-BMP character counting as two", async () => {
+    const { alice, log, sign } = await harbor();
+    const named = (name: string) => resign(log[2], { ...log[2].state, transitions: [], asset: { ...(log[2].state.asset as JsonObject), name } }, sign);
+    const clef = "\u{1D11E}"; // two UTF-16 code units
+    expect(clef.length).toBe(2);
+    const fits = await report([...log, await named(clef + "a".repeat(1022))], [alice]);
+    expect(fits.history.status, JSON.stringify(fits.history.failure)).toBe("valid");
+    failedWith(await report([...log, await named(clef + "a".repeat(1023))], [alice]), 3, "STATE_NAME", "invalid-evidence");
+  });
+
+  test("C12-172: P14.3: a number whose magnitude is greater than 2^53 - 1 is rejected however it is written; other numbers are kept", async () => {
+    const { alice, log, sign } = await harbor();
+    // Re-signed with the number as the parser reads it, so only its value is judged.
+    const signedWith = async (value: number, written: string) => {
+      const entry = await resign(log[2], { ...log[2].state, transitions: [], asset: { ...(log[2].state.asset as JsonObject), metadata: { n: value } } }, sign);
+      return serializeLog([...log, entry]).replace(`"metadata":{"n":${JSON.stringify(value)}}`, `"metadata":{"n":${written}}`);
+    };
+    for (const [value, written] of [[1e16, "1e16"], [-1e16, "-1e16"], [9007199254740992, "9007199254740993.0"], [9007199254740992, "9007199254740991.5"], [9007199254740991, "9007199254740991.4"], [9007199254740991, "9007199254740991.0000001"], [1.5e300, "1.5e300"]] as const) {
+      failedWith(await report(await signedWith(value, written), [alice]), 3, "JSON_UNSAFE_NUMBER", "invalid-evidence");
+    }
+    // Given already parsed, too.
+    const parsed = await resign(log[2], { ...log[2].state, transitions: [], asset: { ...(log[2].state.asset as JsonObject), metadata: { n: 1e16 } } }, sign);
+    failedWith(await report([...log, parsed], [alice]), 3, "JSON_UNSAFE_NUMBER", "invalid-evidence");
+    // Any negative zero, however written, including a negative number that underflows to it.
+    for (const written of ["-0", "-0.0", "-0e0", "-1e-400"]) {
+      failedWith(await report(await signedWith(0, written), [alice]), 3, "JSON_UNSAFE_NUMBER", "invalid-evidence");
+    }
+    for (const [value, written] of [[1e15, "1e15"], [9007199254740991, "9007199254740991.0"], [-9007199254740991, "-9.007199254740991e15"], [1.5, "1.5"], [1e-7, "1e-7"]] as const) {
+      const r = await report(await signedWith(value, written), [alice]);
+      expect(r.history.status, `${written}: ${JSON.stringify(r.history.failure)}`).toBe("valid");
+    }
+  });
+
+  test("a did:vh or did:webvh signer log keeps its own method's line rules", async () => {
+    const { alice, log } = await harbor();
+    const signerLog = alice.evidence().log as string;
+    const r = await verifyOriginal({ log, authors: [{ did: alice.did, log: signerLog.replaceAll("\n", "\r\n").slice(0, -2) }], now: NOW, bytes: allBytes(B1, B2) });
+    expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
+    expect(r.identityEvidence.status).toBe("complete");
   });
 });
 
@@ -550,18 +684,18 @@ describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7;
   test("the stored line is measured, never its parsed form re-serialized: a 65,536-byte line that re-serializes longer is accepted", async () => {
     const key = seeded(21);
     const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
-    // `1e21` re-serializes as `1e+21`: the same entry, and the same versionId and proof, one byte longer each time.
-    const nums = Array.from({ length: 200 }, () => 1e21);
+    // `1.5e-6` re-serializes as `0.0000015`: the same entry, and the same versionId and proof, three bytes longer each time.
+    const nums = Array.from({ length: 200 }, () => 1.5e-6);
     let pad = 0;
     for (let i = 0; i < 40; i++) {
       const entry = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", metadata: { nums, pad: "a".repeat(pad) }, resources: [photo(B1)], author: alice.ref("orig"), sign: alice.signer(key, "orig") });
-      const line = serializeLog([entry]).slice(0, -1).replaceAll("1e+21", "1e21");
+      const line = serializeLog([entry]).slice(0, -1).replaceAll("0.0000015", "1.5e-6");
       const size = new TextEncoder().encode(line).length;
       if (size !== 65_536) {
         pad += 65_536 - size;
         continue;
       }
-      expect(new TextEncoder().encode(JSON.stringify(JSON.parse(line))).length).toBe(65_736);
+      expect(new TextEncoder().encode(JSON.stringify(JSON.parse(line))).length).toBe(66_136);
       const r = await verifyOriginal({ log: `${line}\n`, authors: [alice.evidence()], now: NOW, bytes: allBytes(B1) });
       expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
       // Entries parsed with parseLog carry their stored line's size; one parsed elsewhere is measured as its JCS line.

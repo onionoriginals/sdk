@@ -16,6 +16,13 @@ test('the bundled "First Light" evidence package verifies in this tab, with no k
   expect(result.current).toBe(false);
 });
 
+test('the example says plainly where and when the author DID history was obtained, and that the DID may be newer (P7.8)', async () => {
+  const now = Date.parse('2026-10-23T12:00:00Z');
+  const result = await verifyExample(now);
+  expect(result.freshness).toContain(`The history of ${FIRST_LIGHT.author} was obtained from the evidence package at 2026-10-23T12:00:00.000Z; its latest version there is `);
+  expect(result.freshness).toContain('The DID may have a newer version, for example one that removes a key, that this verifier has not seen.');
+});
+
 test('the generated module and the published ZIP are the same package', () => {
   const published = readFileSync(new URL('../../public/example/first-light.originals.zip', import.meta.url));
   expect(Buffer.from(FIRST_LIGHT_ZIP_BASE64, 'base64').equals(published)).toBe(true);

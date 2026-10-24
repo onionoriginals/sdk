@@ -9,7 +9,10 @@ import { join } from "node:path";
  * its note, and is cited by no test.
  */
 interface Row { id: string; position: number; test: string; phases: number[]; status: "todo" | "partial" | "covered" | "not-applicable"; coveredBy?: string[]; note?: string; proposal?: string }
-const registry = JSON.parse(readFileSync(new URL("../../../../specs/originals-conformance.json", import.meta.url), "utf8")) as { rows: Row[] };
+const registry = JSON.parse(readFileSync(new URL("../../../../specs/originals-conformance.json", import.meta.url), "utf8")) as {
+  spec: { openProposals: Array<{ pr: number; head: string; rows: number[] }> };
+  rows: Row[];
+};
 
 function testFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((d) => {
@@ -35,15 +38,25 @@ for (const root of roots) {
 }
 
 describe("section 12 conformance registry", () => {
-  // The pinned table (originals-spec master 1039c471c) has 159 rows; open spec PR #50 adds row
-  // 160, registered provisionally with `proposal`. Ids are stable across re-pins, so they need
-  // not equal table positions; each row records its position in the pinned table.
-  test("registers all 159 pinned rows and the proposed one with unique ids, in table order", () => {
-    expect(registry.rows.length).toBe(160);
-    expect(registry.rows.filter((r) => r.proposal === undefined).length).toBe(159);
-    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(160);
+  // The pinned table (originals-spec master b599fd14b, with #50, #51 and #52 merged) has 189 rows.
+  // Ids are stable across re-pins, so they need not equal table positions; each row records its
+  // position in the pinned table. A row from an open spec pull request would carry `proposal`.
+  test("registers all 189 pinned rows with unique ids, in table order", () => {
+    expect(registry.rows.length).toBe(189);
+    const pinned = registry.rows.filter((r) => r.proposal === undefined);
+    expect(pinned.length).toBe(189);
     expect(registry.rows.map((r) => r.position)).toEqual(registry.rows.map((_, i) => i + 1));
+    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(189);
     for (const r of registry.rows) expect(r.id).toMatch(/^C12-\d{2,3}$/);
+  });
+
+  test("each open proposal lists its rows, in its table's order", () => {
+    for (const p of registry.spec.openProposals) {
+      const rows = registry.rows.filter((r) => r.proposal === `originals-spec#${p.pr}@${p.head}`);
+      expect(rows.map((r) => r.position), `#${p.pr}`).toEqual(p.rows);
+    }
+    const listed = new Set(registry.spec.openProposals.map((p) => `originals-spec#${p.pr}@${p.head}`));
+    for (const r of registry.rows.filter((r) => r.proposal !== undefined)) expect(listed.has(r.proposal!), r.id).toBe(true);
   });
 
   test("every cited row exists and is marked partial or covered, with the citing files", () => {

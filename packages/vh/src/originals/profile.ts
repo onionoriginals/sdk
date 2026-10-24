@@ -11,7 +11,7 @@
  */
 import type { DataIntegrityProof } from "../crypto/index.js";
 import { fail } from "../errors.js";
-import { isJsonObject, type JsonObject } from "../json/index.js";
+import { isJsonObject, type JsonObject, type JsonValue } from "../json/index.js";
 import type { LogEntry, Specialisation, VerifiedEntry, VersionRules } from "../log/index.js";
 import type { DidVhExtension } from "../didvh/index.js";
 import { parseDidWebvh } from "../webvh/index.js";
@@ -139,7 +139,8 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
 
   return {
     name: "originals",
-    versionTime: { fractionalDigits: 3 },
+    // P14.2: at most three fractional digits, and UTC written as Z.
+    versionTime: { fractionalDigits: 3, utc: "Z" },
     maxProofs: 1,
     keys: {
       kind: "controller",
@@ -171,6 +172,9 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
       if (Object.keys(active.witness).length > 0) {
         fail("invalid-evidence", "WITNESS_NOT_PERMITTED", "Originals asset logs do not use witnesses; anchor on Bitcoin for proven ordering (owner decision Q14)");
       }
+      checkParameterMembers(entry.parameters, index);
+      for (const proof of entry.proof) checkProofMembers(proof);
+      checkSafeIntegers(entry as unknown as JsonValue);
       const used = usedThrough(history);
       const state = checkEntryState(entry.state, {
         scid,
@@ -184,6 +188,105 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
       usedIds.set(entry, resourceIdsThrough(state.asset, used));
     },
   };
+}
+
+/**
+ * P14.1: an entry's parameters have exactly the members its kind allows: the
+ * genesis entry `method` and `scid`; a deactivation exactly
+ * `{"deactivated": true}`; every other entry none. So `ttl`, `watchers`,
+ * `updateKeys`, `nextKeyHashes`, `witness: {}`, `deactivated: false` and a
+ * repeated `method` are rejected, as is any null value.
+ */
+function checkParameterMembers(parameters: JsonObject, index: number): void {
+  const keys = Object.keys(parameters).sort();
+  const exactly = (expected: string[]) => keys.length === expected.length && expected.every((k, i) => keys[i] === k);
+  const ok = index === 0
+    ? exactly(["method", "scid"]) && typeof parameters.method === "string" && typeof parameters.scid === "string"
+    : keys.length === 0 || (exactly(["deactivated"]) && parameters.deactivated === true);
+  if (!ok) {
+    fail("invalid-evidence", "PARAMETER_MEMBERS", index === 0
+      ? "the genesis entry's parameters are exactly method and scid (P14.1)"
+      : "an entry's parameters are exactly {} or, for a deactivation, {\"deactivated\": true} (P14.1)");
+  }
+}
+
+/**
+ * P14.3 (wording of originals-spec #51, merged): no number in an entry has a magnitude greater than 2^53 − 1,
+ * however it was written (`1e16`, `9007199254740993.0`, `1.5e300`). Every
+ * double that large is an integer, so this is the safe-integer bound. The
+ * strict parser refuses such integer literals, and this the other spellings,
+ * and entries given already parsed. Plain VH-Log keeps its own number rules.
+ */
+function checkSafeIntegers(value: JsonValue): void {
+  if (typeof value === "number") {
+    if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
+      fail("invalid-evidence", "JSON_UNSAFE_NUMBER", `number ${value} has a magnitude greater than 2^53 - 1 (P14.3)`);
+    }
+  } else if (Array.isArray(value)) {
+    for (const v of value) checkSafeIntegers(v);
+  } else if (isJsonObject(value)) {
+    for (const v of Object.values(value)) checkSafeIntegers(v);
+  }
+}
+
+const PROOF_MEMBERS = ["cryptosuite", "proofPurpose", "proofValue", "type", "verificationMethod"];
+
+const MAX_SAFE = 9_007_199_254_740_991n;
+const NUMBER_TOKEN = /-?(0|[1-9][0-9]*)(?:\.([0-9]+))?(?:[eE]([+-]?[0-9]+))?/y;
+
+/**
+ * P14.3 (originals-spec #51, merged): why a line of an Originals asset log has a number whose exact
+ * decimal value, as written, has magnitude greater than 2^53 − 1, or
+ * undefined. Judged on the text, so `9007199254740991.4` is refused although
+ * it parses to a safe integer. Negative zero is refused by the strict parser.
+ */
+export function exactNumberError(line: string): string | undefined {
+  let inString = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inString) {
+      if (c === "\\") i++;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      continue;
+    }
+    if (c !== "-" && (c < "0" || c > "9")) continue;
+    NUMBER_TOKEN.lastIndex = i;
+    const m = NUMBER_TOKEN.exec(line);
+    if (!m) continue;
+    if (exceedsSafe(m[1], m[2] ?? "", m[3] ?? "0")) return `number ${m[0]} has a magnitude greater than 2^53 - 1 (P14.3)`;
+    i += m[0].length - 1;
+  }
+  return undefined;
+}
+
+/** Whether |int.frac × 10^exp| > 2^53 − 1, exactly. */
+function exceedsSafe(int: string, frac: string, exp: string): boolean {
+  const digits = (int + frac).replace(/^0+/, "");
+  if (digits === "") return false;
+  // Exponents too large for an exact BigInt are decided by digit counts alone.
+  const e = Number(exp) - frac.length;
+  const magnitude = digits.length + e; // the value lies in [10^(magnitude-1), 10^magnitude)
+  if (magnitude > 16) return true;
+  if (magnitude < 16) return false;
+  const d = BigInt(digits);
+  return e >= 0 ? d * 10n ** BigInt(e) > MAX_SAFE : d > MAX_SAFE * 10n ** BigInt(-e);
+}
+
+/**
+ * P14.4, P14.8 (explicit in originals-spec #51, merged): an entry proof has exactly type, cryptosuite,
+ * verificationMethod, proofPurpose and proofValue; `@context`, `id`,
+ * `created`, `expires`, `domain`, `challenge`, `nonce` and `previousProof`
+ * are rejected.
+ */
+function checkProofMembers(proof: unknown): void {
+  const keys = isJsonObject(proof) ? Object.keys(proof).sort() : [];
+  if (keys.length !== PROOF_MEMBERS.length || !PROOF_MEMBERS.every((k, i) => keys[i] === k)) {
+    fail("invalid-evidence", "PROOF_MEMBERS", `an entry proof has exactly ${PROOF_MEMBERS.join(", ")} (P14.4, P14.8)`);
+  }
 }
 
 export function originalsSpecialisation(authors: Iterable<AuthorHistory>): Specialisation {

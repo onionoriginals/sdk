@@ -40,18 +40,18 @@ describe("C12-145: an unanchored Original is never current; it is valid as of it
     const c = await sdk.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("first crop") }], author: alice.ref("orig"), signer });
     if (c.kind !== "original") throw new Error("expected an Original");
     expect(c.original.current).toBe(false);
-    expect(c.original.validAsOf).toEqual({ checkpoint: c.original.checkpoint, signers: [{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt, source: "supplied" }] });
+    expect(c.original.validAsOf).toEqual({ checkpoint: c.original.checkpoint, signers: [{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt, source: "supplied", location: null }] });
     // A fresh reader: the package's evidence, obtained when it was read.
     const local = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: () => LATER });
     const pkg = await sdk.package(c.original.did);
     const loaded = await local.load(pkg.bytes);
     expect(loaded.report.current).toBe(false);
-    expect(loaded.report.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt: new Date(LATER).toISOString(), source: "package" }]);
+    expect(loaded.report.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt: new Date(LATER).toISOString(), source: "package", location: null }]);
     // Imported, the evidence is kept with when it was obtained, and later reads say it is retained.
     await local.import(pkg.bytes);
     const view = await local.get(c.original.did);
     expect(view.current).toBe(false);
-    expect(view.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt: new Date(LATER).toISOString(), source: "retained" }]);
+    expect(view.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt: new Date(LATER).toISOString(), source: "retained", location: null }]);
     expect(view.report.reasons).toEqual(["not-anchored"]);
   });
 });
@@ -100,7 +100,7 @@ describe("C12-64: stale author DID history is not currently authorized (P7.8)", 
     const loaded = await local.load(stale);
     expect(oldAuthorVersion).not.toBe(alice.versionId);
     expect(loaded.report.identityEvidence).toMatchObject({ freshness: "not-established", latestVersionId: alice.versionId, retainedVersionId: alice.versionId });
-    expect(loaded.report.validAsOf?.signers[0]).toMatchObject({ versionId: alice.versionId, source: "retained" });
+    expect(loaded.report.validAsOf?.signers[0]).toMatchObject({ versionId: alice.versionId, source: "retained", location: null });
     expect(loaded.report.current).toBe(false);
   });
 
@@ -234,7 +234,7 @@ describe("C12-64: the newest verified author DID version a reader holds is used,
       expect(loaded.report.identityEvidence).toMatchObject({ status: "complete", latestVersionId: alice.versionId, retainedVersionId: alice.versionId });
       expect(loaded.report.historicallyAuthorizedOnly).toEqual([{ versionId: entry, did: alice.did, role: "author", reason: "key-not-in-latest-signer-document" }]);
       expect(loaded.reasons).toContain("historically-authorized-only");
-      expect(loaded.report.validAsOf?.signers[0]).toMatchObject({ versionId: alice.versionId, source: "supplied" });
+      expect(loaded.report.validAsOf?.signers[0]).toMatchObject({ versionId: alice.versionId, source: "supplied", location: null });
       void did;
     });
 
@@ -248,7 +248,7 @@ describe("C12-64: the newest verified author DID version a reader holds is used,
       const loaded = await local.load(carrying(pkg, alice.did, older.log));
       expect(loaded.report.identityEvidence).toMatchObject({ status: "complete", latestVersionId: alice.versionId });
       expect(loaded.report.historicallyAuthorizedOnly).toEqual([{ versionId: entry, did: alice.did, role: "author", reason: "key-not-in-latest-signer-document" }]);
-      expect(loaded.report.validAsOf?.signers[0]).toMatchObject({ versionId: alice.versionId, source: "retained" });
+      expect(loaded.report.validAsOf?.signers[0]).toMatchObject({ versionId: alice.versionId, source: "retained", location: null });
       void did;
     });
   }

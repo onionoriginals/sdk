@@ -660,7 +660,10 @@ export class FileStore implements OriginalsStore {
     const record = JSON.parse(text) as { did?: unknown; anchor?: Partial<RetainedAnchor> };
     const a = record.anchor;
     return record.did === did && a && typeof a.inscription === "string" && typeof a.sat === "string" && (a.owner === null || typeof a.owner === "string")
-      ? { inscription: a.inscription, sat: a.sat, owner: a.owner }
+      ? {
+        inscription: a.inscription, sat: a.sat, owner: a.owner,
+        ...(Array.isArray(a.unverifiable) && a.unverifiable.length > 0 && a.unverifiable.every((x) => typeof x === "string") ? { unverifiable: [...a.unverifiable] } : {}),
+      }
       : undefined;
   }
 

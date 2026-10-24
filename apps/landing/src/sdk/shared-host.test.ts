@@ -356,8 +356,10 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     const served = await env.h.serve(new Request(`http://${env.siteKey}/originals/resources/${resourceDigest(THEIRS)}`));
     expect(served.headers.get('content-type')).toBe('image/svg+xml');
     // The manifest names the new head, so the snapshot is the accepted checkpoint (P9.1).
-    const manifest = JSON.parse(readFileSync(join(env.h.dataDir, 'hosted', env.siteKey, 'originals', 'originals-evidence.json'), 'utf8')) as { checkpoint: string; head: string };
+    const manifest = JSON.parse(readFileSync(join(env.h.dataDir, 'hosted', env.siteKey, 'originals', 'originals-evidence.json'), 'utf8')) as { checkpoint: string; head: string; completeness: string; missing: unknown[] };
     expect([manifest.checkpoint, manifest.head]).toEqual([one.versionId, one.versionId]);
+    // Every resource version and every signer DID history is hosted (P14.10).
+    expect([manifest.completeness, manifest.missing]).toEqual(['complete', []]);
   });
 
   test('re-uploading an older asset log cannot roll back the accepted head: a retried first publication is already published (08d review r2 #9)', async () => {

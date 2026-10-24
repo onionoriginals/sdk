@@ -279,6 +279,21 @@ function signerDids(lines: string[]): string[] {
 }
 
 /**
+ * P14.10 (P7.1, P7.4): what a hosted snapshot of `lines` lacks: each resource
+ * version the report finds missing, then each signer DID history the host
+ * does not hold (`hosted`), the author's first, with its role. Completeness
+ * is judged from both, never from resources alone.
+ */
+export function hostedMissing(lines: string[], report: OriginalsReport, hosted: (did: string) => boolean): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = report.resources.missing.map((v) => ({ kind: 'resource', resource: v.resource, version: v.version, digest: v.digest, versionId: v.versionId }));
+  const author = (lineState(lines[0]) as { author?: { did?: unknown } } | undefined)?.author?.did;
+  for (const did of signerDids(lines)) {
+    if (!hosted(did)) out.push({ kind: 'identity', did, role: did === author ? 'author' : 'editor' });
+  }
+  return out;
+}
+
+/**
  * The proof check that needs no history verification (C7): the signer's key
  * at the version the entry names, read from `log`, verifies the entry's one
  * proof. Undefined when `log` does not show that version or key, which full
@@ -349,16 +364,16 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
   }
 
   /** A manifest write that fails is repaired later: the log is the commit point (C6). */
-  function tryWriteManifest(owner: string, siteKey: string, original: string, head: string, report?: OriginalsReport): void {
+  function tryWriteManifest(owner: string, siteKey: string, original: string, head: string, report?: OriginalsReport, lines?: string[]): void {
     try {
-      writeManifest(owner, siteKey, original, head, report);
+      writeManifest(owner, siteKey, original, head, report, lines);
     } catch {
       // The next request for this Original writes it again.
     }
   }
 
   /** Keep the hosted manifest naming the accepted head (P9.1). */
-  function writeManifest(owner: string, siteKey: string, original: string, head: string, report?: OriginalsReport): void {
+  function writeManifest(owner: string, siteKey: string, original: string, head: string, report?: OriginalsReport, lines: string[] = []): void {
     const key = `${siteKey}/originals/originals-evidence.json`;
     let manifest: Record<string, unknown> | null = null;
     const existing = store.readHosted(key);
@@ -369,8 +384,9 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
       manifest = null;
     }
     if (!report && manifest?.checkpoint === head && manifest?.head === head) return;
+    // P14.10: resources and signer histories alike (#16): a host holding every resource but not a signer's log is partial.
     const missing: unknown[] = report
-      ? report.resources.missing.map((v) => ({ kind: 'resource', resource: v.resource, version: v.version, digest: v.digest, versionId: v.versionId }))
+      ? hostedMissing(lines, report, (did) => store.readHosted(`${siteKey}/originals/${signerPath(did)}/did.jsonl`) !== null)
       : Array.isArray(manifest?.missing) ? manifest.missing : [];
     const next = {
       format: 'originals-evidence/0.1',
@@ -561,7 +577,7 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     }
     store.saveBytes(owner, assetKey, encoder.encode(`${candidate.join('\n')}\n`), 'application/jsonl');
     // The log write was the commit point: from here the save is accepted (C6).
-    tryWriteManifest(owner, siteKey, s.original, s.parsed.versionId, report);
+    tryWriteManifest(owner, siteKey, s.original, s.parsed.versionId, report, candidate);
     return { http: 200, body: { status: 'accepted', checkpoint: s.parsed.versionId, head: s.parsed.versionId } };
   }
 

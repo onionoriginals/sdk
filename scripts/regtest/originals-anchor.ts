@@ -36,6 +36,14 @@
  *     re-reads the accepted head (back to the anchor), re-derives the queue
  *     and waits on the recorded pair back in the mempool, preparing nothing;
  *     the next block includes it again.
+ * 10. Chain order after an unverifiable inscription (P9.15, P9.13): a second
+ *     writer holding a newer version of Alice's did:vh inscribes an edit naming
+ *     it; the first writer, which lacks that version, inscribes its own edit
+ *     from the same head a block later. The first writer reports the earlier
+ *     inscription unverifiable and its own as waiting on it, catch-up waits
+ *     for that evidence and prepares nothing, and a result current with them
+ *     carries the notices. A reader with the newer version accepts the earlier
+ *     edit; the later one no longer extends the head.
  *  9. Fresh readers: each Original verifies from its sat alone, with no copy
  *     of the log, plus the off-chain signer DID histories (P9.17, P9.18); and
  *     a recipient of the sat verifies the sender's handoff (resource bytes and
@@ -49,7 +57,7 @@ import { writeFile } from 'node:fs/promises';
 import * as btc from '@scure/btc-signer';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { localSigner } from '@originals/vh/crypto';
-import { createLog, serializeLog, signWith } from '@originals/vh/log';
+import { appendEntry, createLog, serializeLog, signWith } from '@originals/vh/log';
 import { RegtestProvider } from '../../packages/sdk/src/adapters/providers/RegtestProvider';
 import type { InscriptionRecoveryRecord, InscriptionRecoveryStore } from '../../packages/sdk/src/bitcoin/inscription-recovery';
 import type { BitcoinSigner } from '../../packages/sdk/src/types/common';
@@ -123,7 +131,15 @@ try {
     const did = genesis.state.id as string;
     const ref = { did, verificationMethod: `${did}#${fragment}`, versionId: genesis.versionId };
     const evidence: AuthorDidEvidence = { did, log: serializeLog([genesis]) };
-    return { did, ref, evidence, signer: keySigner({ keyType: 'Ed25519', secretKey: signingKey, verificationMethod: ref.verificationMethod }) };
+    /** A later version of this DID, same keys: a history only its holder has (step 10). */
+    const nextVersion = async () => {
+      const v2 = await appendEntry(genesis, {
+        versionTime: new Date(Date.now() - 60_000).toISOString().replace(/\.\d{3}Z$/, 'Z'), parameters: {}, state: genesis.state,
+        sign: signWith(localSigner('Ed25519', update), { cryptosuite: 'eddsa-jcs-2022', verificationMethod: `did:key:${k}#${k}` }),
+      });
+      return { versionId: v2.versionId, evidence: { did, log: serializeLog([genesis, v2]) } as AuthorDidEvidence };
+    };
+    return { did, ref, evidence, nextVersion, signer: keySigner({ keyType: 'Ed25519', secretKey: signingKey, verificationMethod: ref.verificationMethod }) };
   };
   // The author, Alice, and an editor, Bob (step 8).
   const alice = await identity('orig');
@@ -435,6 +451,56 @@ try {
     editorEntry: { versionId: bobAfter.original.checkpoint, signer: bob.did, inscription: bob2Pair.prepared.inscriptionId, height: placed[2].height },
     publication: [first2.pending.publication, waiting2a.pending.publication, second2.pending.publication],
     offChain: anchor2Pair.offChain, actions: actions.splice(0), head: v6.head, current: v6.current,
+  };
+
+  step('10: chain order after an unverifiable inscription');
+  // 10. A second writer holds Alice's DID version 2; this SDK does not.
+  const aliceV2 = await alice.nextVersion();
+  const elsewhere = new MemoryStore();
+  await elsewhere.commit(did, { expectedHead: null, log: await sdk.committedLog(did) });
+  const informed = OriginalsSDK.create({ store: elsewhere, authors: [aliceV2.evidence, bob.evidence] });
+  const named = await informed.edit(did, { parent: v5.checkpoint, name: 'Names Alice\'s version 2', author: { ...author, versionId: aliceV2.versionId }, signer });
+  const firstPair = await prepareEntryInscription({ sdk: informed, did, fundingUtxos: [await holdingOf(v5), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
+  assert.deepEqual(firstPair.carries, [named.original.checkpoint]);
+  assert.equal((await submitEntryInscription({ sdk: informed, did, pair: firstPair, provider, clock, index: ORD, recoveryStore })).broadcast, 'reveal_broadcast');
+  const blockA = (await env.mine())[0];
+  // This SDK cannot verify it: unverifiable, and the accepted state stays current with that notice.
+  const seenA = await readAnchored(sdk, did, { provider, clock, index: ORD });
+  assert.equal(seenA.head, v5.head);
+  assert.deepEqual(seenA.report.anchoring?.unverifiable.map((u) => [u.inscription, u.signer, u.signerVersionId]), [[firstPair.prepared.inscriptionId, authorDid, aliceV2.versionId]]);
+  assert.equal(seenA.current, true, JSON.stringify(seenA.report.reasons));
+  assert.deepEqual(seenA.report.notices, ['unverifiable-inscriptions']);
+  // Its own edit from the same head, inscribed a block later, waits on it (chain order decides).
+  const own = await sdk.edit(did, { parent: v5.checkpoint, name: 'Harbor, edited here', author, signer });
+  const ownStart = await expectStep(did, 'prepare', own.original.checkpoint);
+  const ownPair = await prepareEntryInscription({ sdk, did, fundingUtxos: [await holdingOf(ownStart.pending.view), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
+  assert.equal((await submitEntryInscription({ sdk, did, pair: ownPair, provider, clock, index: ORD, recoveryStore })).broadcast, 'reveal_broadcast');
+  const blockB = (await env.mine())[0];
+  const waitingOwn = await expectStep(did, 'wait-for-evidence', own.original.checkpoint);
+  assert.equal(waitingOwn.inscriptionId, ownPair.prepared.inscriptionId);
+  assert.equal(waitingOwn.waitingOn, firstPair.prepared.inscriptionId, 'the writer names the inscription its own waits on');
+  assert.equal(waitingOwn.signer, authorDid);
+  assert.equal(waitingOwn.signerVersionId, aliceV2.versionId, 'and the signer version that one needs');
+  const seenB = waitingOwn.pending.view;
+  assert.equal(seenB.head, v5.head, 'a valid later publication is not accepted while an earlier one from the same head is unverifiable');
+  assert.deepEqual(seenB.report.anchoring?.ignored.filter((i) => i.reason === 'waiting-for-earlier-unverifiable').map((i) => [i.inscription, i.waitingOn]), [[ownPair.prepared.inscriptionId, firstPair.prepared.inscriptionId]]);
+  assert.deepEqual(seenB.report.notices, ['unverifiable-inscriptions', 'publications-waiting']);
+  assert.equal(seenB.current, true, JSON.stringify(seenB.report.reasons));
+  await assert.rejects(
+    prepareEntryInscription({ sdk, did, fundingUtxos: [await holdingOf(seenB), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore, recoveryIds: [...records.keys()] }),
+    (error: unknown) => (error as { code?: string }).code === 'PAIR_IN_FLIGHT',
+    'nothing is prepared over a waiting pair (P9.6)',
+  );
+  // A reader holding version 2 accepts the earlier edit; the later one no longer extends the head.
+  const withV2 = await verifyOriginal({ bitcoin: [(await readSat(satDid)).evidence], authors: [aliceV2.evidence], now: Date.now() });
+  assert.equal(withV2.head, named.original.checkpoint);
+  assert.deepEqual(withV2.anchoring?.ignored.filter((i) => i.inscription === ownPair.prepared.inscriptionId).map((i) => i.reason), ['does-not-extend-head']);
+  assert.deepEqual(withV2.notices, []);
+  evidence.chainOrder = {
+    unverifiable: { inscription: firstPair.prepared.inscriptionId, block: blockA, names: [authorDid, aliceV2.versionId] },
+    waiting: { inscription: ownPair.prepared.inscriptionId, block: blockB, waitingOn: waitingOwn.waitingOn, action: waitingOwn.action },
+    notices: seenB.report.notices, currentWhileWaiting: seenB.current,
+    withNewerVersion: { head: withV2.head, laterIgnored: 'does-not-extend-head' },
   };
 
   step('9: fresh readers from Bitcoin alone, and a transfer handoff');

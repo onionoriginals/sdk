@@ -98,6 +98,19 @@ const verify = (signers: Array<VhAuthor | AuthorDidEvidence>, bitcoin: SatEviden
 const forge = (previous: LogEntry, state: JsonObject, sign: Parameters<typeof appendEntry>[1]["sign"]) =>
   appendEntry(previous, { versionTime: time(20), parameters: {}, state, sign });
 
+describe("C12-189: an impossible signer versionId is rejected without the signer's DID history (P9.15)", () => {
+  test("a malformed versionId, or one past the 1,000-version limit, never blocks, though the editor's history is not held", async () => {
+    const { alice, anchor, anchoring, asBob } = await harbor();
+    const anchorAt = anchoring();
+    for (const versionId of ["not-a-version", "1001-QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DzA3a1Y"]) {
+      const odd = await updateOriginal(anchor, { versionTime: time(20), resources: [photo(B2)], ...asBob(versionId) });
+      const r = await verify([alice], [sat([anchorAt, inscribe(odd, 20)])]);
+      expect(r.anchoring?.ignored, versionId).toEqual([expect.objectContaining({ versionId: odd.versionId, reason: "invalid-entry", code: "AUTHOR_VERSION_IMPOSSIBLE" })]);
+      expect(r.anchoring?.unverifiable, versionId).toEqual([]);
+    }
+  });
+});
+
 describe("C12-123: an editor entry inscribed on the anchoring sat by the owner (P9.12)", () => {
   test("is accepted: the editor's signature authorizes it, the owner's inscription places it, and holding the sat grants nothing", async () => {
     const { alice, bob, anchor, anchoring, asBob } = await harbor();
@@ -216,6 +229,16 @@ describe("C12-121 (anchored): an editor entry signed with a key removed from the
       return { alice, genesis, anchor, anchoring: inscribe([genesis, anchor], 10) };
     }
     const editorEvidence = (versions: Inscribed[]): AuthorDidEvidence => ({ did: EDITOR_SAT, bitcoin: sat(versions, EDITOR_SAT) });
+
+    test("C12-170: P5.13: an unread inscription on the sat of a did:btco editor that signed nothing in the accepted state leaves its identity evidence complete", async () => {
+      const { alice, anchoring } = await setup();
+      const v1 = didVersion(5, withKey());
+      const unread = didVersion(7, withKey(), { content: new Uint8Array(), metadata: undefined, unsupported: "not-read" });
+      const r = await verify([alice, editorEvidence([v1, unread])], [sat([anchoring])]);
+      expect(r.anchoring?.status).toBe("anchored");
+      expect(r.identityEvidence.status, JSON.stringify(r.identityEvidence)).toBe("complete");
+      expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    });
 
     test("an entry naming a version whose key a later version preceding the inscription removed is rejected", async () => {
       const { alice, anchor, anchoring } = await setup();

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { OriginalsError } from "@originals/vh";
 import { resourceDigest } from "@originals/vh/originals";
-import { MemoryStore, OriginalsSDK, readEvidence, readZip, signerPath, writeZip } from "../../../src/originals/index.js";
+import { MemoryStore, OriginalsSDK, readEvidence, readManifest, readZip, signerPath, writeZip } from "../../../src/originals/index.js";
 import { encodeZip } from "../../../src/originals/zip.js";
 import { Author, bytes, clock, seed } from "./helpers.js";
 
@@ -152,7 +152,7 @@ describe("C12-83: untrusted archives are bounded and checked before extraction (
     fails(writeZip(new Map([["big", new Uint8Array(100)]])), "ARCHIVE_TOO_LARGE", { maxTotalBytes: 99 });
   });
 
-  test("C12-152: an evidence package built twice from the same contents is byte-identical (P14.10, PROVISIONAL, section 14)", async () => {
+  test("C12-152: an evidence package built twice from the same contents is byte-identical (P14.10)", async () => {
     const { sdk, did } = await harbor();
     expect((await sdk.package(did)).bytes).toEqual((await sdk.package(did)).bytes);
   });
@@ -162,7 +162,71 @@ describe("C12-83: untrusted archives are bounded and checked before extraction (
     fails(encodeZip([raw("x".repeat(256))]), "ARCHIVE_PATH");
   });
 
-  test("signer DID histories are under signers/<hex sha256 of the DID>/, and no asset witness file is written or read (P14.10, P9.8; PROVISIONAL, section 14)", async () => {
+  test("P14.10: the 255 name limit counts UTF-8 bytes, for the reader and the writer", () => {
+    // 128 two-byte characters: 128 UTF-16 code units, 256 UTF-8 bytes.
+    const wide = "é".repeat(128);
+    fails(encodeZip([raw(wide)]), "ARCHIVE_PATH");
+    expect(() => writeZip(new Map([[wide, bytes("x")]]))).toThrow(expect.objectContaining({ code: "ARCHIVE_PATH" }) as never);
+    const fits = "é".repeat(127) + "x"; // 255 bytes
+    expect([...readZip(writeZip(new Map([[fits, bytes("x")]]))).keys()]).toEqual([fits]);
+  });
+
+  test("C12-175: the order, date, UTF-8 flag and mode rules bind the writer; the reader accepts an archive that breaks them (P14.10)", () => {
+    // Unsorted names, no UTF-8 flag, mode 0100755.
+    const zip = encodeZip([raw("b.txt", { flags: 0, externalAttributes: (0o100755 << 16) >>> 0 }), raw("a.txt")]);
+    // Another date in both headers: local header offset 12, central header offset 14.
+    const view = new DataView(zip.buffer);
+    const central = view.getUint32(zip.length - 22 + 16, true);
+    const otherDate = (46 << 9) | (10 << 5) | 23; // 2026-10-23
+    view.setUint16(12, otherDate, true);
+    view.setUint16(central + 14, otherDate, true);
+    expect([...readZip(zip).keys()].sort()).toEqual(["a.txt", "b.txt"]);
+    // The writer still produces the deterministic form.
+    const written = writeZip(readZip(zip));
+    expect([...readZip(written).keys()]).toEqual(["a.txt", "b.txt"]);
+    expect(new DataView(written.buffer).getUint16(12, true)).toBe((0 << 9) | (1 << 5) | 1);
+  });
+
+  test("C12-180: the reader decodes every name as UTF-8, rejecting one that is not, and rejects an entry whose mode is not a regular file (P14.10, P7.5)", () => {
+    // A name byte made invalid UTF-8 in both headers.
+    const zip = encodeZip([raw("a.txt")]);
+    const view = new DataView(zip.buffer);
+    const central = view.getUint32(zip.length - 22 + 16, true);
+    zip[30] = 0xff;
+    zip[central + 46] = 0xff;
+    fails(zip, "ARCHIVE_PATH");
+    // Invalid UTF-8 in the local header's name only: still ARCHIVE_PATH, never a raw TypeError.
+    const local = encodeZip([raw("a.txt")]);
+    local[30] = 0xff;
+    fails(local, "ARCHIVE_PATH");
+    for (const type of [0o040000, 0o010000, 0o020000, 0o060000, 0o140000]) {
+      fails(encodeZip([raw("a.txt", { externalAttributes: ((type | 0o644) << 16) >>> 0 })]), "ARCHIVE_PATH");
+    }
+    // No Unix mode at all (a DOS attribute only, or none) is not a regular file either (owner decision on #993's review).
+    for (const externalAttributes of [0, 0x10, 0x20]) fails(encodeZip([raw("a.txt", { externalAttributes })]), "ARCHIVE_PATH");
+    expect([...readZip(encodeZip([raw("a.txt", { externalAttributes: (0o100600 << 16) >>> 0 })])).keys()]).toEqual(["a.txt"]);
+  });
+
+  test("P14.10: missing items have exact shapes; an identity item names its role", () => {
+    const manifest = (missing: unknown[]) =>
+      bytes(JSON.stringify({ format: "originals-evidence/0.1", profile: "originals:1.0", original: "did:vh:Qm", checkpoint: "1-Qm", head: "1-Qm", completeness: "partial", missing }));
+    const resource = { kind: "resource", resource: "photo", version: 1, digest: resourceDigest(B1), versionId: "1-Qm" };
+    const identity = { kind: "identity", did: "did:vh:QmAlice", role: "author" };
+    expect(readManifest(manifest([resource, identity, { ...identity, role: "editor" }])).missing).toHaveLength(3);
+    const bad: unknown[] = [
+      { kind: "identity", did: "did:vh:QmAlice" }, // role is required
+      { ...identity, role: "owner" },
+      { ...identity, extra: true },
+      { ...resource, size: 3 },
+      { kind: "resource", resource: "photo", version: 1, digest: resourceDigest(B1) },
+      { ...resource, version: "1" },
+      { kind: "file", path: "x" },
+      "identity",
+    ];
+    for (const item of bad) expect(() => readManifest(manifest([item])), JSON.stringify(item)).toThrow(expect.objectContaining({ code: "EVIDENCE_MANIFEST" }) as never);
+  });
+
+  test("signer DID histories are under signers/<hex sha256 of the DID>/, and no asset witness file is written or read (the signers/ layout: P14.10, PROVISIONAL; no asset witness file: P9.8, D3)", async () => {
     const { sdk, alice, did } = await harbor();
     const files = readZip((await sdk.package(did)).bytes);
     const hex = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(alice.did)))].map((b) => b.toString(16).padStart(2, "0")).join("");

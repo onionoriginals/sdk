@@ -394,7 +394,7 @@ describe("inscriptions observed but not read (M1; P9.12, P9.14, P9.17)", () => {
     ]);
   });
 
-  test("finding 9, P5.13: a delegated or encoded inscription carries its own metadata; metadata not read stays absent", async () => {
+  test("C12-169: finding 9, P5.13: a delegated or encoded inscription carries its own metadata; metadata not read stays absent", async () => {
     const e = await satEvidence(snapshot([
       { id: id("a"), height: 2, content: "", body: { status: "unsupported", reason: "delegated", mediaType: null, metadata: new Uint8Array([0xa0]) } },
       { id: id("b"), height: 3, content: "", body: { status: "unsupported", reason: "content-encoding", mediaType: null, metadata: null } },
@@ -554,14 +554,14 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [{ ...alice.evidence(), obtainedAt }], clock: later });
     const loaded = await reader.load(pkg.bytes, { bitcoin: [evidence] });
     expect(loaded.report.head).toBe(anchored.original.checkpoint);
-    expect(loaded.report.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt, source: "supplied" }]);
+    expect(loaded.report.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt, source: "supplied", location: null }]);
     expect(loaded.report.current, JSON.stringify(loaded.report.reasons)).toBe(true);
     // Kept by the verifier's store from earlier, the newer version is used too, labelled retained.
     const store = new MemoryStore();
     await store.putAuthorEvidence({ ...alice.evidence(), obtainedAt, source: "fetched" });
     const keeper = OriginalsSDK.create({ store, authors: [], clock: later });
     const kept = await keeper.load(pkg.bytes, { bitcoin: [evidence] });
-    expect(kept.report.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt, source: "retained" }]);
+    expect(kept.report.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt, source: "retained", location: null }]);
   });
 
   for (const [name, change] of [

@@ -5,6 +5,7 @@
  * claim to be published on the web or recorded on Bitcoin.
  */
 import { MemoryStore, OriginalsSDK, readEvidence } from "@originals/sdk/originals";
+import { describeFreshness } from "@originals/vh/originals";
 import { FIRST_LIGHT, FIRST_LIGHT_ZIP_BASE64 } from "./example-evidence";
 
 export interface ExampleCheck {
@@ -26,6 +27,12 @@ export interface VerifiedExample {
   validAsOf?: string;
   /** Always false: a local Original is never reported current (P7.10). */
   current: boolean;
+  /**
+   * P7.8, in plain words: where and when the author DID's history was
+   * obtained, its latest version, and that the DID may have a newer one this
+   * check has not seen.
+   */
+  freshness: string;
 }
 
 function decodeBase64(text: string): Uint8Array {
@@ -70,5 +77,6 @@ export async function verifyExample(now: number = Date.now()): Promise<VerifiedE
     allOk: checks.every((c) => c.ok),
     ...(report.validAsOf ? { validAsOf: report.validAsOf.checkpoint } : {}),
     current: report.current,
+    freshness: describeFreshness(report.identityEvidence.author ?? FIRST_LIGHT.author, report.identityEvidence),
   };
 }

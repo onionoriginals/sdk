@@ -103,9 +103,11 @@ export interface OriginalsSDKOptions {
    * entry that identity signed. Redirects must not be followed (P8.5);
    * `safeFetch` fits: `async (url, o) => (await safeFetch(url, o)).bytes`.
    * A log retrieved there that verifies from the identity DID's genesis, and
-   * extends any other evidence for it, is used and its freshness reported as
-   * `retrieved` (PROVISIONAL). If it cannot be obtained, the other evidence is
-   * used and the identity's freshness is not established.
+   * extends any other evidence for it, is used, and the report states its URL,
+   * when it was retrieved and its latest versionId. Its freshness is
+   * established only when the DID's own witnesses approve that version and
+   * the version's `id` names the location (P7.8; owner decision, 23 Oct
+   * 2026; originals-spec #51, merged); otherwise, or if it cannot be obtained, it is not established.
    *
    * Bounded (08b review R1, R2, A4): only the author DID fixed at genesis is
    * an identity to retrieve, and its location is read from the log's
@@ -448,7 +450,7 @@ function retrievableIdentities(chained: ChainedEntry[], verified: number): strin
  * verified. An editor entry is signed by its editor; the author reference it
  * carries is its parent's and says nothing of where the author is now.
  *
- * PROVISIONAL (P5.14; 08b review r4 #5): when the evidence held verifies no
+ * P5.14 (08b review r4 #5; originals-spec #51, merged): when the evidence held verifies no
  * entry `did` signed (a reader with no evidence for it), no proof can be
  * checked before the log is retrieved. The location named by the earliest
  * chained entry `did` signed (the genesis entry for the author), which is
@@ -486,6 +488,25 @@ function identityLocations(chained: ChainedEntry[], did: string, verified: numbe
     }
   }
   return out;
+}
+
+/**
+ * Where a did:webvh log held for an identity says it now is: the `id` of its
+ * last version, when that is a did:webvh. Only a request; the verifier uses
+ * what is found there only if it verifies from the identity's genesis, and
+ * establishes freshness only if that log's own latest version names the
+ * location (P5.14, P7.8).
+ */
+function movedTo(evidence: AuthorDidEvidence | undefined): string[] {
+  // Any verified log held, fetched or a copy from a package or host (P5.14; owner decision on #993's review).
+  if (typeof evidence?.log !== "string") return [];
+  const last = evidence.log.trimEnd().split("\n").pop();
+  try {
+    const state = last ? (JSON.parse(last) as { state?: { id?: unknown } }).state : undefined;
+    return typeof state?.id === "string" && state.id.startsWith("did:webvh:") ? [state.id] : [];
+  } catch {
+    return [];
+  }
 }
 
 /** The did:webvh log URL of `location`, or undefined when it is not a did:webvh. */
@@ -566,8 +587,8 @@ export class OriginalsSDK {
    * extends that. Of what is supplied, configured and kept, the one with the
    * newest verified version is used, compared by verified versionIds and never
    * by bytes, so older evidence never rolls a newer DID log back, in
-   * verification or in what is published (P7.8, P7.9; PROVISIONAL
-   * originals-spec #47; #965 review C2). With `retained`, the newest
+   * verification or in what is published (P7.8, P7.9; originals-spec #47,
+   * merged; #965 review C2). With `retained`, the newest
    * verified versionId known is retained for the DID, so evidence that falls
    * short of it is stale; evidence that diverges is an identity fork, reported
    * as incomplete identity evidence (AUTHOR_DID_FORK), never as the package's.
@@ -639,7 +660,7 @@ export class OriginalsSDK {
    * call's budget (`loadPublished`), whose exhaustion, deadline or abort ends
    * the call. Any other operation gets a budget of its own from
    * `retrievalLimits`; when that runs out, what was not retrieved stays
-   * unretrieved and its freshness is not established (PROVISIONAL).
+   * unretrieved and its freshness is not established (P7.8).
    */
   private async withIdentities(
     log: string,
@@ -689,9 +710,10 @@ export class OriginalsSDK {
   ): Promise<AuthorDidEvidence[]> {
     const chained = chainedEntries(log);
     // Only an identity that signed a chained entry has a location to retrieve from; none is asked twice.
+    // P5.14 (originals-spec #51, merged): and where a log held for it says the DID now is, when that is elsewhere.
     const plan = retrievableIdentities(chained, verified)
       .filter((did) => did.startsWith("did:webvh:"))
-      .map((did) => ({ did, locations: identityLocations(chained, did, verified).filter((l) => !tried.has(`${did} ${logUrlOf(l)}`)) }))
+      .map((did) => ({ did, locations: [...new Set([...identityLocations(chained, did, verified), ...movedTo(base.find((a) => a.did === did))])].filter((l) => !tried.has(`${did} ${logUrlOf(l)}`)) }))
       .filter((p) => p.locations.length > 0);
     if (plan.length === 0) return base;
     budget.plan(2 * plan.reduce((n, p) => n + p.locations.length, 0), 0);
@@ -777,15 +799,19 @@ export class OriginalsSDK {
       throw error;
     }
     const candidate: AuthorDidEvidence = this.obtained({ did, log: text, ...(witness !== undefined ? { witness } : {}), retrievedFrom: url }, "fetched");
-    const ids = async (evidence: AuthorDidEvidence) => {
+    const read = async (evidence: AuthorDidEvidence) => {
       const h = await verifyAuthorHistory(evidence, { now: this.clock() });
-      return h.failure ? undefined : h.versions.map((v) => v.versionId);
+      return h.failure ? undefined : { ids: h.versions.map((v) => v.versionId), witnessed: h.versions[h.versions.length - 1]?.witnessed === true };
     };
-    const retrieved = await ids(candidate);
-    if (!retrieved || retrieved.length === 0) return undefined;
+    const retrieved = await read(candidate);
+    if (!retrieved || retrieved.ids.length === 0) return undefined;
     if (known) {
-      const have = await ids(known);
-      if (have && !have.every((id, i) => retrieved[i] === id)) return undefined; // shorter or diverging: not used
+      const have = await read(known);
+      if (have && !have.ids.every((id, i) => retrieved.ids[i] === id)) return undefined; // shorter or diverging: not used
+      // The same versions do not replace a log witnessed at its latest with one that is not: following
+      // a move never makes freshness worse (P5.14, P7.8; #993 review). The copy is kept and the move is
+      // reported not obtained.
+      if (have && have.ids.length === retrieved.ids.length && have.witnessed && !retrieved.witnessed) return undefined;
     }
     return candidate;
   }
@@ -1332,6 +1358,8 @@ export class OriginalsSDK {
         now: this.clock(),
         ...comparisons,
       });
+    // A host's snapshot is a copy, like a package: no fetch location, so the location rule does not
+    // apply to its signer logs (P7.8; owner decision on #993's review).
     const supplied = contents.authors.map(({ did, log, witness }) => this.obtained({ did, log, ...(witness !== undefined ? { witness } : {}) }, from));
     const base = await this.authorEvidence(contents.log, supplied, (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])), comparisons.retained);
     const { report } = await this.withIdentities(contents.log, base, run, retrieval);
@@ -1412,7 +1440,7 @@ export class OriginalsSDK {
     const log = text((await put("asset/did.jsonl", true))!, `${base}asset/did.jsonl`);
     // The log is unverified: what it asks for is checked for shape and number before any of it is requested.
     const plan = retrievalPlan(log);
-    // Each signer's log and witness file, and each resource; no asset witness file (P9.8; P14.10, PROVISIONAL, section 14).
+    // Each signer's log and witness file (the signers/ layout, P14.10, PROVISIONAL), and each resource; no asset witness file (P9.8, D3).
     const planned = 2 * plan.authors.length + plan.digests.length;
     // With identityFetch, up to six more requests per did:webvh signer (P5.14), in the same budget:
     // a log and witness file from up to two locations, then from the latest verified location.

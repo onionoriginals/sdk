@@ -25,8 +25,9 @@
  * Only anchoring settles a fork (P9.16, plan 011 PR 9).
  */
 import { OriginalsError, type ErrorCategory } from "../errors.js";
-import type { JsonObject } from "../json/index.js";
+import { isJsonObject, type JsonObject } from "../json/index.js";
 import {
+  compactLineError,
   parseLog,
   resolveCopies,
   verifyLog,
@@ -39,10 +40,10 @@ import {
 } from "../log/index.js";
 import { checkAlias, aliasTarget, type AliasEvidence, type AliasReport } from "./alias.js";
 import { anchoringIndex, assembleFromBitcoin, type AnchoringReport, type OwnershipReport, type RetainedAnchor } from "./bitcoin.js";
-import type { SatEvidence } from "./btco.js";
-import { authorKey, signerLocation, stillAuthorized, verifyAuthorHistory, versionNumberOf, type AuthorDidEvidence, type AuthorHistory, type EvidenceSource } from "./author.js";
+import { chainOrder, type ChainPosition, type SatEvidence } from "./btco.js";
+import { authorKey, stillAuthorized, verifyAuthorHistory, versionNumberOf, type AuthorDidEvidence, type AuthorHistory, type EvidenceSource } from "./author.js";
 import { didWebvhLogUrl } from "../webvh/index.js";
-import { deriveDocument, originalsSpecialisation } from "./profile.js";
+import { deriveDocument, exactNumberError, originalsSpecialisation } from "./profile.js";
 import { ORIGINALS_LIMITS, ORIGINALS_METHOD, resourceDigest, signerOf, type AssetState, type EntryState } from "./state.js";
 
 export interface VerifyOriginalOptions {
@@ -85,13 +86,44 @@ export interface RetainedVersions {
 }
 
 /**
- * Whether a log's freshness was independently established (P7.8). retrieved
- * (PROVISIONAL, P5.14): an identity's log was retrieved, without redirects,
- * from where the latest entry it signed says the DID is. not-established:
- * nothing shows it is the latest. stale: shorter than a retained versionId.
- * None of these makes an unanchored Original current (P7.10).
+ * Whether a signer DID log's freshness was established (P7.8; owner decision,
+ * 23 Oct 2026). established: the log was obtained, without redirects, at a
+ * location (P5.14), and the DID's own witnesses approve its latest version,
+ * whose `id` names that location. not-established: nothing shows it is the
+ * latest; the DID may have a newer version, for example one that removes a
+ * key, that the verifier has not seen. stale: shorter than a retained
+ * versionId. None of these makes an unanchored Original current (P7.10).
+ * Watchers are not consulted: this verifier makes no requests of its own.
  */
-export type Freshness = "retrieved" | "not-established" | "stale";
+export type Freshness = "established" | "not-established" | "stale";
+
+/**
+ * Where, when and as of which version a signer DID history was obtained
+ * (P7.8): what a report states, whatever its freshness.
+ */
+export interface IdentityObtained {
+  /** The URL the log was retrieved from (`AuthorDidEvidence.retrievedFrom`), or null when it was not retrieved from a location. */
+  location: string | null;
+  /** As the evidence states it (`AuthorDidEvidence.obtainedAt`); null when it does not say. */
+  obtainedAt: string | null;
+  source: EvidenceSource | null;
+  /** The latest verified versionId of that history. */
+  latestVersionId: string | null;
+  /** Whether the DID's own witnesses approve that version. */
+  witnessed: boolean;
+  /**
+   * A did:webvh log whose latest version names another location than the
+   * one it was fetched from, or for a copy than the identity DID: where the
+   * DID now is, by that version's `id` (P5.14).
+   */
+  movedTo?: string;
+  /**
+   * With `movedTo`: the log there was not obtained. For a did:webvh log fetched
+   * from a location that leaves freshness not established (P7.8); a copy from
+   * a package or a host keeps the freshness its witnesses give it.
+   */
+  movedLog?: "not-obtained";
+}
 
 /** A signer DID a result relies on: the latest versionId used, and when and where that history was obtained (P7.8, P7.10). */
 export interface SignerReliance {
@@ -101,6 +133,8 @@ export interface SignerReliance {
   /** As the evidence states it (`AuthorDidEvidence.obtainedAt`); null when it does not say. */
   obtainedAt: string | null;
   source: EvidenceSource | null;
+  /** The URL the history was retrieved from, or null (`IdentityObtained.location`). */
+  location: string | null;
 }
 
 /**
@@ -156,6 +190,8 @@ export interface SignerEvidence {
   status: "complete" | "incomplete";
   latestVersionId: string | null;
   freshness: Freshness;
+  /** Where, when and as of which version this DID's history was obtained (P7.8). */
+  obtained: IdentityObtained;
   /** The retained versionId for this DID, when one was supplied. */
   retainedVersionId: string | null;
   deactivated: boolean;
@@ -185,6 +221,8 @@ export interface OriginalsReport {
     author: string | null;
     latestVersionId: string | null;
     freshness: Freshness;
+    /** Where, when and as of which version the author DID's history was obtained (P7.8). */
+    obtained: IdentityObtained;
     /** The retained versionId for the author DID, when one was supplied. */
     retainedVersionId: string | null;
     deactivated: boolean;
@@ -234,13 +272,23 @@ export interface OriginalsReport {
   historicallyAuthorizedOnly: HistoricalAuthorization[];
   /** Never true for an Original that is not anchored (P7.10). */
   current: boolean;
+  /**
+   * What a current result is shown with, never dropped (section 7; originals-spec #51, merged):
+   * `head-changed` when the head moved from the retained one because an
+   * inscription's verifiability changed (`anchoring.headChange` says how and why),
+   * `unverifiable-inscriptions` when inscriptions after the anchor are unverifiable,
+   * `publications-waiting` when publications wait on one of them (P9.15). Neither stops the
+   * accepted state being current.
+   */
+  notices: Array<"head-changed" | "unverifiable-inscriptions" | "publications-waiting">;
   /** Why the result is not current: `not-anchored` for every unanchored Original, and anything else that applies. */
   reasons: string[];
   /**
    * The versionIds to retain after this verification, never lower than those
    * supplied, and unchanged by a fork or stale evidence; and, for an anchored
    * Original, the anchor reported, so a later change of anchor is reported
-   * rather than silent (P9.16).
+   * rather than silent (P9.16), with the inscriptions reported unverifiable,
+   * so accepting one later is a reported change of head (P9.15).
    */
   retain: { original: string | null; authors: Record<string, string>; anchor?: RetainedAnchor };
 }
@@ -256,29 +304,85 @@ function historyStatus(failure?: ReportFailure): OriginalsReport["history"]["sta
   return "invalid";
 }
 
-/**
- * P5.14: whether the identity's log was retrieved from the location of the DID
- * in the verification method id of the latest verified entry that identity
- * signed. A log found anywhere else (an old location, a redirect target, a
- * host's claim) establishes nothing.
- */
-function retrievedAtLocation(did: string, role: "author" | "editor", authors: AuthorDidEvidence[], entries: VerifiedEntry[]): boolean {
-  const evidence = authors.find((a) => a.did === did);
-  if (!evidence?.retrievedFrom) return false;
-  for (let i = entries.length - 1; i >= 0; i--) {
-    // An editor entry carries its parent's author reference, so it says nothing about where a
-    // moved author DID now is (P5.14): only entries the identity itself signed count.
-    const signer = signerOf(entries[i].entry.state as unknown as EntryState);
-    if (signer.role !== role || signer.ref.did !== did) continue;
-    const ref = signer.ref;
-    try {
-      return didWebvhLogUrl(signerLocation(ref)) === evidence.retrievedFrom;
-    } catch (error) {
-      if (error instanceof OriginalsError) return false; // not a did:webvh: it has no location to retrieve from
-      throw error;
-    }
+/** The did:webvh log URL of `did`, or undefined when it has none. */
+function logUrl(did: string): string | undefined {
+  try {
+    return didWebvhLogUrl(did);
+  } catch (error) {
+    if (error instanceof OriginalsError) return undefined;
+    throw error;
   }
-  return false;
+}
+
+function obtained(did: string | null, authors: AuthorDidEvidence[], histories: AuthorHistory[]): IdentityObtained {
+  const evidence = did ? authors.find((a) => a.did === did) : undefined;
+  const h = did ? histories.find((x) => x.did === did) : undefined;
+  const latest = h?.versions[h.versions.length - 1];
+  return {
+    location: evidence?.retrievedFrom ?? null,
+    obtainedAt: evidence?.obtainedAt ?? null,
+    source: evidence?.source ?? null,
+    latestVersionId: latest?.versionId ?? null,
+    witnessed: latest?.witnessed === true,
+    ...movedFrom(evidence, latest?.document.id),
+  };
+}
+
+/**
+ * P5.14: a did:webvh log whose latest version's `id` names another location
+ * than the one it was fetched from (or, for a copy from a package or a host,
+ * than the identity DID itself) shows the identity moved, and the log there
+ * was not obtained, or it would be the one reported. This only reports the
+ * move; a copy's freshness is still judged by its witnesses (P7.8; owner
+ * decision on #993's review).
+ */
+function movedFrom(evidence: AuthorDidEvidence | undefined, latestId: unknown): Pick<IdentityObtained, "movedTo" | "movedLog"> {
+  if (!evidence || typeof latestId !== "string" || !latestId.startsWith("did:webvh:")) return {};
+  const from = evidence.retrievedFrom ?? logUrl(evidence.did);
+  return logUrl(latestId) === from ? {} : { movedTo: latestId, movedLog: "not-obtained" };
+}
+
+const SOURCE_TEXT: Record<EvidenceSource, string> = {
+  package: "the evidence package",
+  host: "the host's snapshot",
+  fetched: "a retrieval",
+  retained: "this verifier's store",
+  supplied: "the caller",
+};
+
+/**
+ * P7.8 (owner decision, 23 Oct 2026; originals-spec #51, merged):
+ * a plain statement of a signer DID's
+ * freshness for people. It always says where and when the history was
+ * obtained and its latest version; unless freshness is established it says
+ * the DID may have a newer version, for example one that removes a key, that
+ * the verifier has not seen.
+ */
+export function describeFreshness(
+  did: string,
+  evidence: { freshness: Freshness; obtained: IdentityObtained; retainedVersionId?: string | null },
+): string {
+  const { freshness, obtained: o } = evidence;
+  const where = o.location ?? (o.source ? SOURCE_TEXT[o.source] : "an unstated source");
+  const when = o.obtainedAt ?? "an unstated time";
+  if (o.latestVersionId === null) return `No verified history of ${did} was obtained (from ${where} at ${when}).`;
+  const moved = o.movedTo ? ` That version says the DID is now at ${o.movedTo}; its log there was not obtained.` : "";
+  const seen = `The history of ${did} was obtained from ${where} at ${when}; its latest version there is ${o.latestVersionId}.${moved}`;
+  if (freshness === "established") return `${seen} That version is approved by the DID's own witnesses, which establishes its freshness.`;
+  const newer = "The DID may have a newer version, for example one that removes a key, that this verifier has not seen.";
+  if (freshness === "stale") return `${seen} It is older than version ${evidence.retainedVersionId ?? "unknown"}, which this verifier has seen before. ${newer}`;
+  return `${seen} Its freshness is not established. ${newer}`;
+}
+
+/**
+ * P14.2 (the reader rule is originals-spec #51, merged): each line of an asset log is compact JSON
+ * ending in a single LF. A copy that is not is treated like one that does not parse; verified as the
+ * log itself, the line is reported (LOG_LINE_FORMAT). did:vh and did:webvh
+ * signer logs keep their own method's rules.
+ */
+function checkLogForm(text: string): void {
+  const bad = !text.endsWith("\n") || text.slice(0, -1).split("\n").some((line) => compactLineError(line) !== undefined || exactNumberError(line) !== undefined);
+  if (bad) throw new OriginalsError("invalid-evidence", "LOG_LINE_FORMAT", "the asset log is not compact JSON Lines, each line ending in one LF (P14.2)");
 }
 
 function lookup(bytes: VerifyOriginalOptions["bytes"], digest: string): Uint8Array | undefined {
@@ -324,6 +428,10 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     identityFailures.push(failure);
     if (!failuresByDid.has(did)) failuresByDid.set(did, failure);
   };
+  // P5.13 (originals-spec #51, merged): a did:btco history that stops at an unread or
+  // disputed inscription is missing evidence only for an entry whose check depends on the history
+  // past it. Held here until the anchor is known; inscriptions after it are unverifiable (P9.15).
+  const heldBack: Array<{ did: string; before: ChainPosition; failure: { code: string; message: string } }> = [];
   const retainedAuthors = { ...options.retained?.authors };
   const staleAuthors = new Set<string>();
   const forkedAuthors = new Set<string>();
@@ -331,7 +439,12 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     try {
       const h = await verifyAuthorHistory(evidence, { now: options.now, maxVersions: options.limits?.maxAuthorVersions });
       histories.push(h);
-      if (h.failure) noteFailure(h.did, { code: h.failure.error.code, message: `DID ${h.did}: ${h.failure.error.message}` });
+      if (h.failure) {
+        const failure = { code: h.failure.error.code, message: `DID ${h.did}: ${h.failure.error.message}` };
+        const gap = h.method === "did:btco" && h.establishedBefore && (failure.code === "AUTHOR_SAT_READ_INCOMPLETE" || failure.code === "AUTHOR_PLACEMENT_DISPUTED");
+        if (gap) heldBack.push({ did: h.did, before: h.establishedBefore!, failure });
+        else noteFailure(h.did, failure);
+      }
       const retained = retainedAuthors[h.did];
       if (retained !== undefined) {
         // By versionId: a did:btco version is an inscription id, with no number in it.
@@ -361,6 +474,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   let assembly: Awaited<ReturnType<typeof assembleFromBitcoin>> | null = null;
   let raw: unknown[] | null = null;
   try {
+    if (typeof options.log === "string") checkLogForm(options.log);
     raw = options.log === undefined ? null : typeof options.log === "string" ? parseLog(options.log) : options.log;
   } catch (error) {
     if (!(error instanceof OriginalsError)) throw error;
@@ -368,12 +482,28 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   }
   if (onSats || (raw && anchoringIndex(raw) >= 0)) {
     const previousAnchor = options.retained?.anchor;
-    assembly = await assembleFromBitcoin(raw, options.bitcoin ?? [], (entries) => verifyLog(entries, verifyOptions), histories, previousAnchor ? { previousAnchor } : {});
+    const previousHead = options.retained?.original;
+    assembly = await assembleFromBitcoin(raw, options.bitcoin ?? [], (entries, o) => verifyLog(entries, { ...verifyOptions, ...o }), histories, {
+      ...(previousAnchor ? { previousAnchor } : {}),
+      ...(previousHead !== undefined ? { previousHead } : {}),
+    });
     input = assembly.entries;
   }
   const onBitcoin = assembly?.report.status === "anchored" ? assembly.report : null;
+  // The entries in the anchoring inscription depend on their signer's history up to it; without an
+  // anchor every entry may. A DID that signed none of them leaves no accepted entry depending on the
+  // history past its gap; inscriptions after the anchor are unverifiable instead (P5.13, P9.15).
+  const anchorLog = onBitcoin ? assembly!.entries.slice(0, anchoringIndex(assembly!.entries) + 1) : Array.isArray(input) ? input : raw ?? [];
+  const signedBy = (did: string) => anchorLog.some((e) => {
+    const state = (e as { state?: unknown } | null)?.state;
+    return isJsonObject(state) && signerOf(state as unknown as EntryState)?.ref?.did === did;
+  });
+  for (const held of heldBack) {
+    const at = onBitcoin ? assembly?.anchorPosition : undefined;
+    if (signedBy(held.did) && (!at || chainOrder(at, held.before) >= 0)) noteFailure(held.did, held.failure);
+  }
   const supplied = (): Promise<LogVerification> =>
-    typeof input === "string" ? verifyLogText(input, verifyOptions) : verifyLog(input, verifyOptions);
+    typeof input === "string" ? verifyLogText(input, { ...verifyOptions, compactLines: true, lineRule: exactNumberError }) : verifyLog(input, verifyOptions);
   let log: LogVerification;
   let fork: OriginalsFork | null = null;
   let copies: CopyReport[] = [];
@@ -406,9 +536,27 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const authorDid = head ? (head.entry.state as unknown as EntryState).author.did : null;
   const history = authorDid ? histories.find((h) => h.did === authorDid) : undefined;
   const latest = history?.versions[history.versions.length - 1];
-  const signerFreshness = (did: string | null, role: "author" | "editor"): Freshness => {
+  const obtainedOf = (did: string | null): IdentityObtained => obtained(did, options.authors, histories);
+  /**
+   * P7.8 (owner decision, 23 Oct 2026; originals-spec #51, merged):
+   * a log obtained at a location establishes freshness only
+   * when the DID's own witnesses approve its latest version, and is the identity's latest there
+   * only when that version's `id` names the location. It must also be the location the latest
+   * entry the identity signed names (P5.14).
+   */
+  const signerFreshness = (did: string | null): Freshness => {
     if (did && staleAuthors.has(did)) return "stale";
-    return did && retrievedAtLocation(did, role, options.authors, log.entries) ? "retrieved" : "not-established";
+    if (!did) return "not-established";
+    const o = obtainedOf(did);
+    if (!o.witnessed) return "not-established";
+    // The location rule is for a did:webvh log fetched from a location: it is the identity's latest
+    // there only when its latest version's `id` names that location, wherever P5.14 sent the reader
+    // (the latest verified entry's location, or where a verified log's latest version points). A
+    // did:vh log, or one from an evidence package, is judged by its witnesses alone (P7.8; originals-spec #51, merged).
+    if (o.location === null || !did.startsWith("did:webvh:")) return "established";
+    const h = histories.find((x) => x.did === did);
+    const latestId = h?.versions[h.versions.length - 1]?.document.id;
+    return typeof latestId === "string" && logUrl(latestId) === o.location ? "established" : "not-established";
   };
 
   // The editor DIDs relied on: each that signed a verified entry, and one whose missing history stopped verification.
@@ -430,7 +578,8 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       did,
       status: !h || h.versions.length === 0 || failure || forkedAuthors.has(did) ? "incomplete" : "complete",
       latestVersionId: last?.versionId ?? null,
-      freshness: signerFreshness(did, "editor"),
+      freshness: signerFreshness(did),
+      obtained: obtainedOf(did),
       retainedVersionId: retainedAuthors[did] ?? null,
       deactivated: last?.deactivated ?? false,
       ...(failure ? { failure } : {}),
@@ -455,8 +604,14 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const versionUnavailable = assembly?.report.ignored.some((i) => i.reason === "author-version-unavailable" || i.code === "AUTHOR_VERSION_UNAVAILABLE") ?? false;
   const identityIncomplete =
     failure?.category === "incomplete-evidence" || identityFailures.length > 0 || !history || editors.some((e) => e.status === "incomplete") || versionUnavailable;
+  // With the anchor, the inscriptions reported unverifiable: one accepted later is a reported change of head (P9.15).
+  const unverifiableNow = onBitcoin?.unverifiable.map((u) => u.inscription) ?? [];
+  const acceptedNow = onBitcoin?.accepted.map((a) => a.inscription) ?? [];
   const retainedAnchor: RetainedAnchor | undefined = onBitcoin
-    ? { inscription: onBitcoin.anchor!.inscription, sat: onBitcoin.sat, owner: assembly!.owner?.output ?? null }
+    ? {
+      inscription: onBitcoin.anchor!.inscription, sat: onBitcoin.sat, owner: assembly!.owner?.output ?? null,
+      ...(unverifiableNow.length > 0 ? { unverifiable: unverifiableNow } : {}), ...(acceptedNow.length > 0 ? { accepted: acceptedNow } : {}),
+    }
     : options.retained?.anchor;
   const report: OriginalsReport = {
     profile: ORIGINALS_METHOD,
@@ -469,7 +624,8 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       status: identityIncomplete ? "incomplete" : "complete",
       author: authorDid ?? history?.did ?? null,
       latestVersionId: latest?.versionId ?? null,
-      freshness: signerFreshness(authorDid, "author"),
+      freshness: signerFreshness(authorDid),
+      obtained: obtainedOf(authorDid ?? history?.did ?? null),
       retainedVersionId: (authorDid && retainedAuthors[authorDid]) || null,
       deactivated: latest?.deactivated ?? false,
       ...(identityFailures[0] ? { failure: identityFailures[0] } : {}),
@@ -500,6 +656,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     // time instead, and entries the anchoring inscription carries against the version they name (P9.15).
     historicallyAuthorizedOnly: onBitcoin === null ? historicallyAuthorizedOnly(prefix, histories, authorDid) : [],
     current: false,
+    notices: [],
     reasons,
     // An anchored log whose anchor Bitcoin has not shown is not retained past what was (P9.12).
     // After a change of anchor, the new anchor's branch is the history (P9.16).
@@ -534,9 +691,16 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   if (assembly && assembly.report.disputed.length > 0) reasons.push("bitcoin-placement-disputed");
   if (assembly?.ownerDisputed) reasons.push("ownership-indexes-disagree");
   if (assembly?.report.change) reasons.push("anchor-changed");
+  // A head change from an inscription's verifiability is a notice, not a reason: the state reached
+  // is current, and the change is shown with it (P9.15; owner decision on #993's review). One that a
+  // reorganization caused is also VH-Log's authoritative-source-changed warning (P9.5).
+  const headChange = assembly?.report.headChange;
   if (assembly?.report.status === "anchored" && options.retained?.original !== undefined) {
     const retained = options.retained.original;
-    if (!log.entries.some((v) => v.entry.versionId === retained)) reasons.push("authoritative-source-changed");
+    // Only an accepted entry that is unverifiable now can take the retained head away; resolving
+    // an unverifiable one never does, and a vanished one is a reorganization (P9.5).
+    const explained = headChange && headChange.unverified.length > 0 && headChange.vanished.length === 0;
+    if (!explained && !log.entries.some((v) => v.entry.versionId === retained)) reasons.push("authoritative-source-changed");
     if (assembly.rejectedByAuthorState.has(retained)) reasons.push("retroactive-revocation-conflict");
   }
   // P7.3, P7.4, P9.18: the log verifies without resource bytes. Missing bytes are reported in
@@ -550,6 +714,9 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   if (valid && selected) report.validAsOf = { checkpoint: selected.entry.versionId, signers: reliedOn(prefix, histories, options.authors) };
   // P7.10: only an anchored Original's state derived from its sat can be current (P9.13).
   report.current = valid && selected === head && anchored(head) && reasons.length === 0;
+  if (headChange) report.notices.push("head-changed");
+  if (onBitcoin && onBitcoin.unverifiable.length > 0) report.notices.push("unverifiable-inscriptions");
+  if (onBitcoin && onBitcoin.ignored.some((i) => i.reason === "waiting-for-earlier-unverifiable")) report.notices.push("publications-waiting");
   return report;
 }
 
@@ -604,6 +771,7 @@ function reliedOn(prefix: VerifiedEntry[], histories: AuthorHistory[], evidence:
       versionId: latestOf(histories, ref.did)?.versionId ?? null,
       obtainedAt: supplied?.obtainedAt ?? null,
       source: supplied?.source ?? null,
+      location: supplied?.retrievedFrom ?? null,
     });
   }
   // The author signs the genesis entry, so it comes first.

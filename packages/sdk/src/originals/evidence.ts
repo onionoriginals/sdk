@@ -11,7 +11,7 @@
  *                                         has witnesses
  *   resources/<digest>                    resource bytes, named by digest
  *
- * PROVISIONAL (P14.10, section 14): signer histories are
+ * PROVISIONAL (P14.10, section 14): the `signers/` layout. Signer histories are
  * under `signers/`, because editors are signers too, and there is no asset
  * witness file, because asset logs have no witnesses (P9.8). Nothing outside
  * this layout is accepted (P7.5); in particular `authors/` and
@@ -27,10 +27,21 @@ import { readZip, writeZip, type ZipLimits } from "./zip.js";
 export const EVIDENCE_FORMAT = "originals-evidence/0.1";
 export const MANIFEST = "originals-evidence.json";
 
+/** An item a partial package lacks, with exactly these members (P14.10). */
 export type MissingItem =
   | { kind: "resource"; resource: string; version: number; digest: string; versionId: string }
   /** A signer DID history the package lacks (P7.1, P7.4): the author's, or an editor's. */
-  | { kind: "identity"; did: string; role?: "author" | "editor" };
+  | { kind: "identity"; did: string; role: "author" | "editor" };
+
+/** P14.10: one missing item, with exactly the members of its kind. */
+function checkMissingItem(item: JsonValue): void {
+  const exactly = (keys: string[]) => isJsonObject(item) && Object.keys(item).length === keys.length && keys.every((k) => k in item);
+  const ok = isJsonObject(item) && (item.kind === "resource"
+    ? exactly(["kind", "resource", "version", "digest", "versionId"]) && typeof item.resource === "string" && Number.isSafeInteger(item.version) && (item.version as number) >= 1 &&
+      typeof item.digest === "string" && typeof item.versionId === "string"
+    : item.kind === "identity" && exactly(["kind", "did", "role"]) && typeof item.did === "string" && (item.role === "author" || item.role === "editor"));
+  if (!ok) evidenceError("EVIDENCE_MANIFEST", "a missing item is exactly { kind: \"resource\", resource, version, digest, versionId } or { kind: \"identity\", did, role: \"author\" | \"editor\" } (P14.10)");
+}
 
 export interface EvidenceManifest {
   format: typeof EVIDENCE_FORMAT;
@@ -97,6 +108,7 @@ function checkManifest(value: JsonValue): EvidenceManifest {
   for (const k of ["original", "checkpoint", "head"]) if (typeof value[k] !== "string") evidenceError("EVIDENCE_MANIFEST", `${k} must be a string`);
   if (value.completeness !== "complete" && value.completeness !== "partial") evidenceError("EVIDENCE_MANIFEST", "completeness must be complete or partial");
   if (!Array.isArray(value.missing)) evidenceError("EVIDENCE_MANIFEST", "missing must be an array");
+  for (const item of value.missing) checkMissingItem(item);
   return value as unknown as EvidenceManifest;
 }
 

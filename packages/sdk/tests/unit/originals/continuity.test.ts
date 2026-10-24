@@ -39,7 +39,7 @@ async function journey() {
 function withoutIdentity(zip: Uint8Array, author: string): Uint8Array {
   const files = new Map([...readZip(zip)].filter(([path]) => !path.startsWith("signers/")));
   const manifest = JSON.parse(new TextDecoder().decode(files.get("originals-evidence.json"))) as Record<string, unknown>;
-  files.set("originals-evidence.json", new TextEncoder().encode(JSON.stringify({ ...manifest, completeness: "partial", missing: [{ kind: "identity", did: author }] })));
+  files.set("originals-evidence.json", new TextEncoder().encode(JSON.stringify({ ...manifest, completeness: "partial", missing: [{ kind: "identity", did: author, role: "author" }] })));
   return writeZip(files);
 }
 
@@ -134,7 +134,7 @@ describe("C12-134: a fresh reader with no package of the moved author's log", ()
     expect(r.current).toBe(false);
   });
 
-  test("found at the location of the DID in the latest entry's verification method, the log is used and its freshness is retrieved", async () => {
+  test("C12-166: found at the location of the DID in the latest entry's verification method, the log is used; without its witnesses' approval freshness is not established, and the report says where, when and which version (P7.8)", async () => {
     const { alice, zip, head } = await movedAndRotated();
     const seen: string[] = [];
     const log = alice.evidence().log as string;
@@ -146,8 +146,11 @@ describe("C12-134: a fresh reader with no package of the moved author's log", ()
     expect(seen).toContain("https://new.example.org/.well-known/did.jsonl");
     expect(loaded.report.checkpoint).toBe(head);
     expect(loaded.report.authorBinding.status).toBe("valid");
-    expect(loaded.report.identityEvidence).toMatchObject({ status: "complete", freshness: "retrieved", latestVersionId: alice.versionId });
-    expect(loaded.report.reasons).not.toContain("author-freshness-not-established");
+    expect(loaded.report.identityEvidence).toMatchObject({
+      status: "complete", freshness: "not-established", latestVersionId: alice.versionId,
+      obtained: { location: didWebvhLogUrl(alice.location), obtainedAt: expect.any(String), source: "fetched", latestVersionId: alice.versionId, witnessed: false },
+    });
+    expect(loaded.report.validAsOf?.signers[0]).toMatchObject({ did: alice.did, location: didWebvhLogUrl(alice.location), source: "fetched" });
   });
 
   test("a log kept only at the old location verifies the history but establishes no freshness (PROVISIONAL, 08b review r4 #5)", async () => {
@@ -167,7 +170,44 @@ describe("C12-134: a fresh reader with no package of the moved author's log", ()
     expect(r.current).toBe(false);
   });
 
-  test("found at both locations, the log from the latest verified entry's location is used and its freshness is retrieved", async () => {
+  test("C12-177: a log from the old host that records a move sends the reader to the new location (P5.14 SHOULD)", async () => {
+    const env = await journey();
+    await env.alice.move("new.example.org");
+    const zip = withoutIdentity((await env.sdk.package(env.did)).bytes, env.alice.did);
+    const seen: string[] = [];
+    const log = env.alice.evidence().log as string;
+    const reader = OriginalsSDK.create({
+      store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")),
+      identityFetch: host({ [didWebvhLogUrl(env.alice.did)]: log, [didWebvhLogUrl(env.alice.location)]: log }, seen),
+    });
+    const r = (await reader.load(zip)).report;
+    expect(seen.filter((u) => u.endsWith("/did.jsonl"))).toEqual([didWebvhLogUrl(env.alice.did), didWebvhLogUrl(env.alice.location)]);
+    expect(r.identityEvidence).toMatchObject({ status: "complete", latestVersionId: env.alice.versionId, obtained: { location: didWebvhLogUrl(env.alice.location) } });
+  });
+
+  test("C12-177: following a move from a witnessed copy never makes freshness worse: the same log fetched without its witness file does not replace it (P5.14, P7.8)", async () => {
+    const alice = await WebvhIdentity.create("old.example.com", [{ fragment: "orig-1", secret: K1 }]);
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async (d) => (d === alice.did ? alice.evidence() : undefined), clock: clock() });
+    const ref = alice.ref("orig-1");
+    const created = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: ref, signer: alice.signer(ref, K1) });
+    if (created.kind !== "original") throw new Error("expected an Original");
+    await alice.move("new.example.org");
+    await alice.witnessedBy(localSigner("Ed25519", seed(71)));
+    const zip = (await sdk.package(created.original.did)).bytes;
+    const at = clock(Date.parse("2026-10-18T13:00:00Z"));
+    const packaged = (await OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: at }).load(zip)).report;
+    expect(packaged.identityEvidence).toMatchObject({ freshness: "established", obtained: { source: "package", movedTo: alice.location, movedLog: "not-obtained" } });
+    // The new location serves the same log without its witness file: the witnessed copy is kept. (That
+    // fetched log does not verify by itself, its witnesses being unmet; the SDK also never lets an
+    // equal fetched log replace a copy unless it is witnessed at its latest version.)
+    const seen: string[] = [];
+    const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: at, identityFetch: host({ [didWebvhLogUrl(alice.location)]: alice.evidence().log as string }, seen) });
+    const r = (await reader.load(zip)).report;
+    expect(seen).toContain(didWebvhLogUrl(alice.location));
+    expect(r.identityEvidence).toMatchObject({ freshness: "established", obtained: { source: "package", movedTo: alice.location, movedLog: "not-obtained" } });
+  });
+
+  test("found at both locations, the log from the latest verified entry's location is used", async () => {
     const { alice, zip, head } = await movedAndRotated();
     const seen: string[] = [];
     const log = alice.evidence().log as string;
@@ -178,7 +218,7 @@ describe("C12-134: a fresh reader with no package of the moved author's log", ()
     const r = (await reader.load(zip)).report;
     expect(seen[0]).toBe(didWebvhLogUrl(alice.did));
     expect(r.checkpoint).toBe(head);
-    expect(r.identityEvidence).toMatchObject({ status: "complete", freshness: "retrieved", latestVersionId: alice.versionId });
+    expect(r.identityEvidence).toMatchObject({ status: "complete", freshness: "not-established", latestVersionId: alice.versionId, obtained: { location: didWebvhLogUrl(alice.location) } });
   });
 
   test("a retrieved log with another SCID, or one that diverges from the package's, is not used", async () => {
@@ -307,6 +347,32 @@ describe("C12-134: identity retrieval is bounded and follows only the identity's
     return { ...env, alias, files, hosted };
   }
 
+  test("P7.8: a did:webvh signer log a host serves is a copy, like a package: it has no fetch location, so the location rule does not apply", async () => {
+    const env = await movedAndRotated();
+    const key = localSigner("Ed25519", seed(61));
+    const k = key.publicKeyMultibase;
+    const g = await createLog({
+      versionTime: "2026-10-18T10:00:00Z",
+      parameters: { method: "did:webvh:1.0", scid: "{SCID}", updateKeys: [k], portable: true },
+      state: { id: "did:webvh:{SCID}:example.com:photos", alsoKnownAs: [env.did] },
+      sign: signWith(key, { cryptosuite: "eddsa-jcs-2022", verificationMethod: `did:key:${k}#${k}` }),
+    });
+    const alias: AliasEvidence = { did: g.state.id as string, log: serializeLog([g]) };
+    await env.sdk.publish(env.did, { parent: env.head, author: env.after, signer: env.alice.signer(env.after, K2), alias });
+    const files = await hostedFiles(env.sdk, env.did, alias);
+    const base = didWebvhFilesUrl(alias.did);
+    const hosted: HostedFetch = (url) => {
+      const data = url.startsWith(base) ? files.get(url.slice(base.length)) : undefined;
+      return data ? Promise.resolve(data.slice()) : Promise.reject(new OriginalsError("unavailable-bytes", "FETCH_STATUS", `${url} answered 404`));
+    };
+    const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")) });
+    const r = await reader.loadPublished(alias.did, hosted);
+    expect(r.report.identityEvidence).toMatchObject({
+      status: "complete", freshness: "not-established",
+      obtained: { location: null, source: "host" },
+    });
+  });
+
   test("loadPublished's deadline and the caller's signal bound identity requests", async () => {
     const { alias, hosted } = await publishedMoved();
     const hanging = OriginalsSDK.create({
@@ -338,7 +404,7 @@ describe("C12-134: identity retrieval is bounded and follows only the identity's
       OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")), retrievalLimits, identityFetch: identity });
     const r = await reader({}).loadPublished(alias.did, hosted);
     expect(seen).toContain(didWebvhLogUrl(alice.location));
-    expect(r.report.identityEvidence).toMatchObject({ status: "complete", freshness: "retrieved" });
+    expect(r.report.identityEvidence).toMatchObject({ status: "complete", freshness: "not-established", obtained: { location: didWebvhLogUrl(alice.location), source: "fetched" } });
     // Without room for the author's two identity requests in the plan, nothing past the asset log is requested.
     const hostCalls: string[] = [];
     const counted: HostedFetch = (url, options) => {
@@ -359,7 +425,7 @@ describe("C12-134: identity retrieval is bounded and follows only the identity's
 });
 
 describe("C12-134: a forged hash-chained line chooses no identity location (P5.14; 08b review r2 #5)", () => {
-  test("the location comes from the last entry that verified, not from an appended line whose proof does not", async () => {
+  test("C12-165: the location comes from the last entry that verified, not from an appended line whose proof does not", async () => {
     const { alice, sdk, did } = await journey();
     const files = new Map(readZip((await sdk.package(did)).bytes));
     const log = new TextDecoder().decode(files.get("asset/did.jsonl"));
@@ -378,7 +444,7 @@ describe("C12-134: a forged hash-chained line chooses no identity location (P5.1
     expect(seen[0]).toBe(didWebvhLogUrl(alice.did));
   });
 
-  test("08b review r4 #5 (PROVISIONAL): a reader with no identity evidence asks the genesis entry's location before a forged line's", async () => {
+  test("C12-165: 08b review r4 #5 (PROVISIONAL): a reader with no identity evidence asks the genesis entry's location before a forged line's", async () => {
     const { alice, sdk, did } = await journey();
     const files = new Map(readZip((await sdk.package(did)).bytes));
     const log = new TextDecoder().decode(files.get("asset/did.jsonl"));

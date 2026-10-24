@@ -10,12 +10,16 @@
  * resource version verify; 1 otherwise; 2 for a usage error. A verified
  * unanchored Original is reported valid as of its checkpoint, with the signer
  * DID versions relied on and when they were obtained (the package's, at
- * verification time); it is never current (P7.10). Entries historically
- * authorized only are listed (P7.9).
+ * verification time); it is never current (P7.10). For each signer DID it
+ * says where and when its history was obtained and, unless freshness is
+ * established, that the DID may have a newer version the verifier has not
+ * seen (P7.8). Entries historically authorized only are listed (P7.9).
  */
 import { readFileSync } from "node:fs";
 import { OriginalsError } from "@originals/vh";
+import { describeFreshness } from "@originals/vh/originals";
 import { MemoryStore, OriginalsSDK, readEvidence } from "./index.js";
+import { noticeLines, verdictLine } from "./verdict.js";
 
 const USAGE = "usage: originals verify <package.zip> [--json] [--now <ISO time>]\n       originals inspect <package.zip>\n";
 
@@ -57,12 +61,18 @@ async function main(argv: string[]): Promise<number> {
     if (rest.includes("--json")) {
       process.stdout.write(`${JSON.stringify({ ...report, reasons, manifest, verified })}\n`);
     } else {
-      process.stdout.write(`${verified ? "verified" : "not verified"}: ${report.original ?? "unknown Original"} at ${report.checkpoint ?? "no checkpoint"}\n`);
+      // Section 7, P9.15: notices go on the verdict line and are listed under it, never left off.
+      process.stdout.write(`${verdictLine(report, verified)}\n`);
+      for (const line of noticeLines(report)) process.stdout.write(`  ${line}\n`);
       for (const v of report.resources.versions) process.stdout.write(`  ${v.resource} v${v.version} ${v.digest} ${v.bytes}\n`);
       if (report.validAsOf) {
         process.stdout.write(`  valid as of ${report.validAsOf.checkpoint}, not current: not anchored (P7.10)\n`);
         for (const s of report.validAsOf.signers) process.stdout.write(`  ${s.role} ${s.did} at ${s.versionId ?? "no version"}, obtained ${s.obtainedAt ?? "at an unknown time"} from ${s.source ?? "an unknown source"}\n`);
       }
+      // P7.8: plainly, where and when each signer DID's history was obtained, and whether it may be newer.
+      const author = report.identityEvidence.author;
+      if (author) process.stdout.write(`  ${describeFreshness(author, report.identityEvidence)}\n`);
+      for (const e of report.identityEvidence.editors) process.stdout.write(`  ${describeFreshness(e.did, e)}\n`);
       for (const h of report.historicallyAuthorizedOnly) process.stdout.write(`  ${h.versionId}: historically authorized only (${h.reason}, P7.9)\n`);
       if (reasons.length > 0) process.stdout.write(`  not current: ${reasons.join(", ")}\n`);
     }

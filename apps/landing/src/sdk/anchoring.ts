@@ -42,6 +42,11 @@ export interface AnchoringStatus {
   disagreement?: { disputed: string[]; holders: string[] };
   heads: { committed: string; accepted: string | null; acceptedHeight: number | null; next: string | null; queue: string[] };
   current: boolean;
+  /** Shown with `current`, never dropped (section 7, P9.15): unverifiable inscriptions, and publications waiting on them. */
+  notices: Array<'unverifiable-inscriptions' | 'publications-waiting'>;
+  listed: { unverifiable: Array<{ inscription: string; signer: string; signerVersionId: string }>; waiting: Array<{ inscription: string; waitingOn: string }> };
+  /** `wait-for-evidence` only: the earlier unverifiable inscription this pair waits on. */
+  waitingOn?: string;
   ownership: { status: string; output: string; address?: string; confirmations: number; indexes: string[] } | null;
   indexes: { used: string[]; compared: boolean };
   recoveryIssues: Array<{ recoveryId: string; code: string; message: string }>;

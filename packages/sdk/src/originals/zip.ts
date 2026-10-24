@@ -1,4 +1,7 @@
 /**
+ * P14.10 (originals-spec #51, merged): the sort, date, UTF-8 flag and mode rules bind the writer
+ * (`writeZip`); the reader may ignore them, and does.
+ *
  * A minimal, strict ZIP codec for evidence packages (PROVISIONAL format, D4;
  * owner decision Q3). Only uncompressed ("stored") entries are written or
  * accepted, so sizes are known from the central directory and no
@@ -50,10 +53,12 @@ const UTF8 = 0x0800;
 const REGULAR_FILE = (0o100644 << 16) >>> 0;
 const DOS_DATE_1980_01_01 = (0 << 9) | (1 << 5) | 1;
 
-/** Check one archive path (P7.5). */
+const NAME_BYTES = new TextEncoder();
+
+/** Check one archive path (P7.5); its length is counted in UTF-8 bytes, at most 255 (P14.10). */
 export function checkArchivePath(name: string): void {
   const bad = (why: string) => archiveError("ARCHIVE_PATH", `archive path ${JSON.stringify(name)} ${why}`);
-  if (name.length === 0 || name.length > 255) bad("is empty or too long");
+  if (name.length === 0 || NAME_BYTES.encode(name).length > 255) bad("is empty or longer than 255 UTF-8 bytes");
   if (name.includes("\u0000")) bad("contains NUL");
   if (name.includes("\\")) bad("contains a backslash");
   if (name.startsWith("/") || /^[A-Za-z]:/.test(name)) bad("is absolute");
@@ -183,7 +188,8 @@ export function readZip(bytes: Uint8Array, limits: ZipLimits = {}): Map<string, 
     if (compressed !== size) archiveError("ARCHIVE_INVALID", `${name} has inconsistent sizes`);
     const type = (external >>> 16) & 0o170000;
     if (type === 0o120000) archiveError("ARCHIVE_SYMLINK", `${name} is a symbolic link`);
-    if (type !== 0 && type !== 0o100000) archiveError("ARCHIVE_PATH", `${name} is not a regular file`);
+    // P14.10: a regular file, by its Unix mode; an entry with none is not one (owner decision on #993's review).
+    if (type !== 0o100000) archiveError("ARCHIVE_PATH", `${name} is not a regular file`);
     checkArchivePath(name);
     const key = name.normalize("NFC");
     if (seen.has(key)) archiveError("ARCHIVE_DUPLICATE", `${name} appears twice`);
@@ -200,7 +206,13 @@ export function readZip(bytes: Uint8Array, limits: ZipLimits = {}): Map<string, 
     if (o + 30 > centralOffset || view.getUint32(o, true) !== 0x04034b50) archiveError("ARCHIVE_INVALID", `${entry.name} has no local header`);
     const nameLength = view.getUint16(o + 26, true);
     const extraLength = view.getUint16(o + 28, true);
-    if (decoder.decode(bytes.subarray(o + 30, o + 30 + nameLength)) !== entry.name) archiveError("ARCHIVE_INVALID", `${entry.name}'s local header names another file`);
+    let localName: string;
+    try {
+      localName = decoder.decode(bytes.subarray(o + 30, o + 30 + nameLength));
+    } catch {
+      return archiveError("ARCHIVE_PATH", `${entry.name}'s local header name is not UTF-8`);
+    }
+    if (localName !== entry.name) archiveError("ARCHIVE_INVALID", `${entry.name}'s local header names another file`);
     const start = o + 30 + nameLength + extraLength;
     if (start + entry.size > centralOffset) archiveError("ARCHIVE_INVALID", `${entry.name} is out of bounds`);
     const data = bytes.slice(start, start + entry.size);

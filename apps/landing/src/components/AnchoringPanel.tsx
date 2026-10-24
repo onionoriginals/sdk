@@ -50,6 +50,12 @@ export function AnchoringPanel(props: {
       <p className="demo-inscribe-note" data-testid="anchoring-label-note">{view.labelNote}</p>
       {view.actionNote && <p className="demo-inscribe-note" data-testid="anchoring-action">{view.actionNote}</p>}
       {view.neverCurrentNote && <p className="demo-inscribe-note">{view.neverCurrentNote}</p>}
+      {view.noticeNote && <p className="demo-inscribe-note" data-testid="anchoring-notices">{view.noticeNote}</p>}
+      {view.noticeItems.length > 0 && (
+        <ul className="demo-inscribe-note" data-testid="anchoring-notice-items">
+          {view.noticeItems.map((item) => <li key={item}>{item}</li>)}
+        </ul>
+      )}
       {asset.btcoDid && (
         <p className="demo-inscribe-note">
           <code>{asset.btcoDid}</code>

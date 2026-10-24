@@ -166,15 +166,15 @@ export class WebvhAuthor {
     return this.appendState(this.document(id, keys, { alsoKnownAs: aka }));
   }
 
-  /** A new version at the current location with these keys (rotation, P5.10). */
-  async rotate(keys: WebvhKey[]): Promise<string> {
+  /** A new version at the current location with these keys (rotation, P5.10), and any parameters (a witness list). */
+  async rotate(keys: WebvhKey[], parameters: JsonObject = {}): Promise<string> {
     const aka = this.entries[this.entries.length - 1].state.alsoKnownAs;
-    return this.appendState(this.document(this.location, keys, aka ? { alsoKnownAs: aka } : {}));
+    return this.appendState(this.document(this.location, keys, aka ? { alsoKnownAs: aka } : {}), parameters);
   }
 
   /** Publish a version with exactly this DID document. */
-  async appendState(state: JsonObject): Promise<string> {
-    const next = await appendEntry(this.entries[this.entries.length - 1], { versionTime: this.time(), parameters: {}, state, sign: this.signUpdate() });
+  async appendState(state: JsonObject, parameters: JsonObject = {}): Promise<string> {
+    const next = await appendEntry(this.entries[this.entries.length - 1], { versionTime: this.time(), parameters, state, sign: this.signUpdate() });
     this.entries.push(next);
     return next.versionId;
   }

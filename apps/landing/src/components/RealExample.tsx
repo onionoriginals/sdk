@@ -152,6 +152,10 @@ export function RealExample() {
                             </dd>
                           </div>
                         )}
+                        <div>
+                          <dt>{realExample.fields.authorHistory}</dt>
+                          <dd>{result.freshness}</dd>
+                        </div>
                         {result.issuedAt && (
                           <div>
                             <dt>{realExample.fields.issued}</dt>

@@ -379,6 +379,10 @@ export const demo = {
     indexSingle: (index: string) => `Read from one index (${index}); no second index was compared.`,
     indexCompared: (indexes: string[]) => `Read from ${indexes.length} indexes that agree: ${indexes.join(', ')}.`,
     neverCurrentNote: 'Until Bitcoin shows the anchor, this Original is valid as of its last version, never confirmed current.',
+    unverifiableItem: (inscription: string, signer: string, version: string) => `Inscription ${inscription} names ${signer} at version ${version}, which is not available here.`,
+    waitingItem: (inscription: string, waitingOn: string) => `Inscription ${inscription} waits on ${inscription === waitingOn ? 'an earlier one' : waitingOn}.`,
+    noticeNote: (unverifiable: number, waiting: number) =>
+      `${unverifiable === 1 ? '1 later inscription on the sat cannot be checked yet' : `${unverifiable} later inscriptions on the sat cannot be checked yet`}: the signer's DID history it names is not available here.${waiting > 0 ? ` ${waiting === 1 ? '1 later version waits' : `${waiting} later versions wait`} on it, and will be accepted or set aside once it can be checked.` : ''} The state shown stays current until then.`,
   },
   evidence: {
     action: 'Download evidence',
@@ -737,7 +741,8 @@ export const realExample = {
     author: 'Author DID',
     profile: 'Record format',
     issued: 'Recorded',
-    validAsOf: 'Valid as of'
+    validAsOf: 'Valid as of',
+    authorHistory: 'Author DID history'
   },
   /** P7.10: a local Original is checked as of an entry, never as the latest version. */
   validAsOfNote: 'Valid as of this entry. A local Original is never shown as the latest version: only an Original recorded on Bitcoin can be.'

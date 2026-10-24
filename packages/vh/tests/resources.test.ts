@@ -210,7 +210,7 @@ describe("C12-158: an added resource not in any grant", () => {
   });
 });
 
-describe("C12-158: the author entry that adds a resource may grant it (PROVISIONAL reading of P5.15)", () => {
+describe("C12-158, C12-171: the author entry that adds a resource may grant it (P5.15, originals-spec #51)", () => {
   test("the grant takes effect from the next entry, so only then may the editor change it (P5.17)", async () => {
     const { alice, bob, at, genesis, asAlice, asBob } = await harbor((bob) => [grant(bob.did, { resources: ["photo"] })]);
     const both = await updateOriginal(genesis, { versionTime: at(), resources: [note(N1)], editors: [grant(bob.did, { resources: ["photo", "note"] })], ...asAlice });
@@ -251,7 +251,7 @@ describe("C12-159: transitions for an added and a removed resource", () => {
   });
 });
 
-describe("C12-160: an Original with 256 resources / 257 resources (P14.13; spec PR #50 (open), owner decision)", () => {
+describe("C12-160: an Original with 256 resources / 257 resources (P14.13; originals-spec #50, merged, owner decision)", () => {
   const many = (n: number, from = 0) => Array.from({ length: n }, (_, i) => note(`r${from + i}`, `r${from + i}`));
   const manyBytes = (n: number, from = 0) => Object.fromEntries(many(n, from).map((d, i) => [d.digest, bytes(`r${from + i}`)]));
 

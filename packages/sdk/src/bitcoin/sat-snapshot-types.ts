@@ -37,8 +37,8 @@ export interface PublicationObservation {
      * (P9.14 defines no encoding). The body is not read. Its own metadata,
      * which delegation and body encoding do not affect, is read when it fits
      * the read's byte budget (`null`: it carries none); absent, it was not
-     * read, and a did:btco history fails closed there (P5.13; whether such an
-     * inscription counts as a did:btco version is open: PROVISIONAL).
+     * read, and a did:btco history fails closed there (P5.13, P14.12; decided,
+     * D6).
      */
     | { status: 'unsupported'; reason: 'delegated' | 'content-encoding'; mediaType: string | null; metadata?: Uint8Array | null }
     /**

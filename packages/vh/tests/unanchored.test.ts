@@ -50,8 +50,8 @@ describe("P7.10: an unanchored Original is never current", () => {
     expect(r.validAsOf).toEqual({
       checkpoint: byBob.versionId,
       signers: [
-        { did: alice.did, role: "author", versionId: alice.versionId, obtainedAt: FETCHED, source: "fetched" },
-        { did: bob.did, role: "editor", versionId: bob.versionId, obtainedAt: FETCHED, source: "fetched" },
+        { did: alice.did, role: "author", versionId: alice.versionId, obtainedAt: FETCHED, source: "fetched" , location: null },
+        { did: bob.did, role: "editor", versionId: bob.versionId, obtainedAt: FETCHED, source: "fetched" , location: null },
       ],
     });
     expect(r.historicallyAuthorizedOnly).toEqual([]);
@@ -61,7 +61,7 @@ describe("P7.10: an unanchored Original is never current", () => {
     const { alice, bob, genesis, cropped } = await harbor();
     const r = await verifyOriginal({ log: [genesis, cropped], authors: [alice.evidence(), bob.evidence()], now: NOW, bytes: allBytes });
     expect(r.current).toBe(false);
-    expect(r.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt: null, source: null }]);
+    expect(r.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt: null, source: null , location: null }]);
   });
 
   test("C12-22: an old valid prefix served as current is valid as of its own checkpoint, never current", async () => {

@@ -114,6 +114,16 @@ export interface AnchoringStatus {
   heads: { committed: string; accepted: string | null; acceptedHeight: number | null; next: string | null; queue: string[] };
   /** Never true for an Original that is not anchored (P7.10). */
   current: boolean;
+  /**
+   * Shown with `current`, never dropped (section 7, P9.15; originals-spec #51):
+   * `unverifiable-inscriptions` and
+   * `publications-waiting` do not stop the accepted state being current, and
+   * `listed` names each one, a waiting one with the inscription it waits on.
+   */
+  notices: string[];
+  listed: { unverifiable: Array<{ inscription: string; signer: string; signerVersionId: string }>; waiting: Array<{ inscription: string; waitingOn: string }> };
+  /** `wait-for-evidence` on a pair that waits on an earlier unverifiable inscription: that inscription. */
+  waitingOn?: string;
   /** The holder of the sat. Ownership is not authority (P9.11, P9.12). */
   ownership: { status: string; output: string; address?: string; confirmations: number; indexes: string[] } | null;
   /** The indexes read, and whether more than one was compared (P9.10, P9.11). */
@@ -313,12 +323,18 @@ export function createOriginalsAnchoring(deps: OriginalsAnchoringDeps) {
       ...('recoveryId' in step ? { recoveryId: step.recoveryId } : {}),
       ...('inscriptionId' in step ? { inscriptionId: step.inscriptionId } : {}),
       ...('reason' in step ? { reason: step.reason } : {}),
+      ...(step.action === 'wait-for-evidence' && step.waitingOn ? { waitingOn: step.waitingOn } : {}),
       ...(step.action === 'prepare' ? { replaces: step.replaces } : {}),
       ...(step.action === 'refused' ? { refused: { commit: step.commit, ifRevealed: step.ifRevealed, code: step.error.code, message: step.error.message } } : {}),
       ...(step.action === 'wait-for-evidence' ? { signer: { did: step.signer, versionId: step.signerVersionId } } : {}),
       ...(step.action === 'wait-for-bitcoin' ? { disagreement: { disputed: step.disputed, holders: step.holders } } : {}),
       heads: { committed: p.committed, accepted: p.accepted, acceptedHeight: p.acceptedHeight, next: p.next, queue: p.queue },
       current: p.view.current,
+      notices: [...p.view.report.notices],
+      listed: {
+        unverifiable: (p.view.report.anchoring?.unverifiable ?? []).map(({ inscription, signer, signerVersionId }) => ({ inscription, signer, signerVersionId })),
+        waiting: (p.view.report.anchoring?.ignored ?? []).flatMap((i) => (i.reason === 'waiting-for-earlier-unverifiable' && i.waitingOn ? [{ inscription: i.inscription, waitingOn: i.waitingOn }] : [])),
+      },
       ownership: ownership
         ? { status: ownership.status, output: ownership.output, ...(ownership.address ? { address: ownership.address } : {}), confirmations: ownership.confirmations, indexes: ownership.indexes }
         : null,

@@ -20,6 +20,7 @@ import {
   verifyAuthorHistory,
   verifyOriginal,
   type AuthorRef,
+  type OriginalsReport,
   type SatEvidence,
   type SatInscription,
 } from "../src/originals/index.js";
@@ -216,11 +217,12 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
   const inscribed = (entries: LogEntry[], height: number, extra: Partial<SatInscription> = {}) =>
     at(height, { mediaType: ORIGINALS_INSCRIPTION_TYPE, content: bytes(serializeLog(entries)), ...extra });
   /** Verify from Bitcoin alone: the author's sat and the anchoring sat, no copy of the log (P9.18). */
-  const fromBitcoin = (author: Inscribed[] | SatEvidence[], anchoring: Inscribed[]) =>
+  const fromBitcoin = (author: Inscribed[] | SatEvidence[], anchoring: Inscribed[], retained?: OriginalsReport["retain"]) =>
     verifyOriginal({
       now: NOW, bytes: allBytes,
       authors: [{ did: AUTHOR, bitcoin: "index" in (author[0] ?? {}) ? (author as SatEvidence[]) : sat(AUTHOR, author as Inscribed[]) }],
       bitcoin: [sat(SAT, anchoring)],
+      ...(retained ? { retained } : {}),
     });
 
   /** The issue's repro: V1 lists key A; the anchoring entry is signed with B and names V2, the grant of B. */
@@ -261,6 +263,85 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     expect(r.head).toBe(anchor.versionId);
     expect(r.anchoring?.ignored).toMatchObject([{ versionId: next.versionId, reason: "author-version-not-yet-in-effect" }]);
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+  });
+
+  test("C12-163: P9.15, P5.13: after the anchor, an entry naming a versionId that a fully read did:btco history does not hold is invalid, not unverifiable", async () => {
+    const { v1, genesis, anchor } = await byA();
+    const fake = id(); // no inscription on the author's sat
+    const next = await updateOriginal(anchor, { versionTime: time(40), name: "Names a version the sat never had", author: ref(fake), sign });
+    const later = inscribed([next], 40);
+    const r = await fromBitcoin([v1], [inscribed([genesis, anchor], 31), later]);
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ inscription: later.id, versionId: next.versionId, reason: "invalid-entry", code: "AUTHOR_VERSION_NOT_IN_HISTORY" })]);
+    expect(r.anchoring?.unverifiable).toEqual([]);
+    expect(r.identityEvidence.status).toBe("complete");
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+  });
+
+  test("P9.15: the same entry is unverifiable when the author's sat was not read in full through its inscription", async () => {
+    const { v1, genesis, anchor } = await byA();
+    const fake = id();
+    const next = await updateOriginal(anchor, { versionTime: time(40), name: "Names a version past what was read", author: ref(fake), sign });
+    const later = inscribed([next], 40);
+    // An unread inscription after the anchor, before the later one: the history stops there (M1).
+    const unread = at(35, { content: new Uint8Array(), unsupported: "not-read" });
+    const cut = await fromBitcoin([v1, unread], [inscribed([genesis, anchor], 31), later]);
+    expect(cut.anchoring?.ignored).toEqual([expect.objectContaining({ inscription: later.id, reason: "later-inscription-unverifiable" })]);
+    expect(cut.anchoring?.unverifiable).toEqual([{ sat: SAT, inscription: later.id, versionId: next.versionId, signer: AUTHOR, signerVersionId: fake }]);
+    // A read whose tip is below the later inscription establishes nothing there either.
+    const short = { ...sat(AUTHOR, [v1]), tip: { height: 35, hash: "cc".repeat(32) } };
+    const low = await fromBitcoin([short], [inscribed([genesis, anchor], 31), later]);
+    expect(low.anchoring?.ignored).toEqual([expect.objectContaining({ inscription: later.id, reason: "later-inscription-unverifiable" })]);
+  });
+
+  test("C12-178, C12-188: P9.15: a later inscription naming a known did:btco version, with an unread inscription on the author's sat before it, is unverifiable, not accepted against the older state", async () => {
+    const { v1, genesis, anchor } = await byA();
+    const next = await updateOriginal(anchor, { versionTime: time(40), name: "Names a known version", author: ref(v1.id), sign });
+    const later = inscribed([next], 40);
+    // The unread inscription could be a version that removes key A.
+    const unread = at(35, { content: new Uint8Array(), unsupported: "not-read" });
+    const r = await fromBitcoin([v1, unread], [inscribed([genesis, anchor], 31), later]);
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ inscription: later.id, reason: "later-inscription-unverifiable" })]);
+    expect(r.anchoring?.unverifiable).toEqual([{ sat: SAT, inscription: later.id, versionId: next.versionId, signer: AUTHOR, signerVersionId: v1.id }]);
+    // P5.13: only an entry whose check depends on the history past the unread inscription is
+    // affected; the accepted state's entries precede it, so its identity evidence is complete.
+    expect(r.identityEvidence.status).toBe("complete");
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.notices).toEqual(["unverifiable-inscriptions"]);
+  });
+
+  test("C12-170: P5.13: an unread inscription on a did:btco author's sat before the anchoring inscription leaves the anchored state's identity evidence incomplete", async () => {
+    const { v1, genesis, anchor } = await byA();
+    const unread = at(25, { content: new Uint8Array(), unsupported: "not-read" });
+    const r = await fromBitcoin([v1, unread], [inscribed([genesis, anchor], 31)]);
+    expect(r.identityEvidence.status).toBe("incomplete");
+    expect(r.current).toBe(false);
+  });
+
+  test("C12-183: a gap in a did:btco signer's history found after an entry was accepted makes it unverifiable; the head is recomputed and the change reported", async () => {
+    const { v1, genesis, anchor } = await byA();
+    const next = await updateOriginal(anchor, { versionTime: time(40), name: "Accepted before the gap was seen", author: ref(v1.id), sign });
+    const later = inscribed([next], 40);
+    const anchoring = inscribed([genesis, anchor], 31);
+    const first = await fromBitcoin([v1], [anchoring, later]);
+    expect(first.head).toBe(next.versionId);
+    const unread = at(35, { content: new Uint8Array(), unsupported: "not-read" });
+    const again = await fromBitcoin([v1, unread], [anchoring, later], first.retain);
+    expect(again.head).toBe(anchor.versionId);
+    expect(again.anchoring?.unverifiable.map((u) => u.inscription)).toEqual([later.id]);
+    expect(again.anchoring?.headChange).toEqual({ previous: next.versionId, current: anchor.versionId, verified: [], resolved: [], unverified: [later.id], vanished: [] });
+    expect(again.notices).toContain("head-changed");
+    expect(again.notices).toContain("unverifiable-inscriptions");
+    expect(again.current, JSON.stringify(again.reasons)).toBe(true);
+  });
+
+  test("P5.13: a did:btco gap read with an unanchored log whose entry has no author reports the failure, never throws", async () => {
+    const { v1, genesis } = await byA();
+    const unread = at(35, { content: new Uint8Array(), unsupported: "not-read" });
+    const junk = { ...genesis, versionId: "2-QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DzA3a1Y", state: { ...genesis.state, author: null } };
+    const r = await verifyOriginal({ now: NOW, bytes: allBytes, log: [genesis, junk] as never, authors: [{ did: AUTHOR, bitcoin: sat(AUTHOR, [v1, unread]) }] });
+    expect(r.history.status).not.toBe("valid");
   });
 
   test("C12-93: an inscribed entry naming a did:btco author version inscribed later in the same block is rejected", async () => {
@@ -341,9 +422,9 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     expect(h.versions.map((v) => v.versionId)).toEqual([v1.id]);
     const { genesis, anchor } = await grant(elsewhere);
     const r = await fromBitcoin([v1, elsewhere], [inscribed([genesis, anchor], 31)]);
-    // The anchoring entry names a version the history does not hold, so the log does not verify.
+    // The anchoring entry names a version the fully read history does not hold: rejected (P9.15, P5.13).
     expect(r.anchoring?.status).toBe("not-anchored");
-    expect(r.anchoring?.ignored[0]).toMatchObject({ reason: "invalid-entry", code: "AUTHOR_VERSION_UNAVAILABLE" });
+    expect(r.anchoring?.ignored[0]).toMatchObject({ reason: "invalid-entry", code: "AUTHOR_VERSION_NOT_IN_HISTORY" });
   });
 
   test("P9.10: a did:btco version whose placement two indexes disagree on is not accepted; missing evidence is reported", async () => {
@@ -364,7 +445,7 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     expect(agreed.current, JSON.stringify(agreed.reasons)).toBe(true);
   });
 
-  test("M1, P5.13: a delegated or encoded inscription without metadata is not a version; an unread one leaves the history incomplete from there", async () => {
+  test("C12-170: M1, P5.13: a delegated or encoded inscription without metadata is not a version; an unread one leaves the history incomplete from there", async () => {
     const { v1, genesis, anchor } = await byA();
     const delegated = at(20, { content: new Uint8Array(), unsupported: "delegated", metadata: null });
     const later = version(22, both());
@@ -381,7 +462,7 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     expect(r.current).toBe(false);
   });
 
-  test("finding 9, P5.13 (PROVISIONAL): a delegated or encoded inscription whose metadata is a version is a version; unread metadata fails closed", async () => {
+  test("C12-169: finding 9, P5.13 (originals-spec #51): a delegated or encoded inscription whose metadata is a version is a version; unread metadata fails closed", async () => {
     const { v1 } = await byA();
     // Metadata is the inscription's own, whatever its body's delegation or encoding.
     for (const unsupported of ["delegated", "content-encoding"] as const) {

@@ -6,7 +6,7 @@ import { anchoringFailureMessage, anchoringInMotion, anchoringView, offChainPrev
 
 const status = (over: Partial<AnchoringStatus>): AnchoringStatus => ({
   did: 'did:vh:x', sat: 'did:btco:reg:5000000000', publication: 'not-anchored', action: 'prepare',
-  heads: { committed: '2-b', accepted: null, acceptedHeight: null, next: '2-b', queue: ['2-b'] }, current: false,
+  heads: { committed: '2-b', accepted: null, acceptedHeight: null, next: '2-b', queue: ['2-b'] }, current: false, notices: [], listed: { unverifiable: [], waiting: [] },
   ownership: null, indexes: { used: ['ord@quicknode'], compared: false }, recoveryIssues: [], satUtxo: null, heldByThisAccount: null,
   ...over,
 });
@@ -20,6 +20,22 @@ describe('the anchoring panel (P9.18)', () => {
     }
     // A pair nothing shows on the network is never called pending acceptance.
     expect(anchoringView({ status: status({ publication: 'submitted-unobserved' }), unpublished: [] })!.label).not.toBe(demo.anchoring.labels['pending-bitcoin-acceptance']);
+  });
+
+  test('a current anchored Original is shown with its notices: unverifiable inscriptions and the publications waiting on them (section 7, P9.15)', () => {
+    const quiet = anchoringView({ status: status({ publication: 'anchored', action: 'done', current: true }), unpublished: [] })!;
+    expect(quiet.noticeNote).toBeNull();
+    const listed = {
+      unverifiable: [{ inscription: 'u1i0', signer: 'did:webvh:x:host', signerVersionId: '4-q' }],
+      waiting: [{ inscription: 'w1i0', waitingOn: 'u1i0' }],
+    };
+    const v = anchoringView({ status: status({ publication: 'anchored', action: 'done', current: true, notices: ['unverifiable-inscriptions', 'publications-waiting'], listed }), unpublished: [] })!;
+    expect(v.tone).toBe('ok');
+    expect(v.noticeNote).toBe(demo.anchoring.noticeNote(1, 1));
+    expect(v.noticeNote).toContain('cannot be checked yet');
+    // Each inscription is named: the unverifiable one with the signer version it needs, the waiting one with what it waits on.
+    expect(v.noticeItems).toEqual([demo.anchoring.unverifiableItem('u1i0', 'did:webvh:x:host', '4-q'), demo.anchoring.waitingItem('w1i0', 'u1i0')]);
+    expect(quiet.noticeItems).toEqual([]);
   });
 
   test('never current until Bitcoin shows the anchor (P7.10)', () => {

@@ -12,9 +12,9 @@
  *                                                      signers/<64 hex>/did.jsonl|did-witness.json,
  *                                                      resources/<digest>)
  *
- * PROVISIONAL (P14.10, P14.11; section 14, PROVISIONAL): each signer
- * DID's history is under `signers/<hex sha256 of the DID>/`, and there is no
- * asset witness file, since asset logs have no witnesses (P9.8). Neither
+ * PROVISIONAL (P14.10, P14.11; section 14): each signer DID's history is
+ * under `signers/<hex sha256 of the DID>/`. There is no asset witness file,
+ * since asset logs have no witnesses (P9.8, D3; decided). Neither
  * `authors/` nor `asset/did-witness.json` is part of the layout.
  *
  * Every write is inside the caller's own namespace, so no shape can shadow the
