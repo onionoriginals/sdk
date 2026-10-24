@@ -246,7 +246,8 @@ export function createOriginalsRoutes(deps: {
       return json({ error: 'bad_key' }, 400);
     }
     if (!servedHost(siteKey)) return json({ error: 'forbidden_host' }, 403);
-    // Who may submit is decided before the body is read (shared-saves.ts, owner decision of 22 October 2026).
+    // Only the namespace owner or an account the hosted log names gets its body read; the queued
+    // attempt judges it precisely (shared-saves.ts, owner decisions of 22 and 23 October 2026).
     const caller = { sub, slug: userSlug(sub) };
     const refused = sharedSaves.mayCall(siteKey, caller);
     if (refused) return json(refused.body, refused.http);
