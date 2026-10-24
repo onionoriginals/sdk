@@ -40,7 +40,7 @@ import { short } from "./format";
 import { StampedAuthorEvidence } from "./author-evidence";
 import { createLocalAuthor } from "./local-author";
 import { BrowserOriginalsStore } from "./browser-store";
-import { MemoryPublicationRecords, hasPublicationRecords, type PublicationRecord, type PublicationRecords } from "./publication-records";
+import { MemoryPublicationRecords, hasPublicationRecords, higherPublication, type PublicationRecord, type PublicationRecords } from "./publication-records";
 import { btcNetwork, demoTier, type BtcNetworkFlag, type DemoTier } from "./network-flag";
 import { contentBytes, contentText, resourceView, type ResourceContent } from "./resource-view";
 import { authorshipPublicKeyMultibase, turnkeyAuthorshipSigner } from "./turnkey-authorship-signer";
@@ -336,7 +336,8 @@ export class DemoEngine {
   }
 
   private async recordPublication(record: PublicationRecord): Promise<void> {
-    this.publication = record;
+    // The page's copy follows the store's rule: forward only.
+    this.publication = higherPublication(this.publication ?? undefined, record);
     await this.records().putPublication(this.did!, record);
   }
 
@@ -449,15 +450,22 @@ export class DemoEngine {
       await read(didWebvhLogUrl(aliasDid), { maxBytes: FETCH_LIMITS.maxBytes, timeoutMs: FETCH_LIMITS.timeoutMs, signal: AbortSignal.timeout(FETCH_LIMITS.timeoutMs) }),
     );
     const alias: AliasEvidence = { did: aliasDid, log: aliasLog };
+    const existing = await this.records().getPublication(did);
     const synced = await sdk.sync(did, this.sharedHost(alias.did));
     if (synced.status === "conflict") throw new Error("The host's history of this Original diverges from this browser's; it is kept as a conflict, and nothing was chosen.");
     await this.store.putAuthorEvidence(alias);
+    // Already verified, and the host has nothing newer: a reopen, not a
+    // restore, so no second read-back (#976 B3).
+    if (existing?.state === "complete" && synced.status === "already-current") return this.open(did);
     // The host may move on between the sync and the read-back: readBack
     // follows a head that descends, and never one that diverges (P2.1, P4.5).
     try {
       await this.readBack(did, alias.did, read, synced.original);
     } catch (error) {
-      await this.records().putPublication(did, { alias, state: "uploaded", indexed: true });
+      // Only a copy with no record, or a started one, becomes uploaded. A
+      // verified publication stays complete through a transient failure on
+      // a reopen; the store refuses a downgrade anyway (higherPublication).
+      if (!existing || existing.state === "started") await this.records().putPublication(did, { alias, state: "uploaded", indexed: true });
       throw error;
     }
     // Found through the account's library, so it is listed there already.

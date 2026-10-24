@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { IDBFactory } from 'fake-indexeddb';
 import { MemoryStore, type OriginalsStore } from '@originals/sdk/originals';
 import { BrowserOriginalsStore, browserDatabase } from './browser-store';
+import { MemoryPublicationRecords, type PublicationRecords } from './publication-records';
 
 // #976 B, gap G2. The browser keeps an author's work in IndexedDB (signed in,
 // the account's database; signed out, the guest's), so it survives a browser
@@ -101,6 +102,27 @@ describe('BrowserOriginalsStore: durable across a browser restart', () => {
 
 // #976 B, G4. A publication record survives a restart, so an interrupted
 // publication resumes under the same alias (P9.2).
+// A record only moves forward (started < uploaded < complete), and a listed
+// one stays listed: a late or failed writer, or a second tab, never
+// downgrades a verified publication.
+for (const [kind, make] of [
+  ['MemoryPublicationRecords', () => new MemoryPublicationRecords()],
+  ['BrowserOriginalsStore', () => new BrowserOriginalsStore('suborg-mono', new IDBFactory())],
+] as Array<[string, () => PublicationRecords]>) {
+  test(`${kind}: a publication record never moves backwards`, async () => {
+    const records = make();
+    const alias = { did: 'did:webvh:x', log: line('1-w') };
+    await records.putPublication(DID, { alias, state: 'complete', indexed: true });
+    await records.putPublication(DID, { alias, state: 'uploaded', indexed: true });
+    await records.putPublication(DID, { alias, state: 'started' });
+    await records.putPublication(DID, { alias, state: 'complete', indexed: false });
+    expect(await records.getPublication(DID)).toEqual({ alias, state: 'complete', indexed: true });
+    await records.putPublication('did:vh:other', { alias, state: 'started' });
+    await records.putPublication('did:vh:other', { alias, state: 'uploaded', indexed: false });
+    expect((await records.getPublication('did:vh:other'))?.state).toBe('uploaded');
+  });
+}
+
 describe('BrowserOriginalsStore: publication records', () => {
   test('a record round-trips across handles, as a copy, and is replaced as the publication moves on', async () => {
     const idb = new IDBFactory();
