@@ -13,7 +13,7 @@ export function YourOriginals() {
   return <AccountLibrary key={user?.subOrgId ?? 'guest'} account={user?.subOrgId} fundingAddress={bitcoin?.fundingAddress} />;
 }
 
-function AccountLibrary({ account, fundingAddress }: { account?: string; fundingAddress?: string }) {
+export function AccountLibrary({ account, fundingAddress }: { account?: string; fundingAddress?: string }) {
   const [items, setItems] = useState<LibraryItem[]>([]);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(true);
@@ -51,6 +51,7 @@ function AccountLibrary({ account, fundingAddress }: { account?: string; funding
       <p className="eyebrow">{copy.eyebrow}</p>
       <h1>{copy.title}</h1>
       <p>{account ? copy.accountIntro : copy.guestIntro}</p>
+      {!account && <p>{copy.guestKey}</p>}
       <p>{copy.durability}</p>
       <div className="library-actions">
         <a className="btn btn-primary" href="/#demo" onClick={(e) => { e.preventDefault(); navigate('/'); requestAnimationFrame(() => document.getElementById('demo')?.scrollIntoView()); }}>{copy.create}</a>
@@ -61,13 +62,24 @@ function AccountLibrary({ account, fundingAddress }: { account?: string; funding
       {busy && <p role="status">{copy.reading}</p>}
       {!busy && !items.length && <p>{copy.empty}</p>}
       {hasDraft && <p><a href="/#demo" onClick={(e) => { e.preventDefault(); navigate('/'); }}>{copy.draft}</a> · {copy.draftNote}</p>}
-      <ul className="library-list">{items.map((item) => <li key={item.did}>
-        <a href={`/me/${encodeURIComponent(item.did)}`} onClick={(e) => { e.preventDefault(); navigate(`/me/${encodeURIComponent(item.did)}`); }}>{item.title}</a>
-        <p>{[item.local && copy.browser, item.server && copy.account, item.pending && copy.pending, item.bitcoin && copy.bitcoinUnchecked].filter(Boolean).join(' · ') || copy.incomplete}</p>
-        <small>{item.did}</small>
-        {item.problem && <p>{item.problem}</p>}
-      </li>)}</ul>
+      <ul className="library-list">{items.map((item) => <LibraryEntry key={item.did} item={item} />)}</ul>
     </div></section>
     {openDid && <Demo key={`${account ?? 'guest'}:${openDid}`} openDid={openDid} />}
   </main>;
+}
+
+/**
+ * One library row. A record whose DID cannot be trusted (`unknown:<key>`) has
+ * no Original to open: it is shown with its problem, not as a link (section 7).
+ */
+export function LibraryEntry({ item }: { item: LibraryItem }) {
+  const openable = item.did.startsWith('did:');
+  return <li>
+    {openable
+      ? <a href={`/me/${encodeURIComponent(item.did)}`} onClick={(e) => { e.preventDefault(); navigate(`/me/${encodeURIComponent(item.did)}`); }}>{item.title}</a>
+      : <strong>{item.title}</strong>}
+    <p>{[item.local && copy.browser, item.server && copy.account, item.pending && copy.pending, item.bitcoin && copy.bitcoinUnchecked].filter(Boolean).join(' · ') || copy.incomplete}</p>
+    <small>{item.did}</small>
+    {item.problem && <p>{item.problem}</p>}
+  </li>;
 }

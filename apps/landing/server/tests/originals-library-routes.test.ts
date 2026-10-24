@@ -66,3 +66,16 @@ test('hosted Originals without summaries are discovered and reopened without ena
   expect(recovered.resource).toEqual(published.resource);
   expect(recovered.author).toBe(published.author);
 });
+
+test('evidence with two histories, neither chosen, answers 409 diverged rather than a 404 (#996 review; P6.6)', async () => {
+  const { OriginalsError } = await import('@originals/vh');
+  const dataDir = await mkdtemp(join(tmpdir(), 'originals-library-routes-'));
+  const library = {
+    list: async () => [],
+    evidence: async (): Promise<Uint8Array | null> => { throw new OriginalsError('fork', 'EVIDENCE_DIVERGED', 'Two copies disagree.'); },
+  };
+  const routes = createOriginalsRoutes({ jwtSecret: secret, store: createOriginalsStore({ dataDir }), library });
+  const answer = await routes.evidence(request('alice'), new URL('http://landing.test/api/originals/evidence?did=did:vh:x'));
+  expect(answer.status).toBe(409);
+  expect(await answer.json()).toEqual({ error: 'diverged', message: 'Two copies disagree.' });
+});

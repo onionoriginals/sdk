@@ -5,6 +5,7 @@ import { MemoryStore, OriginalsSDK, type HostedFetch } from '@originals/sdk/orig
 import { AccountIndexError, DemoEngine } from './engine';
 import { generateArtwork } from './artwork';
 import { BrowserOriginalsStore } from './browser-store';
+import { DurableHostingStorageAdapter } from './durable-hosting-adapter';
 import { createLocalAuthor, type LocalAuthor } from './local-author';
 import { BrowserWebVHSigner, ed25519PublicKeyMultibase, userWebvhSlug } from '../auth/webvh';
 import { DOMAIN, SUB, host } from './publish.fixture';
@@ -173,6 +174,51 @@ describe('restoring a published Original on another client', () => {
   test('an Original the account never published can\'t be restored', async () => {
     const w = await world();
     await expect(w.client().restore('did:vh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ')).rejects.toThrow(/isn't saved to this account/);
+  });
+});
+
+// #996: a fork that stands, or an account whose saved copies diverge (409
+// diverged), is reported and nothing is chosen (S1, P6.6). Restore on open
+// must not reach past either to the host's head.
+describe('restore stops at a fork or a divergence (S1, P6.6, C12-23)', () => {
+  test('a 409 diverged from the account: restore stops with that message, before any host read', async () => {
+    const w = await world();
+    const a = w.client();
+    await a.create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7));
+    const published = await a.publish();
+    let reads = 0;
+    const read: HostedFetch = (url, o) => (reads++, w.read(url, o));
+    const idb = new IDBFactory();
+    const b = w.client(w.author, { idb, read });
+    const { library } = await import('../content');
+    // The account's evidence route answers 409 diverged (server/originals-library.ts).
+    const target = (b as unknown as { target: { upload: { evidence: (did: string) => Promise<Uint8Array | null> } } }).target;
+    target.upload = Object.assign(Object.create(target.upload), {
+      evidence: () => new DurableHostingStorageAdapter({ baseUrl: 'http://x', fetchImpl: (async () => new Response(JSON.stringify({ error: 'diverged' }), { status: 409 })) as unknown as typeof fetch }).evidence(published.did),
+    });
+    await expect(b.restore(published.did)).rejects.toThrow(library.diverged);
+    expect(reads).toBe(0);
+    expect(await new BrowserOriginalsStore(SUB, idb).getPublication(published.did)).toBeUndefined();
+  });
+
+  test('a fork that stands in this browser: restore opens it as it is, and never syncs or reads back', async () => {
+    const w = await world();
+    const idbA = new IDBFactory();
+    const a = w.client(w.author, { idb: idbA });
+    const created = await a.create('Shared', 'Orbits', art('Shared', 1));
+    const published = await a.publish();
+    // Another device extends the published copy differently, offline from the host.
+    const sdkB = OriginalsSDK.create({ store: new MemoryStore(), authors: [w.author.evidence] });
+    await sdkB.import(await a.evidencePackage());
+    await sdkB.edit(created.did, { parent: published.history.at(-1)!.versionId, name: 'Elsewhere', author: w.author.ref, signer: w.author.signer });
+    await a.update('Here', 'Orbits', art('Here', 3));
+    await expect(a.importEvidence((await sdkB.package(created.did)).bytes, created.did)).rejects.toThrow(/conflict/i);
+    let reads = 0;
+    const read: HostedFetch = (url, o) => (reads++, w.read(url, o));
+    const reopening = w.client(w.author, { idb: idbA, read, noEvidence: true });
+    const state = await reopening.restore(published.did);
+    expect(reads).toBe(0);
+    expect((state.provenance as { fork?: unknown }).fork).toBeDefined();
   });
 });
 

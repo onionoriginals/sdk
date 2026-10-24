@@ -163,14 +163,14 @@ describe('completion state', () => {
 describe('the published log’s durability (R7)', () => {
   test('an anonymous visitor gets the temporary-log caveat; a signed-in one does not', () => {
     expect(publishDurabilityNote(false, true)).toBe(demo.hosting.temporaryNote);
-    expect(publishDurabilityNote(false, false)).toBe(demo.hosting.temporaryNoteNoPublish);
+    expect(publishDurabilityNote(false, false)).toBeNull();
     expect(publishDurabilityNote(true, true)).toBeNull();
   });
 
-  test('the caveat names both halves: the guest key is kept here unencrypted, and sign-in signs with your own key (#976 B5)', () => {
+  test('the caveat says publishing needs sign-in with your own key; the guest-key warning is library.guestKey (#976 B5)', () => {
     const note = demo.hosting.temporaryNote;
-    expect(note).toMatch(/unencrypted/i);
-    expect(note).toMatch(/sign in|signed in/i);
+    expect(note).toMatch(/Publishing needs sign-in/);
+    expect(note).toMatch(/your own key/i);
   });
 
   test('it is rendered in the publish step, not only after the log exists', async () => {
