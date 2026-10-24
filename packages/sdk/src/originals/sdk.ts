@@ -103,9 +103,11 @@ export interface OriginalsSDKOptions {
    * entry that identity signed. Redirects must not be followed (P8.5);
    * `safeFetch` fits: `async (url, o) => (await safeFetch(url, o)).bytes`.
    * A log retrieved there that verifies from the identity DID's genesis, and
-   * extends any other evidence for it, is used and its freshness reported as
-   * `retrieved` (PROVISIONAL). If it cannot be obtained, the other evidence is
-   * used and the identity's freshness is not established.
+   * extends any other evidence for it, is used, and the report states its URL,
+   * when it was retrieved and its latest versionId. Its freshness is
+   * established only when the DID's own witnesses approve that version and
+   * the version's `id` names the location (P7.8; owner decision, 23 Oct
+   * 2026); otherwise, or if it cannot be obtained, it is not established.
    *
    * Bounded (08b review R1, R2, A4): only the author DID fixed at genesis is
    * an identity to retrieve, and its location is read from the log's
@@ -639,7 +641,7 @@ export class OriginalsSDK {
    * call's budget (`loadPublished`), whose exhaustion, deadline or abort ends
    * the call. Any other operation gets a budget of its own from
    * `retrievalLimits`; when that runs out, what was not retrieved stays
-   * unretrieved and its freshness is not established (PROVISIONAL).
+   * unretrieved and its freshness is not established (P7.8).
    */
   private async withIdentities(
     log: string,

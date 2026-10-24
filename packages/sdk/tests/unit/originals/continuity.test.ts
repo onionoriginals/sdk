@@ -134,7 +134,7 @@ describe("C12-134: a fresh reader with no package of the moved author's log", ()
     expect(r.current).toBe(false);
   });
 
-  test("found at the location of the DID in the latest entry's verification method, the log is used and its freshness is retrieved", async () => {
+  test("found at the location of the DID in the latest entry's verification method, the log is used; without its witnesses' approval freshness is not established, and the report says where, when and which version (P7.8)", async () => {
     const { alice, zip, head } = await movedAndRotated();
     const seen: string[] = [];
     const log = alice.evidence().log as string;
@@ -146,8 +146,11 @@ describe("C12-134: a fresh reader with no package of the moved author's log", ()
     expect(seen).toContain("https://new.example.org/.well-known/did.jsonl");
     expect(loaded.report.checkpoint).toBe(head);
     expect(loaded.report.authorBinding.status).toBe("valid");
-    expect(loaded.report.identityEvidence).toMatchObject({ status: "complete", freshness: "retrieved", latestVersionId: alice.versionId });
-    expect(loaded.report.reasons).not.toContain("author-freshness-not-established");
+    expect(loaded.report.identityEvidence).toMatchObject({
+      status: "complete", freshness: "not-established", latestVersionId: alice.versionId,
+      obtained: { location: didWebvhLogUrl(alice.location), obtainedAt: expect.any(String), source: "fetched", latestVersionId: alice.versionId, witnessed: false },
+    });
+    expect(loaded.report.validAsOf?.signers[0]).toMatchObject({ did: alice.did, location: didWebvhLogUrl(alice.location), source: "fetched" });
   });
 
   test("a log kept only at the old location verifies the history but establishes no freshness (PROVISIONAL, 08b review r4 #5)", async () => {
@@ -167,7 +170,7 @@ describe("C12-134: a fresh reader with no package of the moved author's log", ()
     expect(r.current).toBe(false);
   });
 
-  test("found at both locations, the log from the latest verified entry's location is used and its freshness is retrieved", async () => {
+  test("found at both locations, the log from the latest verified entry's location is used", async () => {
     const { alice, zip, head } = await movedAndRotated();
     const seen: string[] = [];
     const log = alice.evidence().log as string;
@@ -178,7 +181,7 @@ describe("C12-134: a fresh reader with no package of the moved author's log", ()
     const r = (await reader.load(zip)).report;
     expect(seen[0]).toBe(didWebvhLogUrl(alice.did));
     expect(r.checkpoint).toBe(head);
-    expect(r.identityEvidence).toMatchObject({ status: "complete", freshness: "retrieved", latestVersionId: alice.versionId });
+    expect(r.identityEvidence).toMatchObject({ status: "complete", freshness: "not-established", latestVersionId: alice.versionId, obtained: { location: didWebvhLogUrl(alice.location) } });
   });
 
   test("a retrieved log with another SCID, or one that diverges from the package's, is not used", async () => {
@@ -338,7 +341,7 @@ describe("C12-134: identity retrieval is bounded and follows only the identity's
       OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")), retrievalLimits, identityFetch: identity });
     const r = await reader({}).loadPublished(alias.did, hosted);
     expect(seen).toContain(didWebvhLogUrl(alice.location));
-    expect(r.report.identityEvidence).toMatchObject({ status: "complete", freshness: "retrieved" });
+    expect(r.report.identityEvidence).toMatchObject({ status: "complete", freshness: "not-established", obtained: { location: didWebvhLogUrl(alice.location), source: "fetched" } });
     // Without room for the author's two identity requests in the plan, nothing past the asset log is requested.
     const hostCalls: string[] = [];
     const counted: HostedFetch = (url, options) => {

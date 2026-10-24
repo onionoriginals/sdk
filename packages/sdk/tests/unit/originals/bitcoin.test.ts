@@ -554,14 +554,14 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [{ ...alice.evidence(), obtainedAt }], clock: later });
     const loaded = await reader.load(pkg.bytes, { bitcoin: [evidence] });
     expect(loaded.report.head).toBe(anchored.original.checkpoint);
-    expect(loaded.report.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt, source: "supplied" }]);
+    expect(loaded.report.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt, source: "supplied", location: null }]);
     expect(loaded.report.current, JSON.stringify(loaded.report.reasons)).toBe(true);
     // Kept by the verifier's store from earlier, the newer version is used too, labelled retained.
     const store = new MemoryStore();
     await store.putAuthorEvidence({ ...alice.evidence(), obtainedAt, source: "fetched" });
     const keeper = OriginalsSDK.create({ store, authors: [], clock: later });
     const kept = await keeper.load(pkg.bytes, { bitcoin: [evidence] });
-    expect(kept.report.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt, source: "retained" }]);
+    expect(kept.report.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt, source: "retained", location: null }]);
   });
 
   for (const [name, change] of [

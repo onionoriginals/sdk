@@ -362,12 +362,12 @@ describe("the newest known signer DID version (P7.8, P9.15; originals-spec #47)"
     const known = alice.versionId; // the author's DID log ends here: nothing about later times is known
     const next = await updateOriginal(anchor, { versionTime: time(30), name: "Long after the last known version", author: ref, sign });
     const r = await verifyOriginal({
-      log: [...copy, next], authors: [{ ...alice.evidence(), obtainedAt: OBTAINED, source: "fetched" }], now: NOW, bytes: allBytes, bitcoin: [sat([anchoring(10), inscribe(next, 30)])],
+      log: [...copy, next], authors: [{ ...alice.evidence(), obtainedAt: OBTAINED, source: "fetched" , location: null }], now: NOW, bytes: allBytes, bitcoin: [sat([anchoring(10), inscribe(next, 30)])],
     });
     expect(r.head).toBe(next.versionId);
     expect(r.identityEvidence.status).toBe("complete");
     expect(r.assetFreshness.status).toBe("anchored");
-    expect(r.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: known, obtainedAt: OBTAINED, source: "fetched" }]);
+    expect(r.validAsOf?.signers).toEqual([{ did: alice.did, role: "author", versionId: known, obtainedAt: OBTAINED, source: "fetched" , location: null }]);
     expect(r.reasons).toEqual([]);
     expect(r.current).toBe(true);
   });

@@ -41,11 +41,14 @@ export interface AuthorDidEvidence {
   log?: string | unknown[];
   witness?: unknown;
   /**
-   * PROVISIONAL (P5.14, P7.8): the URL this log was just retrieved from, with
-   * no redirects. When it is where the latest entry that this identity signed
-   * says the DID is (the DID of that entry's verification method id), the
-   * identity's freshness is reported as `retrieved`. Set by the retriever,
-   * never taken from a package.
+   * The URL this log was just retrieved from, with no redirects (P5.14,
+   * P7.8). Set by the retriever, never taken from a package. A log obtained at
+   * a location establishes the identity's freshness only when the DID's own
+   * witnesses approve its latest version, that version's `id` names the
+   * location, and it is where the latest entry this identity signed says the
+   * DID is; otherwise freshness is not established and the report states the
+   * location, when it was obtained and the latest versionId (owner decision,
+   * 23 Oct 2026).
    */
   retrievedFrom?: string;
   /**
@@ -78,6 +81,8 @@ export interface AuthorVersion {
   deactivated: boolean;
   /** A did:btco version's chain position (P5.13). */
   position?: ChainPosition;
+  /** Approved by the witnesses of the DID's own log in effect for it (VH-Log witness threshold); never for did:btco (P7.8). */
+  witnessed?: boolean;
 }
 
 export interface AuthorHistory {
@@ -126,6 +131,7 @@ export async function verifyAuthorHistory(evidence: AuthorDidEvidence, options: 
     document: v.entry.state,
     updateKeys: v.active.updateKeys,
     deactivated: v.active.deactivated,
+    witnessed: v.witnessList !== null && v.witnessed,
   }));
   // P5.14: the log is the identity DID's own only if it verifies from genesis (verifyLog), has the
   // identity DID's SCID and, for did:webvh, the identity DID is one of its versions' ids, reached

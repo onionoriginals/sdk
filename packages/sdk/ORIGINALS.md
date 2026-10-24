@@ -152,14 +152,14 @@ on; it never reports an unanchored Original as current (P7.10). The
 |---|---|
 | `history` | valid · invalid (with the first failing entry) · limit-exceeded |
 | `authorBinding` | valid · failed (per entry) |
-| `identityEvidence` | complete · incomplete, with the latest author DID versionId used, whether it is deactivated (P6.5), and its freshness: retrieved (PROVISIONAL, P5.14) · not-established · stale against the retained versionId (P7.8). `editors` lists the same for each editor DID relied on (P7.8, P5.18); `status` is incomplete when any signer's evidence is |
+| `identityEvidence` | complete · incomplete, with the latest author DID versionId used, whether it is deactivated (P6.5), and its freshness: established (the log was obtained at the DID's location and its own witnesses approve its latest version) · not-established · stale against the retained versionId (P7.8), with `obtained`: where (`location`, the URL it was retrieved from, or null), when (`obtainedAt`), from what `source`, as of which `latestVersionId`, and whether that version is `witnessed`. `editors` lists the same for each editor DID relied on (P7.8, P5.18); `status` is incomplete when any signer's evidence is |
 | `assetFreshness` | not-established · stale against the retained versionId · anchored (the sat's log, as of the read's tip, P9.13), with every compared copy of the asset log (P7.6) |
 | `resources` | available · partial (resource and checkpoint missing) · digest failure. Content availability is reported here and nowhere else: missing bytes, current or historical, leave the log verified and are never a verification failure (P7.3, P7.4, P9.18); bytes that are supplied are always checked, and a mismatch fails |
 | `ordering` | claimed · anchored (P7.6). Asset logs have no witnesses (Q14), so an unanchored Original's ordering is claimed only |
 | `fork` | the version at which known branches diverge and each branch's entry there. A fork not on Bitcoin is an unresolved conflict with no current branch (owner decision Q5); only an anchor settles one (P9.16) |
 | `anchors` | every anchoring entry (phase 4) |
 | `ownership` | none · provisional, with confirmation depth and index agreement (P9.11, P9.16): no index lists every sat, so ownership is never more than provisional |
-| `validAsOf` | for a valid result, anchored or not, `{ checkpoint, signers: [{ did, role, versionId, obtainedAt, source }] }`: the checkpoint the result is valid as of, and for the author and each editor that signed through it, the latest DID versionId relied on and when and where that history was obtained (P7.8, P7.10). Null when the checkpoint does not verify (failed or limit-exceeded history, failed binding, incomplete identity evidence, a failed digest) or the Original is forked. A stale prefix is still valid as of its own checkpoint |
+| `validAsOf` | for a valid result, anchored or not, `{ checkpoint, signers: [{ did, role, versionId, obtainedAt, source, location }] }`: the checkpoint the result is valid as of, and for the author and each editor that signed through it, the latest DID versionId relied on and when and where that history was obtained (P7.8, P7.10). Null when the checkpoint does not verify (failed or limit-exceeded history, failed binding, incomplete identity evidence, a failed digest) or the Original is forked. A stale prefix is still valid as of its own checkpoint |
 | `historicallyAuthorizedOnly` | each entry through the checkpoint whose key the latest verified state of its signer's DID no longer lists (`key-not-in-latest-signer-document`), whose editor DID is deactivated (`signer-did-deactivated`), or any entry once the author DID is deactivated (`author-did-deactivated`) (P7.9, P6.5, P5.18). It does not invalidate the checkpoint; any result including such an entry lists it |
 | `current` | never true for an Original that is not anchored, however fresh the evidence (P7.10): off Bitcoin nothing shows that a newer entry or another branch does not exist. Only an anchored Original's state from its sat can be current |
 | `reasons`, `retain` | why the result is not current (`not-anchored` for every unanchored Original, then anything else that applies); the highest versionIds to keep for the Original and each author DID, never lower than those supplied |
@@ -214,8 +214,20 @@ historically authorized only, with unproven ordering, whatever time it claims
 An unanchored Original is never current (P7.10; originals-spec #46): a valid
 one is reported valid as of its verified checkpoint. There is no freshness
 policy off Bitcoin; the `freshness: "asserted"` option was removed (breaking).
-Freshness is still reported per log (P7.8): `retrieved` for a moved identity's
-log fetched from its latest location, otherwise not established, or stale.
+Freshness is still reported per log (P7.8): `established`, `not-established`
+or `stale`. A log obtained at a location establishes freshness (`established`) only
+when the DID's own witnesses approve its latest version, that version's `id`
+names the location it was obtained at, and that is the location the latest
+entry the identity signed names (P7.8, P5.14; owner decision of 23 October
+2026). Watchers are not consulted. Otherwise freshness is `not-established`
+(or `stale`), and the report states where, when and as of which version the
+history was obtained (`identityEvidence.obtained` and each editor's:
+`{ location, obtainedAt, source, latestVersionId, witnessed }`).
+`describeFreshness(did, evidence)` (`@originals/vh/originals`) says it in
+plain words, as the CLI and the landing show it: "The history of <did> was
+obtained from <location> at <time>; its latest version there is <versionId>.
+Its freshness is not established. The DID may have a newer version, for
+example one that removes a key, that this verifier has not seen."
 The store retains the highest versionId it has verified for each Original and
 each author DID.
 Of the signer DID evidence a package or host supplies, the `authors` option
@@ -353,10 +365,12 @@ const author = { did: identityDid, verificationMethod: `${movedDid}#orig-2`, ver
   entries, and the latest verified entry's location is then asked. An
   unverified line can choose a request, never the result. A log retrieved
   from the latest verified entry's location that verifies and extends
-  the other evidence is used, and its freshness is `retrieved` (PROVISIONAL:
-  retrieval from that location is how this SDK establishes a moved
-  identity's freshness). Otherwise the identity's freshness is not
-  established. Either way an unanchored Original is only valid as of its
+  the other evidence is used. Retrieval alone does not establish its
+  freshness: that needs the DID's own witnesses to approve its latest
+  version, whose `id` must name the location (P7.8; owner decision of 23
+  October 2026). Otherwise the identity's freshness is not established, and
+  the report states the URL, when it was retrieved and its latest
+  versionId. Either way an unanchored Original is only valid as of its
   checkpoint (P7.10). Editor entries
   carry their parent's author reference, so they never reveal where a moved
   author now is: the author's location comes from the latest author entry.

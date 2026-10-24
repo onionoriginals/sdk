@@ -79,7 +79,7 @@ describe("C12-01: create, edit and verify in a fresh reader", () => {
     expect(r.history.status).toBe("valid");
     expect(r.identityEvidence.freshness).toBe("not-established");
     expect(r.current).toBe(false);
-    expect(r.validAsOf).toEqual({ checkpoint: r.head, signers: [{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt: null, source: null }] });
+    expect(r.validAsOf).toEqual({ checkpoint: r.head, signers: [{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt: null, source: null , location: null }] });
     expect(r.reasons).toEqual(["not-anchored"]);
   });
 

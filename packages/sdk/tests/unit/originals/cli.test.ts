@@ -44,11 +44,14 @@ describe("C12-01: package in one process, verify in another", () => {
       // package was read; never current (P7.10). The freshness option is gone (originals-spec #46).
       expect((JSON.parse(out.stdout) as { current: boolean; validAsOf: unknown }).validAsOf).toEqual({
         checkpoint: e.original.checkpoint,
-        signers: [{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt: "2026-10-19T00:00:00.000Z", source: "package" }],
+        signers: [{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt: "2026-10-19T00:00:00.000Z", source: "package", location: null }],
       });
       expect(JSON.parse(out.stdout).current).toBe(false);
       expect(text.stdout).toContain(`valid as of ${e.original.checkpoint}, not current: not anchored (P7.10)`);
       expect(text.stdout).toContain(`author ${alice.did} at ${alice.versionId}, obtained 2026-10-19T00:00:00.000Z from package`);
+      // P7.8 (owner decision, 23 Oct 2026): where and when the history was obtained, and that the DID may be newer.
+      expect(text.stdout).toContain(`The history of ${alice.did} was obtained from the evidence package at 2026-10-19T00:00:00.000Z; its latest version there is ${alice.versionId}.`);
+      expect(text.stdout).toContain("Its freshness is not established. The DID may have a newer version, for example one that removes a key, that this verifier has not seen.");
       expect(run(["verify", file, "--freshness", "asserted"]).code).toBe(2);
       // Missing bytes leave the package verified, with the content reported unavailable (P7.3, P7.4).
       const store = new MemoryStore();

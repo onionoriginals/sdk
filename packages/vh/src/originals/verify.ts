@@ -85,13 +85,32 @@ export interface RetainedVersions {
 }
 
 /**
- * Whether a log's freshness was independently established (P7.8). retrieved
- * (PROVISIONAL, P5.14): an identity's log was retrieved, without redirects,
- * from where the latest entry it signed says the DID is. not-established:
- * nothing shows it is the latest. stale: shorter than a retained versionId.
- * None of these makes an unanchored Original current (P7.10).
+ * Whether a signer DID log's freshness was established (P7.8; owner decision,
+ * 23 Oct 2026). established: the log was obtained, without redirects, at a
+ * location (P5.14), and the DID's own witnesses approve its latest version,
+ * whose `id` names that location. not-established: nothing shows it is the
+ * latest; the DID may have a newer version, for example one that removes a
+ * key, that the verifier has not seen. stale: shorter than a retained
+ * versionId. None of these makes an unanchored Original current (P7.10).
+ * Watchers are not consulted: this verifier makes no requests of its own.
  */
-export type Freshness = "retrieved" | "not-established" | "stale";
+export type Freshness = "established" | "not-established" | "stale";
+
+/**
+ * Where, when and as of which version a signer DID history was obtained
+ * (P7.8): what a report states, whatever its freshness.
+ */
+export interface IdentityObtained {
+  /** The URL the log was retrieved from (`AuthorDidEvidence.retrievedFrom`), or null when it was not retrieved from a location. */
+  location: string | null;
+  /** As the evidence states it (`AuthorDidEvidence.obtainedAt`); null when it does not say. */
+  obtainedAt: string | null;
+  source: EvidenceSource | null;
+  /** The latest verified versionId of that history. */
+  latestVersionId: string | null;
+  /** Whether the DID's own witnesses approve that version. */
+  witnessed: boolean;
+}
 
 /** A signer DID a result relies on: the latest versionId used, and when and where that history was obtained (P7.8, P7.10). */
 export interface SignerReliance {
@@ -101,6 +120,8 @@ export interface SignerReliance {
   /** As the evidence states it (`AuthorDidEvidence.obtainedAt`); null when it does not say. */
   obtainedAt: string | null;
   source: EvidenceSource | null;
+  /** The URL the history was retrieved from, or null (`IdentityObtained.location`). */
+  location: string | null;
 }
 
 /**
@@ -156,6 +177,8 @@ export interface SignerEvidence {
   status: "complete" | "incomplete";
   latestVersionId: string | null;
   freshness: Freshness;
+  /** Where, when and as of which version this DID's history was obtained (P7.8). */
+  obtained: IdentityObtained;
   /** The retained versionId for this DID, when one was supplied. */
   retainedVersionId: string | null;
   deactivated: boolean;
@@ -185,6 +208,8 @@ export interface OriginalsReport {
     author: string | null;
     latestVersionId: string | null;
     freshness: Freshness;
+    /** Where, when and as of which version the author DID's history was obtained (P7.8). */
+    obtained: IdentityObtained;
     /** The retained versionId for the author DID, when one was supplied. */
     retainedVersionId: string | null;
     deactivated: boolean;
@@ -280,6 +305,59 @@ function retrievedAtLocation(did: string, role: "author" | "editor", authors: Au
     }
   }
   return false;
+}
+
+/** The did:webvh log URL of `did`, or undefined when it has none. */
+function logUrl(did: string): string | undefined {
+  try {
+    return didWebvhLogUrl(did);
+  } catch (error) {
+    if (error instanceof OriginalsError) return undefined;
+    throw error;
+  }
+}
+
+function obtained(did: string | null, authors: AuthorDidEvidence[], histories: AuthorHistory[]): IdentityObtained {
+  const evidence = did ? authors.find((a) => a.did === did) : undefined;
+  const h = did ? histories.find((x) => x.did === did) : undefined;
+  const latest = h?.versions[h.versions.length - 1];
+  return {
+    location: evidence?.retrievedFrom ?? null,
+    obtainedAt: evidence?.obtainedAt ?? null,
+    source: evidence?.source ?? null,
+    latestVersionId: latest?.versionId ?? null,
+    witnessed: latest?.witnessed === true,
+  };
+}
+
+const SOURCE_TEXT: Record<EvidenceSource, string> = {
+  package: "the evidence package",
+  host: "the host's snapshot",
+  fetched: "a retrieval",
+  retained: "this verifier's store",
+  supplied: "the caller",
+};
+
+/**
+ * P7.8 (owner decision, 23 Oct 2026): a plain statement of a signer DID's
+ * freshness for people. It always says where and when the history was
+ * obtained and its latest version; unless freshness is established it says
+ * the DID may have a newer version, for example one that removes a key, that
+ * the verifier has not seen.
+ */
+export function describeFreshness(
+  did: string,
+  evidence: { freshness: Freshness; obtained: IdentityObtained; retainedVersionId?: string | null },
+): string {
+  const { freshness, obtained: o } = evidence;
+  const where = o.location ?? (o.source ? SOURCE_TEXT[o.source] : "an unstated source");
+  const when = o.obtainedAt ?? "an unstated time";
+  if (o.latestVersionId === null) return `No verified history of ${did} was obtained (from ${where} at ${when}).`;
+  const seen = `The history of ${did} was obtained from ${where} at ${when}; its latest version there is ${o.latestVersionId}.`;
+  if (freshness === "established") return `${seen} That version is approved by the DID's own witnesses, which establishes its freshness.`;
+  const newer = "The DID may have a newer version, for example one that removes a key, that this verifier has not seen.";
+  if (freshness === "stale") return `${seen} It is older than version ${evidence.retainedVersionId ?? "unknown"}, which this verifier has seen before. ${newer}`;
+  return `${seen} Its freshness is not established. ${newer}`;
 }
 
 function lookup(bytes: VerifyOriginalOptions["bytes"], digest: string): Uint8Array | undefined {
@@ -411,9 +489,21 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const authorDid = head ? (head.entry.state as unknown as EntryState).author.did : null;
   const history = authorDid ? histories.find((h) => h.did === authorDid) : undefined;
   const latest = history?.versions[history.versions.length - 1];
+  const obtainedOf = (did: string | null): IdentityObtained => obtained(did, options.authors, histories);
+  /**
+   * P7.8 (owner decision, 23 Oct 2026): a log obtained at a location establishes freshness only
+   * when the DID's own witnesses approve its latest version, and is the identity's latest there
+   * only when that version's `id` names the location. It must also be the location the latest
+   * entry the identity signed names (P5.14).
+   */
   const signerFreshness = (did: string | null, role: "author" | "editor"): Freshness => {
     if (did && staleAuthors.has(did)) return "stale";
-    return did && retrievedAtLocation(did, role, options.authors, log.entries) ? "retrieved" : "not-established";
+    if (!did || !retrievedAtLocation(did, role, options.authors, log.entries)) return "not-established";
+    const o = obtainedOf(did);
+    const h = histories.find((x) => x.did === did);
+    const latestId = h?.versions[h.versions.length - 1]?.document.id;
+    const names = typeof latestId === "string" && logUrl(latestId) === o.location;
+    return o.witnessed && names ? "established" : "not-established";
   };
 
   // The editor DIDs relied on: each that signed a verified entry, and one whose missing history stopped verification.
@@ -436,6 +526,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       status: !h || h.versions.length === 0 || failure || forkedAuthors.has(did) ? "incomplete" : "complete",
       latestVersionId: last?.versionId ?? null,
       freshness: signerFreshness(did, "editor"),
+      obtained: obtainedOf(did),
       retainedVersionId: retainedAuthors[did] ?? null,
       deactivated: last?.deactivated ?? false,
       ...(failure ? { failure } : {}),
@@ -477,6 +568,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       author: authorDid ?? history?.did ?? null,
       latestVersionId: latest?.versionId ?? null,
       freshness: signerFreshness(authorDid, "author"),
+      obtained: obtainedOf(authorDid ?? history?.did ?? null),
       retainedVersionId: (authorDid && retainedAuthors[authorDid]) || null,
       deactivated: latest?.deactivated ?? false,
       ...(identityFailures[0] ? { failure: identityFailures[0] } : {}),
@@ -612,6 +704,7 @@ function reliedOn(prefix: VerifiedEntry[], histories: AuthorHistory[], evidence:
       versionId: latestOf(histories, ref.did)?.versionId ?? null,
       obtainedAt: supplied?.obtainedAt ?? null,
       source: supplied?.source ?? null,
+      location: supplied?.retrievedFrom ?? null,
     });
   }
   // The author signs the genesis entry, so it comes first.

@@ -430,9 +430,9 @@ describe("C12-134: a moved author whose latest asset entry is an editor entry (P
     expect(atNew.identityEvidence.freshness).toBe("not-established");
 
     expect(atNew.current).toBe(false);
-    // Found where the latest author entry says she was.
+    // Found where the latest author entry says she was, but her log there says she has moved: not her latest (P7.8).
     const atOld = await verifyOriginal({ log, authors: [{ ...alice.evidence(), retrievedFrom: didWebvhLogUrl(alice.did) }, bob.evidence()], now: NOW, bytes: allBytes });
-    expect(atOld.identityEvidence.freshness).toBe("retrieved");
+    expect(atOld.identityEvidence.freshness).toBe("not-established");
   });
 });
 
