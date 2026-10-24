@@ -5,6 +5,8 @@
  * 'same-origin') so the server persists them under the user's JWT sub. The
  * returned URL is the resolvable HTTPS URL for that key.
  */
+import { library as libraryCopy } from '../content';
+
 function toBytes(data: Buffer | Uint8Array | string): Uint8Array {
   if (typeof data === 'string') return new TextEncoder().encode(data);
   if (data instanceof Uint8Array) return data;
@@ -97,6 +99,11 @@ export class DurableHostingStorageAdapter implements AccountIndex {
   async evidence(did: string): Promise<Uint8Array | null> {
     const res = await this.fetchImpl(`${this.baseUrl}/api/originals/evidence?did=${encodeURIComponent(did)}`, { method: 'GET', credentials: 'same-origin', cache: 'no-store' });
     if (res.status === 404) return null;
+    // Two histories, neither chosen (P6.6; #996): said as such, as fetchLibraryEvidence says it.
+    if (res.status === 409) {
+      const body = (await res.json().catch(() => ({}))) as { message?: string };
+      throw new Error(body.message ?? libraryCopy.diverged);
+    }
     if (!res.ok) throw new Error(`DurableHostingStorageAdapter.evidence failed: ${res.status}`);
     if (Number(res.headers.get('content-length')) > MAX_EVIDENCE_BYTES) throw new Error('This recovery export is too large to open here.');
     const bytes = new Uint8Array(await res.arrayBuffer());

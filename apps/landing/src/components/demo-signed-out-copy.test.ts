@@ -1,21 +1,25 @@
 import { describe, test, expect } from 'bun:test';
-import { demo, legal } from '../content';
+import { demo, legal, library } from '../content';
 import { publishDurabilityNote, publishStepLock, resolvedCopy, stepButtonDisabled } from './demo-logic';
 
-// #976 B5, gap G10; owner decision of 23 October 2026 (#992). Signed out,
-// the Original is signed with a guest key kept in this browser with the work,
-// unencrypted, so anyone using the browser can sign as that guest. The copy
-// says so, and promises no backup or anonymous publication that doesn't exist.
+// #976 B5, gap G10; owner decision of 23 October 2026 (#992, #996). Signed
+// out, the Original is signed with a guest key kept in this browser,
+// unencrypted, so anyone using the browser can sign as that guest. One
+// warning says so (library.guestKey, rendered once: pages/guest-key-copy.test.tsx);
+// nothing promises a backup or an anonymous publication that doesn't exist.
 const privacyText = JSON.stringify(legal);
 
 describe('signed-out copy is explicit about the kept guest key', () => {
-  test('the publish-step note warns the guest key is kept, unencrypted, and points to sign-in', () => {
+  test('the one guest-key warning says it is stored here, unencrypted, and who can sign', () => {
+    expect(library.guestKey).toMatch(/stored in this browser, unencrypted/);
+    expect(library.guestKey).toMatch(/Anyone using this browser can sign as this guest/);
+    expect(library.guestKey).toMatch(/Sign in to sign with your own key/);
+  });
+
+  test('the publish-step note does not repeat the warning; it says publishing needs sign-in', () => {
     const note = demo.hosting.temporaryNote;
-    expect(note).toMatch(/saved in this browser/i);
-    expect(note).toMatch(/unencrypted/i);
-    expect(note).toMatch(/anyone using this browser can sign as this guest/i);
-    expect(note).not.toMatch(/discard|shared demo area|couple of hours/i);
-    expect(note).toMatch(/sign in to sign with your own key and publish/i);
+    expect(note).toMatch(/Publishing needs sign-in/);
+    expect(note).not.toMatch(/unencrypted|anyone using this browser|discard|shared demo area|couple of hours/i);
   });
 
   test('privacy copy claims no key in localStorage, no backup file and no anonymous publishing', () => {
@@ -23,7 +27,6 @@ describe('signed-out copy is explicit about the kept guest key', () => {
     expect(privacyText).not.toMatch(/backup file/i);
     expect(privacyText).not.toMatch(/What it publishes goes to an in-memory store/);
     expect(privacyText).not.toMatch(/discarded with it/);
-    expect(privacyText).toMatch(/guest key made in this browser/);
     expect(privacyText).toMatch(/unencrypted/);
     expect(privacyText).toMatch(/Anyone who uses this browser can read them and sign as this guest/);
   });
@@ -35,20 +38,16 @@ describe('signed-out copy is explicit about the kept guest key', () => {
 
 // B5: "Publishing isn't available signed out", in the production build
 // (hostedPublication off) and in the staging acceptance build (on).
-describe('signed out, publishing is locked and the G10 note shows in both builds', () => {
+describe('signed out, publishing is locked in both builds', () => {
   for (const hostedPublication of [false, true]) {
-    test(`hostedPublication ${hostedPublication}: the step is locked and the note warns about the kept guest key`, () => {
+    test(`hostedPublication ${hostedPublication}: the step is locked`, () => {
       expect(publishStepLock({ hostedPublication, authenticated: false })).not.toBeNull();
-      const note = publishDurabilityNote(false, hostedPublication)!;
-      expect(note).toMatch(/saved in this browser/i);
-      expect(note).toMatch(/unencrypted/i);
-      expect(note).toMatch(/anyone using this browser can sign as this guest/i);
-      expect(note).not.toMatch(/discard|shared demo area|couple of hours/i);
     });
   }
 
-  test('the production note does not invite a publish that no build offers', () => {
-    expect(publishDurabilityNote(false, false)).not.toMatch(/publish/i);
+  test('the sign-in-to-publish note shows only where publishing exists', () => {
+    expect(publishDurabilityNote(false, true)).toBe(demo.hosting.temporaryNote);
+    expect(publishDurabilityNote(false, false)).toBeNull();
   });
 
   test('a signed-out publish button is never clickable, even when ready', () => {
