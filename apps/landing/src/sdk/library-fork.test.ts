@@ -85,6 +85,23 @@ test('a library row whose fork Bitcoin settled is not flagged (decision C; P9.16
   const judge = (store: BrowserOriginalsStore) => new DemoEngine({ store, anchoring });
   const { items } = await listLibrary(undefined, undefined, { engine: judge });
   expect(items.find((i) => i.did === did)?.problem).toBeUndefined();
+
+  // Fail safe (round-2 review): a Bitcoin read that fails, or never answers, leaves the fork standing and says so.
+  const unreadable = () => ({ open: async () => undefined, verifyBitcoin: async () => ({ fork: {}, bitcoinReadError: 'down' }) });
+  const failed = (await listLibrary(undefined, undefined, { engine: unreadable })).items.find((i) => i.did === did);
+  expect(failed?.problem).toMatch(/fork unresolved/i);
+  expect(failed?.problem).toMatch(/Bitcoin could not be read/);
+  const throwing = () => ({ open: async () => undefined, verifyBitcoin: async () => { throw new Error('down'); } });
+  expect((await listLibrary(undefined, undefined, { engine: throwing })).items.find((i) => i.did === did)?.problem).toMatch(/Bitcoin could not be read/);
+  const silent = () => ({ open: async () => undefined, verifyBitcoin: () => new Promise<{ fork?: unknown }>(() => undefined) });
+  const started = Date.now();
+  const timedOut = (await listLibrary(undefined, undefined, { engine: silent, bitcoinTimeoutMs: 50 })).items.find((i) => i.did === did);
+  expect(Date.now() - started).toBeLessThan(4_000);
+  expect(timedOut?.problem).toMatch(/fork unresolved/i);
+  expect(timedOut?.problem).toMatch(/Bitcoin could not be read/);
+  // Bitcoin accepted the other branch: the row says so.
+  const otherBranch = () => ({ open: async () => undefined, verifyBitcoin: async () => ({ fork: {}, bitcoinOtherBranch: true }) });
+  expect((await listLibrary(undefined, undefined, { engine: otherBranch })).items.find((i) => i.did === did)?.problem).toMatch(/Bitcoin accepted the other branch/);
 });
 
 test('an unforked Original reopens with no fork and can be revised (P6.6)', async () => {

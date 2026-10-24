@@ -1044,6 +1044,9 @@ export const library = {
   forkUnresolved: 'Fork unresolved — no current branch. Two valid histories of this Original are kept and neither was chosen. Editing and anchoring are paused here. Keep both exports: only anchoring a chosen branch on Bitcoin settles a fork, and this app does not offer that yet.',
   forkHead: 'Fork unresolved — no current branch.',
   forkNote: 'This browser holds two valid histories of this Original that diverge, and neither was chosen. The saved head above is one of them, not the current one. Editing and anchoring are paused here, because either would extend one branch without you choosing it. Keep both exports: only anchoring a chosen branch on Bitcoin settles a fork, and this app does not offer that yet.',
+  // Round-2 review: a fork judged against Bitcoin, and what is said when Bitcoin could not settle it here.
+  forkUnchecked: 'Bitcoin could not be read to check whether its anchor settled this fork.',
+  forkOtherBranch: 'Bitcoin accepted the other branch. This copy\'s latest versions are on a branch Bitcoin dropped, so editing and anchoring are paused here. Both are kept; keep your evidence exports.',
   diverged: 'Saved copies of this Original disagree, and neither was chosen. Nothing has been removed; keep your evidence exports.',
   forkBranches: 'Branches diverge at version',
   unverifiedLocal: 'Saved evidence could not be verified. Nothing has been removed.',

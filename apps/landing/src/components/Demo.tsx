@@ -769,7 +769,7 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
           <p>{libraryCopy.savedHead} <code>{asset.history.at(-1)?.versionId}</code></p>
           {asset.fork && <div role="alert" data-testid="fork-unresolved">
             <p><strong>{libraryCopy.forkHead}</strong></p>
-            <p>{libraryCopy.forkNote}</p>
+            <p>{asset.bitcoinOtherBranch ? libraryCopy.forkOtherBranch : libraryCopy.forkNote}</p>
             <p>{libraryCopy.forkBranches} {asset.fork.version}: {asset.fork.branches.map((b, i) => <span key={`${b.source}-${b.versionId}`}>{i > 0 && ' · '}<code>{b.versionId}</code> ({b.source})</span>)}</p>
           </div>}
           {asset.btcoDid ? <>

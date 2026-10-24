@@ -20,24 +20,32 @@ export const accountOutboxName = (account?: string) => account ? `originals-anch
 export interface ListLibraryOptions {
   /** The engine that judges a forked anchored Original against Bitcoin (P9.16); for tests. */
   engine?: (store: BrowserOriginalsStore) => DemoEngineLike;
+  /** How long a Bitcoin read may take before the fork is treated as unchecked. Default 8 s. */
+  bitcoinTimeoutMs?: number;
 }
 /** What listLibrary needs from DemoEngine, kept structural so this module does not import the engine eagerly. */
 interface DemoEngineLike {
   open(did: string): Promise<unknown>;
-  verifyBitcoin(): Promise<{ fork?: unknown }>;
+  verifyBitcoin(): Promise<{ fork?: unknown; bitcoinOtherBranch?: boolean; bitcoinReadError?: string }>;
 }
 
 /**
- * Whether a fork in an Original with a did:btco alias still stands once
- * judged against a fresh Bitcoin read: an accepted anchor's branch is the
- * history (P9.16). A failed read leaves it standing.
+ * Where a fork in an Original with a did:btco alias stands once judged
+ * against a fresh Bitcoin read. It is settled only when Bitcoin's accepted
+ * head is on this copy's branch (P9.13, P9.16). A read that fails or does not
+ * answer in time leaves it standing, said as unchecked: never a pass (section 7).
  */
-async function forkStands(did: string, store: BrowserOriginalsStore, options: ListLibraryOptions): Promise<boolean> {
+async function forkProblem(did: string, store: BrowserOriginalsStore, options: ListLibraryOptions): Promise<string | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const engine = options.engine?.(store) ?? new (await import('./engine')).DemoEngine({ store });
-    await engine.open(did);
-    return !!(await engine.verifyBitcoin()).fork;
-  } catch { return true; }
+    const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Bitcoin read timed out')), options.bitcoinTimeoutMs ?? 8_000); });
+    const judged = await Promise.race([(async () => { await engine.open(did); return engine.verifyBitcoin(); })(), deadline]);
+    if (!judged.fork) return undefined;
+    if (judged.bitcoinOtherBranch) return libraryCopy.forkOtherBranch;
+    return judged.bitcoinReadError ? `${libraryCopy.forkUnresolved} ${libraryCopy.forkUnchecked}` : libraryCopy.forkUnresolved;
+  } catch { return `${libraryCopy.forkUnresolved} ${libraryCopy.forkUnchecked}`; }
+  finally { clearTimeout(timer); }
 }
 
 export async function listLibrary(account?: string, fundingAddress?: string, options: ListLibraryOptions = {}): Promise<{ items: LibraryItem[]; warning?: string }> {
@@ -74,7 +82,7 @@ export async function listLibrary(account?: string, fundingAddress?: string, opt
         // Divergent valid branches: no current branch, so the row is never shown as fine (P6.6, P9.16).
         // An anchored Original's fork is judged against Bitcoin first (P9.16).
         const anchored = view.state.aliases.some((a) => a.startsWith('did:btco:'));
-        const fork = view.report.fork && (!anchored || (await forkStands(did, store, options))) ? libraryCopy.forkUnresolved : undefined;
+        const fork = !view.report.fork ? undefined : anchored ? await forkProblem(did, store, options) : libraryCopy.forkUnresolved;
         const earlier = conflicted.has(did) ? undefined : rows.get(did)?.problem;
         const problem = [fork, refused, earlier].filter(Boolean).join(' ') || undefined;
         rows.set(did, { did, title: view.state.name, local: true, server: false, pending, bitcoin: !!view.report.anchoring, problem });

@@ -73,5 +73,7 @@ describe('the anchoring panel (P9.18)', () => {
     expect(refused).toMatch(/kept/);
     expect(anchoringFailureMessage(new ForkUnresolvedError({ version: 2, branches: [{ source: 'supplied', versionId: '2-a' }, { source: 'local', versionId: '2-b' }] }))).toBe(library.forkUnresolved);
     expect(library.forkUnresolved).toMatch(/Fork unresolved — no current branch/);
+    // Round-2 review: Bitcoin accepted the other branch is said as such, not as an unresolved fork.
+    expect(anchoringFailureMessage(new ForkUnresolvedError({ version: 3, branches: [] }, true))).toBe(library.forkOtherBranch);
   });
 });
