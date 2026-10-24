@@ -582,6 +582,10 @@ export function demoFailureMessage(err: unknown): string {
   // By name: this module must not import the lazily loaded engine (#976 B4).
   if (err instanceof Error && err.name === 'PublicationNotVerifiedError') return demo.hosting.notVerified;
   if (/^Finish publishing this Original first/.test(raw)) return demo.hosting.finishFirst;
+  // The account index (G3) is reported apart from publication: by name, as above.
+  if (err instanceof Error && err.name === 'AccountIndexError') {
+    return (err as Error & { status?: number | null }).status === 507 ? demo.hosting.indexFull : demo.hosting.indexUnavailable;
+  }
   if (/HostingStorageAdapter\.(?:put|get) failed/.test(raw)) {
     // 507 from the durable per-user store is a QUOTA, not a blip — "try again
     // in a moment" would be a lie. Signed out, nothing is published, so no 507.

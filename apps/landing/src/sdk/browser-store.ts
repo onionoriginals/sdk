@@ -14,7 +14,7 @@
 import { MemoryStore, headOf, higherVersion, refusedVersionId, staleHead, type OriginalsStore, type CommitUpdate, type StoredOriginal, type StoredPending, type StoredRefused } from '@originals/sdk/originals';
 import type { AuthorDidEvidence, RetainedAnchor } from '@originals/vh/originals';
 import { createLocalAuthor, restoreLocalAuthor, type LocalAuthor } from './local-author';
-import type { PublicationRecord, PublicationRecords } from './publication-records';
+import { higherPublication, type PublicationRecord, type PublicationRecords } from './publication-records';
 
 export const browserDatabase = (account?: string) => `originals-library-v1:${account ? `account:${account}` : 'guest'}`;
 
@@ -99,7 +99,8 @@ export class BrowserOriginalsStore implements OriginalsStore, PublicationRecords
   putRetainedAnchor(did: string, anchor: RetainedAnchor) { return this.put(`anchor:${did}`, anchor); }
   // Each Original's publication record (#976 B, G4). A key like the others, so no schema change.
   getPublication(did: string) { return this.getValue<PublicationRecord>(`publication:${did}`); }
-  putPublication(did: string, record: PublicationRecord) { return this.put(`publication:${did}`, structuredClone(record)); }
+  // Read and written in one transaction, and only forward (higherPublication), like putRetained.
+  putPublication(did: string, record: PublicationRecord) { return this.change<PublicationRecord>(`publication:${did}`, (old) => higherPublication(old, record)); }
   putBranch(did: string, log: string) { return this.change<string[]>(`branches:${did}`, (old = []) => old.includes(log) ? old : [...old, log]); }
   async getBranches(did: string) { return (await this.getValue<string[]>(`branches:${did}`)) ?? []; }
   putRefused(did: string, refused: StoredRefused) {

@@ -611,3 +611,40 @@ describe('#965 r5 finding 3: a submitted witness file is depth-bounded', () => {
     }
   });
 });
+
+// #976 B3, gap G3. Publishing records the Original's alias in the account's
+// index, so the author's other clients can find and restore it from the host.
+describe('the account index records a published Original\'s alias', () => {
+  const sub = 'sub-indexer-00001';
+  const did = 'did:vh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ';
+  const alias = (slug = `user-${sub.slice(0, 16)}`, name = `o-${did.slice(7, 23)}`) => `did:webvh:QmScid:demo.example.com:${slug}:${name}`;
+  const post = (routes: ReturnType<typeof createOriginalsRoutes>, body: unknown) =>
+    routes.record(
+      new Request('http://h/api/originals', { method: 'POST', headers: { 'content-type': 'application/json', cookie: cookieFor(sub) }, body: JSON.stringify(body) }),
+      new URL('http://h/api/originals'),
+    );
+  const listed = async (routes: ReturnType<typeof createOriginalsRoutes>) =>
+    ((await (await routes.list(new Request('http://h/api/originals', { headers: { cookie: cookieFor(sub) } }), new URL('http://h/api/originals'))).json()) as { originals: Array<{ did: string; alias?: string }> }).originals;
+
+  test('an alias in the caller\'s own namespace, named for the Original, is kept and listed', async () => {
+    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    expect((await post(routes, { did, title: 'Piece', resourceHash: 'ab', alias: alias() })).status).toBe(200);
+    expect(await listed(routes)).toMatchObject([{ did, alias: alias() }]);
+  });
+
+  test('an alias in another namespace, for another Original, or malformed is refused', async () => {
+    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    for (const bad of [alias('user-someoneelse0000'), alias(undefined, 'o-QmOtherOriginal00'), 'did:webvh:x', 42]) {
+      expect((await post(routes, { did, title: 'Piece', resourceHash: 'ab', alias: bad })).status).toBe(400);
+    }
+    expect(await listed(routes)).toEqual([]);
+  });
+
+  test('once recorded, the alias never changes', async () => {
+    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    await post(routes, { did, title: 'Piece', resourceHash: 'ab' });
+    await post(routes, { did, title: 'Piece', resourceHash: 'ab', alias: alias() });
+    await post(routes, { did, title: 'Piece', resourceHash: 'ab', alias: alias().replace('QmScid', 'QmOther') });
+    expect((await listed(routes))[0].alias).toBe(alias());
+  });
+});

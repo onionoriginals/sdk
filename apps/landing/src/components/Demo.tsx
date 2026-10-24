@@ -1,6 +1,6 @@
 import { BrowserOriginalsStore, pageStore } from '../sdk/browser-store';
 import { clearAcceptanceEngine, exposeAcceptanceEngine } from '../sdk/acceptance-hook';
-import { fetchLibraryEvidence, recoverLegacySubmissions } from '../sdk/library';
+import { recoverLegacySubmissions } from '../sdk/library';
 import { navigate } from '../router';
 import { contentByteLength, contentText, resourceDataUrl, resourceMatchesSource, textMediaType, type ResourceContent } from '../sdk/resource-view';
 import { MAX_SOURCE_BYTES, readAssetFile, SourceFileError } from '../sdk/source-file';
@@ -264,10 +264,16 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
       if (isAuthenticated && user?.subOrgId && bitcoin?.fundingAddress) await recoverLegacySubmissions(user.subOrgId, bitcoin.fundingAddress);
       let warning: string | null = null;
       if (isAuthenticated) {
+        // main's library data path (the account's evidence), then, for a
+        // published Original, the host's head and a stranger's read-back
+        // (#976 B3, G3). A failure leaves the saved copy openable below.
         try {
-          const bytes = await fetchLibraryEvidence(openDid);
-          if (bytes) await engine.importEvidence(bytes, openDid);
-        } catch (e) { warning = (e as Error).message; }
+          await engine.restore(openDid);
+        } catch (e) {
+          // The library's own words (a 409 "diverged", a conflict) are said as
+          // they are, as on main; an unverified read-back in the page's.
+          warning = (e as Error).name === 'PublicationNotVerifiedError' ? demoFailureMessage(e) : (e as Error).message;
+        }
       }
       // A 409 "diverged" from the account is said even when this browser holds no copy to open (P6.6).
       const saved = await engine.open(openDid).catch((e: Error) => { throw warning ? new Error(warning) : e; });
@@ -1080,6 +1086,31 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
                     memory only. Said, never failed silently. */}
                 {asset?.notKeptAcrossRestarts && (
                   <p className="demo-step-note" role="status">{demo.storage.notKeptAcrossRestarts}</p>
+                )}
+                {/* G3: published and verified, but not yet in the account's
+                    list. Reported apart from publication, with a retry. */}
+                {asset?.accountIndex === 'not-listed' && (
+                  <div className="demo-step-note" role="status">
+                    <p>{demo.hosting.notListed}</p>
+                    <button
+                      type="button"
+                      className="btn demo-step-btn"
+                      disabled={busy}
+                      onClick={() => {
+                        void runExclusive(runningRef, async () => {
+                          setError(null);
+                          try {
+                            setAsset(await (await getEngine()).retryAccountIndex());
+                          } catch (err) {
+                            console.error('[originals-demo]', err);
+                            setError(demoFailureMessage(err));
+                          }
+                        });
+                      }}
+                    >
+                      {demo.hosting.retryListing}
+                    </button>
+                  </div>
                 )}
                 {asset && (
                   <div className="demo-evidence">

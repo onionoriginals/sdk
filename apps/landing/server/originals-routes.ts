@@ -76,6 +76,13 @@ function userSlug(sub: string): string {
   return `user-${sub.slice(0, 16)}`;
 }
 
+/** `did:webvh:<SCID>:<host>:user-<sub16>:o-<16 chars of the did:vh SCID>`, the alias publishOriginal builds. */
+function ownAlias(alias: unknown, did: string, sub: string): boolean {
+  if (typeof alias !== 'string' || alias.length > 512 || !did.startsWith('did:vh:')) return false;
+  const parts = alias.split(':');
+  return parts.length === 6 && parts[0] === 'did' && parts[1] === 'webvh' && /^[A-Za-z0-9]+$/.test(parts[2]) && /^[a-z0-9.-]+(?:%3A\d+)?$/.test(parts[3]) && parts[4] === userSlug(sub) && parts[5] === `o-${did.slice('did:vh:'.length, 'did:vh:'.length + 16)}`;
+}
+
 /**
  * Decode the host object key from the request path, or null when it contains a
  * malformed percent-encoding (`%GG`). Bun's URL accepts such paths, so a bare
@@ -293,6 +300,7 @@ export function createOriginalsRoutes(deps: {
       revealTxId?: unknown;
       satoshi?: unknown;
       status?: unknown;
+      alias?: unknown;
     };
     const { did, title, resourceHash } = body;
     if (typeof did !== 'string' || typeof title !== 'string' || typeof resourceHash !== 'string') {
@@ -313,6 +321,10 @@ export function createOriginalsRoutes(deps: {
       if (body.status !== 'pending' && body.status !== 'confirmed') return json({ error: 'bad_request' }, 400);
       inscription.inscriptionStatus = body.status;
     }
+    // A published Original's alias (#976 B, G3): in the caller's own namespace
+    // and named for this Original, so the index never points another client at
+    // someone else's publication. The alias itself is verified by whoever reads it.
+    if (body.alias !== undefined && !ownAlias(body.alias, did, sub)) return json({ error: 'bad_request' }, 400);
     try {
       store.recordOriginal(sub, {
         did,
@@ -320,6 +332,7 @@ export function createOriginalsRoutes(deps: {
         resourceHash,
         createdAt: new Date(now()).toISOString(),
         ...inscription,
+        ...(typeof body.alias === 'string' ? { alias: body.alias } : {}),
       });
     } catch (e) {
       return storeError(e);

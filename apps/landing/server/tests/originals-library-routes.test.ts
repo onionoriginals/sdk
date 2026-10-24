@@ -49,7 +49,9 @@ test('hosted Originals without summaries are discovered and reopened without ena
   const h = host();
   const key = ed.utils.randomSecretKey();
   const signer = new BrowserWebVHSigner(key, ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(key)));
-  const engine = new DemoEngine({ features: { hostedPublication: true }, publishTarget: { upload: h.upload, read: h.read, domain: DOMAIN, slug: userWebvhSlug(SUB), aliasSigner: async () => signer } });
+  // An upload that keeps no account index (#976 B, G3), so no summary is recorded: discovery must not need one.
+  const upload = { put: h.upload.put.bind(h.upload), submit: h.upload.submit.bind(h.upload) };
+  const engine = new DemoEngine({ features: { hostedPublication: true }, publishTarget: { upload, read: h.read, domain: DOMAIN, slug: userWebvhSlug(SUB), aliasSigner: async () => signer } });
   await engine.create('Hosted recovery', 'Orbits', 'exact hosted bytes');
   const published = await engine.publish();
   const stored = createOriginalsStore({ dataDir: h.dataDir });

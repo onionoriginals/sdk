@@ -14,6 +14,8 @@ import { DOMAIN, SUB, host } from './publish.fixture';
 // checkpoint and no second publish entry (P9.2). Publication is complete only
 // once a stranger with no cookie verifies the exact snapshot, every byte
 // included (P3.6, P7.3); until then the page never says it is published.
+// The section 12 matrix has no row for P9.2 (publication retried under the
+// same alias), so these cite the rule itself.
 const art = (title: string, seed: number) => generateArtwork(title, 'Orbits', seed).svg;
 
 async function setup() {
@@ -205,6 +207,9 @@ async function reviseOnHost(s: Awaited<ReturnType<typeof setup>>, did: string, a
 // A client whose local head is behind the host, with no complete record,
 // catches up only to a verified head that descends from its own checkpoint.
 // A head that doesn't descend is a fork and stays a conflict (P2.1, P4.5).
+// C12-128: a publication retried after its acknowledgement (the read-back)
+// was lost, after the head moved on: no second append and no conflict.
+// C12-23: a diverging host is an unresolved fork; no branch is chosen.
 describe('a client behind the host finishes its publication', () => {
   async function behind() {
     const s = await setup();
