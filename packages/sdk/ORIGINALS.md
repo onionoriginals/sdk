@@ -120,14 +120,14 @@ on; it never reports an unanchored Original as current (P7.10). The
   resource must also leave every grant, so pass `editors` without it
   (`STATE_EDITORS` otherwise), and an added resource is in no grant until the
   author grants it. The adding entry may itself grant it, and the grant takes
-  effect from the next entry (P5.15, P5.17; originals-spec #51, open at `b96841c2e`; PROVISIONAL until it merges). An editor never adds or removes a resource
+  effect from the next entry (P5.15, P5.17; originals-spec #51, merged at master `19d3e82a0`). An editor never adds or removes a resource
   (`outside-grant`, `EDITOR_AUTHOR_ONLY`), even one its grant names. A removed
   resource's earlier versions stay in `resources`, in evidence packages and in
   hosted snapshots, and stay checked (P8.3). The entry's transitions give
   `from: null` for an added resource and `to: null` for a removed one: first
   the resulting resources in order, then the removed ones in their previous
   order. BREAKING for TypeScript: `Transition.to` is `string | null`.
-- **Limits (P7.7, P14.13; decided by the owner, spec PR #50 (open)).**
+- **Limits (P7.7, P14.13; decided by the owner, originals-spec #50, merged).**
   `ORIGINALS_LIMITS`: 10,000 entries, 65,536 bytes per entry, 256 resources at
   any one time (removing one makes room for another), 32 editor grants and
   1,000 versions of one signer DID. Exceeding one is `limit-exceeded`
@@ -148,9 +148,11 @@ on; it never reports an unanchored Original as current (P7.10). The
   in a single LF: a missing final LF, CRLF or whitespace between tokens is
   `LOG_LINE_FORMAT` for the log (an inscription is `undecodable`). This is
   the asset log's rule only: did:vh and did:webvh signer and alias logs keep
-  their own method's rules. No number in an entry is an integer outside the
-  IEEE 754 safe range, however written (`1e16`, `9007199254740993.0`;
-  `JSON_UNSAFE_NUMBER`).
+  their own method's rules. No number in an entry has an exact decimal value,
+  as written, of magnitude greater than 2^53 − 1 (`1e16`, `9007199254740993.0`,
+  `9007199254740991.4`; `9007199254740991.0` is accepted), and none is a
+  negative zero (`-0`, `-0.0`, `-0e0`, `-1e-400`); text is judged as written,
+  an entry given parsed by its value (`JSON_UNSAFE_NUMBER`, P14.3).
 - **Versions (P4.4).** Resource versions are derived from history. A caller's
   counter is rejected, and an unchanged digest does not advance a version. A
   resource added after genesis starts at version 1.
@@ -240,12 +242,15 @@ An unanchored Original is never current (P7.10; originals-spec #46): a valid
 one is reported valid as of its verified checkpoint. There is no freshness
 policy off Bitcoin; the `freshness: "asserted"` option was removed (breaking).
 Freshness is still reported per log (P7.8): `established`, `not-established`
-or `stale`. A log obtained at a location establishes freshness (`established`) only
-when the DID's own witnesses approve its latest version, that version's `id`
-names the location it was obtained at, and that is the location the latest
-entry the identity signed names (P7.8, P5.14; owner decision of 23 October
-2026; originals-spec #51, open at `b96841c2e`; PROVISIONAL until it merges). Watchers are not consulted, so a
-log supported only by watchers is reported not established. Otherwise freshness is `not-established`
+or `stale`. A log establishes freshness (`established`) only when the DID's own
+witnesses approve its latest version. A did:webvh log fetched from a location
+must also have a latest version whose `id` names that location; a did:vh log
+or one from an evidence package is judged by its witnesses alone (P7.8, P5.14;
+owner decision of 23 October 2026; originals-spec #51, merged at master
+`19d3e82a0`). A log whose latest version names another location shows the
+identity moved: its verified versions are used, removals included, and the
+SDK also asks that location (P5.14). Watchers are not consulted, so a log
+supported only by watchers is reported not established. Otherwise freshness is `not-established`
 (or `stale`), and the report states where, when and as of which version the
 history was obtained (`identityEvidence.obtained` and each editor's:
 `{ location, obtainedAt, source, latestVersionId, witnessed }`).
@@ -384,7 +389,7 @@ const author = { did: identityDid, verificationMethod: `${movedDid}#orig-2`, ver
   with the evidence the reader holds, so an appended line whose proof does
   not verify cannot choose the request. A reader holding no evidence that
   verifies any entry of that identity can check no proof before retrieving
-  (P5.14; originals-spec #51, open at `b96841c2e`; PROVISIONAL until it merges): it first asks the location named by the earliest chained
+  (P5.14; originals-spec #51, merged at master `19d3e82a0`): it first asks the location named by the earliest chained
   entry the identity signed (for the author, the genesis entry, which is
   bound to the Original's SCID), and the latest chained entry's location
   only when that gives no usable log. A log found first verifies the
@@ -394,7 +399,7 @@ const author = { did: identityDid, verificationMethod: `${movedDid}#orig-2`, ver
   the other evidence is used. Retrieval alone does not establish its
   freshness: that needs the DID's own witnesses to approve its latest
   version, whose `id` must name the location (P7.8; owner decision of 23
-  October 2026; originals-spec #51, open at `b96841c2e`; PROVISIONAL until it merges). Otherwise the identity's freshness is not established, and
+  October 2026; originals-spec #51, merged at master `19d3e82a0`). Otherwise the identity's freshness is not established, and
   the report states the URL, when it was retrieved and its latest
   versionId. Either way an unanchored Original is only valid as of its
   checkpoint (P7.10). Editor entries
@@ -699,7 +704,9 @@ received.report.ownership?.output;                           // compare with the
   read shows unconfirmed or disputed is waited on, and so is one it reports
   `later-inscription-unverifiable`, whose signer DID version the writer has
   no verified copy of: `wait-for-evidence` names the signer and version, P9.12,
-  P9.15, P5.6). A pair can still land
+  P9.15, P5.6; and one `waiting-for-earlier-unverifiable`, which waits on
+  someone else's earlier inscription from the same head: `wait-for-evidence`
+  then also gives `waitingOn` and that inscription's signer and version). A pair can still land
   only while the sat read shows the sat in its funding input or its own
   outputs, before the anchor is accepted as after; among several the one
   furthest along on the network wins, then the lowest recovery id. A
@@ -775,7 +782,7 @@ received.report.ownership?.output;                           // compare with the
   (`RegtestProvider` does; `QuickNodeProvider` reports mempool entries). A
   pair submitted but not observed (rejected, evicted, or a provider without a
   mempool view) is `submitted-unobserved`, never pending acceptance.
-  P9.18 as originals-spec #51, open at `b96841c2e`; PROVISIONAL until it merges: a submitted
+  P9.18 as originals-spec #51, merged at master `19d3e82a0`: a submitted
   inscription the network is not observed to hold is "submitted, not
   observed", so a rejected or evicted anchor is not reported as on its way;
   master's P9.18 names only "pending Bitcoin acceptance". Once
@@ -824,7 +831,7 @@ received.report.ownership?.output;                           // compare with the
 - The anchoring inscription carries the whole log, genesis through the
   anchoring entry; every later inscription exactly one entry, as
   `application/vnd.originals.vh+jsonl`, with no metadata and at most 350,000
-  bytes (P9.17, P14.12; owner decisions, D6; spec PR #50 (open)). So the sat alone verifies the
+  bytes (P9.17, P14.12; owner decisions, D6; originals-spec #50, merged). So the sat alone verifies the
   log: a stored or packaged copy is only compared (`anchoring.copy`), and one
   that differs is ignored. Entries before the anchoring entry are checked
   against the versions they name, with claimed ordering (P9.15). The writer
@@ -865,7 +872,7 @@ received.report.ownership?.output;                           // compare with the
 - The holder of the anchoring sat can inscribe anything on it, but cannot
   make reading it fail (P9.12). The sat reader (`getSatSnapshot`) reports a
   delegated or encoded inscription as observed but unsupported (with its own
-  metadata, read on a full read: P5.13; originals-spec #51, open at `b96841c2e`; PROVISIONAL until it merges), and a body
+  metadata, read on a full read: P5.13; originals-spec #51, merged at master `19d3e82a0`), and a body
   or metadata past its byte budget or the transport's response cap (for
   example QuickNode's 1 MiB JSON cap) as observed but unread, and reads on;
   `satEvidence` passes them on flagged `unsupported` (PROVISIONAL). The
@@ -928,7 +935,7 @@ received.report.ownership?.output;                           // compare with the
   the anchor naming a version the verifier has no verified copy of is
   incomplete identity evidence (P5.6). After the anchor such an inscription
   never downgrades the accepted head (P9.12, P9.15; owner decision of 23
-  October 2026; originals-spec #51, open at `b96841c2e`; PROVISIONAL until it merges): one naming a version the signer's history shows is not that
+  October 2026; originals-spec #51, merged at master `19d3e82a0`): one naming a version the signer's history shows is not that
   DID's is `invalid-entry` (`AUTHOR_VERSION_NOT_IN_HISTORY`, P5.13). For a
   did:vh or did:webvh that is a version numbered at or below the newest
   verified version but not in its history; for a did:btco whose sat was read
@@ -938,10 +945,25 @@ received.report.ownership?.output;                           // compare with the
   through the inscription (an unread or disputed inscription before it, or a
   tip below it), is `later-inscription-unverifiable`, listed in
   `anchoring.unverifiable` with the signer DID and version it names, and the
-  accepted head keeps its identity evidence and stays current, except that an
-  unread inscription on a did:btco signer's sat still makes that DID's
-  history incomplete (P5.13), so the Original is not current until it is
-  read. The holder of
+  accepted head keeps its identity evidence and stays current. One that fails
+  any check not depending on that version (it does not chain to the head, or
+  breaks a state rule) is rejected instead, and so is one naming a did:vh or
+  did:webvh version past the 1,000-version limit or after a deactivated
+  version the verifier holds (`AUTHOR_VERSION_IMPOSSIBLE`). An entry in the
+  anchoring inscription naming a version its signer's history shows is not
+  that DID's is rejected the same way. An unread or disputed inscription on a
+  did:btco signer's sat is missing evidence only for entries whose check
+  depends on the history past it: an anchoring inscription at or after it has
+  incomplete identity evidence; after the anchor the inscription is
+  unverifiable (P5.13). Chain order decides (P9.13): while an inscription
+  extending the head is unverifiable, a later publication extending the same
+  head, or extending the unverifiable one, is ignored as
+  `waiting-for-earlier-unverifiable` with `waitingOn` naming it; once that one
+  is verified it is accepted, or rejected and the next considered. A
+  current result is shown with `notices` (`unverifiable-inscriptions`,
+  `publications-waiting`), never without them (section 7). An entry naming a
+  signer version that never exists leaves later publications from that head
+  waiting for good; the owner accepted that risk (P9.15). The holder of
   the sat decides what is inscribed but has no authority (P9.11, P9.12), so
   otherwise a hash-chained junk entry naming a version that does not exist
   would make the Original incomplete, never current, for good. A verifier
@@ -949,9 +971,14 @@ received.report.ownership?.output;                           // compare with the
   change of head rather than changing silently (P9.15, as P9.16 for an
   anchor): the retained anchor (`retain.anchor`, kept by the store with
   `putRetainedAnchor`) lists the inscriptions reported unverifiable, and
-  when one of them is accepted later `anchoring.headChange` gives the head
-  retained before, the head now and the inscriptions verified, with the
-  reason `unverifiable-inscription-accepted`, once. A retained
+  when the head moves because an inscription's verifiability changed,
+  `anchoring.headChange` gives the head retained before, the head now, the
+  inscriptions accepted past it (`verified`), those reported unverifiable
+  before that no longer are (`resolved`), and those accepted before that are
+  unverifiable now (`unverified`, as when a did:btco gap is found later), with
+  the reasons `unverifiable-inscription-accepted`,
+  `unverifiable-inscription-resolved` and `accepted-inscription-unverifiable`,
+  once. A retained
   versionId the evidence falls short of is `stale`, and the result is not
   current. The cost, accepted by the owner: a host that withholds a key
   removal can get later inscriptions accepted by readers who do not know of
@@ -982,7 +1009,7 @@ received.report.ownership?.output;                           // compare with the
   `AUTHOR_PLACEMENT_DISPUTED` (missing evidence). A delegated or encoded
   inscription carries its own metadata, which delegation and body encoding do
   not affect: the sat reader reads it, and it is a version candidate like any
-  other (P5.13, P14.12; originals-spec #51, open at `b96841c2e`; PROVISIONAL until it merges). An inscription whose metadata the reader
+  other (P5.13, P14.12; originals-spec #51, merged at master `19d3e82a0`). An inscription whose metadata the reader
   did not read (past its byte budget) stops the history there with
   `AUTHOR_SAT_READ_INCOMPLETE` (missing evidence); it is never skipped. An entry names its version
   by inscription id (PROVISIONAL); `deactivated: true` is terminal. For an

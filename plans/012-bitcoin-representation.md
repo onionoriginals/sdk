@@ -77,7 +77,7 @@ recognises an entry as anchoring when it first lists a did:btco alias.
 ### 3.2 What an inscription carries
 
 - **Content type:** `application/vnd.originals.vh+jsonl` (P9.17, P14.12;
-  decided by the owner on 21 October 2026, D6; spec PR #50 (open)).
+  decided by the owner on 21 October 2026, D6; originals-spec #50, merged).
 - **Content:** UTF-8 JSON Lines of complete log entries, exactly as in
   `did.jsonl`. No ord metadata, no did:btco metadata (S11), no delegation, no
   compression. The sat reader does not refuse a delegated or
@@ -98,8 +98,8 @@ recognises an entry as anchoring when it first lists a did:btco alias.
 - **Resources** are not inscribed. Each entry commits to its resources by
   digest (P9.4's content commitment is the entry's state); the bytes stay in
   evidence packages and on the web host.
-- **Size:** a body is at most 350,000 bytes (P9.17, P14.12; decided, D6; spec
-  PR #50 (open)), which keeps
+- **Size:** a body is at most 350,000 bytes (P9.17, P14.12; decided, D6; originals-spec
+  #50, merged), which keeps
   a full anchoring inscription within Bitcoin's standard transaction size. The
   SDK refuses to anchor a log through the anchoring entry over it (writer, PR
   10); a verifier rejects a larger inscription.
@@ -187,7 +187,7 @@ anchor itself, which settles a fork (owner decision Q5).
 
 `did:btco:<sat>` on mainnet; `did:btco:sig:`, `did:btco:test:` and
 `did:btco:reg:` elsewhere, as the SDK already does (P9.10, P14.12; decided by
-the owner on 21 October 2026, D6; spec PR #50 (open)). The did:btco method
+the owner on 21 October 2026, D6; originals-spec #50, merged). The did:btco method
 spec names no network prefixes yet; they are proposed upstream as
 decentralized-identity/labs-ordinals-plus#4 [S30].
 The grammar is strict (P9.10): an optional prefix, then the sat number in
@@ -198,8 +198,8 @@ by the index on another sat number, is not on the alias's sat.
 ### 3.6 Confirmation policy and reorganisations (P9.5, P9.11)
 
 - An inscription counts once it has **1 confirmation**, on every network,
-  mainnet included (decision D; P9.5, owner decision of 21 October 2026, spec
-  PR #50 (open)); there is no per-network policy. An
+  mainnet included (decision D; P9.5, owner decision of 21 October 2026, originals-spec
+  #50, merged); there is no per-network policy. An
   unconfirmed one is reported as observed, never as part of the accepted log.
   Every accepted inscription is reported with its confirmation depth, so the
   reader judges the risk.
@@ -309,6 +309,6 @@ owner. A copy of the same evidence on another sat confers none (C12-33).
   is replaced.
 - **D. Confirmations: accept at 1, report the depth.** Ownership is reported
   with its depth too, always provisional (P9.16). *Confirmed on 2026-10-21 by
-  owner decision (spec PR #50 (open), P9.5, D6):* one confirmation on every
+  owner decision (originals-spec #50, merged, P9.5, D6):* one confirmation on every
   network, mainnet included; with it the media type, the 350,000-byte limit
   and the did:btco network prefixes are decided, not provisional.

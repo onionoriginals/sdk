@@ -1,43 +1,10 @@
 {
-  "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row, pinned to originals-spec master 1039c471c. Each row is covered by a test that references its id, or stays status=todo. status=partial means some layers are tested and the note says what remains; coveredBy lists the citing test files (checked by packages/vh/tests/conformance/registry.test.ts). Phases follow spec section 10 and plans/011. status=not-applicable means an owner decision makes the row moot pending a spec edit; its note names the decision. Ids are stable across re-pins: position is the row's place in the pinned table. Pinned rows are in table order, positions 1 to N; rows from open pull requests follow them, and two pull requests can each propose a row at the same position. A proposal can also insert rows between pinned ones, and reword pinned rows, whose note then gives the proposed wording. A row with `proposal` is not in the pinned table: it comes from the named open spec pull request, is implemented provisionally, and its position is its place in that pull request's table.",
+  "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row, pinned to originals-spec master 19d3e82a0. Each row is covered by a test that references its id, or stays status=todo. status=partial means some layers are tested and the note says what remains; coveredBy lists the citing test files (checked by packages/vh/tests/conformance/registry.test.ts). Phases follow spec section 10 and plans/011. status=not-applicable means an owner decision makes the row moot pending a spec edit; its note names the decision. Ids are stable across re-pins: position is the row's place in the pinned table. Pinned rows are in table order, positions 1 to N; rows from open pull requests follow them, and two pull requests can each propose a row at the same position. A proposal can also insert rows between pinned ones, and reword pinned rows, whose note then gives the proposed wording. A row with `proposal` is not in the pinned table: it comes from the named open spec pull request, is implemented provisionally, and its position is its place in that pull request's table.",
   "spec": {
     "repository": "aviarytech/originals-spec",
-    "commit": "1039c471c",
+    "commit": "19d3e82a0",
     "section": "12",
-    "openProposals": [
-      {
-        "pr": 50,
-        "head": "555ce24d3",
-        "rows": [
-          160
-        ]
-      },
-      {
-        "pr": 51,
-        "head": "b96841c2e",
-        "rows": [
-          101,
-          162,
-          163,
-          164,
-          165,
-          166,
-          167,
-          168,
-          169,
-          170,
-          171,
-          172,
-          173,
-          174,
-          175,
-          176,
-          177,
-          178,
-          179
-        ]
-      }
-    ]
+    "openProposals": []
   },
   "rows": [
     {
@@ -157,16 +124,15 @@
     {
       "id": "C12-09",
       "position": 9,
-      "test": "Missing identity history",
-      "requiredResult": "Incomplete identity evidence; no blanket verified result",
+      "test": "Missing identity history for an entry the accepted state depends on",
+      "requiredResult": "Incomplete identity evidence; no blanket verified result. For an inscription after the anchor, see P9.15’s unverifiable case",
       "phases": [
         1
       ],
       "status": "covered",
       "coveredBy": [
         "packages/vh/tests/originals.test.ts"
-      ],
-      "note": "PROVISIONAL rewording in originals-spec #51 (head b96841c2e, row 9): Missing identity history for an entry the accepted state depends on | Incomplete identity evidence; no blanket verified result. For an inscription after the anchor, see P9.15’s unverifiable case"
+      ]
     },
     {
       "id": "C12-10",
@@ -852,16 +818,15 @@
     {
       "id": "C12-62",
       "position": 60,
-      "test": "Anchored Original whose did:vh or did:webvh author DID log is unavailable",
-      "requiredResult": "Incomplete identity evidence; not reported as current",
+      "test": "Anchored Original whose did:vh or did:webvh author DID log is unavailable for entries the accepted state depends on",
+      "requiredResult": "Incomplete identity evidence; not reported as current. Later inscriptions it cannot check are unverifiable and leave the accepted state current; later publications from that head wait (P9.15)",
       "phases": [
         4
       ],
       "status": "covered",
       "coveredBy": [
         "packages/vh/tests/bitcoin.test.ts"
-      ],
-      "note": "PROVISIONAL rewording in originals-spec #51 (head b96841c2e, row 60): Anchored Original whose did:vh or did:webvh author DID log is unavailable for entries the accepted state depends on | Incomplete identity evidence; not reported as current. Later inscriptions it cannot check are unverifiable and leave the accepted state current (P9.15)"
+      ]
     },
     {
       "id": "C12-63",
@@ -1388,19 +1353,31 @@
       "id": "C12-100",
       "position": 100,
       "test": "Anchoring when the log or signer identity evidence through the signed anchoring entry does not verify",
-      "requiredResult": "SDK refuses to inscribe; one that verifies is labelled pending Bitcoin acceptance until confirmed (P9.18)",
+      "requiredResult": "SDK refuses to inscribe (P9.18)",
       "phases": [
         4
       ],
       "status": "covered",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts"
+      ]
+    },
+    {
+      "id": "C12-176",
+      "position": 101,
+      "test": "Verified anchoring inscription after submission",
+      "requiredResult": "Submitted, not observed, while the network is not seen to hold it; pending Bitcoin acceptance while in the mempool, or confirmed but not yet verified; once confirmed, reverified and reported anchored, not anchored, or anchored with incomplete identity evidence (P9.18)",
+      "phases": [
+        4
       ],
-      "note": "PROVISIONAL rewording in originals-spec #51 (head b96841c2e, row 100): Anchoring when the log or signer identity evidence through the signed anchoring entry does not verify | SDK refuses to inscribe (P9.18)"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts"
+      ]
     },
     {
       "id": "C12-101",
-      "position": 101,
+      "position": 102,
       "test": "Anchoring inscription that does not start at the genesis entry, or whose entries do not verify as one log",
       "requiredResult": "Not an anchor (P9.17)",
       "phases": [
@@ -1413,7 +1390,7 @@
     },
     {
       "id": "C12-102",
-      "position": 102,
+      "position": 103,
       "test": "Anchoring inscription whose last entry is not an anchoring entry naming that sat",
       "requiredResult": "Not an anchor (P9.17)",
       "phases": [
@@ -1426,7 +1403,7 @@
     },
     {
       "id": "C12-103",
-      "position": 103,
+      "position": 104,
       "test": "Inscription the Bitcoin index reports on a sat whose number differs from the did:btco alias’s sat number",
       "requiredResult": "Not on the anchoring sat; ignored and reported (P9.10)",
       "phases": [
@@ -1439,7 +1416,7 @@
     },
     {
       "id": "C12-104",
-      "position": 104,
+      "position": 105,
       "test": "Inscriptions read from a network other than the one the did:btco alias names",
       "requiredResult": "Not on the anchoring sat (P9.10)",
       "phases": [
@@ -1452,7 +1429,7 @@
     },
     {
       "id": "C12-105",
-      "position": 105,
+      "position": 106,
       "test": "did:btco author DID inscription the index reports on a sat other than the one the DID names",
       "requiredResult": "Not a version of that DID (P5.13)",
       "phases": [
@@ -1465,7 +1442,7 @@
     },
     {
       "id": "C12-106",
-      "position": 106,
+      "position": 107,
       "test": "Entry after anchoring that replaces the did:webvh alias with a different one",
       "requiredResult": "Rejected (P9.10)",
       "phases": [
@@ -1478,7 +1455,7 @@
     },
     {
       "id": "C12-107",
-      "position": 107,
+      "position": 108,
       "test": "Entry before the anchoring entry, in the anchoring inscription, signed by a key removed from its signer’s DID before the inscription",
       "requiredResult": "Accepted against the version it names; ordering claimed (P9.15)",
       "phases": [
@@ -1492,7 +1469,7 @@
     },
     {
       "id": "C12-108",
-      "position": 108,
+      "position": 109,
       "test": "did:btco alias with an unknown network prefix, a sign, leading zeros or a number beyond the supply of sats",
       "requiredResult": "Rejected (P9.10)",
       "phases": [
@@ -1505,7 +1482,7 @@
     },
     {
       "id": "C12-109",
-      "position": 109,
+      "position": 110,
       "test": "Two indexes the verifier uses disagree on which sat an inscription is on",
       "requiredResult": "Not accepted; missing evidence reported until they agree (P9.10)",
       "phases": [
@@ -1519,7 +1496,7 @@
     },
     {
       "id": "C12-110",
-      "position": 110,
+      "position": 111,
       "test": "Anchored Original whose did:webvh alias is removed, then added again",
       "requiredResult": "Re-adding rejected (P9.10)",
       "phases": [
@@ -1532,7 +1509,7 @@
     },
     {
       "id": "C12-111",
-      "position": 111,
+      "position": 112,
       "test": "Inscription body of exactly 350,000 bytes",
       "requiredResult": "Accepted, if otherwise valid (P9.17)",
       "phases": [
@@ -1545,7 +1522,7 @@
     },
     {
       "id": "C12-112",
-      "position": 112,
+      "position": 113,
       "test": "Inscription body over 350,000 bytes, or an Original whose log through the anchoring entry is over it",
       "requiredResult": "Rejected; the SDK refuses to anchor (P9.17)",
       "phases": [
@@ -1560,7 +1537,7 @@
     },
     {
       "id": "C12-113",
-      "position": 113,
+      "position": 114,
       "test": "Two editors with grants each sign an entry within their grant, on successive heads, with no author signature",
       "requiredResult": "Both accepted; author unchanged; each entry identifies its editor (P5.16)",
       "phases": [
@@ -1574,7 +1551,7 @@
     },
     {
       "id": "C12-114",
-      "position": 114,
+      "position": 115,
       "test": "Editor entry changing content outside its grant: the name, the metadata or a resource it is not granted",
       "requiredResult": "Rejected (P5.16)",
       "phases": [
@@ -1588,7 +1565,7 @@
     },
     {
       "id": "C12-115",
-      "position": 115,
+      "position": 116,
       "test": "Editor entry that changes grants, aliases, lifecycle or parameters, anchors, or deactivates",
       "requiredResult": "Rejected (P5.16)",
       "phases": [
@@ -1603,7 +1580,7 @@
     },
     {
       "id": "C12-116",
-      "position": 116,
+      "position": 117,
       "test": "Editor entry whose author reference differs from its parent’s",
       "requiredResult": "Rejected (P5.16)",
       "phases": [
@@ -1616,7 +1593,7 @@
     },
     {
       "id": "C12-117",
-      "position": 117,
+      "position": 118,
       "test": "Editor entry whose parent’s state has no grant for that editor, including after revocation",
       "requiredResult": "Rejected (P5.17)",
       "phases": [
@@ -1630,9 +1607,9 @@
     },
     {
       "id": "C12-118",
-      "position": 118,
+      "position": 119,
       "test": "Editor entry signed before its revocation, on the revocation’s parent",
-      "requiredResult": "Unanchored: fork, unresolved; settled by the anchor’s branch (P9.16). After anchoring: the first inscribed in chain order extending the head is accepted, the other ignored (P9.13)",
+      "requiredResult": "Unanchored: fork, unresolved; settled by the anchor’s branch (P9.16). After anchoring: the first inscribed in chain order extending the head is accepted, the other ignored (P9.13); if the first is unverifiable, the other waits (P9.15)",
       "phases": [
         2,
         4
@@ -1646,7 +1623,7 @@
     },
     {
       "id": "C12-119",
-      "position": 119,
+      "position": 120,
       "test": "Editor’s earlier entries after its grant is revoked",
       "requiredResult": "Remain valid",
       "phases": [
@@ -1660,7 +1637,7 @@
     },
     {
       "id": "C12-120",
-      "position": 120,
+      "position": 121,
       "test": "Grant naming the author DID, a DID of the author’s identity, a duplicate editor or an unlisted DID method",
       "requiredResult": "Rejected (P5.15)",
       "phases": [
@@ -1673,7 +1650,7 @@
     },
     {
       "id": "C12-121",
-      "position": 121,
+      "position": 122,
       "test": "Editor entry signed with a key removed from the editor DID",
       "requiredResult": "Unanchored: not current while the latest verified editor DID state does not list the key. Anchored: rejected if inscribed at or after the removal, unless it names a later did:vh or did:webvh editor DID version that lists the key again (P9.15), or, for a did:btco editor DID, the latest version preceding the inscription lists it (P5.13); see P5.18",
       "phases": [
@@ -1689,7 +1666,7 @@
     },
     {
       "id": "C12-122",
-      "position": 122,
+      "position": 123,
       "test": "Editor entry after the author DID is deactivated",
       "requiredResult": "Unanchored: not current. Anchored: rejected if its inscription time is at or after the author DID deactivation’s versionTime, or for a did:btco author DID if the deactivation precedes it in chain order (P9.15, P5.18)",
       "phases": [
@@ -1705,7 +1682,7 @@
     },
     {
       "id": "C12-123",
-      "position": 123,
+      "position": 124,
       "test": "Editor entry inscribed on the anchoring sat by the owner",
       "requiredResult": "Accepted (P9.12)",
       "phases": [
@@ -1719,9 +1696,9 @@
     },
     {
       "id": "C12-124",
-      "position": 124,
+      "position": 125,
       "test": "Editor DID history missing for an editor entry",
-      "requiredResult": "Incomplete identity evidence; not reported as current (P7.1, P5.6)",
+      "requiredResult": "In the accepted state: incomplete identity evidence, not reported as current (P7.1, P5.6). An inscription after the anchor: unverifiable; accepted state stays current; later publications from that head wait (P9.15)",
       "phases": [
         2
       ],
@@ -1729,12 +1706,11 @@
       "coveredBy": [
         "packages/sdk/tests/unit/originals/editors.test.ts",
         "packages/vh/tests/editors.test.ts"
-      ],
-      "note": "PROVISIONAL rewording in originals-spec #51 (head b96841c2e, row 125): Editor DID history missing for an editor entry | In the accepted state: incomplete identity evidence, not reported as current (P7.1, P5.6). An inscription after the anchor: unverifiable; accepted state stays current (P9.15)"
+      ]
     },
     {
       "id": "C12-125",
-      "position": 125,
+      "position": 126,
       "test": "Two submissions with the same parent at a shared host",
       "requiredResult": "One accepted; the other refused with a stale-parent conflict returning the new head; refused candidate kept by the SDK, not published (P6.7, P6.8)",
       "phases": [
@@ -1748,7 +1724,7 @@
     },
     {
       "id": "C12-126",
-      "position": 126,
+      "position": 127,
       "test": "Reconciled candidate signed by an authorized signer against the new head",
       "requiredResult": "Accepted (P6.8)",
       "phases": [
@@ -1761,7 +1737,7 @@
     },
     {
       "id": "C12-127",
-      "position": 127,
+      "position": 128,
       "test": "Host changes or re-signs a submitted entry",
       "requiredResult": "Fails verification, or is not by an authorized signer (P6.7)",
       "phases": [
@@ -1771,7 +1747,7 @@
     },
     {
       "id": "C12-128",
-      "position": 128,
+      "position": 129,
       "test": "Submission retried after a lost acknowledgement, including after the head has moved on",
       "requiredResult": "Existing checkpoint and current head returned; no second append and no conflict (P6.7)",
       "phases": [
@@ -1784,7 +1760,7 @@
     },
     {
       "id": "C12-129",
-      "position": 129,
+      "position": 130,
       "test": "Refused candidate published elsewhere",
       "requiredResult": "Unanchored: fork; unresolved until anchoring. Anchored: not current; ignored (P6.6, P6.8, P9.12, P9.13)",
       "phases": [
@@ -1798,7 +1774,7 @@
     },
     {
       "id": "C12-130",
-      "position": 130,
+      "position": 131,
       "test": "Longer branch of a fork, or the branch with more signers",
       "requiredResult": "No winner; unresolved conflict (P6.6)",
       "phases": [
@@ -1811,7 +1787,7 @@
     },
     {
       "id": "C12-131",
-      "position": 131,
+      "position": 132,
       "test": "Entry on one branch bringing in content from another",
       "requiredResult": "Accepted on its branch as a single-parent entry; fork remains (P6.6)",
       "phases": [
@@ -1824,7 +1800,7 @@
     },
     {
       "id": "C12-132",
-      "position": 132,
+      "position": 133,
       "test": "did:webvh author moved under DID portability, then rotated; new entry signed with the new key naming a version after the move",
       "requiredResult": "Accepted; entries before the move still verify against versions before it (P5.14)",
       "phases": [
@@ -1838,7 +1814,7 @@
     },
     {
       "id": "C12-133",
-      "position": 133,
+      "position": 134,
       "test": "Moved author: package, import into a fresh reader, verify, then continue editing with the new key",
       "requiredResult": "Same result in the fresh reader; editing continues with authority (P5.14)",
       "phases": [
@@ -1851,7 +1827,7 @@
     },
     {
       "id": "C12-134",
-      "position": 134,
+      "position": 135,
       "test": "Moved author whose latest asset entry is an editor entry, read by a fresh reader with no package",
       "requiredResult": "Author freshness not established unless the moved author log is found; not reported as currently authorized (P5.14, P7.8)",
       "phases": [
@@ -1867,7 +1843,7 @@
     },
     {
       "id": "C12-135",
-      "position": 135,
+      "position": 136,
       "test": "Verification method at a version after a move whose controller is the old DID",
       "requiredResult": "Author binding failure (P5.3, P5.14)",
       "phases": [
@@ -1881,7 +1857,7 @@
     },
     {
       "id": "C12-136",
-      "position": 136,
+      "position": 137,
       "test": "Log with a different SCID whose `alsoKnownAs` lists the author DID",
       "requiredResult": "Not the author’s identity; entries signed with its keys rejected (P5.14)",
       "phases": [
@@ -1894,7 +1870,7 @@
     },
     {
       "id": "C12-137",
-      "position": 137,
+      "position": 138,
       "test": "Old author DID location redirecting to a new host",
       "requiredResult": "Redirect not followed; no continuity established (P5.14, P8.5)",
       "phases": [
@@ -1907,7 +1883,7 @@
     },
     {
       "id": "C12-138",
-      "position": 138,
+      "position": 139,
       "test": "Author DID that changes DID method",
       "requiredResult": "Not continuity; entries naming the new DID’s keys rejected (P5.14)",
       "phases": [
@@ -1920,7 +1896,7 @@
     },
     {
       "id": "C12-139",
-      "position": 139,
+      "position": 140,
       "test": "The Original’s did:webvh alias moves to another host",
       "requiredResult": "Unanchored: handled as an alias change by an author entry (P3.6, P9.3). Anchored: a new did:webvh alias is rejected (P9.10). Author binding unaffected either way",
       "phases": [
@@ -1935,7 +1911,7 @@
     },
     {
       "id": "C12-140",
-      "position": 140,
+      "position": 141,
       "test": "Editor entry whose proof’s verificationMethod is the author’s, or whose operation is not update",
       "requiredResult": "Rejected (P5.2, P5.16)",
       "phases": [
@@ -1948,7 +1924,7 @@
     },
     {
       "id": "C12-141",
-      "position": 141,
+      "position": 142,
       "test": "Editor entry naming an older editor DID version than that editor’s previous entry",
       "requiredResult": "Rejected (P5.8, P5.18)",
       "phases": [
@@ -1961,7 +1937,7 @@
     },
     {
       "id": "C12-142",
-      "position": 142,
+      "position": 143,
       "test": "Grant naming a resourceID outside the resource set, or more grants than the profile limit",
       "requiredResult": "Rejected; limit-exceeded (P5.15, P7.7)",
       "phases": [
@@ -1974,7 +1950,7 @@
     },
     {
       "id": "C12-143",
-      "position": 143,
+      "position": 144,
       "test": "Unanchored: verifier that reported a state learns of a competing branch",
       "requiredResult": "Conflict reported; not silent (P6.6)",
       "phases": [
@@ -1987,7 +1963,7 @@
     },
     {
       "id": "C12-144",
-      "position": 144,
+      "position": 145,
       "test": "Grant, before or after anchoring, naming the anchoring sat’s did:btco DID or the Original’s own did:vh",
       "requiredResult": "Rejected (P5.15)",
       "phases": [
@@ -2002,7 +1978,7 @@
     },
     {
       "id": "C12-145",
-      "position": 145,
+      "position": 146,
       "test": "Unanchored Original with complete evidence and signer DID histories fetched moments ago",
       "requiredResult": "Reported valid as of its verified checkpoint, with each signer DID versionId and fetch time; never current or currently authorized (P7.10)",
       "phases": [
@@ -2018,7 +1994,7 @@
     },
     {
       "id": "C12-146",
-      "position": 146,
+      "position": 147,
       "test": "Entry state with a member section 14 does not list, at any level",
       "requiredResult": "Rejected (P14.4)",
       "phases": [
@@ -2029,7 +2005,7 @@
     },
     {
       "id": "C12-147",
-      "position": 147,
+      "position": 148,
       "test": "Resource digest in a non-canonical encoding, or a multihash other than SHA-256",
       "requiredResult": "Rejected (P14.7)",
       "phases": [
@@ -2040,7 +2016,7 @@
     },
     {
       "id": "C12-148",
-      "position": 148,
+      "position": 149,
       "test": "`asset.editors` present as an empty array",
       "requiredResult": "Rejected (P14.5)",
       "phases": [
@@ -2051,7 +2027,7 @@
     },
     {
       "id": "C12-149",
-      "position": 149,
+      "position": 150,
       "test": "Resource descriptor whose `size` or `mediaType` changes without its `digest`",
       "requiredResult": "Rejected (P14.6)",
       "phases": [
@@ -2062,7 +2038,7 @@
     },
     {
       "id": "C12-150",
-      "position": 150,
+      "position": 151,
       "test": "Entry whose UTF-8 line is 65,536 bytes / 65,537 bytes",
       "requiredResult": "Accepted / rejected (P14.13)",
       "phases": [
@@ -2079,7 +2055,7 @@
     },
     {
       "id": "C12-151",
-      "position": 151,
+      "position": 152,
       "test": "Derived DID document compared with section 14’s template",
       "requiredResult": "Identical for every resolver (P14.9)",
       "phases": [
@@ -2090,7 +2066,7 @@
     },
     {
       "id": "C12-152",
-      "position": 152,
+      "position": 153,
       "test": "Evidence package built twice from the same contents",
       "requiredResult": "Byte-identical archives (P14.10)",
       "phases": [
@@ -2104,7 +2080,7 @@
     },
     {
       "id": "C12-153",
-      "position": 153,
+      "position": 154,
       "test": "Evidence package with a compressed archive entry or a name over 255 bytes",
       "requiredResult": "Rejected (P14.10)",
       "phases": [
@@ -2118,7 +2094,7 @@
     },
     {
       "id": "C12-154",
-      "position": 154,
+      "position": 155,
       "test": "Editor entry that adds or removes a resource, even one its grant names",
       "requiredResult": "Rejected (P5.16)",
       "phases": [
@@ -2132,7 +2108,7 @@
     },
     {
       "id": "C12-155",
-      "position": 155,
+      "position": 156,
       "test": "Entry that adds a resource with a resourceID the Original used before",
       "requiredResult": "Rejected (P4.1)",
       "phases": [
@@ -2146,7 +2122,7 @@
     },
     {
       "id": "C12-156",
-      "position": 156,
+      "position": 157,
       "test": "Entry that removes the last resource",
       "requiredResult": "Rejected (P4.1)",
       "phases": [
@@ -2160,7 +2136,7 @@
     },
     {
       "id": "C12-157",
-      "position": 157,
+      "position": 158,
       "test": "Author entry removing a resource that a grant still names",
       "requiredResult": "Rejected (P5.15)",
       "phases": [
@@ -2174,7 +2150,7 @@
     },
     {
       "id": "C12-158",
-      "position": 158,
+      "position": 159,
       "test": "Added resource not in any grant",
       "requiredResult": "No editor may change it until an author entry grants it (P5.15)",
       "phases": [
@@ -2188,7 +2164,7 @@
     },
     {
       "id": "C12-159",
-      "position": 159,
+      "position": 160,
       "test": "Transitions for an added and a removed resource",
       "requiredResult": "`from: null` for the added one, `to: null` for the removed one, in the order P14.4 gives (P14.4)",
       "phases": [
@@ -2202,46 +2178,27 @@
     },
     {
       "id": "C12-160",
-      "position": 160,
-      "test": "Original with 256 resources / 257 resources",
+      "position": 161,
+      "test": "Original with 256 resources whose entries are within the entry limit / 257 resources",
       "requiredResult": "Accepted / rejected (P14.13)",
       "phases": [
         1
       ],
       "status": "covered",
-      "proposal": "originals-spec#50@555ce24d3",
-      "note": "PROVISIONAL: open spec PR #50 (head 555ce24d3), not in the pinned table; the owner has decided the 256-resource limit (D6, 21 October 2026).",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/resources.test.ts",
         "packages/vh/tests/resources.test.ts"
       ]
     },
     {
-      "id": "C12-176",
-      "position": 101,
-      "test": "Verified anchoring inscription after submission",
-      "requiredResult": "Submitted, not observed, while the network is not seen to hold it; pending Bitcoin acceptance while in the mempool or confirmed; anchored once confirmed (P9.18)",
-      "phases": [
-        4
-      ],
-      "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
-      "coveredBy": [
-        "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts"
-      ]
-    },
-    {
       "id": "C12-161",
       "position": 162,
       "test": "Inscription after the anchor naming a signer DID version the verifier cannot verify",
-      "requiredResult": "Reported unverifiable; the accepted state stays current and its identity evidence is not made incomplete (P9.15)",
+      "requiredResult": "Reported unverifiable; the accepted state stays current and its identity evidence is not made incomplete; later publications from that head wait (P9.15)",
       "phases": [
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/bitcoin.test.ts"
       ]
@@ -2255,8 +2212,6 @@
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/bitcoin.test.ts"
       ]
@@ -2270,8 +2225,6 @@
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/btco-author.test.ts"
       ]
@@ -2285,8 +2238,6 @@
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/bitcoin.test.ts"
       ]
@@ -2300,8 +2251,6 @@
         2
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/continuity.test.ts"
       ]
@@ -2316,8 +2265,6 @@
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/continuity.test.ts",
         "packages/vh/tests/continuity.test.ts"
@@ -2332,8 +2279,6 @@
         2
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/continuity.test.ts"
       ]
@@ -2347,8 +2292,6 @@
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts"
       ]
@@ -2362,8 +2305,6 @@
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/bitcoin.test.ts",
         "packages/vh/tests/btco-author.test.ts"
@@ -2373,13 +2314,11 @@
       "id": "C12-170",
       "position": 171,
       "test": "did:btco inscription on the DID’s sat whose metadata the verifier has not read",
-      "requiredResult": "History ends before it; identity evidence incomplete (P5.13)",
+      "requiredResult": "History ends before it; an entry depending on it has incomplete identity evidence, or is unverifiable if inscribed after the anchoring inscription (P5.13, P9.15)",
       "phases": [
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/btco-author.test.ts"
       ]
@@ -2393,8 +2332,6 @@
         1
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/resources.test.ts"
       ]
@@ -2408,8 +2345,6 @@
         1
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/originals.test.ts"
       ]
@@ -2424,8 +2359,6 @@
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/bitcoin.test.ts",
         "packages/vh/tests/originals.test.ts"
@@ -2440,8 +2373,6 @@
         1
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/originals.test.ts"
       ]
@@ -2449,21 +2380,151 @@
     {
       "id": "C12-175",
       "position": 176,
-      "test": "Evidence package whose entries are unsorted or carry other dates, flags or modes",
+      "test": "Evidence package whose entries are unsorted or carry other dates or flags",
       "requiredResult": "A reader may accept it; a writer never produces it (P14.10)",
       "phases": [
         1
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/evidence.test.ts"
       ]
     },
     {
-      "id": "C12-177",
+      "id": "C12-180",
       "position": 177,
+      "test": "Evidence package with a name that is not valid UTF-8, or an entry whose mode is not a regular file",
+      "requiredResult": "Rejected (P14.10, P7.5)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/evidence.test.ts"
+      ]
+    },
+    {
+      "id": "C12-181",
+      "position": 178,
+      "test": "Valid publication after an earlier unverifiable inscription extending the same head",
+      "requiredResult": "Not accepted until the unverifiable one is resolved; reported as waiting on it (P9.15)",
+      "phases": [
+        4
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts",
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
+    },
+    {
+      "id": "C12-182",
+      "position": 179,
+      "test": "Earlier unverifiable inscription later verified as invalid, with a valid later publication from the same head",
+      "requiredResult": "The later publication is accepted; the change of head is reported (P9.15)",
+      "phases": [
+        4
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
+    },
+    {
+      "id": "C12-183",
+      "position": 180,
+      "test": "did:btco signer gap found after an inscription was accepted",
+      "requiredResult": "That inscription becomes unverifiable; the head is recomputed and the change reported (P9.15)",
+      "phases": [
+        4
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
+    },
+    {
+      "id": "C12-184",
+      "position": 181,
+      "test": "Entry in the anchoring inscription naming a signer version number the verifier holds under another versionId",
+      "requiredResult": "Rejected (P9.15)",
+      "phases": [
+        4
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
+    },
+    {
+      "id": "C12-185",
+      "position": 182,
+      "test": "`name` of 1,024 / 1,025 UTF-16 code units, counting a non-BMP character as two",
+      "requiredResult": "Accepted / rejected (P14.5)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
+    },
+    {
+      "id": "C12-186",
+      "position": 183,
+      "test": "Inscription after the anchor whose signer version is unverifiable but which fails a check not depending on that version",
+      "requiredResult": "Rejected, not unverifiable (P9.15)",
+      "phases": [
+        4
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
+    },
+    {
+      "id": "C12-187",
+      "position": 184,
+      "test": "Publication extending an unverifiable inscription",
+      "requiredResult": "Listed as waiting on it; followed under P9.13 once it is accepted, ignored if it is rejected (P9.15)",
+      "phases": [
+        4
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
+    },
+    {
+      "id": "C12-188",
+      "position": 185,
+      "test": "Single acceptance check while an unverifiable inscription is listed",
+      "requiredResult": "Passes only with the list presented beside its result (P9.15)",
+      "phases": [
+        4
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts",
+        "packages/vh/tests/btco-author.test.ts"
+      ]
+    },
+    {
+      "id": "C12-189",
+      "position": 186,
+      "test": "Inscription after the anchor naming a did:vh or did:webvh version above the P14.13 limit, or after a deactivated version the verifier holds",
+      "requiredResult": "Rejected (P9.15)",
+      "phases": [
+        4
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
+    },
+    {
+      "id": "C12-177",
+      "position": 187,
       "test": "Signer DID log from the old host whose latest version moves the DID and removes a key",
       "requiredResult": "Removal applied; moved log sought; freshness not established until found (P7.8, P5.14)",
       "phases": [
@@ -2471,30 +2532,27 @@
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/continuity.test.ts",
         "packages/vh/tests/continuity.test.ts"
       ]
     },
     {
       "id": "C12-178",
-      "position": 178,
+      "position": 188,
       "test": "did:btco signer whose named version is known but an earlier inscription on its sat is unread",
       "requiredResult": "Unverifiable; not accepted against the older state (P9.15)",
       "phases": [
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/btco-author.test.ts"
       ]
     },
     {
       "id": "C12-179",
-      "position": 179,
+      "position": 189,
       "test": "Asset log line with whitespace outside JSON strings / with keys in non-JCS order",
       "requiredResult": "Rejected / accepted (P14.2)",
       "phases": [
@@ -2502,8 +2560,6 @@
         4
       ],
       "status": "covered",
-      "proposal": "originals-spec#51@b96841c2e",
-      "note": "PROVISIONAL: open spec PR #51 (head b96841c2e), not in the pinned table; owner decisions of 23 October 2026.",
       "coveredBy": [
         "packages/vh/tests/originals.test.ts"
       ]

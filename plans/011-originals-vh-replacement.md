@@ -6,7 +6,7 @@ Status: **approved by the owner on 2026-10-18**, with the recommendations for Q1
 
 | Dependency | Pin | Notes |
 |---|---|---|
-| Originals Protocol | `aviarytech/originals-spec@1039c471c` (`master`) | Editor's Draft 0.1 with #34–#36 (Q5, Q6, Q15; #42 and #43 inside), #45 (editors, shared-host saves, identity continuity), #46 (an unanchored Original is never current), #47 (the newest known signer DID version), #48 (section 14 wire format) and #49 (the author adds and removes resources) merged; re-pinned from `051049d8b`. §12 has 159 rows; IDs are kept and the mapping is in `specs/README.md`. Open #50 (head `555ce24d3`: Bitcoin values and limits decided, 256 resources, row 160) is implemented |
+| Originals Protocol | `aviarytech/originals-spec@19d3e82a0` (`master`, with #50 and #51) | Editor's Draft 0.1 with #34–#36 (Q5, Q6, Q15; #42 and #43 inside), #45 (editors, shared-host saves, identity continuity), #46 (an unanchored Original is never current), #47 (the newest known signer DID version), #48 (section 14 wire format) and #49 (the author adds and removes resources) merged; re-pinned from `051049d8b`. §12 has 159 rows; IDs are kept and the mapping is in `specs/README.md`. Open #50 (head `555ce24d3`: Bitcoin values and limits decided, 256 resources, row 160) is implemented |
 | VH-Log | `swcurran/VH-Log@f2f9fda2d8dae26b717ab54163169350c7182233` + PR 1 `a3e3627e`, PR 2 `0d5eb134`, PR 3 `3bcd0acb`, PR 8 `3770b574`, PR 9 `5552a668`, PR 10 `1867a2b1`, PR 11 `2fe380dbf` (keys and editors from a controller) | PRs treated as merged |
 | did:vh | `swcurran/didvh@e0b7cbad27d7b2274057251f85687e133329b5a9` + PR 3 `b3e7a56d` | extension mechanism treated as merged |
 | did:webvh (experimental, on VH-Log) | `decentralized-identity/didwebvh` PR 302, merge `deef9cf1` (`spec-exp/`) | Merged 2026-10-18; keeps method value `did:webvh:1.0` |
@@ -159,7 +159,7 @@ resources/<digest>
 
 ### 2.4 Limits (P7.7)
 
-The limits (P14.13), decided by the owner on 21 October 2026 (D6; spec PR #50 (open)), are 10,000 entries, 65,536 bytes per entry measured as the UTF-8 length of its stored line without the line feed, 256 resources at one time, 32 editor grants, 1,000 signer-DID versions, a 16 MiB fetched log file, a 64 MiB fetched resource and 15 s per fetch (the fetch caps are configurable). Exceeding a limit produces a last-valid-prefix result labelled `limit-exceeded`.
+The limits (P14.13), decided by the owner on 21 October 2026 (D6; originals-spec #50, merged), are 10,000 entries, 65,536 bytes per entry measured as the UTF-8 length of its stored line without the line feed, 256 resources at one time, 32 editor grants, 1,000 signer-DID versions, a 16 MiB fetched log file, a 64 MiB fetched resource and 15 s per fetch (the fetch caps are configurable). Exceeding a limit produces a last-valid-prefix result labelled `limit-exceeded`.
 
 ### 2.5 Bitcoin representation (D6)
 
