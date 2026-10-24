@@ -79,6 +79,39 @@ export class AnchoringSubmitError extends Error {
   }
 }
 
+/** Why the server refused a pair itself, kept beside the pair (owner decision, 23 October 2026). */
+export interface PairRefusal {
+  status: number;
+  code: string;
+  message: string;
+  at: string;
+}
+
+/**
+ * Answers that may still be followed by acceptance, or that say nothing about
+ * this pair: the pair is kept unchanged and sent again (P9.6). Everything else
+ * in 4xx is a refusal of the pair itself (owner decision, 23 October 2026).
+ */
+const KEEP_AND_RESEND = new Set([401, 404, 408, 429]);
+
+/** True for a refusal of this pair itself: 4xx other than 401, 404, 408 and 429. Network errors and 5xx are not. */
+export function isPairRefusal(error: unknown): error is AnchoringSubmitError {
+  return error instanceof AnchoringSubmitError && error.status >= 400 && error.status < 500 && !KEEP_AND_RESEND.has(error.status);
+}
+
+/**
+ * The server refused this pair (for example `original_forked`,
+ * `signed_pair_mismatch`, `evidence_not_verified`, `not_sendable`,
+ * `bad_request`). The pair is kept, marked refused, and not sent again; the
+ * user can abandon it explicitly and prepare a new one (P9.6).
+ */
+export class AnchoringRefusedError extends Error {
+  constructor(public readonly refusal: PairRefusal) {
+    super(`The server refused this submission: ${refusal.message} Its signed transactions are kept for recovery and will not be sent again. Abandon it to prepare a new one.`);
+    this.name = 'AnchoringRefusedError';
+  }
+}
+
 /** Cancelled before the pair reached the server: nothing was broadcast, nothing spent. */
 export class AnchoringCancelledError extends Error {
   constructor() {
@@ -152,6 +185,8 @@ export interface OutboxEntry {
   /** The evidence package, base64. */
   evidence: string;
   savedAt: string;
+  /** Set when the server refused this pair itself: kept for recovery, never resent automatically. */
+  refused?: PairRefusal;
 }
 
 export interface AnchoringOutbox {
@@ -236,11 +271,28 @@ export function httpAnchoringTransport(opts: { baseUrl?: string; fetchImpl?: typ
 
 /**
  * A later refusal says nothing about an earlier lost answer (P9.6). Only an
- * acknowledgement removes signed transactions; auth, gate and validation
- * errors preserve the identical pair for recovery, never prepare a new one.
+ * acknowledgement, or the user's explicit abandon of a refused pair, removes
+ * signed transactions. Auth, gate, rate, server and network errors preserve
+ * the identical pair to send again. A refusal of the pair itself marks it
+ * refused and keeps it (owner decision, 23 October 2026); nothing prepares a
+ * new pair while it is there.
  */
 async function deliver(transport: AnchoringTransport, outbox: AnchoringOutbox, did: string, entry: OutboxEntry): Promise<SubmitAnswer> {
-  const sent = await transport.submit({ did, evidence: base64.decode(entry.evidence), pair: entry.pair });
+  if (entry.refused) throw new AnchoringRefusedError(entry.refused);
+  let sent: SubmitAnswer;
+  try {
+    sent = await transport.submit({ did, evidence: base64.decode(entry.evidence), pair: entry.pair });
+  } catch (error) {
+    if (!isPairRefusal(error)) throw error;
+    const refused: PairRefusal = {
+      status: error.status,
+      code: error.body.error ?? error.body.code ?? `http_${error.status}`,
+      message: error.body.message ?? `The server answered ${error.status}${error.body.error ? ` (${error.body.error})` : ''}.`,
+      at: new Date().toISOString(),
+    };
+    await outbox.put(did, { ...entry, refused });
+    throw new AnchoringRefusedError(refused);
+  }
   if (sent.commitTxId !== entry.pair.prepared.commitTxId || sent.revealTxId !== entry.pair.prepared.revealTxId || sent.versionId !== entry.pair.versionId) {
     throw new Error('The server did not acknowledge the saved submission. It has been kept for recovery.');
   }
@@ -281,6 +333,18 @@ export async function resendWaiting(transport: AnchoringTransport, outbox: Ancho
   if (!waiting) return null;
   const sent = await deliver(transport, outbox, did, waiting);
   return { sent, pair: waiting.pair, offChain: waiting.pair.offChain, resent: true };
+}
+
+/**
+ * The user's explicit abandon of a pair the server refused: deletes it so a
+ * new one can be prepared. A pair that is not marked refused may still be
+ * accepted, so it is never abandoned here (P9.6).
+ */
+export async function abandonRefused(outbox: AnchoringOutbox, did: string): Promise<void> {
+  const waiting = await outbox.get(did);
+  if (!waiting) return;
+  if (!waiting.refused) throw new Error('Only a submission the server refused can be abandoned. This one may still be accepted, so it has been kept.');
+  await outbox.delete(did);
 }
 
 /**

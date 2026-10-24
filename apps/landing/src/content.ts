@@ -337,6 +337,13 @@ export const demo = {
     resend: 'Send again',
     resendNote:
       'The server never answered the last send. Sending again uses the same signed transactions, so nothing is paid twice.',
+    // Owner decision, 23 October 2026: a refused pair is kept, shown, and abandoned only on request (P9.6).
+    refusedHeading: 'The server refused this submission',
+    refused: (reason: string) =>
+      `Reason: ${reason} The signed transactions are kept in this browser for recovery and are not sent again. Abandon the submission to prepare a new one.`,
+    abandon: 'Abandon this submission',
+    abandonConfirm:
+      'Delete the refused signed transactions from this browser? A new submission is prepared and signed from scratch. Nothing else about the Original changes.',
     labels: {
       'not-anchored': 'Not on Bitcoin',
       'submitted-unobserved': 'Sent, not seen on the network yet',
@@ -1033,4 +1040,13 @@ export const library = {
   holder: 'Sat holder output (provisional):',
   currentRead: 'Current according to this Bitcoin read:', yes: 'yes', no: 'no',
   draftSaveError: 'Your draft could not be saved in this browser. Keep this page open and copy your work before leaving.',
+  // P6.6, P9.16: divergent valid branches are an unresolved conflict; no branch is current.
+  forkUnresolved: 'Fork unresolved — no current branch. Two valid histories of this Original are kept and neither was chosen. Editing and anchoring are paused here; keep an evidence export.',
+  forkHead: 'Fork unresolved — no current branch.',
+  forkNote: 'This browser holds two valid histories of this Original that diverge, and neither was chosen. The saved head above is one of them, not the current one. Editing and anchoring are paused here, because either would extend one branch without you choosing it. Only anchoring on Bitcoin settles a fork.',
+  forkBranches: 'Branches diverge at version',
+  unverifiedLocal: 'Saved evidence could not be verified. Nothing has been removed.',
+  refusedPair: (reason: string) => `The server refused its Bitcoin submission: ${reason} The signed transactions are kept in this browser and are not sent again. Open it to abandon the submission and prepare a new one.`,
+  // Owner decision, 23 October 2026: the guest key is accepted, and said plainly.
+  guestKey: 'Guest Originals are signed with a key stored in this browser. Anyone using this browser can sign as this guest author. Sign in to sign with your own key.',
 };

@@ -133,6 +133,8 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
   signingRef.current = signing;
   const cancelRef = useRef<AbortController | null>(null);
   const [pendingHandOff, setPendingHandOff] = useState(false);
+  // A pair the server refused: kept, shown with its reason, abandoned only on request (owner decision, 23 October 2026; P9.6).
+  const [refusedHandOff, setRefusedHandOff] = useState<{ message: string } | null>(null);
   const network = btcNetwork();
   // R5: the real Bitcoin path follows AUTH, not the build flag alone. The
   // engine derives its provider from this same value, so an enabled money
@@ -266,6 +268,7 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
       }
       const state = await engine.verifyBitcoin();
       const pending = await engine.pendingHandOff();
+      const refused = await engine.refusedHandOff();
       if (!live) return;
       const title = state.history.at(-1)?.name ?? 'Original';
       const uploaded = { name: state.resource.id, content: state.resource.content, contentType: state.resource.contentType };
@@ -276,6 +279,7 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
       setAsset(state);
       setPhase(state.btcoDid ? 'inscribed' : state.webvhDid ? 'published' : 'created');
       setPendingHandOff(pending);
+      setRefusedHandOff(refused);
       setError(warning);
     })().catch((e) => { if (live) setError((e as Error).message); }).finally(() => { if (live) setOpening(false); });
     return () => { live = false; };
@@ -533,8 +537,28 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
     } finally {
       cancelRef.current = null;
       setPendingHandOff(await engine.pendingHandOff().catch(() => false));
+      setRefusedHandOff(await engine.refusedHandOff().catch(() => null));
     }
   };
+
+  /** The user's explicit abandon of a refused pair; never automatic (owner decision, 23 October 2026; P9.6). */
+  const abandonRefused = () =>
+    runExclusive(runningRef, async () => {
+      if (!window.confirm(demo.anchoring.abandonConfirm)) return;
+      setError(null);
+      setUpdating(true);
+      try {
+        const engine = await getEngine();
+        await engine.abandonRefusedHandOff();
+        setRefusedHandOff(await engine.refusedHandOff());
+        setPendingHandOff(await engine.pendingHandOff());
+      } catch (err) {
+        console.error('[originals-demo]', err);
+        setError(demoFailureMessage(err));
+      } finally {
+        setUpdating(false);
+      }
+    });
 
   const inscribeNext = () =>
     runExclusive(runningRef, async () => {
@@ -740,7 +764,12 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
           <p>{libraryCopy.history} {(asset.provenance as { history: { status: string } }).history.status} · {libraryCopy.binding} {(asset.provenance as { authorBinding: { status: string } }).authorBinding.status} · {libraryCopy.identity} {(asset.provenance as { identityEvidence: { status: string } }).identityEvidence.status} · {libraryCopy.resources} {(asset.provenance as { resources: { status: string } }).resources.status}</p>
           <p>{libraryCopy.identityLimit}</p>
           <p>{libraryCopy.savedHead} <code>{asset.history.at(-1)?.versionId}</code></p>
-          {asset.btcoDid ? <>
+          {asset.fork && <div role="alert" data-testid="fork-unresolved">
+            <p><strong>{libraryCopy.forkHead}</strong></p>
+            <p>{libraryCopy.forkNote}</p>
+            <p>{libraryCopy.forkBranches} {asset.fork.version}: {asset.fork.branches.map((b, i) => <span key={`${b.source}-${b.versionId}`}>{i > 0 && ' · '}<code>{b.versionId}</code> ({b.source})</span>)}</p>
+          </div>}
+          {asset.fork ? null : asset.btcoDid ? <>
             <p>{libraryCopy.bitcoin} {libraryCopy.bitcoinLabels[asset.bitcoinVerification?.anchoring?.status ?? ''] ?? libraryCopy.notChecked} · {libraryCopy.acceptedHead} <code>{(asset.bitcoinVerification?.anchoring?.status === 'anchored' ? asset.bitcoinVerification.head : null) ?? libraryCopy.notEstablished}</code></p>
             <p>{libraryCopy.currentRead} {asset.bitcoinVerification?.current ? libraryCopy.yes : libraryCopy.no}</p>
             {asset.bitcoinVerification?.ownership && <p>{libraryCopy.holder} <code>{asset.bitcoinVerification.ownership.output}</code></p>}
@@ -1109,6 +1138,16 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
                 )}
 
                 {error && <p className="demo-error" role="alert">{error}</p>}
+
+                {anchoringOn && refusedHandOff && (
+                  <div className="demo-anchoring" data-testid="anchoring-refused">
+                    <strong>{demo.anchoring.refusedHeading}</strong>
+                    <p className="demo-inscribe-note">{demo.anchoring.refused(refusedHandOff.message)}</p>
+                    <button type="button" className="btn demo-step-btn" disabled={busy} onClick={() => { void abandonRefused(); }}>
+                      {demo.anchoring.abandon}
+                    </button>
+                  </div>
+                )}
 
                 {phase === 'published' && inscribeView.simulated && (
                   <p className="demo-inscribe-note demo-sim-note">{demo.simulated.note}</p>

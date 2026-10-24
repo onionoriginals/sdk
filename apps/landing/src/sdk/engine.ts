@@ -17,14 +17,15 @@ import type { OffChainEvidence } from "@originals/sdk/originals/bitcoin";
 import type { BitcoinSigner, Utxo } from "@originals/sdk";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
-import type { AliasEvidence, AuthorDidEvidence, AuthorRef, OriginalsReport } from "@originals/vh/originals";
+import type { AliasEvidence, AuthorDidEvidence, AuthorRef, OriginalsFork, OriginalsReport } from "@originals/vh/originals";
+import { OriginalsError } from "@originals/vh";
 import { didWebvhLogUrl } from "@originals/vh/webvh";
 import { base58AddressToEd25519Multikey } from "@originals/sdk";
 import { parseJson } from "@originals/vh/json";
 import { ensureAuthorshipAccount, ensureIdentityAccount, fundingSignerAddress, type TurnkeyBitcoinClient } from "../auth/turnkey-session";
 import {
-  AnchoringSubmitError, guardedSign, httpAnchoringTransport, indexedDbOutbox, publishNextEntry, resendWaiting, signingGuard,
-  type AnchoringOutbox, type AnchoringStatus, type AnchoringTransport, type PublishNextResult, type SubmitAnswer,
+  AnchoringSubmitError, abandonRefused, guardedSign, httpAnchoringTransport, indexedDbOutbox, publishNextEntry, resendWaiting, signingGuard,
+  type AnchoringOutbox, type PairRefusal, type AnchoringStatus, type AnchoringTransport, type PublishNextResult, type SubmitAnswer,
 } from "./anchoring";
 import { HttpOrdinalsProvider } from "./http-ordinals-provider";
 import { TurnkeySatSigner } from "./turnkey-sat-signer";
@@ -113,6 +114,12 @@ export interface DemoAssetState {
      */
     unpublished: string[];
   };
+  /**
+   * Set when the store holds divergent valid branches of this Original: an
+   * unresolved conflict with no current branch (P6.6, P9.16). Revise, publish
+   * and anchor are refused while it is set.
+   */
+  fork?: OriginalsFork;
   /** The verification report of the current checkpoint. */
   provenance: unknown;
   bitcoinVerification?: OriginalsReport;
@@ -134,6 +141,19 @@ export class StaleSaveError extends Error {
   constructor(public readonly refused: string, public readonly hostHead: string) {
     super("Someone saved this Original first. Your change is kept as a refused candidate and was not published; reconcile it with the new version.");
     this.name = "StaleSaveError";
+  }
+}
+
+/**
+ * The Original has divergent valid branches and none is current (owner
+ * decision S1; P6.6, P9.16). Revising, publishing or anchoring here would
+ * extend one branch without the author choosing it, so each is refused; both
+ * branches stay kept. The category is the spec's `fork` (section 6).
+ */
+export class ForkUnresolvedError extends OriginalsError {
+  constructor(public readonly fork: OriginalsFork) {
+    super("fork", "FORK_UNRESOLVED", "Fork unresolved — no current branch. This Original has two valid histories and neither was chosen, so it cannot be revised, published or anchored here. Both are kept; keep an evidence export.", { fork });
+    this.name = "ForkUnresolvedError";
   }
 }
 
@@ -332,8 +352,21 @@ export class DemoEngine {
     return this.snapshot();
   }
 
+  /**
+   * Off Bitcoin no signed entry settles a fork, and extending one branch here
+   * would choose it for the author without showing the other (P6.6, P9.16).
+   * Read the store's current report, so a branch imported since is seen.
+   */
+  private async refuseFork(): Promise<void> {
+    if (!this.did || !this.sdk) return;
+    const view = await this.sdk.get(this.did);
+    this.view = view;
+    if (view.report.fork) throw new ForkUnresolvedError(view.report.fork);
+  }
+
   async update(title: string, style: string, source: string | AssetSource): Promise<DemoAssetState> {
     if (!this.did || !this.view) throw new Error("Create an asset first");
+    await this.refuseFork();
     const { ref, signer } = await this.author();
     // A save whose answer was lost is sent again first, byte for byte (P6.4).
     await this.retryPending();
@@ -447,6 +480,7 @@ export class DemoEngine {
    */
   async reconcile(refused: string, title: string, style: string, source: string | AssetSource): Promise<DemoAssetState> {
     if (!this.did || !this.published()) throw new Error("Publish the Original first");
+    await this.refuseFork();
     const { ref, signer } = await this.author();
     const result = await this.sdk!.reconcile(this.did, {
       host: this.sharedHost(),
@@ -477,6 +511,7 @@ export class DemoEngine {
       throw new FeatureUnavailableError("hostedPublication", "Publishing to the web is not open yet.");
     }
     if (!this.did || !this.view || !this.sdk) throw new Error("Create an asset first");
+    await this.refuseFork();
     const authoring = await this.author();
     const target = this.target ?? this.accountTarget();
     const result = await publishOriginal({
@@ -542,6 +577,8 @@ export class DemoEngine {
       throw new FeatureUnavailableError("bitcoinAnchoring", "Anchoring on Bitcoin is not open yet.");
     }
     if (!this.did || !this.view || !this.sdk) throw new Error("Create an asset first");
+    // A pair already prepared is kept as is (P9.6); nothing new is prepared or sent for a forked Original (P6.6, P9.16).
+    await this.refuseFork();
     if (!this.authed && !this.authorOverride) throw new Error("Sign in to anchor: the sat is funded from, and returned to, your own address.");
     const network = this.anchoringNetwork();
     const transport = this.anchoringTransport();
@@ -598,9 +635,27 @@ export class DemoEngine {
     return this.snapshot();
   }
 
-  /** A pair handed to the server whose answer never came back: it is sent again identically on the next inscribe (P9.6). */
+  /** A pair handed to the server whose answer never came back: it is sent again identically on the next inscribe (P9.6). A refused pair is not pending. */
   async pendingHandOff(): Promise<boolean> {
-    return !!this.did && !!(await this.outbox().get(this.did));
+    if (!this.did) return false;
+    const waiting = await this.outbox().get(this.did);
+    return !!waiting && !waiting.refused;
+  }
+
+  /** The server's reason, when it refused this Original's kept pair (owner decision, 23 October 2026). */
+  async refusedHandOff(): Promise<PairRefusal | null> {
+    if (!this.did) return null;
+    return (await this.outbox().get(this.did))?.refused ?? null;
+  }
+
+  /**
+   * The user's explicit abandon of a refused pair: it is deleted, and the next
+   * inscribe prepares a new one. A pair that is not refused is never abandoned (P9.6).
+   */
+  async abandonRefusedHandOff(): Promise<void> {
+    if (!this.did) throw new Error("Create an asset first");
+    await abandonRefused(this.outbox(), this.did);
+    this.emit("asset:abandoned", `Abandoned the refused submission for ${short(this.did)}`, { did: this.did });
   }
 
   private readStatus(transport: AnchoringTransport): Promise<AnchoringStatus | null> {
@@ -754,6 +809,7 @@ export class DemoEngine {
       metadata: meta ? { id: meta.id, hash: hexOfDigest(meta.digest), content: contentText(bytesOf(meta.digest)) } : undefined,
       credentials: 0,
       history: this.history(),
+      ...(view.report.fork ? { fork: view.report.fork } : {}),
       provenance: view.report,
       bitcoinVerification: this.bitcoinVerification,
       bitcoinReadError: this.bitcoinReadError,
