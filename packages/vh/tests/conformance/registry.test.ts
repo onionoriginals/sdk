@@ -38,7 +38,7 @@ for (const root of roots) {
 }
 
 describe("section 12 conformance registry", () => {
-  // The pinned table (originals-spec master 19d3e82a0, with #50 and #51 merged) has 189 rows.
+  // The pinned table (originals-spec master b599fd14b, with #50, #51 and #52 merged) has 189 rows.
   // Ids are stable across re-pins, so they need not equal table positions; each row records its
   // position in the pinned table. A row from an open spec pull request would carry `proposal`.
   test("registers all 189 pinned rows with unique ids, in table order", () => {

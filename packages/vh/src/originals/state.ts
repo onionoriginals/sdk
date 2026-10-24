@@ -40,7 +40,7 @@ export interface ResourceDescriptor {
   id: string;
   mediaType: string;
   size: number;
-  /** PROVISIONAL (D4): multibase base58btc of a sha2-256 multihash. */
+  /** A sha2-256 multihash (P14.7, decided), multibase base58btc (the encoding is PROVISIONAL, D4). */
   digest: string;
 }
 

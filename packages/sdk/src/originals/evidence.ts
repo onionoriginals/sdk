@@ -11,7 +11,7 @@
  *                                         has witnesses
  *   resources/<digest>                    resource bytes, named by digest
  *
- * PROVISIONAL (P14.10, section 14): signer histories are
+ * PROVISIONAL (P14.10, section 14): the `signers/` layout. Signer histories are
  * under `signers/`, because editors are signers too, and there is no asset
  * witness file, because asset logs have no witnesses (P9.8). Nothing outside
  * this layout is accepted (P7.5); in particular `authors/` and

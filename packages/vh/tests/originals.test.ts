@@ -499,7 +499,7 @@ describe("the derived DID document and generic resolvers (P3.5, P3.8)", () => {
     failedWith(await report([...log, empty], [alice]), 3, "PARAMETER_MEMBERS", "invalid-evidence");
   });
 
-  test("digests are multibase base58btc sha2-256 multihashes (PROVISIONAL, D4)", () => {
+  test("digests are sha2-256 multihashes (P14.7) in multibase base58btc (the encoding PROVISIONAL, D4)", () => {
     const d = resourceDigest(bytes("abc"));
     expect(d).toBe(`z${base58btcEncode(new Uint8Array([0x12, 0x20, ...sha256(bytes("abc"))]))}`);
     expect(d.startsWith("zQm")).toBe(true);
