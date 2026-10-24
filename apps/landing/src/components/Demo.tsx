@@ -262,7 +262,8 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
           if (bytes) await engine.importEvidence(bytes, openDid);
         } catch (e) { warning = (e as Error).message; }
       }
-      const saved = await engine.open(openDid);
+      // A 409 "diverged" from the account is said even when this browser holds no copy to open (P6.6).
+      const saved = await engine.open(openDid).catch((e: Error) => { throw warning ? new Error(warning) : e; });
       if (anchoringOn && saved.btcoDid) {
         try { await engine.anchoringStatus(); } catch { warning = libraryCopy.bitcoinStatusUnavailable; }
       }
@@ -757,7 +758,8 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
       <div className="container">
         <a href="/me" onClick={(e) => { e.preventDefault(); navigate('/me'); }}>{libraryCopy.title} →</a>
         <p>{libraryCopy.localNote}</p>
-        {!isAuthenticated && <p data-testid="guest-key-note">{libraryCopy.guestKey}</p>}
+        {/* On /me/<did> the library above already says it: once per page. */}
+        {!isAuthenticated && !openDid && <p data-testid="guest-key-note">{libraryCopy.guestKey}</p>}
         {opening && <p role="status">{libraryCopy.opening}</p>}
         {openDid && asset && <div className="library-verification">
           <h2>{libraryCopy.saved}</h2>
@@ -770,14 +772,14 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
             <p>{libraryCopy.forkNote}</p>
             <p>{libraryCopy.forkBranches} {asset.fork.version}: {asset.fork.branches.map((b, i) => <span key={`${b.source}-${b.versionId}`}>{i > 0 && ' · '}<code>{b.versionId}</code> ({b.source})</span>)}</p>
           </div>}
-          {asset.fork ? null : asset.btcoDid ? <>
+          {asset.btcoDid ? <>
             <p>{libraryCopy.bitcoin} {libraryCopy.bitcoinLabels[asset.bitcoinVerification?.anchoring?.status ?? ''] ?? libraryCopy.notChecked} · {libraryCopy.acceptedHead} <code>{(asset.bitcoinVerification?.anchoring?.status === 'anchored' ? asset.bitcoinVerification.head : null) ?? libraryCopy.notEstablished}</code></p>
             <p>{libraryCopy.currentRead} {asset.bitcoinVerification?.current ? libraryCopy.yes : libraryCopy.no}</p>
             {asset.bitcoinVerification?.ownership && <p>{libraryCopy.holder} <code>{asset.bitcoinVerification.ownership.output}</code></p>}
             <p>{libraryCopy.bitcoinTrust}</p>
             {asset.bitcoinReadError && <p role="status">{asset.bitcoinReadError}</p>}
             <button className="btn" disabled={busy} onClick={() => { void runExclusive(runningRef, async () => { setUpdating(true); try { setAsset(await (await getEngine()).verifyBitcoin()); } finally { setUpdating(false); } }); }}>{libraryCopy.checkBitcoin}</button>
-          </> : <p>{libraryCopy.localCheckpoint}</p>}
+          </> : asset.fork ? null : <p>{libraryCopy.localCheckpoint}</p>}
           {pendingHandOff && <p>{libraryCopy.pendingNote}</p>}
         </div>}
       </div>

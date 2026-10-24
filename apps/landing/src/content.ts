@@ -1041,9 +1041,10 @@ export const library = {
   currentRead: 'Current according to this Bitcoin read:', yes: 'yes', no: 'no',
   draftSaveError: 'Your draft could not be saved in this browser. Keep this page open and copy your work before leaving.',
   // P6.6, P9.16: divergent valid branches are an unresolved conflict; no branch is current.
-  forkUnresolved: 'Fork unresolved — no current branch. Two valid histories of this Original are kept and neither was chosen. Editing and anchoring are paused here; keep an evidence export.',
+  forkUnresolved: 'Fork unresolved — no current branch. Two valid histories of this Original are kept and neither was chosen. Editing and anchoring are paused here. Keep both exports: only anchoring a chosen branch on Bitcoin settles a fork, and this app does not offer that yet.',
   forkHead: 'Fork unresolved — no current branch.',
-  forkNote: 'This browser holds two valid histories of this Original that diverge, and neither was chosen. The saved head above is one of them, not the current one. Editing and anchoring are paused here, because either would extend one branch without you choosing it. Only anchoring on Bitcoin settles a fork.',
+  forkNote: 'This browser holds two valid histories of this Original that diverge, and neither was chosen. The saved head above is one of them, not the current one. Editing and anchoring are paused here, because either would extend one branch without you choosing it. Keep both exports: only anchoring a chosen branch on Bitcoin settles a fork, and this app does not offer that yet.',
+  diverged: 'Saved copies of this Original disagree, and neither was chosen. Nothing has been removed; keep your evidence exports.',
   forkBranches: 'Branches diverge at version',
   unverifiedLocal: 'Saved evidence could not be verified. Nothing has been removed.',
   refusedPair: (reason: string) => `The server refused its Bitcoin submission: ${reason} The signed transactions are kept in this browser and are not sent again. Open it to abandon the submission and prepare a new one.`,

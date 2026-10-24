@@ -13,6 +13,7 @@ import { createLocalAuthor } from './local-author';
 import { listLibrary } from './library';
 import { indexedDbOutbox, type AnchoringTransport } from './anchoring';
 import { WALLET_ADDRESS, fakeChain } from '../../server/tests/originals-chain-fixture';
+import { base64 } from '@scure/base';
 
 const original = (globalThis as { indexedDB?: IDBFactory }).indexedDB;
 beforeEach(() => { (globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory(); });
@@ -48,10 +49,42 @@ test('a reopened fork is reported, and revise, publish and anchor are refused (C
   await expect(reopened.inscribe({ funding: { fundingUtxos: [chain.satUtxo], changeAddress: WALLET_ADDRESS } })).rejects.toBeInstanceOf(ForkUnresolvedError);
   expect((await new DemoEngine({ store: new BrowserOriginalsStore() }).open(created.did)).history.length).toBe(entries);
 
+  // A pending submission carrying B's branch is in the outbox too: the row says
+  // "fork unresolved" once, not that and "conflicting history" both.
+  await options.anchoring.outbox.put(created.did, { pair: { versionId: 'x', prepared: { commitTxId: 'c', revealTxId: 'r' } } as never, evidence: base64.encode(await deviceB.evidencePackage()), savedAt: 'now' });
+
   // The library row says so after a refresh, rather than listing it as fine.
   const { items } = await listLibrary();
   const row = items.find((i) => i.did === created.did);
   expect(row?.problem).toMatch(/fork unresolved/i);
+  expect(row?.problem?.match(/fork unresolved/gi)).toHaveLength(1);
+  expect(row?.problem).not.toMatch(/conflicting history/i);
+});
+
+test('a library row whose fork Bitcoin settled is not flagged (decision C; P9.16)', async () => {
+  const { httpAnchoringTransport, memoryOutbox } = await import('./anchoring');
+  const { HttpOrdinalsProvider } = await import('./http-ordinals-provider');
+  const { inProcessLanding } = await import('../../server/tests/landing-server-fixture');
+  const { walletSigner } = await import('../../server/tests/originals-chain-fixture');
+  const chain = fakeChain();
+  const landing = inProcessLanding(chain);
+  const transport = httpAnchoringTransport({ fetchImpl: landing.fetchImpl, provider: new HttpOrdinalsProvider({ fetchImpl: landing.fetchImpl }) });
+  const anchoring = { transport, outbox: memoryOutbox(), satSigner: walletSigner, network: 'regtest' as const, index: 'ord-test' };
+  const author = await createLocalAuthor();
+  const engine = new DemoEngine({ store: new BrowserOriginalsStore(), author, features: { bitcoinAnchoring: true }, anchoring });
+  const { did } = await engine.create('Harbor', 'Orbits', 'harbor');
+  const other = new DemoEngine({ author });
+  await other.importEvidence(await engine.evidencePackage());
+  await other.update('Harbor elsewhere', 'Orbits', 'elsewhere');
+  const stale = await other.evidencePackage();
+  await engine.inscribe({ funding: { fundingUtxos: [chain.satUtxo, chain.fund(50_000)], changeAddress: WALLET_ADDRESS } });
+  chain.mine();
+  await expect(engine.importEvidence(stale, did)).rejects.toThrow(/conflict/i);
+
+  // Judged without Bitcoin the row would be flagged; with a Bitcoin read it is not.
+  const judge = (store: BrowserOriginalsStore) => new DemoEngine({ store, anchoring });
+  const { items } = await listLibrary(undefined, undefined, { engine: judge });
+  expect(items.find((i) => i.did === did)?.problem).toBeUndefined();
 });
 
 test('an unforked Original reopens with no fork and can be revised (P6.6)', async () => {

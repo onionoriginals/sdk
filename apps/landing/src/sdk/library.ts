@@ -17,8 +17,33 @@ export interface LibraryItem {
 }
 export const accountOutboxName = (account?: string) => account ? `originals-anchoring-outbox:account:${account}` : 'originals-anchoring-outbox:guest';
 
-export async function listLibrary(account?: string, fundingAddress?: string): Promise<{ items: LibraryItem[]; warning?: string }> {
+export interface ListLibraryOptions {
+  /** The engine that judges a forked anchored Original against Bitcoin (P9.16); for tests. */
+  engine?: (store: BrowserOriginalsStore) => DemoEngineLike;
+}
+/** What listLibrary needs from DemoEngine, kept structural so this module does not import the engine eagerly. */
+interface DemoEngineLike {
+  open(did: string): Promise<unknown>;
+  verifyBitcoin(): Promise<{ fork?: unknown }>;
+}
+
+/**
+ * Whether a fork in an Original with a did:btco alias still stands once
+ * judged against a fresh Bitcoin read: an accepted anchor's branch is the
+ * history (P9.16). A failed read leaves it standing.
+ */
+async function forkStands(did: string, store: BrowserOriginalsStore, options: ListLibraryOptions): Promise<boolean> {
+  try {
+    const engine = options.engine?.(store) ?? new (await import('./engine')).DemoEngine({ store });
+    await engine.open(did);
+    return !!(await engine.verifyBitcoin()).fork;
+  } catch { return true; }
+}
+
+export async function listLibrary(account?: string, fundingAddress?: string, options: ListLibraryOptions = {}): Promise<{ items: LibraryItem[]; warning?: string }> {
   const rows = new Map<string, LibraryItem>();
+  // Outbox imports that conflicted: the store's own fork judgement below replaces their message.
+  const conflicted = new Set<string>();
   const store = new BrowserOriginalsStore(account);
   const reader = OriginalsSDK.create({ store, authors: [] });
   const outbox = indexedDbOutbox(accountOutboxName(account));
@@ -35,6 +60,7 @@ export async function listLibrary(account?: string, fundingAddress?: string): Pr
         const loaded = await reader.load(bytes);
         if (loaded.report.original !== did) throw new Error('Evidence mismatch');
         const imported = await reader.import(bytes);
+        if (imported.status === 'conflict') conflicted.add(did);
         if (imported.status === 'conflict') rows.set(did, { did, title: imported.original.state.name, local: true, server: false, pending: !waiting.refused, problem: 'Conflicting history is retained. No branch was chosen.' });
       } catch { rows.set(did, { did, title: 'Submission needing recovery', local: true, server: false, pending: !waiting.refused, problem: 'This pending submission has incomplete evidence. Its transaction pair has been kept.' }); }
     }
@@ -46,8 +72,11 @@ export async function listLibrary(account?: string, fundingAddress?: string): Pr
       try {
         const view = await reader.get(did);
         // Divergent valid branches: no current branch, so the row is never shown as fine (P6.6, P9.16).
-        const fork = view.report.fork ? libraryCopy.forkUnresolved : undefined;
-        const problem = [fork, refused, rows.get(did)?.problem].filter(Boolean).join(' ') || undefined;
+        // An anchored Original's fork is judged against Bitcoin first (P9.16).
+        const anchored = view.state.aliases.some((a) => a.startsWith('did:btco:'));
+        const fork = view.report.fork && (!anchored || (await forkStands(did, store, options))) ? libraryCopy.forkUnresolved : undefined;
+        const earlier = conflicted.has(did) ? undefined : rows.get(did)?.problem;
+        const problem = [fork, refused, earlier].filter(Boolean).join(' ') || undefined;
         rows.set(did, { did, title: view.state.name, local: true, server: false, pending, bitcoin: !!view.report.anchoring, problem });
       } catch {
         rows.set(did, { did, title: 'Original needing recovery', local: true, server: false, pending, problem: [libraryCopy.unverifiedLocal, refused].filter(Boolean).join(' ') });
@@ -71,6 +100,11 @@ export async function listLibrary(account?: string, fundingAddress?: string): Pr
 export async function fetchLibraryEvidence(did: string): Promise<Uint8Array | null> {
   const response = await fetch(`/api/originals/evidence?did=${encodeURIComponent(did)}`, { credentials: 'same-origin', cache: 'no-store' });
   if (response.status === 404) return null;
+  // Two histories, neither chosen (P6.6): said as such, never shown as "nothing saved".
+  if (response.status === 409) {
+    const body = (await response.json().catch(() => ({}))) as { message?: string };
+    throw new Error(body.message ?? libraryCopy.diverged);
+  }
   if (!response.ok) throw new Error('Your saved evidence could not be reached. Retry or import your recovery export.');
   const declared = Number(response.headers.get('content-length'));
   const max = 96 * 1024 * 1024;
