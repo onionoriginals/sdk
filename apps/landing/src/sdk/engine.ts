@@ -20,6 +20,7 @@ import { hex } from "@scure/base";
 import type { AliasEvidence, AuthorDidEvidence, AuthorRef, OriginalsFork, OriginalsReport } from "@originals/vh/originals";
 import { OriginalsError } from "@originals/vh";
 import { didWebvhLogUrl } from "@originals/vh/webvh";
+import { FETCH_LIMITS } from "@originals/vh/fetch";
 import { base58AddressToEd25519Multikey } from "@originals/sdk";
 import { parseJson } from "@originals/vh/json";
 import { ensureAuthorshipAccount, ensureIdentityAccount, fundingSignerAddress, type TurnkeyBitcoinClient } from "../auth/turnkey-session";
@@ -29,14 +30,16 @@ import {
 } from "./anchoring";
 import { HttpOrdinalsProvider } from "./http-ordinals-provider";
 import { TurnkeySatSigner } from "./turnkey-sat-signer";
-import { DEFAULT_WEBVH_DOMAIN, TurnkeyWebVHSigner, readUserWebVHDid, userWebvhSlug, type WebVHSigner } from "../auth/webvh";
+import { TurnkeyWebVHSigner, readUserWebVHDid, userWebvhSlug, type WebVHSigner } from "../auth/webvh";
+import { webvhDomain } from "../auth/webvh-domain";
 import { FEATURES, type Feature } from "./features";
 import { publishOriginal, type HostedUpload } from "./publish";
 import { landingSharedHost, type SubmitTransport } from "./shared-host";
-import { DurableHostingStorageAdapter } from "./durable-hosting-adapter";
+import { DurableHostingStorageAdapter, type AccountIndex, type AccountIndexEntry } from "./durable-hosting-adapter";
 import { short } from "./format";
 import { StampedAuthorEvidence } from "./author-evidence";
 import { createLocalAuthor } from "./local-author";
+import { MemoryPublicationRecords, hasPublicationRecords, higherPublication, type PublicationRecord, type PublicationRecords } from "./publication-records";
 import { btcNetwork, demoTier, type BtcNetworkFlag, type DemoTier } from "./network-flag";
 import { contentBytes, contentText, resourceView, type ResourceContent } from "./resource-view";
 import { authorshipPublicKeyMultibase, turnkeyAuthorshipSigner } from "./turnkey-authorship-signer";
@@ -70,6 +73,20 @@ export interface HistoryEntry {
 export interface DemoAssetState {
   layer: LayerId;
   did: string;
+  /**
+   * The web publication (#976 B4): `incomplete` once an entry lists a
+   * did:webvh alias but a stranger has not yet verified the hosted snapshot;
+   * `complete` only after one has. An alias built for a publish whose entry
+   * was never signed is not listed, so it is `none`, and `webvhDid` is unset.
+   * `layer` is `did:webvh` only when complete.
+   */
+  publication: "none" | "incomplete" | "complete";
+  /**
+   * Whether a complete publication is listed in the account's index for the
+   * author's other clients (G3), reported apart from publication itself.
+   * Unset when this engine keeps no index.
+   */
+  accountIndex?: "listed" | "not-listed";
   webvhDid?: string;
   webvhLogUrl?: string;
   webvhResolved?: boolean;
@@ -124,6 +141,8 @@ export interface DemoAssetState {
   bitcoinOtherBranch?: boolean;
   /** The verification report of the current checkpoint. */
   provenance: unknown;
+  /** Signed in, but this browser has no IndexedDB, so the work is in memory only (#976 B, G2). */
+  notKeptAcrossRestarts?: true;
   bitcoinVerification?: OriginalsReport;
   bitcoinReadError?: string;
 }
@@ -143,6 +162,37 @@ export class StaleSaveError extends Error {
   constructor(public readonly refused: string, public readonly hostHead: string) {
     super("Someone saved this Original first. Your change is kept as a refused candidate and was not published; reconcile it with the new version.");
     this.name = "StaleSaveError";
+  }
+}
+
+/**
+ * The files are uploaded but a stranger with no cookie could not verify the
+ * exact snapshot, every byte included, so the publication is not complete
+ * (#976 B4, G5). Publishing again resumes it.
+ */
+export class PublicationNotVerifiedError extends Error {
+  constructor(public readonly reasons: string[]) {
+    super(`Uploaded, but a reader can't verify it yet (${reasons.join("; ") || "unreadable"}). Publish again to resume.`);
+    this.name = "PublicationNotVerifiedError";
+  }
+}
+
+/**
+ * The account index (G3) refused or missed a write. Publication is complete
+ * without it; this only says the Original isn't yet listed for the author's
+ * other clients. `status` is the HTTP status when there was one (507: the
+ * account's index is full).
+ */
+export class AccountIndexError extends Error {
+  constructor(public readonly status: number | null, message: string) {
+    super(message);
+    this.name = "AccountIndexError";
+  }
+
+  static from(error: unknown): AccountIndexError {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = /failed:\s*(\d{3})\b/.exec(message)?.[1];
+    return new AccountIndexError(status ? Number(status) : null, message);
   }
 }
 
@@ -188,14 +238,14 @@ interface LogLine {
  * Original (P6.7); `read` fetches its public files (defaults to `fetch`).
  */
 export interface PublishTarget {
-  upload: HostedUpload & Partial<SubmitTransport>;
+  upload: HostedUpload & Partial<SubmitTransport> & Partial<AccountIndex>;
   read?: HostedFetch;
   domain: string;
   slug: string;
   aliasSigner: () => Promise<WebVHSigner>;
 }
 
-interface Authoring {
+export interface Authoring {
   ref: AuthorRef;
   signer: OriginalsSigner;
   evidence: AuthorDidEvidence;
@@ -210,7 +260,17 @@ export class DemoEngine {
   private readonly authed: boolean;
   private readonly subOrgId?: string;
   private readonly listeners = new Set<Listener>();
+  /**
+   * The engine's store. The page passes main's account-scoped
+   * BrowserOriginalsStore: signed in, the account's database; signed out, the
+   * guest's (owner decision of 23 October 2026). Without IndexedDB it is a
+   * MemoryStore, and the snapshot says the work isn't kept across restarts
+   * (#976 B, G2).
+   */
   private readonly store: OriginalsStore;
+  /** In memory only, because this browser has no IndexedDB. */
+  private readonly notKeptAcrossRestarts: boolean;
+  private readonly authorWith?: () => Promise<Authoring>;
   private authoring: Authoring | null = null;
   private sdk: OriginalsSDK | null = null;
   private did: string | null = null;
@@ -225,6 +285,9 @@ export class DemoEngine {
   private readonly features: Record<Feature, boolean>;
   private readonly target?: PublishTarget;
   private alias: AliasEvidence | null = null;
+  /** The current Original's publication record (G4), kept in the store when it can keep one. */
+  private publication: PublicationRecord | null = null;
+  private readonly memoryPublications = new MemoryPublicationRecords();
 
   private readonly networkFlag: BtcNetworkFlag;
   private readonly anchoringOpts: AnchoringOptions;
@@ -233,6 +296,8 @@ export class DemoEngine {
   constructor(opts?: {
     store?: OriginalsStore;
     localAuthor?: () => Promise<Authoring>;
+    /** The page fell back to memory because this browser has no IndexedDB (#976 B, G2); the snapshot says so. */
+    notKeptAcrossRestarts?: boolean;
     authed?: boolean;
     subOrgId?: string;
     networkFlag?: BtcNetworkFlag;
@@ -244,19 +309,24 @@ export class DemoEngine {
      * Overrides the signed-in author (Turnkey `#key-1`), for tests and the
      * regtest journey, which sign with local keys and say so.
      */
-    author?: Authoring;
+    author?: Authoring | (() => Promise<Authoring>);
     /** Overrides how anchoring reaches the network, stores its outbox and signs the commit; for tests and the regtest journey. */
     anchoring?: AnchoringOptions;
   }) {
+    // The page chooses the store (browser-store.ts `pageStore`): this
+    // browser's own, or memory when there is no IndexedDB, which the page
+    // says. Without one, memory, as on main: a plain engine is not the guest.
     this.store = opts?.store ?? new MemoryStore();
     this.localAuthor = opts?.localAuthor;
+    this.notKeptAcrossRestarts = opts?.notKeptAcrossRestarts ?? false;
     this.authed = opts?.authed ?? false;
     this.subOrgId = opts?.subOrgId;
     this.features = { ...FEATURES, ...opts?.features };
     this.target = opts?.publishTarget;
-    this.authorOverride = opts?.author;
+    this.authorOverride = typeof opts?.author === "function" ? undefined : opts?.author;
     this.anchoringOpts = opts?.anchoring ?? {};
     this.networkFlag = opts?.networkFlag ?? btcNetwork();
+    this.authorWith = typeof opts?.author === "function" ? opts.author : undefined;
     this.tier = demoTier(this.networkFlag, this.authed);
   }
 
@@ -284,10 +354,21 @@ export class DemoEngine {
     this.authorEvidence.set(evidence);
   }
 
+  /** Where publication records are kept: the durable store when it keeps them. */
+  private records(): PublicationRecords {
+    return this.store && hasPublicationRecords(this.store) ? this.store : this.memoryPublications;
+  }
+
+  private async recordPublication(record: PublicationRecord): Promise<void> {
+    // The page's copy follows the store's rule: forward only.
+    this.publication = higherPublication(this.publication ?? undefined, record);
+    await this.records().putPublication(this.did!, record);
+  }
+
   /** The author this engine signs as, set up once per engine. */
   private async author(): Promise<Authoring> {
     if (this.authoring) return this.authoring;
-    const authoring = this.authorOverride ?? (this.authed ? await this.signedInAuthor() : await (this.localAuthor?.() ?? createLocalAuthor()));
+    const authoring = this.authorOverride ?? (this.authorWith ? await this.authorWith() : this.authed ? await this.signedInAuthor() : await (this.localAuthor?.() ?? createLocalAuthor()));
     this.setAuthorEvidence(authoring.evidence);
     await this.store.putAuthorEvidence(authoring.evidence);
     this.sdk ??= OriginalsSDK.create({
@@ -349,11 +430,76 @@ export class DemoEngine {
     });
     if (result.kind !== "original") throw new Error("The Original was not signed.");
     this.alias = null;
+    this.publication = null;
     this.did = result.original.did;
     this.view = result.original;
     await this.refresh();
     this.emit("asset:created", `Created ${short(this.did)}, signed by ${short(ref.did)}`, { did: this.did, checkpoint: this.view.checkpoint });
     return this.snapshot();
+  }
+
+  /**
+   * Reopen an Original this browser may not hold (#976 B3, G3). The data
+   * path is main's account library: the account's own evidence
+   * (`GET /api/originals/evidence`), verified and imported as any import is;
+   * importing grants no authorship or ownership (P7.5, P8.4). A published
+   * Original then gets the hosted restore semantics: the host's accepted log
+   * is synced only when it extends this copy, never a diverging head (P2.1,
+   * P4.5), and read back as a stranger reads it before it is recorded
+   * complete (G5). If the read-back fails, the copy is recorded as uploaded,
+   * so opening it later offers to finish (G4), and this page takes nothing on.
+   * Editing continues with this author's own signer; restoring confers none.
+   */
+  async restore(did: string): Promise<DemoAssetState> {
+    const target = this.target ?? this.accountTarget();
+    this.sdk ??= OriginalsSDK.create({ store: this.store, authors: async (id) => this.authorEvidence.get(id) });
+    const sdk = this.sdk;
+    const bytes = typeof target.upload.evidence === "function" ? await target.upload.evidence(did) : null;
+    if (bytes) {
+      const checked = await sdk.load(bytes);
+      if (checked.report.original !== did) throw new Error("The account's evidence names a different Original.");
+      const imported = await sdk.import(bytes);
+      if (imported.status === "conflict") throw new Error("Conflicting history kept for recovery. No branch was chosen.");
+    }
+    let held: OriginalView;
+    try {
+      held = await sdk.get(did);
+    } catch {
+      throw new Error(`${short(did)} isn't saved to this account.`);
+    }
+    // A fork that stands is reported, and nothing is chosen (S1, P6.6; #996):
+    // the host's head is not fetched to settle it. open() reports the fork.
+    if (held.report.fork) return this.open(did);
+    const aliasDid = held.state.aliases.find((a) => a.startsWith("did:webvh:"));
+    if (!aliasDid || !this.features.hostedPublication) return this.open(did);
+    const read = target.read ?? publicRead;
+    const aliasLog = new TextDecoder().decode(
+      await read(didWebvhLogUrl(aliasDid), { maxBytes: FETCH_LIMITS.maxBytes, timeoutMs: FETCH_LIMITS.timeoutMs, signal: AbortSignal.timeout(FETCH_LIMITS.timeoutMs) }),
+    );
+    const alias: AliasEvidence = { did: aliasDid, log: aliasLog };
+    const existing = await this.records().getPublication(did);
+    const synced = await sdk.sync(did, this.sharedHost(alias.did));
+    if (synced.status === "conflict") throw new Error("The host's history of this Original diverges from this browser's; it is kept as a conflict, and nothing was chosen.");
+    await this.store.putAuthorEvidence(alias);
+    // Already verified, and the host has nothing newer: a reopen, not a
+    // restore, so no second read-back (#976 B3).
+    if (existing?.state === "complete" && synced.status === "already-current") return this.open(did);
+    // The host may move on between the sync and the read-back: readBack
+    // follows a head that descends, and never one that diverges (P2.1, P4.5).
+    try {
+      await this.readBack(did, alias.did, read, synced.original);
+    } catch (error) {
+      // Only a copy with no record, or a started one, becomes uploaded. A
+      // verified publication stays complete through a transient failure on
+      // a reopen; the store refuses a downgrade anyway (higherPublication).
+      if (!existing || existing.state === "started") await this.records().putPublication(did, { alias, state: "uploaded", indexed: true });
+      throw error;
+    }
+    // Found through the account's library, so it is listed there already.
+    await this.records().putPublication(did, { alias, state: "complete", indexed: true });
+    const state = await this.open(did);
+    this.emit("asset:restored", `Restored ${short(did)} from the host at ${short(state.history.at(-1)?.versionId ?? "")}`, { did });
+    return state;
   }
 
   /**
@@ -418,6 +564,9 @@ export class DemoEngine {
     if (!this.did || !this.view) throw new Error("Create an asset first");
     await this.refuseFork();
     const { ref, signer } = await this.author();
+    // The host takes the asset log only as published or through saves, so
+    // nothing is edited on top of a half-published snapshot (G4).
+    if (this.publicationState() === "incomplete") throw new Error("Finish publishing this Original first, then keep editing.");
     // A save whose answer was lost is sent again first, byte for byte (P6.4).
     await this.retryPending();
     const input = this.changeFor(title, style, source, ref);
@@ -459,9 +608,26 @@ export class DemoEngine {
     };
   }
 
-  /** Published from this engine, with hosted publication on: saves go through the host. */
+  /** Published, verified by a stranger, with hosted publication on: saves go through the host. */
   private published(): boolean {
-    return this.features.hostedPublication && !!this.alias && !!this.view?.state.aliases.includes(this.alias.did);
+    return this.features.hostedPublication && this.publicationState() === "complete" && !!this.alias && !!this.view?.state.aliases.includes(this.alias.did);
+  }
+
+  /** The did:webvh alias the Original's state lists, if any (P3.6). Bitcoin aliases are terminal anchoring state, not web publication (P9.10). */
+  private listedWebvhAlias(): string | undefined {
+    return this.view?.state.aliases.find((did) => did.startsWith("did:webvh:"));
+  }
+
+  /**
+   * Published only once an entry lists a did:webvh alias. Listed, it is
+   * complete when a stranger verified the snapshot, and incomplete until
+   * then. A `started` record with no entry listing its alias published
+   * nothing (a cancelled signature, P9.2): it is kept only so the next
+   * publish reuses the alias, and the Original stays editable.
+   */
+  private publicationState(): DemoAssetState["publication"] {
+    if (!this.listedWebvhAlias()) return "none";
+    return this.publication?.state === "complete" ? "complete" : "incomplete";
   }
 
   /**
@@ -474,13 +640,13 @@ export class DemoEngine {
   }
 
   /** The published Original's shared host. */
-  private sharedHost(): SharedHost {
+  private sharedHost(aliasDid: string = this.alias!.did): SharedHost {
     const target = this.target ?? this.accountTarget();
     const transport = target.upload;
     if (typeof transport.submit !== "function") throw new Error("This host does not take saves for published Originals.");
     return landingSharedHost({
       sdk: this.sdk!,
-      aliasDid: this.alias!.did,
+      aliasDid,
       transport: { submit: (key, body) => transport.submit!(key, body) },
       read: target.read ?? publicRead,
     });
@@ -564,6 +730,21 @@ export class DemoEngine {
     await this.refuseFork();
     const authoring = await this.author();
     const target = this.target ?? this.accountTarget();
+    // Whatever happens below, the view follows the store: an entry committed
+    // before an interruption is shown, never hidden (G4).
+    let published: { alias: string; baseUrl: string };
+    try {
+      published = await this.publishTo(target, authoring);
+    } finally {
+      this.view = await this.sdk.get(this.did);
+      await this.refresh();
+    }
+    this.emit("asset:published", `Published ${short(this.did)} as ${short(published.alias)}`, published);
+    return this.snapshot();
+  }
+
+  private async publishTo(target: PublishTarget, authoring: Authoring): Promise<{ alias: string; baseUrl: string }> {
+    if (!this.did || !this.view || !this.sdk) throw new Error("Create an asset first");
     const result = await publishOriginal({
       sdk: this.sdk,
       did: this.did,
@@ -575,14 +756,105 @@ export class DemoEngine {
       slug: target.slug,
       hosting: target.upload,
       ...(this.alias ? { alias: this.alias } : {}),
-      onAlias: (alias) => {
+      // Kept before anything is signed or uploaded, so a restart resumes under this alias (G4).
+      onAlias: async (alias) => {
         this.alias = alias;
+        await this.recordPublication({ alias, state: "started" });
       },
     });
-    this.view = await this.sdk.get(this.did);
-    await this.refresh();
-    this.emit("asset:published", `Published ${short(this.did)} as ${short(result.alias.did)}`, { alias: result.alias.did, baseUrl: result.baseUrl });
+    this.alias = result.alias;
+    await this.recordPublication({ alias: result.alias, state: "uploaded" });
+    this.view = await this.readBack(this.did, result.alias.did, target.read ?? publicRead, await this.sdk.get(this.did));
+    // Complete on the stranger's read-back alone (G5). Listing it for the
+    // author's other clients (G3) is a separate step, retried and reported
+    // on its own: the index is a list, never evidence.
+    const indexed = typeof target.upload.recordOriginal === "function";
+    await this.recordPublication({ alias: result.alias, state: "complete", ...(indexed ? { indexed: false } : {}) });
+    if (indexed) await this.tryAccountIndex();
+    return { alias: result.alias.did, baseUrl: result.baseUrl };
+  }
+
+  /**
+   * List the current, completely published Original in the account's index
+   * (G3), and record that it is listed. Throws AccountIndexError on failure.
+   */
+  private async recordInAccountIndex(): Promise<void> {
+    const index = (this.target ?? this.accountTarget()).upload;
+    const record = this.publication;
+    if (!this.did || !this.view || record?.state !== "complete" || typeof index.recordOriginal !== "function") return;
+    try {
+      await index.recordOriginal({ did: this.did, title: this.view.state.name, resourceHash: hexOfDigest(this.view.state.resources[0].digest), alias: record.alias.did });
+    } catch (error) {
+      throw AccountIndexError.from(error);
+    }
+    await this.recordPublication({ ...record, indexed: true });
+  }
+
+  /** The index step, best effort: a failure is reported in the snapshot, never thrown. */
+  private async tryAccountIndex(): Promise<void> {
+    try {
+      await this.recordInAccountIndex();
+    } catch (error) {
+      this.emit("account:index-failed", "Published, but not yet listed for your other devices", { error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  /** Retry listing a published Original in the account's index; throws AccountIndexError when it still fails. */
+  async retryAccountIndex(): Promise<DemoAssetState> {
+    if (this.publicationState() !== "complete") throw new Error("Publish the Original first");
+    await this.recordInAccountIndex();
     return this.snapshot();
+  }
+
+  /**
+   * The G5 read-back, for a client that may be behind the host. Another
+   * client may have saved on the host since this one's entry (P6.7), so the
+   * host serves a later head. That head is synced to, and the read-back
+   * repeated at it, only when the SDK verified it as extending this client's
+   * history (`imported`). A host that diverges is a fork: kept as a branch,
+   * reported, never accepted (P2.1, P4.5, P6.6).
+   */
+  private async readBack(did: string, aliasDid: string, read: HostedFetch, view: OriginalView): Promise<OriginalView> {
+    try {
+      await this.verifyPublished(aliasDid, read, view.checkpoint);
+      return view;
+    } catch (error) {
+      if (!(error instanceof PublicationNotVerifiedError)) throw error;
+      let synced: Awaited<ReturnType<OriginalsSDK["sync"]>>;
+      try {
+        synced = await this.sdk!.sync(did, this.sharedHost(aliasDid));
+      } catch {
+        throw error;
+      }
+      if (synced.status === "conflict") {
+        throw new PublicationNotVerifiedError([...error.reasons, "the host's history diverges from this copy; it is kept as a branch, and no branch is chosen (P6.6)"]);
+      }
+      if (synced.status !== "imported") throw error;
+      this.emit("asset:synced", `The host's version ${short(synced.original.checkpoint)} (${synced.status})`, { checkpoint: synced.original.checkpoint });
+      await this.verifyPublished(aliasDid, read, synced.original.checkpoint);
+      return synced.original;
+    }
+  }
+
+  /**
+   * Read the publication back as a stranger would, with a reader that has no
+   * key, no store and no cookie (G5). Complete only if the hosted snapshot
+   * verifies at this checkpoint with every byte (P3.6, P7.3).
+   */
+  private async verifyPublished(aliasDid: string, read: HostedFetch, checkpoint: string): Promise<void> {
+    const stranger = OriginalsSDK.create({ store: new MemoryStore(), authors: [] });
+    let reasons: string[];
+    try {
+      const r = await stranger.loadPublished(aliasDid, read);
+      reasons = [
+        ...(r.verified ? [] : ["the snapshot does not verify", ...r.reasons.map(String)]),
+        ...(r.report.validAsOf?.checkpoint === checkpoint ? [] : [`the host serves ${r.report.validAsOf?.checkpoint ?? "no checkpoint"}, not ${checkpoint}`]),
+        ...(r.report.resources.status === "available" ? [] : [`resources are ${r.report.resources.status}`]),
+      ];
+    } catch (error) {
+      reasons = [error instanceof Error ? error.message : String(error)];
+    }
+    if (reasons.length > 0) throw new PublicationNotVerifiedError(reasons);
   }
 
   /** The signed-in account's host namespace, with its Turnkey identity key controlling the alias. */
@@ -591,7 +863,7 @@ export class DemoEngine {
     if (!this.authed || !subOrgId) throw new Error("Sign in to publish: an Original's web address lives in your account.");
     return {
       upload: new DurableHostingStorageAdapter(),
-      domain: DEFAULT_WEBVH_DOMAIN,
+      domain: webvhDomain(),
       slug: userWebvhSlug(subOrgId),
       aliasSigner: async () => {
         const { openSessionKey } = await import("../auth/turnkey-browser-client");
@@ -785,12 +1057,17 @@ export class DemoEngine {
       this.bitcoinVerification = undefined;
       this.bitcoinReadError = undefined;
     }
-    this.did = did;
-    this.view = view;
     const alias = view.state.aliases.find((a) => a.startsWith('did:webvh:'));
     const aliasEvidence = alias ? await this.store.getAuthorEvidence(alias) : undefined;
-    this.alias = aliasEvidence?.log !== undefined ? { did: aliasEvidence.did, log: aliasEvidence.log, witness: aliasEvidence.witness } : null;
+    const record = (await this.records().getPublication(did)) ?? null;
+    this.did = did;
+    this.view = view;
+    this.publication = record;
+    // The listed alias, else the one an interrupted publication built before its entry (G4).
+    this.alias = aliasEvidence?.log !== undefined ? { did: aliasEvidence.did, log: aliasEvidence.log, ...(aliasEvidence.witness === undefined ? {} : { witness: aliasEvidence.witness }) } : (record?.alias ?? null);
     await this.refresh();
+    // Published but not yet listed for the author's other clients: try again (G3).
+    if (record?.state === "complete" && record.indexed === false && this.publicationState() === "complete") await this.tryAccountIndex();
     return this.snapshot();
   }
 
@@ -841,11 +1118,15 @@ export class DemoEngine {
     const meta = rest.find((r) => r.id === "metadata.json");
     const versionOf = (id: string) => view.resources.filter((r) => r.resource === id).length;
     const bytesOf = (digest: string) => this.bytes.get(digest) ?? new Uint8Array();
-    const alias = state.aliases.find((a) => a.startsWith("did:webvh:"));
+    // Only a listed alias: a `started` one published nothing, and its URL would 404 (P9.2).
+    const alias = this.listedWebvhAlias();
     const btco = state.aliases.find((a) => a.startsWith("did:btco:"));
+    const publication = this.publicationState();
     return {
-      layer: btco ? "did:btco" : alias ? "did:webvh" : "did:vh",
+      layer: btco ? "did:btco" : publication === "complete" ? "did:webvh" : "did:vh",
       did: this.did,
+      publication,
+      ...(publication === "complete" && this.publication?.indexed !== undefined ? { accountIndex: this.publication.indexed ? ("listed" as const) : ("not-listed" as const) } : {}),
       ...(alias ? { webvhDid: alias, webvhLogUrl: didWebvhLogUrl(alias) } : {}),
       ...(btco ? { btcoDid: btco } : {}),
       ...(this.anchoring ? { anchoring: { ...this.anchoring, unpublished: this.unpublished(this.anchoring.status) } } : {}),
@@ -863,6 +1144,7 @@ export class DemoEngine {
       ...(this.unsettledFork() ? { fork: this.unsettledFork() } : {}),
       ...(this.bitcoinOtherBranch() ? { bitcoinOtherBranch: true } : {}),
       provenance: view.report,
+      ...(this.notKeptAcrossRestarts ? { notKeptAcrossRestarts: true as const } : {}),
       bitcoinVerification: this.bitcoinVerification,
       bitcoinReadError: this.bitcoinReadError,
     };
@@ -913,10 +1195,22 @@ function p2wpkhScript(address: string, network: "mainnet" | "regtest"): string {
 }
 
 /** A public read of a hosted file, as any reader makes it. */
+/**
+ * A stranger's read in the page: no cookie, no redirect, no cache. Failures
+ * are the SDK's `unavailable-bytes`, as `safeFetch` reports them, so an absent
+ * optional file (a did-witness.json) is missing rather than fatal.
+ */
 const publicRead: HostedFetch = async (url, options) => {
-  const res = await fetch(url, { signal: options.signal, credentials: "omit", redirect: "error" });
-  if (!res.ok) throw new Error(`${url} answered ${res.status}`);
-  return new Uint8Array(await res.arrayBuffer());
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: options.signal, credentials: "omit", redirect: "error", cache: "no-store" });
+  } catch {
+    throw new OriginalsError("unavailable-bytes", "FETCH_FAILED", `${url} could not be retrieved`);
+  }
+  if (!res.ok) throw new OriginalsError("unavailable-bytes", "FETCH_STATUS", `${url} answered ${res.status}`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes.length > options.maxBytes) throw new OriginalsError("unavailable-bytes", "FETCH_TOO_LARGE", `${url} is over ${options.maxBytes} bytes`);
+  return bytes;
 };
 
 function asSource(source: string | AssetSource): AssetSource {

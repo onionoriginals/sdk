@@ -133,7 +133,9 @@ describe('anchoring an Original from the landing (plan 011, PR 10b)', () => {
 
   test('a revision after the anchor is inscribed on the same sat, spending the output that holds it (P9.12, P9.13)', async () => {
     const { chain, engine, funding } = await setup();
-    await engine.inscribe({ funding: funding() });
+    const anchored = await engine.inscribe({ funding: funding() });
+    expect(anchored.layer).toBe('did:btco');
+    expect(anchored.publication).toBe('none');
     chain.mine();
     const revised = await engine.update('Harbor at dusk', 'Orbits', generateArtwork('Harbor at dusk', 'Orbits', 8).svg);
     const read = (await engine.anchoringStatus()).anchoring!;

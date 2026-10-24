@@ -42,4 +42,5 @@ The receipt (`<out>/receipt.json`, also printed to stdout) records:
 The orchestrator exits 1 on any failure.
 
 Out of scope: section B (Turnkey, a public host, browser restart and
-interrupted publication) and Bitcoin.
+interrupted publication), whose runbook is [hosted-README.md](hosted-README.md),
+and Bitcoin.

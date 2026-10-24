@@ -42,7 +42,12 @@ export interface OriginalInscription {
   inscriptionStatus?: 'pending' | 'confirmed';
 }
 
-export interface OriginalSummary extends OriginalInscription {
+/** The did:webvh alias a published Original lists, recorded once (#976 B, G3). */
+export interface OriginalAlias {
+  alias?: string;
+}
+
+export interface OriginalSummary extends OriginalInscription, OriginalAlias {
   did: string;
   title: string;
   resourceHash: string;
@@ -62,7 +67,7 @@ export interface OriginalSummary extends OriginalInscription {
 
 interface UserIndex {
   originals: Array<
-    { did: string; title: string; resourceHash: string; createdAt: string } & OriginalInscription
+    { did: string; title: string; resourceHash: string; createdAt: string } & OriginalInscription & OriginalAlias
   >;
   sizes: Record<string, number>;
   totalBytes: number;
@@ -72,7 +77,7 @@ export interface OriginalsStore {
   saveBytes(subOrgId: string, key: string, bytes: Uint8Array, contentType: string): void;
   recordOriginal(
     subOrgId: string,
-    o: { did: string; title: string; resourceHash: string; createdAt: string } & OriginalInscription
+    o: { did: string; title: string; resourceHash: string; createdAt: string } & OriginalInscription & OriginalAlias
   ): void;
   list(subOrgId: string): OriginalSummary[];
   /** Private, account-owned evidence artifacts grouped by their hosted Original. */
@@ -295,7 +300,7 @@ export function createOriginalsStore(opts: {
 
   function recordOriginal(
     subOrgId: string,
-    o: { did: string; title: string; resourceHash: string; createdAt: string } & OriginalInscription
+    o: { did: string; title: string; resourceHash: string; createdAt: string } & OriginalInscription & OriginalAlias
   ): void {
     const idx = readIndex(subOrgId);
     // Idempotent by did, upsert-merge for the inscription fields: the engine
@@ -311,6 +316,8 @@ export function createOriginalsStore(opts: {
         if (o[k] !== undefined) existing[k] = o[k];
       };
       (['btcoDid', 'inscriptionId', 'commitTxId', 'revealTxId', 'satoshi', 'inscriptionStatus'] as const).forEach(merge);
+      // An Original lists one alias and keeps it, so the record is set once and never changed.
+      if (existing.alias === undefined && o.alias !== undefined) existing.alias = o.alias;
       writeIndex(subOrgId, idx);
       return;
     }

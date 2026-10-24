@@ -1,0 +1,5 @@
+---
+'@originals/landing': minor
+---
+
+A signed-in author's Originals are listed by main's account library (`/me`). Publishing also records the Original's alias in the account index (`POST /api/originals` takes an optional `alias`, which must be in the caller's own namespace, must be named for that Original, and never changes once recorded). Opening an Original on `/me/<did>` calls `DemoEngine.restore(did)`: it imports the account's evidence (main's data path), and for a published Original syncs the host's accepted log only when it extends that copy, reads it back as a stranger, and records it complete. If the host moves on during a restore, it follows a head that descends; a failed read-back leaves the page unchanged and the copy resumable. Publication is complete on the stranger's read-back alone: recording the Original in the account index is a separate step, retried on open and from the page, and reported as `accountIndex: "listed" | "not-listed"`, so a full index (507) never leaves a verified Original unpublished (#976 B, G3, G5).

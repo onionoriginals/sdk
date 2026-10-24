@@ -29,6 +29,7 @@ const GOOD = {
   ORIGINALS_DATA_DIR: '/data',
   TRUSTED_PROXY_HOPS: '1',
   RAILWAY_VOLUME_MOUNT_PATH: '/data',
+  VITE_WEBVH_HOST: 'staging.originals.build',
 };
 const mounted: DataDirProbe = { path: '/data', writable: true, mountPoints: ['/data'] };
 
@@ -445,19 +446,21 @@ describe('validateConfig — the deposit indexer seam', () => {
 });
 
 /**
- * The did:webvh host (#529). `demoHost()` falls back to `window.location.host`,
- * so without VITE_WEBVH_HOST baked in, whichever hostname a visitor happened to
- * arrive on is written into their DID — permanently, because a did:webvh domain
- * cannot be changed after publication. Railway keeps its generated
- * *.up.railway.app hostname reachable alongside the custom domain, so this is
- * not hypothetical. Required once the deploy spends real money.
+ * The did:webvh host (#529; #976 B, G1). The SPA mints every did:webvh on the
+ * domain it was built for, `VITE_WEBVH_HOST` (`webvhDomain()`). Unset, it falls
+ * back to the legacy domain `magby.originals.build`, so a deployed instance
+ * without it mints DIDs on a domain it may not serve, permanently, because a
+ * did:webvh domain cannot be changed after publication (P3.6; an alias that
+ * moves host is an alias change, C12-139). Required on every deployed
+ * instance, not only once the deploy spends real money.
  */
-describe('validateConfig — the did:webvh host is pinned, not inherited from the visitor', () => {
+describe('validateConfig — the did:webvh host is pinned on every deployed instance', () => {
   const MAINNET = {
     ...GOOD,
     BTC_NETWORK: 'mainnet',
     VITE_BTC_NETWORK: 'mainnet',
     QUICKNODE_ENDPOINT: 'https://x.quiknode.pro/k/',
+    VITE_WEBVH_HOST: 'originals.build',
   };
 
   test('a mainnet deploy without VITE_WEBVH_HOST is reported naming it', () => {
@@ -465,15 +468,24 @@ describe('validateConfig — the did:webvh host is pinned, not inherited from th
     expect(keys(issues)).toContain('VITE_WEBVH_HOST');
   });
 
+  test('a testnet deploy without VITE_WEBVH_HOST is reported too, naming the legacy fallback', () => {
+    const issues = errors(validateConfig({ env: without(GOOD, 'VITE_WEBVH_HOST'), dataDir: mounted }));
+    expect(keys(issues)).toEqual(['VITE_WEBVH_HOST']);
+    expect(issues[0].message).toContain('magby.originals.build');
+    expect(issues[0].message).not.toMatch(/whatever hostname|arrived on/);
+  });
+
   test('setting it to a bare host satisfies the rule', () => {
-    const env = { ...MAINNET, VITE_WEBVH_HOST: 'originals.build' };
-    expect(errors(validateConfig({ env, dataDir: mounted }))).toEqual([]);
+    expect(errors(validateConfig({ env: MAINNET, dataDir: mounted }))).toEqual([]);
+    expect(errors(validateConfig({ env: GOOD, dataDir: mounted }))).toEqual([]);
   });
 
   test('a value carrying a scheme or a path is reported — the DID wants a bare host', () => {
-    for (const bad of ['https://originals.build', 'originals.build/', 'originals.build/logs']) {
-      const issues = errors(validateConfig({ env: { ...MAINNET, VITE_WEBVH_HOST: bad }, dataDir: mounted }));
-      expect(keys(issues)).toContain('VITE_WEBVH_HOST');
+    for (const env of [MAINNET, GOOD]) {
+      for (const bad of ['https://originals.build', 'originals.build/', 'originals.build/logs']) {
+        const issues = errors(validateConfig({ env: { ...env, VITE_WEBVH_HOST: bad }, dataDir: mounted }));
+        expect(keys(issues)).toContain('VITE_WEBVH_HOST');
+      }
     }
   });
 
@@ -485,11 +497,66 @@ describe('validateConfig — the did:webvh host is pinned, not inherited from th
     expect(issues[0].message).toMatch(/lowercase/);
   });
 
-  test('not required on testnet4 — a throwaway chain does not mint permanent DIDs worth protecting', () => {
-    expect(errors(validateConfig({ env: without(GOOD, 'VITE_WEBVH_HOST'), dataDir: mounted }))).toEqual([]);
+  test('not an error locally — a dev build mints on the legacy domain on purpose (PROVISIONAL)', () => {
+    const local = { BTC_NETWORK: 'testnet4' };
+    expect(errors(validateConfig({ env: local, dataDir: mounted }))).toEqual([]);
   });
 });
 
+
+/**
+ * #976 B, gap G7. The acceptance switch exists only for the staging run. The
+ * bundle ignores it on the production host and on mainnet (features.ts); the
+ * server reports it set there, so a mis-set variable is named at boot rather
+ * than discovered on the page.
+ */
+describe('validateConfig — the hosted acceptance switch is staging-only', () => {
+  const STAGING = { ...GOOD, VITE_WEBVH_HOST: 'staging.originals.build', VITE_ACCEPTANCE_HOSTED_PUBLICATION: '1' };
+
+  test('set on a non-mainnet, non-production instance, it is not reported', () => {
+    expect(keys(validateConfig({ env: STAGING, dataDir: mounted }))).not.toContain('VITE_ACCEPTANCE_HOSTED_PUBLICATION');
+  });
+
+  test('set with mainnet on either half, it is reported', () => {
+    for (const env of [
+      { ...STAGING, BTC_NETWORK: 'mainnet', VITE_BTC_NETWORK: 'mainnet', QUICKNODE_ENDPOINT: 'https://x.quiknode.pro/k/' },
+      { ...STAGING, VITE_BTC_NETWORK: 'mainnet' },
+    ]) {
+      const issues = validateConfig({ env, dataDir: mounted });
+      expect(keys(issues)).toContain('VITE_ACCEPTANCE_HOSTED_PUBLICATION');
+    }
+  });
+
+  // Owner decision: the switch with mainnet refuses the boot, whatever
+  // CONFIG_STRICT says and whether or not the instance looks deployed.
+  test('set with mainnet, it is fatal: the boot is refused with CONFIG_STRICT off', () => {
+    const local = { BTC_NETWORK: 'testnet4', VITE_BTC_NETWORK: 'mainnet', VITE_ACCEPTANCE_HOSTED_PUBLICATION: '1', VITE_WEBVH_HOST: 'staging.originals.build' };
+    for (const env of [{ ...STAGING, VITE_BTC_NETWORK: 'mainnet' }, local]) {
+      const issues = validateConfig({ env, dataDir: mounted });
+      expect(fatals(issues).map((i) => i.key)).toContain('VITE_ACCEPTANCE_HOSTED_PUBLICATION');
+      expect(() => enforceConfig(issues, { strict: false, log: () => {} })).toThrow(/VITE_ACCEPTANCE_HOSTED_PUBLICATION/);
+    }
+  });
+
+  test('set on the production host alone, it stays an error: reported, and CONFIG_STRICT decides', () => {
+    const issues = validateConfig({ env: { ...STAGING, VITE_WEBVH_HOST: 'originals.build' }, dataDir: mounted });
+    const mine = issues.filter((i) => i.key === 'VITE_ACCEPTANCE_HOSTED_PUBLICATION');
+    expect(mine.map((i) => i.severity)).toEqual(['error']);
+    expect(() => enforceConfig(mine, { strict: false, log: () => {} })).not.toThrow();
+    expect(() => enforceConfig(mine, { strict: true, log: () => {} })).toThrow(/VITE_ACCEPTANCE_HOSTED_PUBLICATION/);
+  });
+
+  test('set on the production host, it is reported', () => {
+    const issues = errors(validateConfig({ env: { ...STAGING, VITE_WEBVH_HOST: 'originals.build' }, dataDir: mounted }));
+    expect(keys(issues)).toContain('VITE_ACCEPTANCE_HOSTED_PUBLICATION');
+    expect(issues.find((i) => i.key === 'VITE_ACCEPTANCE_HOSTED_PUBLICATION')!.message).toContain('originals.build');
+  });
+
+  test('unset, nothing is reported', () => {
+    const env = { ...GOOD, VITE_WEBVH_HOST: 'originals.build', BTC_NETWORK: 'mainnet', VITE_BTC_NETWORK: 'mainnet', QUICKNODE_ENDPOINT: 'https://x.quiknode.pro/k/' };
+    expect(keys(validateConfig({ env, dataDir: mounted }))).not.toContain('VITE_ACCEPTANCE_HOSTED_PUBLICATION');
+  });
+});
 
 describe('block completion feed configuration', () => {
   test('defaults to the configured Bitcoin network and supports explicit opt-out', () => {

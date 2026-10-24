@@ -118,6 +118,28 @@ describe('originals routes — auth gating', () => {
     expect((await shadow(`magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/authors/${hex}/did-witness.json`)).status).toBe(403);
   });
 
+  // #976 B, G1; P3.6: a did:webvh names the host it is fetched from. An
+  // instance serves only its own did:webvh hosts, so a write under any other
+  // host would be bytes no reader of that DID can fetch here.
+  test('with served hosts configured, refuses a write or a save under any other host (403)', async () => {
+    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore(), hosts: ['originals.build', 'magby.originals.build'] });
+    const put = (key: string) => {
+      const url = new URL(`http://h/api/originals/host/${encodeURIComponent(key)}`);
+      return routes.hostPut(new Request(url, { method: 'PUT', headers: { cookie: cookieFor('sub-1') }, body: '{"v":1}' }), url, '1.1.1.1');
+    };
+    const refused = await put('intruder.example.com/user-sub-1/did.jsonl');
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: 'forbidden_host' });
+    expect((await put('Originals.Build:443/user-sub-1/did.jsonl')).status).toBe(403);
+    expect((await put('originals.build/user-sub-1/did.jsonl')).status).toBe(200);
+    expect((await put('magby.originals.build/user-sub-1/did.jsonl')).status).toBe(200);
+
+    const submitUrl = new URL(`http://h/api/originals/submit/${encodeURIComponent('intruder.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z')}`);
+    const submitted = await routes.submit(new Request(submitUrl, { method: 'POST', headers: { cookie: cookieFor('sub-1') }, body: '{}' }), submitUrl, '1.1.1.1');
+    expect(submitted.status).toBe(403);
+    expect(await submitted.json()).toEqual({ error: 'forbidden_host' });
+  });
+
   test('rejects an oversized upload by Content-Length (413)', async () => {
     const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
     const url = new URL(`http://h/api/originals/host/${encodeURIComponent('h/user-sub-1/did.jsonl')}`);
@@ -587,5 +609,42 @@ describe('#965 r5 finding 3: a submitted witness file is depth-bounded', () => {
       expect(out.http).toBe(400);
       expect(out.body?.error).toBe('identity_witness_invalid');
     }
+  });
+});
+
+// #976 B3, gap G3. Publishing records the Original's alias in the account's
+// index, so the author's other clients can find and restore it from the host.
+describe('the account index records a published Original\'s alias', () => {
+  const sub = 'sub-indexer-00001';
+  const did = 'did:vh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ';
+  const alias = (slug = `user-${sub.slice(0, 16)}`, name = `o-${did.slice(7, 23)}`) => `did:webvh:QmScid:demo.example.com:${slug}:${name}`;
+  const post = (routes: ReturnType<typeof createOriginalsRoutes>, body: unknown) =>
+    routes.record(
+      new Request('http://h/api/originals', { method: 'POST', headers: { 'content-type': 'application/json', cookie: cookieFor(sub) }, body: JSON.stringify(body) }),
+      new URL('http://h/api/originals'),
+    );
+  const listed = async (routes: ReturnType<typeof createOriginalsRoutes>) =>
+    ((await (await routes.list(new Request('http://h/api/originals', { headers: { cookie: cookieFor(sub) } }), new URL('http://h/api/originals'))).json()) as { originals: Array<{ did: string; alias?: string }> }).originals;
+
+  test('an alias in the caller\'s own namespace, named for the Original, is kept and listed', async () => {
+    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    expect((await post(routes, { did, title: 'Piece', resourceHash: 'ab', alias: alias() })).status).toBe(200);
+    expect(await listed(routes)).toMatchObject([{ did, alias: alias() }]);
+  });
+
+  test('an alias in another namespace, for another Original, or malformed is refused', async () => {
+    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    for (const bad of [alias('user-someoneelse0000'), alias(undefined, 'o-QmOtherOriginal00'), 'did:webvh:x', 42]) {
+      expect((await post(routes, { did, title: 'Piece', resourceHash: 'ab', alias: bad })).status).toBe(400);
+    }
+    expect(await listed(routes)).toEqual([]);
+  });
+
+  test('once recorded, the alias never changes', async () => {
+    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    await post(routes, { did, title: 'Piece', resourceHash: 'ab' });
+    await post(routes, { did, title: 'Piece', resourceHash: 'ab', alias: alias() });
+    await post(routes, { did, title: 'Piece', resourceHash: 'ab', alias: alias().replace('QmScid', 'QmOther') });
+    expect((await listed(routes))[0].alias).toBe(alias());
   });
 });

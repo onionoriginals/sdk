@@ -1,5 +1,6 @@
-import { BrowserOriginalsStore } from '../sdk/browser-store';
-import { fetchLibraryEvidence, recoverLegacySubmissions } from '../sdk/library';
+import { BrowserOriginalsStore, pageStore } from '../sdk/browser-store';
+import { clearAcceptanceEngine, exposeAcceptanceEngine } from '../sdk/acceptance-hook';
+import { recoverLegacySubmissions } from '../sdk/library';
 import { navigate } from '../router';
 import { contentByteLength, contentText, resourceDataUrl, resourceMatchesSource, textMediaType, type ResourceContent } from '../sdk/resource-view';
 import { MAX_SOURCE_BYTES, readAssetFile, SourceFileError } from '../sdk/source-file';
@@ -34,6 +35,7 @@ import {
   completionCopy,
   resolvedCopy,
   publishDurabilityNote,
+  publishStepLock,
   inscribeCostNote,
   selectFundingUtxos,
   depositDisclosure,
@@ -82,9 +84,13 @@ function useEngine(authed: boolean, subOrgId?: string) {
     if (engineRef.current) return engineRef.current;
     loading.current ??= import('../sdk/engine').then(({ DemoEngine }) => {
       // Signing identity and browser storage share the same account scope.
-      const store = new BrowserOriginalsStore(authed ? subOrgId : undefined);
-      const engine = new DemoEngine({ authed, subOrgId, store, localAuthor: () => store.localAuthor() });
+      // Without IndexedDB the engine keeps the work in memory and says so (#976 B, G2).
+      const engine = new DemoEngine({ authed, subOrgId, ...pageStore(authed ? subOrgId : undefined) });
       engineRef.current = engine;
+      // The page's own engine, for the hosted acceptance driver, on a staging
+      // acceptance build only (never production). Set here, not in the
+      // engine, so a helper engine (an import on /me) never takes its place.
+      exposeAcceptanceEngine(engine);
       return engine;
     });
     return loading.current;
@@ -95,6 +101,7 @@ function useEngine(authed: boolean, subOrgId?: string) {
   const discardEngine = useCallback(() => {
     engineRef.current = null;
     loading.current = null;
+    clearAcceptanceEngine();
   }, []);
 
   return { getEngine, discardEngine };
@@ -150,7 +157,7 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
   // cannot drift apart (KTD9).
   const done = completionCopy(inscribeView.simulated, network);
   const resolved = resolvedCopy(isAuthenticated);
-  const durabilityNote = publishDurabilityNote(isAuthenticated);
+  const durabilityNote = publishDurabilityNote(isAuthenticated, featureEnabled('hostedPublication'));
   const costNote = inscribeCostNote(real);
   const [title, setTitle] = useState(demo.form.defaultTitle);
   const [style, setStyle] = useState<string>(getArtSeed().style);
@@ -257,10 +264,16 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
       if (isAuthenticated && user?.subOrgId && bitcoin?.fundingAddress) await recoverLegacySubmissions(user.subOrgId, bitcoin.fundingAddress);
       let warning: string | null = null;
       if (isAuthenticated) {
+        // main's library data path (the account's evidence), then, for a
+        // published Original, the host's head and a stranger's read-back
+        // (#976 B3, G3). A failure leaves the saved copy openable below.
         try {
-          const bytes = await fetchLibraryEvidence(openDid);
-          if (bytes) await engine.importEvidence(bytes, openDid);
-        } catch (e) { warning = (e as Error).message; }
+          await engine.restore(openDid);
+        } catch (e) {
+          // The library's own words (a 409 "diverged", a conflict) are said as
+          // they are, as on main; an unverified read-back in the page's.
+          warning = (e as Error).name === 'PublicationNotVerifiedError' ? demoFailureMessage(e) : (e as Error).message;
+        }
       }
       // A 409 "diverged" from the account is said even when this browser holds no copy to open (P6.6).
       const saved = await engine.open(openDid).catch((e: Error) => { throw warning ? new Error(warning) : e; });
@@ -686,8 +699,8 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
 
   // Rebuild from a clean slate whenever the auth identity changes (sign in/out
   // via the modal, no reload). Without this the demo keeps the engine it
-  // preloaded, so a user who signs in mid-session would publish through the
-  // anonymous ephemeral adapter instead of their durable account. Skip the
+  // preloaded, so a user who signs in mid-session would keep signing as the
+  // guest, in the guest's database, instead of their account. Skip the
   // initial mount (identity unchanged).
   const identity = engineIdentity(isAuthenticated, user?.subOrgId);
   const prevIdentity = useRef(identity);
@@ -958,9 +971,12 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
                 <ol className="demo-steps">
                   {demo.steps.map((s, i) => {
                     // Publishing and anchoring wait on later phases (features.ts).
-                    const unavailable = (i === 1 && !featureEnabled('hostedPublication')) || (i === 2 && !featureEnabled('bitcoinAnchoring'));
+                    // Publishing also needs sign-in, in every build (#976 B5).
+                    const publishLock = i === 1 ? publishStepLock({ hostedPublication: featureEnabled('hostedPublication'), authenticated: isAuthenticated }) : null;
+                    const unavailable = publishLock === 'unavailable' || (i === 2 && !featureEnabled('bitcoinAnchoring'));
+                    const locked = unavailable || publishLock === 'signed-out';
                     const state =
-                      unavailable
+                      locked
                         ? 'locked'
                         : step > i
                           ? 'done'
@@ -992,10 +1008,10 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
                               <span className="dot" />
                               {s.label}
                             </span>
-                            {unavailable && (
+                            {locked && (
                               <span className="demo-sim-badge">
                                 <span className="dot" aria-hidden="true" />
-                                {demo.unavailable.badge}
+                                {unavailable ? demo.unavailable.badge : demo.unavailable.signedOutBadge}
                               </span>
                             )}
                             {!unavailable && i === 2 && inscribeView.simulated && (
@@ -1012,14 +1028,14 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
                               ? i === 1 ? demo.unavailable.hostedPublication : demo.unavailable.bitcoinAnchoring
                               : i === 2 ? inscribeView.description : s.description}
                           </p>
-                          {/* R7: an anonymous publish is temporary and shares a
-                              demo path. Said HERE — in the publish step, from
-                              first paint — because after the log exists is too
-                              late to decide to sign in first. */}
-                          {i === 1 && !unavailable && durabilityNote && (
+                          {/* R7: signed out, publishing needs sign-in. Said
+                              HERE, in the publish step, from first paint. The
+                              guest-key warning (G10) is the one guest-key-note
+                              above, shown in every build. */}
+                          {i === 1 && durabilityNote && (
                             <p className="demo-step-note">{durabilityNote}</p>
                           )}
-                          {state !== 'done' && !unavailable && (
+                          {state !== 'done' && !locked && (
                             // Step 3 in the simulated tier runs the SDK's mock
                             // provider for real — completable, not disabled —
                             // so its "this is not Bitcoin" signal is the
@@ -1034,6 +1050,7 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
                                 pendingRevision,
                                 updating,
                                 anyRunning: busy,
+                                authenticated: isAuthenticated,
                               })}
                               data-busy={state === 'busy' || undefined}
                               onClick={stepActions[i]}
@@ -1065,6 +1082,36 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
                   })}
                 </ol>
 
+                {/* #976 B, G2: signed in without IndexedDB, the work is in
+                    memory only. Said, never failed silently. */}
+                {asset?.notKeptAcrossRestarts && (
+                  <p className="demo-step-note" role="status">{demo.storage.notKeptAcrossRestarts}</p>
+                )}
+                {/* G3: published and verified, but not yet in the account's
+                    list. Reported apart from publication, with a retry. */}
+                {asset?.accountIndex === 'not-listed' && (
+                  <div className="demo-step-note" role="status">
+                    <p>{demo.hosting.notListed}</p>
+                    <button
+                      type="button"
+                      className="btn demo-step-btn"
+                      disabled={busy}
+                      onClick={() => {
+                        void runExclusive(runningRef, async () => {
+                          setError(null);
+                          try {
+                            setAsset(await (await getEngine()).retryAccountIndex());
+                          } catch (err) {
+                            console.error('[originals-demo]', err);
+                            setError(demoFailureMessage(err));
+                          }
+                        });
+                      }}
+                    >
+                      {demo.hosting.retryListing}
+                    </button>
+                  </div>
+                )}
                 {asset && (
                   <div className="demo-evidence">
                     <button
@@ -1272,10 +1319,11 @@ export function Demo({ openDid }: { openDid?: string } = {}) {
                   asset?.webvhLogUrl && (
                     <div className="demo-resolved">
                       <div className="demo-resolved-head">
-                        {/* An anonymous log is served from the shared in-memory
-                            host store, so the heading stops short of calling it
-                            a permanent home. The caveat itself is up in the
-                            publish step, where it can still change a mind. */}
+                        {/* Publishing needs sign-in (#976 B5), so this block
+                            shows an account's published log. Signed out, the
+                            heading still stops short of calling the page's copy
+                            a home: the guest's work is only in this browser,
+                            and the caveat is up in the publish step. */}
                         <span>{resolved.heading}</span>
                         <span
                           className="demo-resolved-badge"

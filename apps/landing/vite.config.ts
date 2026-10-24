@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
+import { buildRevision } from './scripts/build-revision';
 import { site } from './src/content';
 
 // Resolve polyfill packages to absolute paths so the aliases also apply to
@@ -55,14 +56,17 @@ function injectSiteMeta(): Plugin {
     },
     transformIndexHtml: {
       order: 'pre',
-      handler: (html) =>
-        html.replace(/%SITE_[A-Z_]+%/g, (token) => {
+      handler: (html) => {
+        const out = html.replace(/%SITE_[A-Z_]+%/g, (token) => {
           const value = tokens[token];
           if (value === undefined) {
             throw new Error(`index.html uses unknown token ${token}`);
           }
           return escapeAttr(value);
-        })
+        });
+        const revision = buildRevision();
+        return revision ? out.replace('</head>', `<meta name="originals-revision" content="${revision}">\n</head>`) : out;
+      }
     }
   };
 }

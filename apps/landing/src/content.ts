@@ -259,7 +259,7 @@ export const demo = {
       layer: 'did:vh',
       label: 'Private draft',
       description:
-        'Creates a signed record of your file. It stays private until you publish. When you’re signed in, Turnkey holds your signing key. Otherwise, the key and your work stay in this tab.'
+        'Creates a signed record of your file. It stays private until you publish. When you’re signed in, Turnkey holds your signing key. Otherwise, a guest key and your work stay in this browser.'
     },
     {
       id: 'publish',
@@ -309,6 +309,8 @@ export const demo = {
    */
   unavailable: {
     badge: 'Coming back',
+    /** The publish step's badge when only sign-in is missing (#976 B5). */
+    signedOutBadge: 'Sign in to publish',
     hostedPublication:
       'Publishing to the web is being rebuilt on the Originals Protocol and returns soon. Your Original is complete without it: download its evidence to keep a copy anyone can check.',
     bitcoinAnchoring:
@@ -464,8 +466,11 @@ export const demo = {
   },
   resolved: {
     heading: 'Signed history—available on this site',
-    /** Anonymous logs live in the shared in-memory host store; see `hosting.temporaryNote`. */
-    temporaryHeading: 'Signed history—available here for now',
+    /**
+     * Signed-out heading. Publishing needs sign-in (#976 B5), so a signed-out
+     * history is only in this browser; see `hosting.temporaryNote`.
+     */
+    temporaryHeading: 'Signed history—in this browser only',
     resolvedBadge: 'Available ✓',
     pendingBadge: 'Available on the published site',
     linkLabel: 'Open the signed history',
@@ -672,18 +677,37 @@ export const demo = {
    * failed: 507` was reaching the page before this existed — a transport string
    * on screen, and a breach of the mechanical floor in GRADING.md.
    */
+  /** Where signed-in work is kept on this device (#976 B, G2). */
+  storage: {
+    notKeptAcrossRestarts:
+      'This browser can’t keep your work on this device, so it isn’t saved across restarts. Keep this page open, and download its evidence before you leave.'
+  },
   hosting: {
+    /** Published and verified, but not yet in the account's list (G3). Said apart from publication. */
+    notListed:
+      'Published, and anyone can verify it. It isn’t in your account’s list yet, so your other devices won’t show it until it is.',
+    retryListing: 'Add to my list',
+    indexFull:
+      'Your account’s list of published Originals is full, so this one can’t be added. It is still published, and anyone can verify it.',
+    indexUnavailable:
+      'We couldn’t add this Original to your account’s list. It is still published, and anyone can verify it. Try again in a moment.',
     rateLimited:
       'Publishing is temporarily limited. Wait a few seconds and try again. Your signed Original is still in this tab.',
     unavailable:
       'We couldn’t publish your signed history. Your Original is still in this tab. Try again in a moment.',
+    notVerified:
+      'Your files are uploaded, but a reader can’t verify the published copy yet, so it isn’t published. Publish again to finish; it keeps the same web address.',
+    finishFirst:
+      'This Original’s publishing was interrupted. Publish it again to finish, then keep editing.',
     quotaFull:
       'Your account has used up its hosting space, so there’s no room for another version right now. Everything you’ve already published is untouched and still available.',
     // R7 — rendered in the PUBLISH step, before the button that publishes, not
     // only on the log that comes back afterwards. It is the one thing an
     // anonymous visitor cannot find out later.
+    // Signed out, where publishing exists: it needs sign-in (#976 B5). The
+    // guest-key warning itself is `library.guestKey`, shown once above.
     temporaryNote:
-      'Without signing in, your published history is stored in a shared demo area and removed after a couple of hours. Sign in before publishing to save it under your account for as long as this service runs.'
+      'Publishing needs sign-in. Sign in to sign with your own key and publish this Original.'
   },
   /** Last resort: something we did not anticipate, said without a stack trace. */
   failure:
@@ -886,11 +910,10 @@ export const legal = {
         ]
       },
       {
-        heading: 'Keys held in your browser',
+        heading: 'Keys and your browser',
         body: [
-          'The Ed25519 key that signs your own did:webvh identity lives in this browser’s localStorage, together with the DID log it created. Neither is ever sent to the server, and nothing on our side can reissue them: clearing site data, switching browsers, or the browser evicting storage destroys them for good.',
-          'The key that signs the Originals you author while signed in is a different key, and it is not held here: it is an Ed25519 key in your Turnkey sub-organization, which is what lets an Original you published on one device still be carried to Bitcoin from another. Signed out, Originals use a guest authorship key generated and saved in this browser’s IndexedDB. It is separate from every signed-in account and survives refresh on this device; clearing browser data destroys it. It is stored unencrypted, so anyone using this browser can sign as that guest author.',
-          'The backup file you can download is wrapped with your passphrase inside the browser before it is written to disk. No copy of the file, and no copy of the passphrase, reaches the server.',
+          'Signed in, the keys behind your did:webvh identity and the Originals you author are Ed25519 keys in your Turnkey sub-organization, not in this browser. The identity key controls your DID and each published Original’s web address; a different key signs your Originals. This site publishes your DID log and never holds either private key.',
+          'Signed out, Originals are signed with a guest key made in this browser. The guest key and your guest work are saved in this browser’s IndexedDB, unencrypted and separate from every account, so they survive a reload on this device. Anyone who uses this browser can read them and sign as this guest. Nothing of it is sent to the server, and clearing browser data destroys it. Sign in to sign with your own key and to publish. A guest Original’s evidence package holds no private key.',
           'The key authorising your Turnkey session is a non-extractable WebCrypto key in this browser’s IndexedDB — it can be asked to sign, but its private half cannot be read back out, by our code or anyone else’s. localStorage holds only the sub-organization id, the matching public key, and the expiry time.',
           'Unsigned drafts, signed Originals, resource files and verified checkpoints are kept in account-scoped IndexedDB storage on this device. Guest authorship keys are also saved locally so guest work can be revised after refresh. Signing in does not upload local drafts, and signing out keeps them for the same account’s return. Clearing browser data removes these local copies; export evidence for recovery.',
           'When you anchor an Original on Bitcoin, the signed transactions are also kept in this browser’s IndexedDB until the server confirms it has stored them, so a lost answer is retried with the same transactions rather than new ones. They pay only your own deposit address, and the copy is deleted only when the server acknowledges those exact transactions.'
@@ -903,7 +926,7 @@ export const legal = {
           'When you inscribe, the signed commit and reveal transactions are stored before anything is broadcast. That copy is what lets the server finish an inscription for a browser tab that died between the two, and it stays on the volume afterwards — only a superseded pair that can no longer land has its signed transactions dropped. A per-account ceiling bounds how many of these records are kept, oldest spent ones first.',
           'When you anchor an Original on Bitcoin, the server keeps its own copy of the evidence you send with it: the Original’s signed history, your DID’s log, and the bytes of its files. It checks that copy before anything is broadcast, and keeps it, with the signed transactions, so it can finish or re-send an inscription later. Bitcoin itself holds only the signed history; that copy, and your own, are where the files live.',
           'The deposit address your account is bound to is stored too, along with the last balance read we could trust and any unresolved problem reading it, in a file named after your sub-organization id. That is what puts a warning on Your Originals after you have closed the tab.',
-          'The anonymous demo stores nothing durable. What it publishes goes to an in-memory store with a size budget and a time limit, and it is gone by the next deploy.'
+          'Signed out, nothing is published and the server stores nothing: publishing needs sign-in, and guest work stays in this browser.'
         ]
       },
       {
@@ -1057,5 +1080,6 @@ export const library = {
   unverifiedLocal: 'Saved evidence could not be verified. Nothing has been removed.',
   refusedPair: (reason: string) => `The server refused its Bitcoin submission: ${reason} The signed transactions are kept in this browser and are not sent again. Open it to abandon the submission and prepare a new one.`,
   // Owner decision, 23 October 2026: the guest key is accepted, and said plainly.
-  guestKey: 'Guest Originals are signed with a key stored in this browser. Anyone using this browser can sign as this guest author. Sign in to sign with your own key.',
+  // The one guest-key warning (owner decision of 23 October 2026; #996, #976 B5 G10): shown once wherever guest mode is.
+  guestKey: 'Guest Originals are signed with a key stored in this browser, unencrypted. Anyone using this browser can sign as this guest author. Sign in to sign with your own key.',
 };
