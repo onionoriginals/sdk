@@ -1,0 +1,411 @@
+# Hosted feature-enablement acceptance (issue #976, section B)
+
+This runbook is the gate for turning on `hostedPublication`
+(`apps/landing/src/sdk/features.ts`). Section A, the local release, is
+[README.md](README.md) (`bun run acceptance:local`). Section B is separate and
+needs real resources:
+
+- a client-held Turnkey session;
+- a deployed public host;
+- a signed-out reader on the open network.
+
+**Status.** Section B can't pass yet. The gaps in [Gaps](#gaps) must land
+first, and the harness (`hosted-release.mjs`, gap G9) is not written yet. This
+document is the contract the harness and the operator follow.
+
+**What this runbook doesn't authorize:** deploying, publishing to
+production, changing credentials, or any Bitcoin activity. The owner
+provisions the host and the account. A B run uses only those.
+
+## Environment
+
+The owner decided this on 2026-10-22.
+
+### Host
+
+A **staging environment** of the Railway service `builder`, separate from
+production (`originals.build`). Production deploys `main`, does not have the
+hosted stack, and stays untouched.
+
+| Requirement | Why |
+|---|---|
+| Built from the exact candidate SHA, the head of the stack under test | The receipt compares the deployed revision with the source SHA (G6) |
+| Its own mounted volume, with `ORIGINALS_DATA_DIR` pointing at it | The durable host store is the volume. A deployed instance with auth refuses to boot without a mounted volume (`server/config.ts`) |
+| Its own domain, set as `VITE_WEBVH_HOST` (a bare hostname) and bound in Railway | The did:webvh domain of every identity and alias minted there, permanently (G1). Must not be `originals.build` |
+| The acceptance-only publication build switch (G7) | Without it, `resolveFeatures` returns `hostedPublication: false` |
+| `VITE_BTC_NETWORK` not `off`, and `BTC_NETWORK` matching it | The Turnkey session bootstrap only runs when the network flag is on (`src/auth/useAuth.tsx`). No Bitcoin action is taken, and no funds are involved |
+
+Environment variables, **by name only**. The owner sets their values in the
+Railway dashboard. They are never written to source, to a log or to the receipt.
+
+| Name | Kind |
+|---|---|
+| `JWT_SECRET` | secret, at least 32 chars, distinct from production's |
+| `TURNKEY_ORGANIZATION_ID` | secret, the **staging** Turnkey org |
+| `TURNKEY_API_PUBLIC_KEY` | secret, the staging org's API key |
+| `TURNKEY_API_PRIVATE_KEY` | secret, the staging org's API key |
+| `NODE_ENV` | `production` |
+| `ORIGINALS_DATA_DIR` | the staging volume's mount path |
+| `TRUSTED_PROXY_HOPS` | `1` behind the Railway edge |
+| `VITE_WEBVH_HOST` | the staging hostname |
+| `VITE_BTC_NETWORK`, `BTC_NETWORK` | a non-mainnet network |
+| `VITE_ACCEPTANCE_HOSTED_PUBLICATION` | `1`, the G7 switch. It is ignored when `VITE_WEBVH_HOST` is the production host or `VITE_BTC_NETWORK` is `mainnet` |
+
+### Railway IaC: never apply it to staging
+
+`.railway/railway.ts` is the desired state of the `builder` service, and it
+has **no per-environment scoping**. `railway config apply` reconciles it
+against whichever environment the CLI is linked to. Applied to staging, it
+would:
+
+- set `VITE_WEBVH_HOST` to `originals.build`, so every identity and alias
+  minted there would claim the production domain, permanently (G1);
+- set `BTC_NETWORK` and `VITE_BTC_NETWORK` to `mainnet`;
+- point the source at `branch: "main"`, so staging stops building the
+  candidate SHA (G6);
+- mount `builder-volume` at `/data`;
+- **delete** every variable the file doesn't declare, including
+  `VITE_ACCEPTANCE_HOSTED_PUBLICATION`.
+
+The file has no override mechanism for staging. Staging is configured in the
+Railway dashboard only. **Never run `railway config apply` (or
+`railway config plan` followed by apply) with the CLI linked to the staging
+environment.** Before any `railway config` command, run `railway status` and
+confirm the linked environment is production. The operator's CLI access to
+staging is read-only (see [Operator](#operator)).
+
+### Account
+
+- A **separate staging Turnkey org**, provisioned by the owner.
+- A dedicated test email whose inbox the operator can read. Its first
+  sign-in creates one sub-org, and the app creates its wallet accounts:
+
+| Role | Turnkey account | Path | In the author DID | Used for |
+|---|---|---|---|---|
+| Identity / alias control | `IDENTITY_ACCOUNT` | `m/44'/501'/1'/0'` | `#key-0`, the did:webvh update key | Updating the author DID. Creating and updating each Original's did:webvh alias (P3.7) |
+| Originals signing | `AUTHORSHIP_ACCOUNT` | `m/44'/501'/0'/0'` | `#key-1`, the only `assertionMethod` | Signing every asset-log entry (P5.2, P5.3). Never an update key of the author DID or of any alias (P5.11) |
+
+The private keys stay in Turnkey. The browser holds only a non-extractable
+P-256 session key in IndexedDB (12 hours) and the `auth_token` cookie (7 days).
+
+**The account's identity DID must be on the staging domain.** Sign-in finds
+an identity the account already has and never mints a second one
+(`readUserWebVHDid`). So an account that signed in before G1 landed keeps a
+`did:webvh:…:magby.originals.build:user-…` identity. That identity doesn't
+resolve from staging, and B2's author binding fails. Use a **fresh sub-org**
+(a test email that has never signed in to this Turnkey org) whose first
+sign-in happens on the staging build, so its identity is minted on the
+staging `VITE_WEBVH_HOST`. The harness checks this before anything is
+published, and records it in the receipt as `author.didDomain`. A DID on any
+other domain fails B1.
+
+### Operator
+
+- A checkout at the candidate SHA, with Node, Bun and Chromium
+  (`CHROMIUM_PATH`, or playwright-core's own browser).
+- Railway CLI **read** access to the staging environment, to cross-check the
+  deployed revision.
+- The test inbox, to read each OTP as the harness asks for it.
+
+### Never recorded
+
+These must not appear in the receipt, an artifact, a log or a commit:
+
+- OTP codes, the `auth_token` JWT, cookies;
+- the Turnkey session key or its stamps;
+- API keys, `JWT_SECRET`;
+- the test email address. The receipt names the sub-org by the first 16
+  chars of its id, the same value as the host slug.
+
+## Running it
+
+```sh
+bun run build
+node scripts/acceptance/hosted-release.mjs --base-url https://<staging-host> [--out <dir>] [--receipt <file>]
+node scripts/acceptance/hosted-release.mjs --target local    # dry run, see below
+```
+
+The harness drives Chromium through `playwright-core`.
+
+- **Browser restarts are real.** Each author client has its own persistent
+  user-data dir. A restart closes the browser process and launches a new one
+  on the same dir, so IndexedDB, localStorage and cookies survive just as they
+  do for a person.
+- **"Another client"** is a second user-data dir that starts empty.
+- **Sign-in.** When an OTP is needed, the harness pauses and reads the code
+  from stdin. It types the code into the page and drops it.
+- **Reader.** It runs as a separate Node process with only `PATH` in its
+  environment, a fresh HOME and TMPDIR, no cookie jar, and no access to the
+  author profile dirs. This matches the section A reader, except that it has
+  the network.
+
+`--target local` boots `apps/landing/server` on a temp data dir, the way
+`src/sdk/publish.fixture.ts` does. It replaces Turnkey with a local
+Ed25519 signer that has the same two key roles. It runs the B2, B4 and B5
+checks so CI can catch harness regressions. **A local run is never a B
+receipt.** It writes `target: "local"`, and every gate becomes `NOT-RUN`.
+
+## Gates
+
+Each gate lists its automated steps, any manual steps, and what counts as
+PASS. A gate fails if any of its checks fails, or if a check can't run.
+
+### B1. Create, revise and publish through the real Turnkey session
+
+Automated:
+
+1. Client A opens the staging site and signs in. **Manual:** the operator
+   enters the OTP.
+2. It creates the author identity, the did:webvh at
+   `<VITE_WEBVH_HOST>:user-<sub16>`.
+3. It creates a work with an `image/png`, an `application/octet-stream` and
+   a `text/markdown` resource.
+4. It revises the text and the image.
+5. It publishes. The page must show publication complete only after G5's
+   read-back.
+6. It reads the author DID log and the alias log from the host.
+
+PASS when all of these hold:
+
+- The author DID's domain is the staging `VITE_WEBVH_HOST`
+  (`did:webvh:<SCID>:<VITE_WEBVH_HOST>:user-<sub16>`), not `magby` or any
+  other host (see [Account](#account)).
+- The author DID document lists `#key-1` as its only `assertionMethod`. The
+  log's `updateKeys` are the identity key's `did:key`, which is `#key-0`.
+- Every asset-log entry proof names `<author>#key-1` at a versionId of the
+  author DID that lists it (P5.3). No entry is signed by `#key-0`.
+- The alias is `did:webvh:<SCID>:<VITE_WEBVH_HOST>:user-<sub16>:o-<16>`.
+  Its `updateKeys` are the identity `did:key`, it has
+  `alsoKnownAs: [<did:vh>]`, and it is `portable`.
+- The authorship key is not an update key of either log (P5.11).
+- The Original's state lists exactly that alias (P3.6).
+- The receipt holds public keys, verification method IDs and Turnkey paths,
+  never secrets.
+
+### B2. A fresh, signed-out reader verifies the published work
+
+Automated, two readers:
+
+- **(a)** The Node reader process calls
+  `OriginalsSDK.loadPublished(aliasDid, safeFetch)` against the public URLs.
+- **(b)** A new incognito browser context, with no cookies, storage or
+  profile, loads the same alias through the app's reader view.
+
+PASS when each reader shows all of these:
+
+- `verified: true`.
+- `report.validAsOf.checkpoint` equals the checkpoint client A published
+  (versionId and entry hash).
+- The alias is `confirmed` in both directions. The Original lists it, and its
+  latest document points back (P3.6).
+- `report.resources` is `available`. Every resource SHA-256 matches the bytes
+  client A uploaded. A missing byte doesn't fail `verified` (P7.3), so this
+  is checked separately.
+- These are recorded as **separate** fields:
+  - `verified`;
+  - `current`, which must be `false` with reason `not-anchored` (P7.10);
+  - `identityEvidence` freshness and `validAsOf.signers[*].{obtainedAt,source}`;
+  - `ordering`, which must be `claimed` (P7.6).
+
+  FAIL if any of them is merged into a single "ok".
+- The reader received no `Set-Cookie`, sent no cookie, and had no
+  `auth_token`.
+
+### B3. Restore and continue editing after a browser restart, and on another client
+
+Automated:
+
+1. **Same client.** Close client A's browser and relaunch it on the same
+   profile. The Original is listed (G2, G3). It reopens at the published
+   checkpoint, and a revision saves through the host's submit route.
+2. **Another client.** Client B uses a fresh profile, and the operator signs
+   in with the same account (**manual:** OTP). The published Original is
+   listed from the account's index and restored from the host (G3). A
+   revision then continues from the explicit parent, the host's head.
+3. The B2 reader runs again and verifies the new checkpoint.
+
+PASS when all of these hold:
+
+- Both clients reach the same did:vh with the same history prefix.
+- Each new entry's parent is the head the client loaded. Nothing is rebased
+  and no fork is reported (P2.1, P4.5).
+- The authority to sign comes only from the Turnkey session. A restored
+  Original with no session refuses to sign (`SIGNER_REQUIRED`).
+- Restoring needs more than the account key. FAIL if B's only route to the
+  work is re-creating it.
+
+Unpublished work isn't synchronised between clients. It survives a restart on
+the same profile (G2), and moves to another client only as an evidence
+package import, the section A path. The receipt lists this under
+`unavailable`.
+
+### B4. Interrupted publication resumes
+
+Automated. There are two runs, each on a new Original in client A:
+
+- **(i) After the publish entry.** The harness aborts every
+  `PUT /api/originals/host/*` once the publish entry is committed locally
+  (`page.route`).
+- **(ii) During the uploads.** The alias log and the asset log upload, then
+  the harness aborts `originals/resources/*` partway through.
+
+After each abort:
+
+1. Close the browser and relaunch the same profile.
+2. The reader runs and must **not** report a verified complete snapshot.
+3. The page shows the publication as incomplete, never complete.
+4. Resume the publication (G4), then run the reader again.
+
+PASS when all of these hold:
+
+- The resumed run uses the **same** alias DID and the **same** checkpoint.
+- The asset log has exactly one entry that adds the alias. A second alias
+  entry, or a second alias for the Original, is a FAIL.
+- The page never showed complete while the reader couldn't verify the whole
+  snapshot.
+- After resuming, the B2 checks pass.
+
+### B5. Signed-out ephemeral demo stays explicit
+
+Automated, in a fresh signed-out context:
+
+1. Create a work.
+2. Check the copy: the key is generated in the page and discarded with it.
+   Nothing may claim a stored key or a backup.
+3. Export the evidence package.
+4. Reload.
+
+PASS when all of these hold:
+
+- After the reload the work is gone, and the page says so. It doesn't offer
+  to restore it.
+- Publishing isn't available signed out.
+- The package's did:vh genesis holds only Multikey public keys. No file in
+  the package holds private key material: no `secretKeyMultibase`, no
+  `privateKey*` member, no Multikey Ed25519 secret prefix.
+- No anonymous key is persisted to localStorage, IndexedDB or a cookie.
+
+### B6. Hosted publication stays off until this receipt passes
+
+**B6 is a UI gate.** It checks that no build except the staging acceptance
+build offers publishing in the page. It doesn't close the server path: the
+server's `PUT /api/originals/host/*` accepts hosted writes from any signed-in
+account regardless of the flag, in every environment. That is unchanged by
+this runbook, and B6 makes no claim about it.
+
+Automated:
+
+- In the candidate source, `resolveFeatures({})` and
+  `resolveFeatures(<production env>)` both return
+  `hostedPublication: false` (`features.ts`). The production env is the
+  `VITE_*` shape of `.railway/railway.ts`: `VITE_WEBVH_HOST=originals.build`,
+  `VITE_BTC_NETWORK=mainnet`, with or without
+  `VITE_ACCEPTANCE_HOSTED_PUBLICATION=1`.
+- Production (`https://originals.build`) still serves a bundle with publishing
+  disabled. The harness checks the deployed `/api/version` and the step's
+  disabled state.
+
+PASS when the publish step is off in every build except the staging
+acceptance build. Turning it on is a separate owner PR, and that PR cites a
+PASS receipt from this runbook.
+
+## Receipt
+
+The receipt is `<out>/receipt.json`, also printed to stdout. It has the same
+shape as the section A receipt:
+
+```jsonc
+{
+  "receipt": "originals-hosted-acceptance/1",
+  "scope": "onionoriginals/sdk#976 section B (hosted feature enablement). Not Bitcoin.",
+  "target": "staging",                 // or "local", which is never a B pass
+  "createdAt": "…",
+  "status": "PASS",                    // or "FAIL"
+  "source": { "sha": "…", "branch": "…", "dirty": false, "dirtyFiles": [] },
+  "deployed": {
+    "baseUrl": "https://<staging-host>",
+    "revision": "…",                   // /api/version server SHA
+    "spaRevision": "…",                // SHA baked into the SPA (G6)
+    "webvhHost": "<staging-host>",
+    "hostedPublicationBuild": true,
+    "production": { "baseUrl": "https://originals.build", "revision": "…", "hostedPublication": false }
+  },
+  "packages": { "@originals/sdk": "…", "@originals/vh": "…", "@originals/auth": "…", "@originals/landing": "…", "didwebvh-ts": "…" },
+  "runtimes": { "node": "…", "bun": "…", "chromium": "…", "platform": "…" },
+  "profile": { "protocol": "originals:1.0", "cryptosuite": "eddsa-jcs-2022", "witnesses": "none (Q14)", "ordering": "claimed (unanchored)", "freshness": "never current unanchored (P7.10)" },
+  "signerMode": "Turnkey client-held session (non-extractable P-256 session key in IndexedDB; Ed25519 wallet accounts held by Turnkey)",
+  "author": {
+    "did": "did:webvh:…",
+    "subOrg": "<first 16 chars>",
+    "didDomain": { "expected": "<VITE_WEBVH_HOST>", "actual": "<the DID's domain>", "status": "PASS" },
+    "roles": {
+      "identity":   { "verificationMethod": "#key-0", "turnkeyPath": "m/44'/501'/1'/0'", "publicKeyMultibase": "z…", "updateKey": true, "controlsAlias": true },
+      "authorship": { "verificationMethod": "#key-1", "turnkeyPath": "m/44'/501'/0'/0'", "publicKeyMultibase": "z…", "updateKey": false, "assertionMethod": true }
+    }
+  },
+  "originals": [
+    { "case": "B1", "did": "did:vh:…", "alias": "did:webvh:…", "checkpoint": { "versionId": "…", "entryHash": "…" },
+      "resources": [{ "id": "…", "mediaType": "…", "sha256": "…" }], "urls": { "aliasLog": "…", "assetLog": "…" } }
+  ],
+  "isolation": { "clients": [{ "name": "A", "userDataDir": "…", "launches": 3, "pids": [] }], "readers": [{ "pid": 0, "envNames": ["PATH", "…"], "cookies": 0 }] },
+  "gates": { "B1-turnkey-create-revise-publish": "PASS", "B2-signed-out-reader": "PASS", "B3-restore-continue": "PASS",
+             "B4-interrupted-publication": "PASS", "B5-signed-out-ephemeral": "PASS", "B6-flag-off": "PASS" },
+  "phases": [ /* { phase, started, finished, isolation, facts, checks: [{ id, title, status, detail|error }], status } */ ],
+  "manual": [{ "step": "otp", "phase": "b1-client-a", "at": "…" }],   // never the code itself
+  "artifacts": [{ "path": "…", "bytes": 0, "sha256": "…" }],
+  "unavailable": ["Unpublished work does not sync between clients; it moves by evidence package import (section A)."],
+  "notIncluded": ["Bitcoin anchoring, signing and commit/reveal restart."]
+}
+```
+
+Before the receipt is written, it is scanned for secret patterns: JWT shapes,
+`auth_token`, `secretKeyMultibase`, `privateKey`, and the OTP the operator
+typed. A hit fails the run.
+
+## PASS and FAIL
+
+**PASS** requires all of these:
+
+- every gate B1–B6 is PASS;
+- `source.dirty` is false;
+- `deployed.revision` and `deployed.spaRevision` equal `source.sha`;
+- `target` is `staging`.
+
+**FAIL** in any of these cases:
+
+- any check fails or can't run;
+- the deployed revision is unknown or differs from the source;
+- `current` is ever `true`;
+- a second alias entry appears;
+- the page reports publication complete before the reader can verify it;
+- a secret is found in an artifact or the receipt;
+- the run used production.
+
+CI green, a merge, release notes or a `--target local` run are not public-host
+proof.
+
+## Gaps
+
+These must land, each tested first, before B can pass. The recommended stack
+order follows the dependencies. `hostedPublication` stays `false` in every
+one of them.
+
+| # | Gap | Blocks | Proposed fix |
+|---|---|---|---|
+| G1 | The SPA hard-codes the did:webvh domain `magby.originals.build` (`src/auth/webvh.ts`) and never reads `VITE_WEBVH_HOST`. The server 301s every non-`/api` read on a non-canonical host to `VITE_WEBVH_HOST`, so a reader can't fetch what was published | B1, B2 | New identities and aliases use the build's `VITE_WEBVH_HOST`. Unset, they fall back to the legacy domain `magby.originals.build` (`src/auth/webvh-domain.ts`, PROVISIONAL), never to `location.host`. Reads of the hosted layout for a host this instance serves (`VITE_WEBVH_HOST` or the legacy domain) skip the canonical redirect, so existing `magby` identity DIDs stay readable |
+| G6 | No deployed revision. `/api/health` is `{status:"ok"}` | receipt | `GET /api/version` returns the server's `RAILWAY_GIT_COMMIT_SHA`, and the build bakes the SPA's SHA |
+| G7 | `hostedPublication` is a constant, so no deployed build can publish | B1–B4 | A build-time switch `VITE_ACCEPTANCE_HOSTED_PUBLICATION`, honoured only when `VITE_WEBVH_HOST` isn't the production host and `VITE_BTC_NETWORK` isn't `mainnet`. A test pins production off |
+| G10 | The signed-out copy is stale. It describes a key in localStorage, a key backup file, and anonymous publishing to a "shared demo area" (`src/content.ts`, `src/components/demo-logic.ts`) | B5 | Rewrite the copy to say the key is page-scoped, discarded, and not recoverable. Add a content-claim test |
+| G2 | `DemoEngine` keeps the work in `MemoryStore` and the alias in memory | B3, B4 | An IndexedDB `OriginalsStore`, one database per sub-org, holding the log, resources, author and alias evidence, retained versions, branches, and pending and refused candidates. Signed-in engines use it; signed out stays `MemoryStore` |
+| G4 | After a restart, a publication interrupted after its entry can't resume | B4 | Persist a publication record (the alias evidence, the phase, the files uploaded) before each step. On open, an incomplete record offers "Resume", which passes the stored alias, so no second publish entry is signed |
+| G5 | `publish()` reports success when the PUTs resolve, with no read-back | B1, B4 | Report complete only after a cookie-less `loadPublished` sees the local checkpoint with every byte. Otherwise the state is `uploaded-unverified` with "Resume" |
+| G3 | Nothing lists or reopens an account's Originals. `GET`/`POST /api/originals` exist but the client never calls them | B3 | Publishing records `{did, alias}` in the account index. The engine lists the durable store plus the index, opens local work, and restores a published Original from the host with `sdk.sync` |
+| G9 | No hosted harness | all | `hosted-release.mjs`, reusing `lib/phase.mjs`, with the `--target local` dry run in CI |
+
+Not gaps, but noted:
+
+- Hosted reads have no CORS headers. The B2 readers are a Node process and a
+  same-origin browser, which is the supported reader path. Cross-origin
+  browser readers are out of scope.
+- The Turnkey session lasts 12 hours. A restore after it expires needs a new
+  OTP sign-in, which is expected and recorded as a manual step.
