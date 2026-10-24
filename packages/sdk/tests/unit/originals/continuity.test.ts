@@ -185,6 +185,28 @@ describe("C12-134: a fresh reader with no package of the moved author's log", ()
     expect(r.identityEvidence).toMatchObject({ status: "complete", latestVersionId: env.alice.versionId, obtained: { location: didWebvhLogUrl(env.alice.location) } });
   });
 
+  test("C12-177: following a move from a witnessed copy never makes freshness worse: the same log fetched without its witness file does not replace it (P5.14, P7.8)", async () => {
+    const alice = await WebvhIdentity.create("old.example.com", [{ fragment: "orig-1", secret: K1 }]);
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async (d) => (d === alice.did ? alice.evidence() : undefined), clock: clock() });
+    const ref = alice.ref("orig-1");
+    const created = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: ref, signer: alice.signer(ref, K1) });
+    if (created.kind !== "original") throw new Error("expected an Original");
+    await alice.move("new.example.org");
+    await alice.witnessedBy(localSigner("Ed25519", seed(71)));
+    const zip = (await sdk.package(created.original.did)).bytes;
+    const at = clock(Date.parse("2026-10-18T13:00:00Z"));
+    const packaged = (await OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: at }).load(zip)).report;
+    expect(packaged.identityEvidence).toMatchObject({ freshness: "established", obtained: { source: "package", movedTo: alice.location, movedLog: "not-obtained" } });
+    // The new location serves the same log without its witness file: the witnessed copy is kept. (That
+    // fetched log does not verify by itself, its witnesses being unmet; the SDK also never lets an
+    // equal fetched log replace a copy unless it is witnessed at its latest version.)
+    const seen: string[] = [];
+    const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: at, identityFetch: host({ [didWebvhLogUrl(alice.location)]: alice.evidence().log as string }, seen) });
+    const r = (await reader.load(zip)).report;
+    expect(seen).toContain(didWebvhLogUrl(alice.location));
+    expect(r.identityEvidence).toMatchObject({ freshness: "established", obtained: { source: "package", movedTo: alice.location, movedLog: "not-obtained" } });
+  });
+
   test("found at both locations, the log from the latest verified entry's location is used", async () => {
     const { alice, zip, head } = await movedAndRotated();
     const seen: string[] = [];

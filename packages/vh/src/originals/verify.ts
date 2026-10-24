@@ -117,7 +117,11 @@ export interface IdentityObtained {
    * DID now is, by that version's `id` (P5.14).
    */
   movedTo?: string;
-  /** With `movedTo`: the log there was not obtained, so freshness is not established. */
+  /**
+   * With `movedTo`: the log there was not obtained. For a did:webvh log fetched
+   * from a location that leaves freshness not established (P7.8); a copy from
+   * a package or a host keeps the freshness its witnesses give it.
+   */
   movedLog?: "not-obtained";
 }
 

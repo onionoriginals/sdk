@@ -799,15 +799,19 @@ export class OriginalsSDK {
       throw error;
     }
     const candidate: AuthorDidEvidence = this.obtained({ did, log: text, ...(witness !== undefined ? { witness } : {}), retrievedFrom: url }, "fetched");
-    const ids = async (evidence: AuthorDidEvidence) => {
+    const read = async (evidence: AuthorDidEvidence) => {
       const h = await verifyAuthorHistory(evidence, { now: this.clock() });
-      return h.failure ? undefined : h.versions.map((v) => v.versionId);
+      return h.failure ? undefined : { ids: h.versions.map((v) => v.versionId), witnessed: h.versions[h.versions.length - 1]?.witnessed === true };
     };
-    const retrieved = await ids(candidate);
-    if (!retrieved || retrieved.length === 0) return undefined;
+    const retrieved = await read(candidate);
+    if (!retrieved || retrieved.ids.length === 0) return undefined;
     if (known) {
-      const have = await ids(known);
-      if (have && !have.every((id, i) => retrieved[i] === id)) return undefined; // shorter or diverging: not used
+      const have = await read(known);
+      if (have && !have.ids.every((id, i) => retrieved.ids[i] === id)) return undefined; // shorter or diverging: not used
+      // The same versions do not replace a log witnessed at its latest with one that is not: following
+      // a move never makes freshness worse (P5.14, P7.8; #993 review). The copy is kept and the move is
+      // reported not obtained.
+      if (have && have.ids.length === retrieved.ids.length && have.witnessed && !retrieved.witnessed) return undefined;
     }
     return candidate;
   }

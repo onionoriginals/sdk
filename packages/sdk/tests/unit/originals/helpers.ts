@@ -3,7 +3,7 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import { localSigner, multibaseEncode, type ProofSigner } from "@originals/vh/crypto";
 import * as W from "didwebvh-ts";
 import type { JsonObject } from "@originals/vh/json";
-import { appendEntry, createLog, serializeLog, signWith, type LogEntry } from "@originals/vh/log";
+import { appendEntry, createLog, createWitnessProof, serializeLog, signWith, type LogEntry } from "@originals/vh/log";
 import type { AuthorDidEvidence, AuthorRef } from "@originals/vh/originals";
 import { keySigner, type OriginalsSigner } from "../../../src/originals/index.js";
 
@@ -134,6 +134,20 @@ export class WebvhIdentity {
     return this.versionId;
   }
 
+  /** The did-witness.json entries for this log, once witnesses are set. */
+  witness: Array<{ versionId: string; proof: unknown[] }> | undefined;
+
+  /** Add `witness` as this DID's one witness, approving the version that does (P7.8 needs it). */
+  async witnessedBy(witness: ProofSigner): Promise<string> {
+    const r = await W.updateDID({
+      log: this.log as never, signer: this.updateSigner(), verifier: this.verifier, updated: this.time(),
+      witness: { threshold: 1, witnesses: [{ id: `did:key:${witness.publicKeyMultibase}` }] },
+    } as never);
+    this.log = r.log as unknown as Array<Record<string, unknown>>;
+    this.witness = [{ versionId: this.versionId, proof: [await createWitnessProof(witness, this.versionId)] }];
+    return this.versionId;
+  }
+
   get versionId(): string {
     return this.log[this.log.length - 1].versionId as string;
   }
@@ -144,7 +158,7 @@ export class WebvhIdentity {
   }
 
   evidence(): AuthorDidEvidence {
-    return { did: this.did, log: serializeLog(this.log as unknown as LogEntry[]) };
+    return { did: this.did, log: serializeLog(this.log as unknown as LogEntry[]), ...(this.witness ? { witness: this.witness } : {}) };
   }
 
   /** The identity DID, the method's absolute id at `versionId`, and that version (P5.14). */
