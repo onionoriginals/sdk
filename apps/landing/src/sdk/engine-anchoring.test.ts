@@ -329,3 +329,20 @@ test('a fork whose sat cannot be read stays refused, and says Bitcoin could not 
   expect(state.fork).toBeDefined();
   expect(state.bitcoinReadError).toMatch(/could not be checked/i);
 });
+
+test('a fork after the anchor that Bitcoin has not reached is not settled: shown, and revise refused (round 3; P6.6, P9.16)', async () => {
+  const { postAnchorFork } = await import('../../server/tests/post-anchor-fork-fixture');
+  const f = await postAnchorFork({ inscribeB: false });
+  await expect(f.a.importEvidence(f.branchB, f.did)).rejects.toThrow(/conflict/i);
+  await f.a.open(f.did);
+  const checked = await f.a.verifyBitcoin();
+  // Bitcoin's head is the anchor: on A's branch, but before the branches diverge.
+  expect(checked.bitcoinVerification?.anchoring?.status).toBe('anchored');
+  expect(checked.bitcoinVerification?.head).toBe(f.anchorHead);
+  expect(checked.fork).toBeDefined();
+  expect(checked.bitcoinOtherBranch).toBeUndefined();
+  const refused = await f.a.update('v4 on A', 'Orbits', 'v4').catch((e) => e);
+  expect(refused).toBeInstanceOf(ForkUnresolvedError);
+  expect((refused as ForkUnresolvedError).bitcoinOtherBranch).toBe(false);
+  expect(f.a.snapshot().history.at(-1)?.versionId).toBe(f.v3a);
+});

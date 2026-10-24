@@ -246,6 +246,18 @@ describe('fork checks against Bitcoin fail safe (round-2 review; P6.6, P9.16)', 
     expect((refused as OriginalsError).code).toBe('EVIDENCE_DIVERGED');
   });
 
+  test('a fork after the anchor that Bitcoin has not reached stands: incomplete, and no evidence is served (round 3; P6.6, P9.16)', async () => {
+    const { postAnchorFork } = await import('./post-anchor-fork-fixture');
+    const f = await postAnchorFork({ inscribeB: false });
+    await durable(f.landing.dataDir, 'other-sub', f.did, [f.branchA, f.branchB]);
+    const library = createAnchoringLibrary(f.landing.dataDir, undefined, { bitcoin: f.landing.anchoring.bitcoinEvidence });
+    const rows = await library.list('other-sub');
+    expect(rows[0]).toMatchObject({ did: f.did, availability: 'incomplete' });
+    expect(rows[0].problem).toMatch(/fork unresolved/i);
+    expect(rows[0].problem).not.toMatch(/other branch/);
+    expect((await library.evidence('other-sub', f.did).catch((e) => e) as OriginalsError).code).toBe('EVIDENCE_DIVERGED');
+  });
+
   test('a sat reader that throws leaves the fork standing, said as unchecked', async () => {
     const { landing, did } = await preAnchorFork({ mine: true });
     const library = createAnchoringLibrary(landing.dataDir, undefined, { bitcoin: async () => { throw new Error('index down'); } });

@@ -13,7 +13,7 @@ import type { OriginalsStore } from '@originals/sdk/originals';
 import { inProcessLanding } from './landing-server-fixture';
 import { WALLET_ADDRESS, fakeChain, walletSigner } from './originals-chain-fixture';
 
-export async function postAnchorFork(opts: { storeA?: OriginalsStore; transport?: (t: AnchoringTransport) => AnchoringTransport } = {}) {
+export async function postAnchorFork(opts: { storeA?: OriginalsStore; transport?: (t: AnchoringTransport) => AnchoringTransport; inscribeB?: boolean } = {}) {
   const chain = fakeChain();
   const landing = inProcessLanding(chain);
   const author = await createLocalAuthor();
@@ -29,8 +29,11 @@ export async function postAnchorFork(opts: { storeA?: OriginalsStore; transport?
   const b = new DemoEngine({ features: { bitcoinAnchoring: true }, author, anchoring: anchoring() });
   await b.importEvidence(anchored, did);
   const v3b = (await b.update('Harbor from B', 'Orbits', 'harbor b')).history.at(-1)!.versionId;
-  await b.inscribe({ funding: { fundingUtxos: [chain.fund(50_000)], changeAddress: WALLET_ADDRESS } });
-  chain.mine();
+  // Without inscribeB, neither branch reaches Bitcoin: its head stays the anchor, below the fork (round 3).
+  if (opts.inscribeB !== false) {
+    await b.inscribe({ funding: { fundingUtxos: [chain.fund(50_000)], changeAddress: WALLET_ADDRESS } });
+    chain.mine();
+  }
 
   // A's revision is committed locally and never submitted.
   const v3a = (await a.update('Harbor from A', 'Orbits', 'harbor a')).history.at(-1)!.versionId;

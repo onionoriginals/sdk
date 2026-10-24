@@ -128,7 +128,11 @@ export function createAnchoringLibrary(dataDir: string, hosted?: OriginalsStore,
       const onBitcoin = (await sdk.load((await sdk.package(did)).bytes, { bitcoin: evidence })).report;
       if (onBitcoin.anchoring?.status !== 'anchored' || !onBitcoin.head) return { view, fork: 'standing' };
       const local = (await sdk.committedLog(did)).trimEnd().split('\n').map((line) => (JSON.parse(line) as { versionId: string }).versionId);
-      return { view, fork: local.includes(onBitcoin.head) ? 'settled' : 'other-branch' };
+      if (!local.includes(onBitcoin.head)) return { view, fork: 'other-branch' };
+      // On this branch but before the branches diverge (say the anchor, neither later branch
+      // inscribed): Bitcoin has not chosen a branch, so the fork stands (P6.6, P9.16).
+      const version = Number.parseInt(onBitcoin.head.slice(0, onBitcoin.head.indexOf('-')), 10);
+      return { view, fork: Number.isFinite(version) && version >= view.report.fork.version ? 'settled' : 'standing' };
     } catch { return { view, fork: 'unchecked' }; }
   }
 

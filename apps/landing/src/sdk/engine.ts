@@ -376,8 +376,17 @@ export class DemoEngine {
   }
 
   /** The last fresh Bitcoin read accepted the anchor: its branch is the Original's history (P9.16). */
+  /**
+   * Bitcoin settled the fork for this branch: its accepted head is on the
+   * local branch AND at or past the version where the branches diverge. A
+   * head before the fork (say the anchor, with neither later branch
+   * inscribed) has not chosen a branch, so the fork stands (P6.6, P9.16).
+   */
   private settledOnBitcoin(): boolean {
-    return this.anchoredOnBitcoin() && this.bitcoinHeadIsLocal();
+    const fork = this.view?.report.fork;
+    const head = this.bitcoinVerification?.head;
+    if (!this.anchoredOnBitcoin() || !this.bitcoinHeadIsLocal() || !head) return false;
+    return !fork || versionNumber(head) >= fork.version;
   }
 
   private anchoredOnBitcoin(): boolean {
@@ -934,6 +943,12 @@ function createdAtOf(metadataJson: string): string {
 
 function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** The version number of a versionId (`<n>-<hash>`), or 0 when it has none. */
+function versionNumber(versionId: string): number {
+  const n = Number.parseInt(versionId.slice(0, versionId.indexOf("-")), 10);
+  return Number.isFinite(n) ? n : 0;
 }
 
 /** The SHA-256 hex inside a `z…` sha2-256 multihash digest. */
