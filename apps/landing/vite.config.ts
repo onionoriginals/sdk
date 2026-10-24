@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { buildRevision } from './scripts/build-revision';
 import { site } from './src/content';
 
 // Resolve polyfill packages to absolute paths so the aliases also apply to
@@ -25,20 +25,6 @@ const escapeAttr = (s: string) =>
 // constant (site.url): robots.txt and sitemap.xml are static files in
 // public/ that must reference the same origin, so a mismatch fails the build
 // instead of shipping a half-swapped domain (see issue #330).
-// The commit this SPA was built from, for /api/version and the hosted
-// acceptance receipt (#976 B, G6). Railway sets RAILWAY_GIT_COMMIT_SHA at
-// build time; elsewhere git answers. Unknown leaves no meta tag, never a guess.
-function buildRevision(): string | null {
-  const fromEnv = process.env.RAILWAY_GIT_COMMIT_SHA;
-  if (fromEnv && /^[0-9a-f]{7,64}$/.test(fromEnv)) return fromEnv;
-  try {
-    const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    return /^[0-9a-f]{40,64}$/.test(sha) ? sha : null;
-  } catch {
-    return null;
-  }
-}
-
 function injectSiteMeta(): Plugin {
   const tokens: Record<string, string> = {
     '%SITE_TITLE%': site.title,
