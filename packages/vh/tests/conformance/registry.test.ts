@@ -39,7 +39,7 @@ for (const root of roots) {
 
 describe("section 12 conformance registry", () => {
   // The pinned table (originals-spec master 1039c471c) has 159 rows. Open spec PRs propose more,
-  // registered provisionally with `proposal`: #50 row 160, and #51 rows 160 to 174. Ids are stable
+  // registered provisionally with `proposal`: #50 row 160, and #51 rows 161 to 175. Ids are stable
   // across re-pins, so they need not equal table positions; a pinned row records its position in
   // the pinned table, a proposed one its position in its pull request's table.
   test("registers all 159 pinned rows and the proposed ones with unique ids, in table order", () => {

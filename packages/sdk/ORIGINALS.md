@@ -120,7 +120,7 @@ on; it never reports an unanchored Original as current (P7.10). The
   resource must also leave every grant, so pass `editors` without it
   (`STATE_EDITORS` otherwise), and an added resource is in no grant until the
   author grants it. The adding entry may itself grant it, and the grant takes
-  effect from the next entry (P5.15, P5.17; originals-spec #51, open at `8d6326c1b`; PROVISIONAL until it merges). An editor never adds or removes a resource
+  effect from the next entry (P5.15, P5.17; originals-spec #51, open at `3f5a15ea6`; PROVISIONAL until it merges). An editor never adds or removes a resource
   (`outside-grant`, `EDITOR_AUTHOR_ONLY`), even one its grant names. A removed
   resource's earlier versions stay in `resources`, in evidence packages and in
   hosted snapshots, and stay checked (P8.3). The entry's transitions give
@@ -244,7 +244,7 @@ or `stale`. A log obtained at a location establishes freshness (`established`) o
 when the DID's own witnesses approve its latest version, that version's `id`
 names the location it was obtained at, and that is the location the latest
 entry the identity signed names (P7.8, P5.14; owner decision of 23 October
-2026; originals-spec #51, open at `8d6326c1b`; PROVISIONAL until it merges). Watchers are not consulted, so a
+2026; originals-spec #51, open at `3f5a15ea6`; PROVISIONAL until it merges). Watchers are not consulted, so a
 log supported only by watchers is reported not established. Otherwise freshness is `not-established`
 (or `stale`), and the report states where, when and as of which version the
 history was obtained (`identityEvidence.obtained` and each editor's:
@@ -384,7 +384,7 @@ const author = { did: identityDid, verificationMethod: `${movedDid}#orig-2`, ver
   with the evidence the reader holds, so an appended line whose proof does
   not verify cannot choose the request. A reader holding no evidence that
   verifies any entry of that identity can check no proof before retrieving
-  (P5.14; originals-spec #51, open at `8d6326c1b`; PROVISIONAL until it merges): it first asks the location named by the earliest chained
+  (P5.14; originals-spec #51, open at `3f5a15ea6`; PROVISIONAL until it merges): it first asks the location named by the earliest chained
   entry the identity signed (for the author, the genesis entry, which is
   bound to the Original's SCID), and the latest chained entry's location
   only when that gives no usable log. A log found first verifies the
@@ -394,7 +394,7 @@ const author = { did: identityDid, verificationMethod: `${movedDid}#orig-2`, ver
   the other evidence is used. Retrieval alone does not establish its
   freshness: that needs the DID's own witnesses to approve its latest
   version, whose `id` must name the location (P7.8; owner decision of 23
-  October 2026; originals-spec #51, open at `8d6326c1b`; PROVISIONAL until it merges). Otherwise the identity's freshness is not established, and
+  October 2026; originals-spec #51, open at `3f5a15ea6`; PROVISIONAL until it merges). Otherwise the identity's freshness is not established, and
   the report states the URL, when it was retrieved and its latest
   versionId. Either way an unanchored Original is only valid as of its
   checkpoint (P7.10). Editor entries
@@ -775,7 +775,7 @@ received.report.ownership?.output;                           // compare with the
   (`RegtestProvider` does; `QuickNodeProvider` reports mempool entries). A
   pair submitted but not observed (rejected, evicted, or a provider without a
   mempool view) is `submitted-unobserved`, never pending acceptance.
-  P9.18 as originals-spec #51, open at `8d6326c1b`; PROVISIONAL until it merges: a submitted
+  P9.18 as originals-spec #51, open at `3f5a15ea6`; PROVISIONAL until it merges: a submitted
   inscription the network is not observed to hold is "submitted, not
   observed", so a rejected or evicted anchor is not reported as on its way;
   master's P9.18 names only "pending Bitcoin acceptance". Once
@@ -865,7 +865,7 @@ received.report.ownership?.output;                           // compare with the
 - The holder of the anchoring sat can inscribe anything on it, but cannot
   make reading it fail (P9.12). The sat reader (`getSatSnapshot`) reports a
   delegated or encoded inscription as observed but unsupported (with its own
-  metadata, read on a full read: P5.13; originals-spec #51, open at `8d6326c1b`; PROVISIONAL until it merges), and a body
+  metadata, read on a full read: P5.13; originals-spec #51, open at `3f5a15ea6`; PROVISIONAL until it merges), and a body
   or metadata past its byte budget or the transport's response cap (for
   example QuickNode's 1 MiB JSON cap) as observed but unread, and reads on;
   `satEvidence` passes them on flagged `unsupported` (PROVISIONAL). The
@@ -928,7 +928,7 @@ received.report.ownership?.output;                           // compare with the
   the anchor naming a version the verifier has no verified copy of is
   incomplete identity evidence (P5.6). After the anchor such an inscription
   never downgrades the accepted head (P9.12, P9.15; owner decision of 23
-  October 2026; originals-spec #51, open at `8d6326c1b`; PROVISIONAL until it merges): one naming a version the signer's history shows is not that
+  October 2026; originals-spec #51, open at `3f5a15ea6`; PROVISIONAL until it merges): one naming a version the signer's history shows is not that
   DID's is `invalid-entry` (`AUTHOR_VERSION_NOT_IN_HISTORY`, P5.13). For a
   did:vh or did:webvh that is a version numbered at or below the newest
   verified version but not in its history; for a did:btco whose sat was read
@@ -979,7 +979,7 @@ received.report.ownership?.output;                           // compare with the
   `AUTHOR_PLACEMENT_DISPUTED` (missing evidence). A delegated or encoded
   inscription carries its own metadata, which delegation and body encoding do
   not affect: the sat reader reads it, and it is a version candidate like any
-  other (P5.13, P14.12; originals-spec #51, open at `8d6326c1b`; PROVISIONAL until it merges). An inscription whose metadata the reader
+  other (P5.13, P14.12; originals-spec #51, open at `3f5a15ea6`; PROVISIONAL until it merges). An inscription whose metadata the reader
   did not read (past its byte budget) stops the history there with
   `AUTHOR_SAT_READ_INCOMPLETE` (missing evidence); it is never skipped. An entry names its version
   by inscription id (PROVISIONAL); `deactivated: true` is terminal. For an

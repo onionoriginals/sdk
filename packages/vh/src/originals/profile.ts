@@ -211,7 +211,7 @@ function checkParameterMembers(parameters: JsonObject, index: number): void {
 }
 
 /**
- * P14.3 (wording of originals-spec #51 (open, head 8d6326c1b), PROVISIONAL until it merges): no number in an entry is an integer outside the IEEE 754 safe range,
+ * P14.3 (wording of originals-spec #51 (open, head 3f5a15ea6), PROVISIONAL until it merges): no number in an entry is an integer outside the IEEE 754 safe range,
  * however it was written (`1e16`, `9007199254740993.0`): the strict parser
  * refuses such integer literals, and this the other spellings, and entries
  * given already parsed. Plain VH-Log keeps its own number rules.
@@ -231,7 +231,7 @@ function checkSafeIntegers(value: JsonValue): void {
 const PROOF_MEMBERS = ["cryptosuite", "proofPurpose", "proofValue", "type", "verificationMethod"];
 
 /**
- * P14.4, P14.8 (explicit in originals-spec #51 (open, head 8d6326c1b), PROVISIONAL until it merges): an entry proof has exactly type, cryptosuite,
+ * P14.4, P14.8 (explicit in originals-spec #51 (open, head 3f5a15ea6), PROVISIONAL until it merges): an entry proof has exactly type, cryptosuite,
  * verificationMethod, proofPurpose and proofValue; `@context`, `id`,
  * `created`, `expires`, `domain`, `challenge`, `nonce` and `previousProof`
  * are rejected.
