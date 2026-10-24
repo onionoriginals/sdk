@@ -1,5 +1,22 @@
 [
-  { "id": "collector", "kind": "code", "path": "scripts/rev-evidence.mjs" },
-  { "id": "expectations", "kind": "test", "path": "scripts/rev-evidence.test.mjs" },
-  { "id": "observations", "kind": "behavior", "path": ".rev/observations.txt" }
+  {
+    "id": "release-probe",
+    "kind": "test",
+    "path": ".rev/release.mjs"
+  },
+  {
+    "id": "workflow-contract",
+    "kind": "test",
+    "path": "scripts/release-workflow.test.mjs"
+  },
+  {
+    "id": "workflow",
+    "kind": "code",
+    "path": ".github/workflows/release.yml"
+  },
+  {
+    "id": "observations",
+    "kind": "behavior",
+    "path": ".rev/observations.txt"
+  }
 ]

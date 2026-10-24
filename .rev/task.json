@@ -1,8 +1,18 @@
 {
   "version": 1,
-  "task": "Add an observational REV acceptance check to SDK pull requests, with commit-bound evidence collection.",
+  "task": "Validate the SDK 5.1.0 release metadata in PR #997 without publishing or enabling hosted/Bitcoin features.",
   "criteria": [
-    { "id": "revision", "description": "The collector includes the exact checked-out PR head SHA, base revision, implementation diff and supplied behavioral observations; it rejects a mismatched head SHA and reuse of an unchanged task from the base revision." },
-    { "id": "invalid-evidence", "description": "The collector fails for missing behavioral evidence, duplicate source IDs, source files outside the repository, and evidence exceeding the 1 MiB corpus limit, without silently truncating evidence." }
+    {
+      "id": "versions",
+      "description": "SDK 5.1.0, vh 0.3.0, auth 4.0.2 and landing 0.4.0 match workspace lock versions and have matching changelog headings."
+    },
+    {
+      "id": "scope",
+      "description": "Compared with the PR base, changes outside REV evidence are limited to package versions, changelogs, consumed changesets and workspace lock metadata; the dependency resolution graph and runtime code are unchanged."
+    },
+    {
+      "id": "publishing",
+      "description": "Release workflow contract tests pass, preserving explicit release decisions, OIDC authentication and build/import gates. This does not prove npm trust configuration or public-host/Bitcoin acceptance."
+    }
   ]
 }
