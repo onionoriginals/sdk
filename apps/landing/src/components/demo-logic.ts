@@ -220,14 +220,13 @@ export function resolvedCopy(authenticated: boolean): {
 
 /**
  * R7 — the signed-out caveat, returned for the PUBLISH STEP rather than for
- * the log that comes back from it: the guest key is kept in this browser,
- * unencrypted, and publishing needs sign-in (#976 B5; owner decision of
- * 23 October 2026).
+ * the log that comes back from it: publishing needs sign-in (#976 B5). The
+ * guest-key warning is `library.guestKey` (owner decision of 23 October 2026).
  */
 export function publishDurabilityNote(authenticated: boolean, hostedPublication: boolean): string | null {
-  if (authenticated) return null;
-  // Shown in every build (G10). Where no build publishes, it doesn't invite a publish.
-  return hostedPublication ? demo.hosting.temporaryNote : demo.hosting.temporaryNoteNoPublish;
+  // The guest-key warning (G10) is `library.guestKey`, shown once in every
+  // build. This only says publishing needs sign-in, where publishing exists.
+  return authenticated || !hostedPublication ? null : demo.hosting.temporaryNote;
 }
 
 /**

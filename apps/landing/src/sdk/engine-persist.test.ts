@@ -4,7 +4,7 @@ import * as ed from '@noble/ed25519';
 import { MemoryStore, OriginalsSDK } from '@originals/sdk/originals';
 import { DemoEngine } from './engine';
 import { generateArtwork } from './artwork';
-import { BrowserOriginalsStore, browserDatabase } from './browser-store';
+import { BrowserOriginalsStore, browserDatabase, pageStore } from './browser-store';
 import { createLocalAuthor, type LocalAuthor } from './local-author';
 import { BrowserWebVHSigner, ed25519PublicKeyMultibase, userWebvhSlug } from '../auth/webvh';
 import { DOMAIN, SUB, host } from './publish.fixture';
@@ -85,7 +85,8 @@ describe('without IndexedDB (#976 B, G2)', () => {
   for (const authed of [true, false]) {
     test(`${authed ? 'signed in' : 'signed out'}, the work is kept in memory and the snapshot says so`, async () => {
       globalThis.indexedDB = undefined as unknown as IDBFactory;
-      const engine = new DemoEngine({ authed, ...(authed ? { subOrgId: SUB, author: await createLocalAuthor() } : {}) });
+      // As the page builds it (Demo's useEngine).
+      const engine = new DemoEngine({ authed, ...(authed ? { subOrgId: SUB, author: await createLocalAuthor() } : {}), ...pageStore(authed ? SUB : undefined) });
       const created = await engine.create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7));
       expect(created.notKeptAcrossRestarts).toBe(true);
     });
@@ -94,6 +95,17 @@ describe('without IndexedDB (#976 B, G2)', () => {
   test('with IndexedDB, there is no such notice', async () => {
     const created = await signedIn(new IDBFactory(), await createLocalAuthor()).create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7));
     expect(created.notKeptAcrossRestarts).toBeUndefined();
+    const page = pageStore(SUB, new IDBFactory());
+    expect(page.store).toBeInstanceOf(BrowserOriginalsStore);
+    expect(page.notKeptAcrossRestarts).toBe(false);
+  });
+
+  test('a plain engine, as the #996 two-device tests build one, keeps its own memory and is not the guest', async () => {
+    const idb = new IDBFactory();
+    globalThis.indexedDB = idb;
+    const created = await new DemoEngine().create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7));
+    expect(created.notKeptAcrossRestarts).toBeUndefined();
+    expect(await idb.databases()).toEqual([]);
   });
 });
 
@@ -109,10 +121,11 @@ describe('signed out, guest work stays in the guest database', () => {
   test('a reload finds the guest work under the same guest key; no account database is written', async () => {
     const idb = new IDBFactory();
     globalThis.indexedDB = idb;
-    const created = await new DemoEngine().create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7));
+    // The signed-out page's engine, as Demo builds it.
+    const created = await new DemoEngine({ ...pageStore() }).create('Harbor at dawn', 'Orbits', art('Harbor at dawn', 7));
     expect((await idb.databases()).map((d) => d.name)).toEqual([browserDatabase()]);
     // The reload: a new engine on the same browser.
-    const reloaded = new DemoEngine();
+    const reloaded = new DemoEngine({ ...pageStore() });
     const reopened = await reloaded.open(created.did);
     expect(reopened.history.map((h) => h.versionId)).toEqual(created.history.map((h) => h.versionId));
     const next = await reloaded.update('Harbor at dusk', 'Orbits', art('Harbor at dusk', 8));

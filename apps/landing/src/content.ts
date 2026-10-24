@@ -339,6 +339,13 @@ export const demo = {
     resend: 'Send again',
     resendNote:
       'The server never answered the last send. Sending again uses the same signed transactions, so nothing is paid twice.',
+    // Owner decision, 23 October 2026: a refused pair is kept, shown, and abandoned only on request (P9.6).
+    refusedHeading: 'The server refused this submission',
+    refused: (reason: string) =>
+      `Reason: ${reason} The signed transactions are kept in this browser for recovery and are not sent again. Abandon the submission to prepare a new one.`,
+    abandon: 'Abandon this submission',
+    abandonConfirm:
+      'Delete the refused signed transactions from this browser? A new submission is prepared and signed from scratch. Nothing else about the Original changes.',
     labels: {
       'not-anchored': 'Not on Bitcoin',
       'submitted-unobserved': 'Sent, not seen on the network yet',
@@ -685,13 +692,10 @@ export const demo = {
     // R7 — rendered in the PUBLISH step, before the button that publishes, not
     // only on the log that comes back afterwards. It is the one thing an
     // anonymous visitor cannot find out later.
-    // Owner decision of 23 October 2026: signed out, the guest key is kept in
-    // this browser with a warning (#992). Said before anything is signed.
+    // Signed out, where publishing exists: it needs sign-in (#976 B5). The
+    // guest-key warning itself is `library.guestKey`, shown once above.
     temporaryNote:
-      'Signed out, this Original is signed with a guest key saved in this browser with your work, unencrypted: it survives a reload here, and anyone using this browser can sign as this guest. Publishing needs sign-in. Sign in to sign with your own key and publish.',
-    /** The same caveat (G10) for a build where no one can publish yet. */
-    temporaryNoteNoPublish:
-      'Signed out, this Original is signed with a guest key saved in this browser with your work, unencrypted: it survives a reload here, and anyone using this browser can sign as this guest. Sign in to sign with your own key.'
+      'Publishing needs sign-in. Sign in to sign with your own key and publish this Original.'
   },
   /** Last resort: something we did not anticipate, said without a stack trace. */
   failure:
@@ -1051,4 +1055,18 @@ export const library = {
   holder: 'Sat holder output (provisional):',
   currentRead: 'Current according to this Bitcoin read:', yes: 'yes', no: 'no',
   draftSaveError: 'Your draft could not be saved in this browser. Keep this page open and copy your work before leaving.',
+  // P6.6, P9.16: divergent valid branches are an unresolved conflict; no branch is current.
+  forkUnresolved: 'Fork unresolved — no current branch. Two valid histories of this Original are kept and neither was chosen. Editing and anchoring are paused here. Keep both exports: only anchoring a chosen branch on Bitcoin settles a fork, and this app does not offer that yet.',
+  forkHead: 'Fork unresolved — no current branch.',
+  forkNote: 'This browser holds two valid histories of this Original that diverge, and neither was chosen. The saved head above is one of them, not the current one. Editing and anchoring are paused here, because either would extend one branch without you choosing it. Keep both exports: only anchoring a chosen branch on Bitcoin settles a fork, and this app does not offer that yet.',
+  // Round-2 review: a fork judged against Bitcoin, and what is said when Bitcoin could not settle it here.
+  forkUnchecked: 'Bitcoin could not be read to check whether its anchor settled this fork.',
+  forkOtherBranch: 'Bitcoin accepted the other branch. This copy\'s latest versions are on a branch Bitcoin dropped, so editing and anchoring are paused here. Both are kept; keep your evidence exports.',
+  diverged: 'Saved copies of this Original disagree, and neither was chosen. Nothing has been removed; keep your evidence exports.',
+  forkBranches: 'Branches diverge at version',
+  unverifiedLocal: 'Saved evidence could not be verified. Nothing has been removed.',
+  refusedPair: (reason: string) => `The server refused its Bitcoin submission: ${reason} The signed transactions are kept in this browser and are not sent again. Open it to abandon the submission and prepare a new one.`,
+  // Owner decision, 23 October 2026: the guest key is accepted, and said plainly.
+  // The one guest-key warning (owner decision of 23 October 2026; #996, #976 B5 G10): shown once wherever guest mode is.
+  guestKey: 'Guest Originals are signed with a key stored in this browser, unencrypted. Anyone using this browser can sign as this guest author. Sign in to sign with your own key.',
 };

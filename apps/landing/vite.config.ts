@@ -103,11 +103,29 @@ export default defineConfig({
     rolldownOptions: {
       output: {
         codeSplitting: {
-          groups: [{
-            name: 'buffer-polyfill',
-            // Keep this initialization independent of SDK chunks that read Buffer eagerly.
-            test: /(?:node_modules\/(?:buffer|base64-js|ieee754)\/|src\/shims\/buffer-global\.ts$)/
-          }]
+          groups: [
+            {
+              name: 'buffer-polyfill',
+              priority: 20,
+              // Keep this initialization independent of SDK chunks that read Buffer eagerly.
+              test: /(?:node_modules\/(?:buffer|base64-js|ieee754)\/|src\/shims\/buffer-global\.ts$)/
+            },
+            {
+              // The SDK, VH engine and the crypto/Bitcoin libraries they share go
+              // in ONE chunk. Left to automatic splitting, Rolldown put
+              // @originals/sdk's Bitcoin modules (plus @noble/hashes' RIPEMD-160)
+              // in the `engine` chunk and @originals/vh with noble's HashMD base
+              // in the `originals` chunk, each importing the other. When the
+              // entry evaluated `originals` first, `engine` ran with HashMD still
+              // undefined: "Class extends value undefined" and a blank page.
+              // These packages only import each other and leaf modules, so one
+              // chunk cannot form a cycle with the app chunks that use it.
+              // scripts/check-chunks.mjs fails the build check on any cycle.
+              name: 'sdk-core',
+              priority: 10,
+              test: /(?:node_modules\/(?:@noble|@scure|micro-packed|micro-ordinals)\/|packages\/(?:sdk|vh)\/dist\/)/
+            }
+          ]
         }
       }
     },
