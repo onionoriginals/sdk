@@ -351,14 +351,17 @@ function unverifiedLater(entry: LogEntry, inscription: SatInscription, histories
 }
 
 /**
- * A did:vh or did:webvh version that cannot exist: numbered past the profile's
- * limit on versions of one signer DID (P14.13), or after a deactivated version
- * the verifier holds, which is terminal (P9.15; originals-spec #51, merged).
+ * A did:vh or did:webvh version that cannot exist: not of the form
+ * `<number>-<entry hash>` numbered from 1, numbered past the profile's limit
+ * on versions of one signer DID (P14.13; this profile never verifies it,
+ * P7.7), or after a deactivated version the verifier holds, which is terminal (P9.15; originals-spec #51, merged).
  */
 function impossibleVersion(entry: LogEntry, histories: AuthorHistory[]): boolean {
   const ref = signerRefOf(entry);
   const history = ref ? histories.find((h) => h.did === ref.did) : undefined;
   if (!ref || !history || history.method === "did:btco") return false;
+  // `<number>-<entry hash>`, numbered from 1: anything else is no version of a did:vh or did:webvh.
+  if (!/^[1-9][0-9]*-[1-9A-HJ-NP-Za-km-z]+$/.test(ref.versionId)) return true;
   const n = versionNumberOf(ref.versionId);
   const newest = history.versions[history.versions.length - 1];
   return n > ORIGINALS_LIMITS.authorVersions || (newest?.deactivated === true && n > newest.versionNumber);
@@ -483,6 +486,7 @@ export async function assembleFromBitcoin(
     if (satNamedBy(last) !== read.alias.did) return ["names-another-sat"];
     // An entry naming a version its signer's history shows is not that DID's is rejected, here
     // as after the anchor, not incomplete identity evidence (P9.15; originals-spec #51, merged).
+    if (entries.some((e) => impossibleVersion(e, histories))) return ["invalid-entry", "AUTHOR_VERSION_IMPOSSIBLE"];
     const wrong = entries.find((e) => notInHistory(e, i, histories));
     if (wrong) return ["invalid-entry", "AUTHOR_VERSION_NOT_IN_HISTORY"];
     const v = await verify(entries);

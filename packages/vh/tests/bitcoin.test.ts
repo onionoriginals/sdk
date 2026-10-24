@@ -559,6 +559,29 @@ describe("the newest known signer DID version (P7.8, P9.15; originals-spec #47)"
     expect(d.anchoring?.unverifiable).toEqual([]);
   });
 
+  test("C12-189: a malformed did:vh or did:webvh versionId, or one numbered below 1, is impossible: rejected, never blocking", async () => {
+    const { alice, copy, anchor, anchoring, ref, sign } = await anchored();
+    const good = await updateOriginal(anchor, { versionTime: time(40), name: "Valid, later", author: ref, sign });
+    for (const versionId of ["not-a-version", "0-QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DzA3a1Y", "-1-QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DzA3a1Y", "2-not base58!"]) {
+      const odd = await updateOriginal(anchor, { versionTime: time(30), name: "Odd version", author: { ...ref, versionId }, sign });
+      const r = await verify(copy, alice, [sat([anchoring(10), inscribe(odd, 30), inscribe(good, 40)])]);
+      // `0-…` is also older than the anchor's version, which P5.8 rejects first.
+      expect(r.anchoring?.ignored, versionId).toEqual([expect.objectContaining({ versionId: odd.versionId, reason: "invalid-entry" })]);
+      expect(["AUTHOR_VERSION_IMPOSSIBLE", "AUTHOR_VERSION_REGRESSED"], versionId).toContain(r.anchoring?.ignored[0]?.code);
+      expect(r.anchoring?.unverifiable, versionId).toEqual([]);
+      expect(r.head, versionId).toBe(good.versionId);
+    }
+  });
+
+  test("C12-189, C12-184: an entry in the anchoring inscription naming an impossible version is rejected there too, not missing evidence", async () => {
+    const { alice, sign, ref, genesis, renamed } = await anchored();
+    const anchor = await updateOriginal(renamed, { versionTime: time(10), aliases: [SAT], author: { ...ref, versionId: "1001-QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DzA3a1Y" }, sign });
+    const log = [genesis, renamed, anchor];
+    const r = await verify(log, alice, [sat([inscribe(log, 10)])]);
+    expect(r.anchoring?.status).toBe("not-anchored");
+    expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ versionId: anchor.versionId, reason: "invalid-entry", code: "AUTHOR_VERSION_IMPOSSIBLE" })]);
+  });
+
   test("C12-186: P9.15: an inscription naming a version the reader lacks that fails a check not depending on that version is rejected, not unverifiable, and holds nothing back", async () => {
     const { alice, copy, anchor, anchoring, ref, sign } = await anchored();
     const older = alice.entries.slice();
