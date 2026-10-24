@@ -17,14 +17,15 @@ import type { OffChainEvidence } from "@originals/sdk/originals/bitcoin";
 import type { BitcoinSigner, Utxo } from "@originals/sdk";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
-import type { AliasEvidence, AuthorDidEvidence, AuthorRef, OriginalsReport } from "@originals/vh/originals";
+import type { AliasEvidence, AuthorDidEvidence, AuthorRef, OriginalsFork, OriginalsReport } from "@originals/vh/originals";
+import { OriginalsError } from "@originals/vh";
 import { didWebvhLogUrl } from "@originals/vh/webvh";
 import { base58AddressToEd25519Multikey } from "@originals/sdk";
 import { parseJson } from "@originals/vh/json";
 import { ensureAuthorshipAccount, ensureIdentityAccount, fundingSignerAddress, type TurnkeyBitcoinClient } from "../auth/turnkey-session";
 import {
-  AnchoringSubmitError, guardedSign, httpAnchoringTransport, indexedDbOutbox, publishNextEntry, resendWaiting, signingGuard,
-  type AnchoringOutbox, type AnchoringStatus, type AnchoringTransport, type PublishNextResult, type SubmitAnswer,
+  AnchoringSubmitError, abandonRefused, guardedSign, httpAnchoringTransport, indexedDbOutbox, publishNextEntry, resendWaiting, signingGuard,
+  type AnchoringOutbox, type PairRefusal, type AnchoringStatus, type AnchoringTransport, type PublishNextResult, type SubmitAnswer,
 } from "./anchoring";
 import { HttpOrdinalsProvider } from "./http-ordinals-provider";
 import { TurnkeySatSigner } from "./turnkey-sat-signer";
@@ -114,6 +115,14 @@ export interface DemoAssetState {
      */
     unpublished: string[];
   };
+  /**
+   * Set when the store holds divergent valid branches of this Original: an
+   * unresolved conflict with no current branch (P6.6, P9.16). Revise, publish
+   * and anchor are refused while it is set.
+   */
+  fork?: OriginalsFork;
+  /** Set with `fork` when Bitcoin accepted the branch this copy is not on (P9.13, P9.16). */
+  bitcoinOtherBranch?: boolean;
   /** The verification report of the current checkpoint. */
   provenance: unknown;
   bitcoinVerification?: OriginalsReport;
@@ -135,6 +144,21 @@ export class StaleSaveError extends Error {
   constructor(public readonly refused: string, public readonly hostHead: string) {
     super("Someone saved this Original first. Your change is kept as a refused candidate and was not published; reconcile it with the new version.");
     this.name = "StaleSaveError";
+  }
+}
+
+/**
+ * The Original has divergent valid branches and none is current (owner
+ * decision S1; P6.6, P9.16). Revising, publishing or anchoring here would
+ * extend one branch without the author choosing it, so each is refused; both
+ * branches stay kept. The category is the spec's `fork` (section 6).
+ */
+export class ForkUnresolvedError extends OriginalsError {
+  constructor(public readonly fork: OriginalsFork, public readonly bitcoinOtherBranch = false) {
+    super("fork", "FORK_UNRESOLVED", bitcoinOtherBranch
+      ? "Bitcoin accepted the other branch. This copy's latest versions are on a branch Bitcoin dropped, so it cannot be revised or anchored here. Both are kept; keep an evidence export."
+      : "Fork unresolved — no current branch. This Original has two valid histories and neither was chosen, so it cannot be revised, published or anchored here. Both are kept; keep an evidence export.", { fork, bitcoinOtherBranch });
+    this.name = "ForkUnresolvedError";
   }
 }
 
@@ -333,8 +357,67 @@ export class DemoEngine {
     return this.snapshot();
   }
 
+  /**
+   * Off Bitcoin no signed entry settles a fork, and extending one branch here
+   * would choose it for the author without showing the other (P6.6, P9.16).
+   * Read the store's current report, so a branch imported since is seen. For
+   * an Original with a did:btco alias the fork is judged against Bitcoin
+   * first: once the anchor is accepted its branch is the history (P9.16), so a
+   * stale pre-anchor branch does not freeze it. A Bitcoin read that fails
+   * leaves the fork standing.
+   */
+  private async refuseFork(): Promise<void> {
+    if (!this.did || !this.sdk) return;
+    const view = await this.sdk.get(this.did);
+    this.view = view;
+    if (!view.report.fork) return;
+    if (this.btcoAlias() && !this.settledOnBitcoin()) await this.verifyBitcoin();
+    const fork = this.unsettledFork();
+    if (fork) throw new ForkUnresolvedError(fork, this.bitcoinOtherBranch());
+  }
+
+  /** The last fresh Bitcoin read accepted the anchor: its branch is the Original's history (P9.16). */
+  /**
+   * Bitcoin settled the fork for this branch: its accepted head is on the
+   * local branch AND at or past the version where the branches diverge. A
+   * head before the fork (say the anchor, with neither later branch
+   * inscribed) has not chosen a branch, so the fork stands (P6.6, P9.16).
+   */
+  private settledOnBitcoin(): boolean {
+    const fork = this.view?.report.fork;
+    const head = this.bitcoinVerification?.head;
+    if (!this.anchoredOnBitcoin() || !this.bitcoinHeadIsLocal() || !head) return false;
+    return !fork || versionNumber(head) >= fork.version;
+  }
+
+  private anchoredOnBitcoin(): boolean {
+    return this.bitcoinVerification?.anchoring?.status === "anchored";
+  }
+
+  /**
+   * Bitcoin's accepted head is on this copy's branch: the local head is it, or
+   * the local log extends it. Otherwise Bitcoin accepted the other branch, and
+   * extending this one would build on what Bitcoin dropped (P9.13, P9.16).
+   */
+  private bitcoinHeadIsLocal(): boolean {
+    const head = this.bitcoinVerification?.head;
+    return !!head && this.logEntries.some((e) => e.versionId === head);
+  }
+
+  /** Bitcoin settled the fork, but for the branch this copy is not on. */
+  private bitcoinOtherBranch(): boolean {
+    return !!this.view?.report.fork && this.anchoredOnBitcoin() && !this.bitcoinHeadIsLocal();
+  }
+
+  /** The fork that stands: the store's, unless Bitcoin has settled it (P6.6, P9.16). */
+  private unsettledFork(): OriginalsFork | undefined {
+    const fork = this.view?.report.fork;
+    return fork && !this.settledOnBitcoin() ? fork : undefined;
+  }
+
   async update(title: string, style: string, source: string | AssetSource): Promise<DemoAssetState> {
     if (!this.did || !this.view) throw new Error("Create an asset first");
+    await this.refuseFork();
     const { ref, signer } = await this.author();
     // A save whose answer was lost is sent again first, byte for byte (P6.4).
     await this.retryPending();
@@ -448,6 +531,7 @@ export class DemoEngine {
    */
   async reconcile(refused: string, title: string, style: string, source: string | AssetSource): Promise<DemoAssetState> {
     if (!this.did || !this.published()) throw new Error("Publish the Original first");
+    await this.refuseFork();
     const { ref, signer } = await this.author();
     const result = await this.sdk!.reconcile(this.did, {
       host: this.sharedHost(),
@@ -478,6 +562,7 @@ export class DemoEngine {
       throw new FeatureUnavailableError("hostedPublication", "Publishing to the web is not open yet.");
     }
     if (!this.did || !this.view || !this.sdk) throw new Error("Create an asset first");
+    await this.refuseFork();
     const authoring = await this.author();
     const target = this.target ?? this.accountTarget();
     const result = await publishOriginal({
@@ -550,6 +635,9 @@ export class DemoEngine {
     // A pair whose answer was lost goes first, identical, needing no funding or signature (P9.6).
     const resent = await resendWaiting(transport, outbox, this.did);
     if (resent) return this.afterSend(transport, resent);
+    // Only a NEW pair is refused for a fork Bitcoin has not settled; the resend above
+    // sends a pair signed before, byte for byte, and signs nothing (P6.6, P9.6, P9.16).
+    await this.refuseFork();
     const funding = opts?.funding;
     if (!funding || funding.fundingUtxos.length === 0) throw new Error("Anchoring needs funding from your deposit address.");
     const guard = signingGuard({ signal: opts?.signal, sessionActive: opts?.sessionActive });
@@ -599,9 +687,27 @@ export class DemoEngine {
     return this.snapshot();
   }
 
-  /** A pair handed to the server whose answer never came back: it is sent again identically on the next inscribe (P9.6). */
+  /** A pair handed to the server whose answer never came back: it is sent again identically on the next inscribe (P9.6). A refused pair is not pending. */
   async pendingHandOff(): Promise<boolean> {
-    return !!this.did && !!(await this.outbox().get(this.did));
+    if (!this.did) return false;
+    const waiting = await this.outbox().get(this.did);
+    return !!waiting && !waiting.refused;
+  }
+
+  /** The server's reason, when it refused this Original's kept pair (owner decision, 23 October 2026). */
+  async refusedHandOff(): Promise<PairRefusal | null> {
+    if (!this.did) return null;
+    return (await this.outbox().get(this.did))?.refused ?? null;
+  }
+
+  /**
+   * The user's explicit abandon of a refused pair: it is deleted, and the next
+   * inscribe prepares a new one. A pair that is not refused is never abandoned (P9.6).
+   */
+  async abandonRefusedHandOff(): Promise<void> {
+    if (!this.did) throw new Error("Create an asset first");
+    if (!(await abandonRefused(this.outbox(), this.did))) return;
+    this.emit("asset:abandoned", `Abandoned the refused submission for ${short(this.did)}`, { did: this.did });
   }
 
   private readStatus(transport: AnchoringTransport): Promise<AnchoringStatus | null> {
@@ -755,6 +861,8 @@ export class DemoEngine {
       metadata: meta ? { id: meta.id, hash: hexOfDigest(meta.digest), content: contentText(bytesOf(meta.digest)) } : undefined,
       credentials: 0,
       history: this.history(),
+      ...(this.unsettledFork() ? { fork: this.unsettledFork() } : {}),
+      ...(this.bitcoinOtherBranch() ? { bitcoinOtherBranch: true } : {}),
       provenance: view.report,
       bitcoinVerification: this.bitcoinVerification,
       bitcoinReadError: this.bitcoinReadError,
@@ -836,6 +944,12 @@ function createdAtOf(metadataJson: string): string {
 
 function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** The version number of a versionId (`<n>-<hash>`), or 0 when it has none. */
+function versionNumber(versionId: string): number {
+  const n = Number.parseInt(versionId.slice(0, versionId.indexOf("-")), 10);
+  return Number.isFinite(n) ? n : 0;
 }
 
 /** The SHA-256 hex inside a `z…` sha2-256 multihash digest. */
