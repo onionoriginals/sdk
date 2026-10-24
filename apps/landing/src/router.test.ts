@@ -16,12 +16,16 @@ describe('routeForPath', () => {
     expect(routeForPath('/terms-of-use')).toBe('landing');
   });
 
-  // Explore and Your Originals return with web publication and Bitcoin
-  // anchoring on the Originals Protocol (plan 011, PRs 8 and 10).
-  test('/explore and /me paths fall through to the landing page for now', () => {
-    for (const path of ['/explore', '/explore/did%3Avh%3Ax', '/me', '/me/did%3Avh%3Ax']) {
+  // Private recovery does not depend on public Explore or publication gates.
+  test('/explore remains off', () => {
+    for (const path of ['/explore', '/explore/did%3Avh%3Ax']) {
       expect(routeForPath(path)).toBe('landing');
     }
+  });
+
+  test('Your Originals has a private list and reopen route', () => {
+    expect(routeForPath('/me')).toBe('originals');
+    expect(routeForPath('/me/did%3Avh%3Ax')).toBe('originals');
   });
 
   test('unknown path → landing (SPA fallback)', () => {

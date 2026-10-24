@@ -193,12 +193,12 @@ describe('DemoEngine shared-host saves after a lost answer or a refusal (P6.4, P
 
   test('C12-126: after a refusal the engine syncs the host\'s head and reconciles the change against it, never merging', async () => {
     const { h, engine, published } = await publishedEngine({ drop: false });
-    // Another device of the same author saves first.
+    // Another device of the same author, signed in to the same account (one email is one landing account), saves first.
     const internals = engine as unknown as { sdk: OriginalsSDK; did: string; author(): Promise<{ ref: never; signer: never }>; authoring: { evidence: never } };
     const { ref, signer } = await internals.author();
     const other = OriginalsSDK.create({ store: new MemoryStore(), authors: [internals.authoring.evidence] });
     await other.import((await internals.sdk.package(internals.did)).bytes);
-    const otherHost = landingSharedHost({ sdk: other, aliasDid: published.webvhDid!, transport: h.adapterFor('sub-other-device'), read: h.read });
+    const otherHost = landingSharedHost({ sdk: other, aliasDid: published.webvhDid!, transport: h.adapterFor(SUB), read: h.read });
     const first = await other.sign(await other.prepareEdit(internals.did, { parent: (await other.get(internals.did)).checkpoint, name: 'Harbor at noon', author: ref }), signer);
     expect((await other.submit(first, otherHost)).status).toBe('accepted');
     const refusal = await engine.update('Harbor at dusk', 'Orbits', generateArtwork('Harbor at dusk', 'Orbits', 8).svg).then(() => undefined, (e: unknown) => e);

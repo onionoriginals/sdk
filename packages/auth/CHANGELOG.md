@@ -1,5 +1,35 @@
 # @originals/auth
 
+## 4.0.1
+
+### Patch Changes
+
+- 1e8e1a5: Delete the CEL 3 asset implementation and every earlier format (plan 011, PR 5). `@originals/cel` is removed from the repository, along with the SDK's `./cel`, `./v3` and `./asset-envelope` subpaths, the `originals-cel` CLI, `LifecycleManager`, `OriginalsAsset`, the migration subsystem and did:cel resolution. The root `OriginalsSDK` is now the Originals Protocol workflow from `@originals/sdk/originals`, and the did:webvh identity operations (`createDIDOriginal`, `updateDIDOriginal`, `verifyDIDSignature`, `prepareDIDDataForSigning`, `createOriginal`, `updateOriginal`) are exported as plain functions. The DID, credential, storage, Bitcoin, provider and crypto utilities stay, with their shared helpers (`StructuredError` from `@originals/vh`, Multikey, encoding, CBOR, satoshi validation, telemetry, `SatSnapshot` and the Bitcoin Core validators) now owned by the SDK. The byte-signer interface is exported as `ByteSigner`. `@originals/auth` calls the identity functions directly; its API is unchanged.
+- 5924062: Allow verified email login to an existing identity when the parent Turnkey key lacks permission to repair missing wallet accounts. Keep other repair failures visible and leave account creation to the authenticated user session.
+- Updated dependencies [f17156d]
+- Updated dependencies [135154b]
+- Updated dependencies [596562c]
+- Updated dependencies [74fb2de]
+- Updated dependencies [c008e66]
+- Updated dependencies [6317ece]
+- Updated dependencies [c68fac7]
+- Updated dependencies [11bb93f]
+- Updated dependencies [08913a8]
+- Updated dependencies [75bbca5]
+- Updated dependencies [3f9a365]
+- Updated dependencies [47752a0]
+- Updated dependencies [1e8e1a5]
+- Updated dependencies [e900d43]
+- Updated dependencies [dcee1fc]
+- Updated dependencies [cef01ce]
+- Updated dependencies [840d011]
+- Updated dependencies [1832877]
+- Updated dependencies [d018a77]
+- Updated dependencies [902db9a]
+- Updated dependencies [ac61f88]
+- Updated dependencies [bfdd489]
+  - @originals/sdk@5.0.0
+
 ## 4.0.0
 
 ### Major Changes

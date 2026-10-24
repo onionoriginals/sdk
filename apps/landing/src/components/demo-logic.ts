@@ -220,8 +220,9 @@ export function resolvedCopy(authenticated: boolean): {
 
 /**
  * R7 — the signed-out caveat, returned for the PUBLISH STEP rather than for
- * the log that comes back from it: the key is page-scoped and discarded, and
- * publishing needs sign-in (#976 B5).
+ * the log that comes back from it: the guest key is kept in this browser,
+ * unencrypted, and publishing needs sign-in (#976 B5; owner decision of
+ * 23 October 2026).
  */
 export function publishDurabilityNote(authenticated: boolean, hostedPublication: boolean): string | null {
   if (authenticated) return null;

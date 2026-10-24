@@ -9,10 +9,12 @@
  *
  * Every route requires a valid JWT (cookie or Bearer); the store is namespaced
  * by the JWT `sub`, so a user only ever writes/reads under their own account.
- * The one exception is a shared-host save: any signed-in caller may submit a
- * signed entry for an Original hosted in someone's namespace, because the
- * entry's validity under the profile, not the account, authorizes the change
- * (P5.4, P6.7). Accepted files stay the namespace owner's.
+ * The one exception is a shared-host save into someone's namespace: the
+ * entry's validity under the profile authorizes the change (P5.4, P6.7), and
+ * the caller must be the namespace owner or an account whose landing DID the
+ * head state names as author or editor (P5.15; owner decision of 22 October
+ * 2026). Any other caller is refused before its body is read. Accepted files
+ * stay the namespace owner's.
  *
  * Once an Original's asset log is hosted, it changes only through the
  * verifying submit route: a PUT of the asset log is taken only when there is
@@ -32,6 +34,8 @@ import { bytesMatchDigest, classifyHostedKey, hostedContentType, parseWitnessFil
 import { readBodyCapped } from './body';
 import { createSharedSaves, parseSubmission } from './shared-saves';
 
+import type { AnchoringLibrary } from './originals-library';
+
 const HOST_PREFIX = '/api/originals/host/';
 const SUBMIT_PREFIX = '/api/originals/submit/';
 // A submission carries one entry, the bytes it introduces (base64) and its signer's DID logs.
@@ -43,7 +47,6 @@ const MAX_SUBMIT_BYTES = 12 * 1024 * 1024;
 // users hit.
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 
-/** The caller's per-user namespace slug — mirrors userWebvhSlug in src/auth/webvh.ts. */
 function sameBytes(a: Uint8Array | null, b: Uint8Array | null): boolean {
   if (a === null || b === null) return a === b;
   return a.length === b.length && a.every((x, i) => x === b[i]);
@@ -68,6 +71,7 @@ function supersededManifest(manifest: Uint8Array, log: Uint8Array | null): boole
   }
 }
 
+/** The caller's per-user namespace slug — mirrors userWebvhSlug in src/auth/webvh.ts. */
 function userSlug(sub: string): string {
   return `user-${sub.slice(0, 16)}`;
 }
@@ -92,6 +96,7 @@ export interface OriginalsRoutes {
   submit(req: Request, url: URL, clientIp: string): Promise<Response>;
   record: Handler;
   list: Handler;
+  evidence: Handler;
   serve(url: URL): Response | null;
 }
 
@@ -99,8 +104,14 @@ export function createOriginalsRoutes(deps: {
   jwtSecret: string;
   store: OriginalsStore;
   now?: () => number;
+  library?: AnchoringLibrary;
+  // The did:webvh hosts this instance serves (webvh-hosts.ts). Set, a write
+  // or save under any other host is refused (#976 B, G1; P3.6). Unset (dev,
+  // tests), any host is accepted.
+  hosts?: readonly string[];
 }): OriginalsRoutes {
   const { store } = deps;
+  const servedHost = (key: string) => !deps.hosts || deps.hosts.includes(key.split('/', 1)[0]);
   const now = deps.now ?? (() => Date.now());
   // 120 writes/min per resolved client identity (client-ip.ts) — never a raw
   // X-Forwarded-For. A publish issues a handful of writes, so this is ~20
@@ -148,6 +159,7 @@ export function createOriginalsRoutes(deps: {
     // no write can shadow the app's static assets or another author's files.
     const hosted = classifyHostedKey(key, userSlug(sub));
     if (!hosted) return json({ error: 'forbidden_path' }, 403);
+    if (!servedHost(key)) return json({ error: 'forbidden_host' }, 403);
     // Cap the upload in bytes while reading it, declared or chunked (the rate
     // limiter bounds request COUNT, not per-request size).
     const bytes = await readBodyCapped(req, MAX_UPLOAD_BYTES);
@@ -233,6 +245,12 @@ export function createOriginalsRoutes(deps: {
     if (siteKey === null || rest.length > 0 || !ns || !classifyHostedKey(`${siteKey}/originals/asset/did.jsonl`, ns)) {
       return json({ error: 'bad_key' }, 400);
     }
+    if (!servedHost(siteKey)) return json({ error: 'forbidden_host' }, 403);
+    // Only the namespace owner or an account the hosted log names gets its body read; the queued
+    // attempt judges it precisely (shared-saves.ts, owner decisions of 22 and 23 October 2026).
+    const caller = { sub, slug: userSlug(sub) };
+    const refused = sharedSaves.mayCall(siteKey, caller);
+    if (refused) return json(refused.body, refused.http);
     // Counted in bytes as it arrives, declared or chunked (R4).
     const raw = await readBodyCapped(req, MAX_SUBMIT_BYTES);
     if (!raw) return json({ error: 'payload_too_large' }, 413);
@@ -244,7 +262,7 @@ export function createOriginalsRoutes(deps: {
     }
     const parsed = parseSubmission(body);
     if ('http' in parsed) return json(parsed.body, parsed.http);
-    return sharedSaves.submit(siteKey, parsed);
+    return sharedSaves.submit(siteKey, parsed, caller);
   }
 
   // adapter.get: read back an object under this user's account (auth-scoped in
@@ -309,11 +327,31 @@ export function createOriginalsRoutes(deps: {
     return json({ ok: true }, 200);
   };
 
-  const list: Handler = (req) => {
+  const list: Handler = async (req) => {
     const sub = authSub(req);
     if (!sub) return json({ error: 'unauthorized' }, 401);
-    return json({ originals: store.list(sub) });
+    try {
+      const rows = new Map<string, { did: string; title: string; availability: string }>(store.list(sub).map((o) => [o.did, { ...o, availability: 'incomplete' }]));
+      // Discovery reads the caller's durable anchoring tree, even without a
+      // separate summary or with the Bitcoin writer disabled (P9.18).
+      for (const row of await deps.library?.list(sub) ?? []) rows.set(row.did, { ...rows.get(row.did), ...row });
+      return json({ originals: [...rows.values()] }, 200, { 'Cache-Control': 'no-store' });
+    } catch { return json({ error: 'library_unavailable', message: 'Your saved work could not be listed. Please retry.' }, 503); }
   };
 
-  return { hostPut, hostGet, submit, record, list, serve: (url) => store.serve(url) };
+  const evidence: Handler = async (req, url) => {
+    const sub = authSub(req);
+    if (!sub) return json({ error: 'unauthorized' }, 401);
+    try {
+      const bytes = await deps.library?.evidence(sub, url.searchParams.get('did') ?? '');
+      if (!bytes) return json({ error: 'evidence_not_found' }, 404);
+      return new Response(bytes as Uint8Array<ArrayBuffer>, { headers: {
+        'Content-Type': 'application/zip', 'Cache-Control': 'no-store',
+        'Content-Disposition': 'attachment; filename="original.originals.zip"',
+        'X-Content-Type-Options': 'nosniff',
+      } });
+    } catch { return json({ error: 'evidence_unavailable', message: 'This saved evidence needs recovery. No work was removed.' }, 503); }
+  };
+
+  return { hostPut, hostGet, submit, record, list, evidence, serve: (url) => store.serve(url) };
 }

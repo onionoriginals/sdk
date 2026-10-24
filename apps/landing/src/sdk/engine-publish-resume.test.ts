@@ -4,7 +4,7 @@ import * as ed from '@noble/ed25519';
 import { MemoryStore, OriginalsSDK, type HostedFetch, type OriginalsSigner } from '@originals/sdk/originals';
 import { DemoEngine, PublicationNotVerifiedError, type PublishTarget } from './engine';
 import { generateArtwork } from './artwork';
-import { IndexedDbStore } from './idb-store';
+import { BrowserOriginalsStore } from './browser-store';
 import { createLocalAuthor, type LocalAuthor } from './local-author';
 import { BrowserWebVHSigner, ed25519PublicKeyMultibase, userWebvhSlug } from '../auth/webvh';
 import { DOMAIN, SUB, host } from './publish.fixture';
@@ -30,7 +30,7 @@ async function setup() {
       authed: true,
       subOrgId: SUB,
       features: { hostedPublication: true },
-      openStore: () => IndexedDbStore.open(SUB, idb),
+      store: new BrowserOriginalsStore(SUB, idb),
       author: async () => a,
       publishTarget: { upload, read, domain: DOMAIN, slug: userWebvhSlug(SUB), aliasSigner: async () => aliasSigner, ...target },
     });
