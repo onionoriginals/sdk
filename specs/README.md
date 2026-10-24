@@ -34,8 +34,9 @@ for them as provisional wire-format values (P14.1–P14.11). Where section 14
 asked the SDK to change (the `signers/` package directory, no asset witness
 file, entry size in UTF-8 bytes, a 64 MiB resource fetch limit), the SDK
 follows it. The Bitcoin values (P14.12) and the limits (P14.13) are decided by
-the owner (#50), as are the wire rules P14.2, P14.3, P14.5 and P14.8 and the
-ZIP writer binding of P14.10 (#51), and so are JCS, SHA-256 multihash digests
+the owner (#50), as are the parts of P14.2, P14.3, P14.5 and P14.8 that D4
+records (the line format, the 2^53 − 1 bound, `name` in UTF-16 code units, the
+five proof members) and the ZIP writer binding of P14.10 (#51), and so are JCS, SHA-256 multihash digests
 (P14.7), the two cryptosuites and the absence of an asset witness file (D3,
 D4, as #52 states), so they carry no `PROVISIONAL` marker. The entry state
 fields, the package format and its `signers/` layout, the digest encoding,

@@ -12,8 +12,8 @@
  * inscription it cannot read fails resolution: it could be a newer version.
  * A delegated or encoded inscription, which the sat's holder can add, keeps
  * its own metadata (delegation and body encoding do not affect it): the
- * reader reads it and it is a version candidate like any other (P5.13; whether
- * such an inscription counts as a version is open, PROVISIONAL). One whose
+ * reader reads it and it is a version candidate like any other (P5.13, P14.12;
+ * decided, D6). One whose
  * metadata or body was past the reader's byte budget was not read, so
  * resolution is `unresolvable`: it is never skipped.
  *

@@ -71,8 +71,7 @@ export interface SatInscription {
    *   P9.17). Its own metadata, which delegation and body encoding do not
    *   affect, is read as for any inscription: on a did:btco DID's sat it is a
    *   version candidate, and metadata not read (absent) stops the history
-   *   (P5.13; whether such an inscription counts as a version is an open
-   *   question, PROVISIONAL).
+   *   (P5.13, P14.12; decided, D6).
    * - `not-read`: its body and metadata were past the reader's byte budget,
    *   or not asked for. An unread Originals inscription is missing evidence:
    *   the verification fails (`SAT_READ_INCOMPLETE`, P9.17), unless
