@@ -7,15 +7,15 @@
  * It starts Core 31.1 and ord 0.29.0, builds the SPA with
  * VITE_BTC_NETWORK=regtest, VITE_ORIGINALS_BITCOIN_ANCHORING=1 and a short
  * Turnkey session (VITE_TURNKEY_SESSION_SECONDS, default 300), and runs
- * apps/landing/serve.ts with the Turnkey credentials of a NON-PRODUCTION
+ * apps/landing/serve.ts with the Turnkey credentials of an explicitly authorized
  * organization from the environment. The owner signs in by email OTP in a
  * real browser; the session key stays in that browser's IndexedDB, and every
  * signature (the author's entry, the deposit key's commit) is authorized
- * there. This process never sees a key.
+ * there. This process never sees the browser signing keys.
  *
- * Refuses to start unless LIVE_TURNKEY_NON_PRODUCTION_ORG=1 (the owner's
- * statement that TURNKEY_ORGANIZATION_ID is not the production organization)
- * and the three TURNKEY_* values are set. Credentials are never printed or
+ * Requires exactly one organization declaration: LIVE_TURNKEY_NON_PRODUCTION_ORG=1
+ * or LIVE_TURNKEY_PRODUCTION_ORG_APPROVED=1 (separate owner approval),
+ * and the three TURNKEY_* values. Credentials are never printed or
  * written to the receipt; the organization id is recorded as a SHA-256.
  *
  * Commands (stdin):
@@ -56,8 +56,10 @@ function required(name: string): string {
   return value;
 }
 
-if (process.env.LIVE_TURNKEY_NON_PRODUCTION_ORG !== '1') {
-  throw new Error('Set LIVE_TURNKEY_NON_PRODUCTION_ORG=1 to state that TURNKEY_ORGANIZATION_ID is a non-production organization. Production Turnkey credentials need the owner\'s separate approval.');
+const statedNonProduction = process.env.LIVE_TURNKEY_NON_PRODUCTION_ORG === '1';
+const productionOrganizationApproved = process.env.LIVE_TURNKEY_PRODUCTION_ORG_APPROVED === '1';
+if (statedNonProduction === productionOrganizationApproved) {
+  throw new Error('Choose exactly one: LIVE_TURNKEY_NON_PRODUCTION_ORG=1 for a non-production organization, or LIVE_TURNKEY_PRODUCTION_ORG_APPROVED=1 only with the owner\'s explicit approval to use a production organization on regtest.');
 }
 const turnkey = { TURNKEY_API_PUBLIC_KEY: required('TURNKEY_API_PUBLIC_KEY'), TURNKEY_API_PRIVATE_KEY: required('TURNKEY_API_PRIVATE_KEY'), TURNKEY_ORGANIZATION_ID: required('TURNKEY_ORGANIZATION_ID') };
 const sessionSeconds = process.env.VITE_TURNKEY_SESSION_SECONDS ?? '300';
@@ -198,7 +200,7 @@ async function receipt(path?: string) {
     revision: (await Bun.$`git -C ${root} rev-parse HEAD`.text()).trim(),
     dirty: (await Bun.$`git -C ${root} status --porcelain`.text()).trim().length > 0,
     versions: env.versions,
-    turnkey: { organization: `sha256:${hex.encode(sha256(new TextEncoder().encode(turnkey.TURNKEY_ORGANIZATION_ID)))}`, statedNonProduction: true, sessionSeconds: Number(sessionSeconds), apiBase: 'https://api.turnkey.com' },
+    turnkey: { organization: `sha256:${hex.encode(sha256(new TextEncoder().encode(turnkey.TURNKEY_ORGANIZATION_ID)))}`, statedNonProduction, productionOrganizationApproved, sessionSeconds: Number(sessionSeconds), apiBase: 'https://api.turnkey.com' },
     signers: { author: 'Turnkey authorship key (#key-1, Ed25519), via the browser session', commit: 'Turnkey deposit key (P2WPKH), via the browser session', reveal: 'SDK ephemeral key' },
     server: { entry: 'apps/landing/serve.ts', processes: generation, index: 'ord@regtest-local', indexesCompared: false },
     pairs: await recordedPairs(),

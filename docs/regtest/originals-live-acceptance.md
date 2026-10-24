@@ -20,11 +20,15 @@ stage below runs a local landing built with it on.
 ## Stage A: regtest with a real Turnkey signer
 
 **Authorization:**
-- a **non-production** Turnkey organization: parent API public and private
-  keys, and the organization id;
+- a Turnkey organization: parent API public and private keys, and the
+  organization id; non-production is the default;
 - the owner's inbox for the email OTP.
 
-Production Turnkey credentials are not used in this stage.
+A production organization requires separate explicit owner approval, limited
+to Turnkey activity with disposable regtest coins. On 23 October 2026 the
+owner granted that approval for this Stage A run. This does not authorize
+mainnet, testnet, signet or real Bitcoin spending. The receipt records whether
+the organization was declared non-production or production use was approved.
 
 **Budget:** no Bitcoin; regtest coins only. A few dozen Turnkey signing
 activities (each anchoring step is one Ed25519 signature and one
@@ -36,7 +40,10 @@ server and writes the receipt.
 1. Pass the credentials through the shell only. Do not commit them or put
    them in chat:
    ```sh
-   export LIVE_TURNKEY_NON_PRODUCTION_ORG=1   # your statement that this org is not production
+   # Choose exactly one declaration:
+   export LIVE_TURNKEY_NON_PRODUCTION_ORG=1   # for a non-production organization
+   # For separately approved production use instead, unset the above and set:
+   # export LIVE_TURNKEY_PRODUCTION_ORG_APPROVED=1
    export TURNKEY_API_PUBLIC_KEY=… TURNKEY_API_PRIVATE_KEY=… TURNKEY_ORGANIZATION_ID=…
    bun run regtest:install
    BITCOIND_BIN=… ORD_BIN=… bun scripts/regtest/landing-live.ts   # VITE_TURNKEY_SESSION_SECONDS=300 by default

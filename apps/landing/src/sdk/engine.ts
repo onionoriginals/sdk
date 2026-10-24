@@ -287,7 +287,12 @@ export class DemoEngine {
     if (!versionId) throw new Error("Your DID log could not be read.");
     return {
       ref: { did: found.did, verificationMethod, versionId },
-      signer: turnkeyAuthorshipSigner({ client, subOrgId: this.subOrgId, signWith: address, verificationMethod }),
+      signer: turnkeyAuthorshipSigner({
+        // Re-auth replaces the session credential, while this Original and its
+        // author stay fixed (P5.3). Never retain the expired client's key.
+        client: async () => (await openSessionKey(this.subOrgId!)).client as unknown as TurnkeyBitcoinClient,
+        subOrgId: this.subOrgId, signWith: address, verificationMethod,
+      }),
       evidence: { did: found.did, log: entries },
     };
   }
