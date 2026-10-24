@@ -337,6 +337,13 @@ export const demo = {
     resend: 'Send again',
     resendNote:
       'The server never answered the last send. Sending again uses the same signed transactions, so nothing is paid twice.',
+    // Owner decision, 23 October 2026: a refused pair is kept, shown, and abandoned only on request (P9.6).
+    refusedHeading: 'The server refused this submission',
+    refused: (reason: string) =>
+      `Reason: ${reason} The signed transactions are kept in this browser for recovery and are not sent again. Abandon the submission to prepare a new one.`,
+    abandon: 'Abandon this submission',
+    abandonConfirm:
+      'Delete the refused signed transactions from this browser? A new submission is prepared and signed from scratch. Nothing else about the Original changes.',
     labels: {
       'not-anchored': 'Not on Bitcoin',
       'submitted-unobserved': 'Sent, not seen on the network yet',
@@ -877,7 +884,7 @@ export const legal = {
         heading: 'Keys held in your browser',
         body: [
           'The Ed25519 key that signs your own did:webvh identity lives in this browser’s localStorage, together with the DID log it created. Neither is ever sent to the server, and nothing on our side can reissue them: clearing site data, switching browsers, or the browser evicting storage destroys them for good.',
-          'The key that signs the Originals you author while signed in is a different key, and it is not held here: it is an Ed25519 key in your Turnkey sub-organization, which is what lets an Original you published on one device still be carried to Bitcoin from another. Signed out, Originals use a guest authorship key generated and saved in this browser’s IndexedDB. It is separate from every signed-in account and survives refresh on this device; clearing browser data destroys it.',
+          'The key that signs the Originals you author while signed in is a different key, and it is not held here: it is an Ed25519 key in your Turnkey sub-organization, which is what lets an Original you published on one device still be carried to Bitcoin from another. Signed out, Originals use a guest authorship key generated and saved in this browser’s IndexedDB. It is separate from every signed-in account and survives refresh on this device; clearing browser data destroys it. It is stored unencrypted, so anyone using this browser can sign as that guest author.',
           'The backup file you can download is wrapped with your passphrase inside the browser before it is written to disk. No copy of the file, and no copy of the passphrase, reaches the server.',
           'The key authorising your Turnkey session is a non-extractable WebCrypto key in this browser’s IndexedDB — it can be asked to sign, but its private half cannot be read back out, by our code or anyone else’s. localStorage holds only the sub-organization id, the matching public key, and the expiry time.',
           'Unsigned drafts, signed Originals, resource files and verified checkpoints are kept in account-scoped IndexedDB storage on this device. Guest authorship keys are also saved locally so guest work can be revised after refresh. Signing in does not upload local drafts, and signing out keeps them for the same account’s return. Clearing browser data removes these local copies; export evidence for recovery.',
@@ -1033,4 +1040,17 @@ export const library = {
   holder: 'Sat holder output (provisional):',
   currentRead: 'Current according to this Bitcoin read:', yes: 'yes', no: 'no',
   draftSaveError: 'Your draft could not be saved in this browser. Keep this page open and copy your work before leaving.',
+  // P6.6, P9.16: divergent valid branches are an unresolved conflict; no branch is current.
+  forkUnresolved: 'Fork unresolved — no current branch. Two valid histories of this Original are kept and neither was chosen. Editing and anchoring are paused here. Keep both exports: only anchoring a chosen branch on Bitcoin settles a fork, and this app does not offer that yet.',
+  forkHead: 'Fork unresolved — no current branch.',
+  forkNote: 'This browser holds two valid histories of this Original that diverge, and neither was chosen. The saved head above is one of them, not the current one. Editing and anchoring are paused here, because either would extend one branch without you choosing it. Keep both exports: only anchoring a chosen branch on Bitcoin settles a fork, and this app does not offer that yet.',
+  // Round-2 review: a fork judged against Bitcoin, and what is said when Bitcoin could not settle it here.
+  forkUnchecked: 'Bitcoin could not be read to check whether its anchor settled this fork.',
+  forkOtherBranch: 'Bitcoin accepted the other branch. This copy\'s latest versions are on a branch Bitcoin dropped, so editing and anchoring are paused here. Both are kept; keep your evidence exports.',
+  diverged: 'Saved copies of this Original disagree, and neither was chosen. Nothing has been removed; keep your evidence exports.',
+  forkBranches: 'Branches diverge at version',
+  unverifiedLocal: 'Saved evidence could not be verified. Nothing has been removed.',
+  refusedPair: (reason: string) => `The server refused its Bitcoin submission: ${reason} The signed transactions are kept in this browser and are not sent again. Open it to abandon the submission and prepare a new one.`,
+  // Owner decision, 23 October 2026: the guest key is accepted, and said plainly.
+  guestKey: 'Guest Originals are signed with a key stored in this browser. Anyone using this browser can sign as this guest author. Sign in to sign with your own key.',
 };
