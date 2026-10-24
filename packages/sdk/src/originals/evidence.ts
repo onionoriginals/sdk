@@ -11,7 +11,7 @@
  *                                         has witnesses
  *   resources/<digest>                    resource bytes, named by digest
  *
- * P14.10 (decided in originals-spec #51): signer histories are
+ * PROVISIONAL (P14.10, section 14): signer histories are
  * under `signers/`, because editors are signers too, and there is no asset
  * witness file, because asset logs have no witnesses (P9.8). Nothing outside
  * this layout is accepted (P7.5); in particular `authors/` and
@@ -70,7 +70,7 @@ function evidenceError(code: string, message: string): never {
   throw new OriginalsError("invalid-evidence", code, message);
 }
 
-/** The directory of a signer DID's history in a package or hosted layout: `signers/<hex sha256 of the DID>` (P14.10). */
+/** The directory of a signer DID's history in a package or hosted layout: `signers/<hex sha256 of the DID>` (P14.10, PROVISIONAL, section 14). */
 export function signerPath(did: string): string {
   return `signers/${hex.encode(sha256(encoder.encode(did)))}`;
 }

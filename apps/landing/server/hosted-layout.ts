@@ -12,7 +12,7 @@
  *                                                      signers/<64 hex>/did.jsonl|did-witness.json,
  *                                                      resources/<digest>)
  *
- * P14.10, and P14.11 (PROVISIONAL, section 14): each signer
+ * PROVISIONAL (P14.10, P14.11; section 14): each signer
  * DID's history is under `signers/<hex sha256 of the DID>/`, and there is no
  * asset witness file, since asset logs have no witnesses (P9.8). Neither
  * `authors/` nor `asset/did-witness.json` is part of the layout.

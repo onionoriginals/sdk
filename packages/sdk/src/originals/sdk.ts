@@ -148,7 +148,7 @@ export interface CreateInput {
   metadata?: JsonObject;
   resources: ResourceInput[];
   author: AuthorRef;
-  /** Editor grants (P5.15; member names per P14.5). */
+  /** Editor grants (P5.15; PROVISIONAL member names, D4). */
   editors?: EditorGrant[];
 }
 
@@ -1436,7 +1436,7 @@ export class OriginalsSDK {
     const log = text((await put("asset/did.jsonl", true))!, `${base}asset/did.jsonl`);
     // The log is unverified: what it asks for is checked for shape and number before any of it is requested.
     const plan = retrievalPlan(log);
-    // Each signer's log and witness file, and each resource; no asset witness file (P9.8; P14.10).
+    // Each signer's log and witness file, and each resource; no asset witness file (P9.8; P14.10, PROVISIONAL, section 14).
     const planned = 2 * plan.authors.length + plan.digests.length;
     // With identityFetch, up to six more requests per did:webvh signer (P5.14), in the same budget:
     // a log and witness file from up to two locations, then from the latest verified location.

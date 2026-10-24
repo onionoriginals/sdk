@@ -157,7 +157,7 @@ describe("C12-83: untrusted archives are bounded and checked before extraction (
     expect((await sdk.package(did)).bytes).toEqual((await sdk.package(did)).bytes);
   });
 
-  test("C12-153: an archive with a compressed entry or a name over 255 bytes is rejected (P14.10)", () => {
+  test("C12-153: an archive with a compressed entry or a name over 255 bytes is rejected (P14.10, PROVISIONAL, section 14)", () => {
     fails(encodeZip([raw("a", { method: 8 })]), "ARCHIVE_COMPRESSED");
     fails(encodeZip([raw("x".repeat(256))]), "ARCHIVE_PATH");
   });
@@ -226,7 +226,7 @@ describe("C12-83: untrusted archives are bounded and checked before extraction (
     for (const item of bad) expect(() => readManifest(manifest([item])), JSON.stringify(item)).toThrow(expect.objectContaining({ code: "EVIDENCE_MANIFEST" }) as never);
   });
 
-  test("signer DID histories are under signers/<hex sha256 of the DID>/, and no asset witness file is written or read (P14.10, P9.8)", async () => {
+  test("signer DID histories are under signers/<hex sha256 of the DID>/, and no asset witness file is written or read (P14.10, P9.8; PROVISIONAL, section 14)", async () => {
     const { sdk, alice, did } = await harbor();
     const files = readZip((await sdk.package(did)).bytes);
     const hex = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(alice.did)))].map((b) => b.toString(16).padStart(2, "0")).join("");

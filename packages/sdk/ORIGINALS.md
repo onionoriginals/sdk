@@ -206,7 +206,7 @@ every signer (the author and each editor that signed an entry, P7.1) under
 `signers/<hex sha256 of the DID>/` (`did.jsonl`, and `did-witness.json` where
 that DID's method has witnesses; `signerPath(did)`), and the resource bytes
 under `resources/<digest>`. There is no asset witness file: asset logs have
-no witnesses (P9.8). P14.10 (BREAKING): the directory was `authors/` and an
+no witnesses (P9.8). PROVISIONAL (P14.10, section 14; BREAKING): the directory was `authors/` and an
 `asset/did-witness.json` was written; neither is written or read any more,
 and a package or hosted snapshot carrying them is rejected
 (`EVIDENCE_LAYOUT`). The manifest records the packager's head, so a

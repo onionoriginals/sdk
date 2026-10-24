@@ -110,7 +110,7 @@ describe('originals routes — auth gating', () => {
     expect((await shadow('magby.originals.build/user-sub-1/did.jsonl')).status).toBe(200);
     expect((await shadow('magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/did.jsonl')).status).toBe(200);
     expect((await shadow('magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/originals-evidence.json')).status).toBe(200);
-    // P14.10: signer DID histories are under signers/, and an
+    // P14.10 (PROVISIONAL, section 14): signer DID histories are under signers/, and an
     // asset log has no witness file (P9.8), so neither authors/ nor asset/did-witness.json is part of the layout.
     const hex = 'a'.repeat(64);
     expect((await shadow(`magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/asset/did-witness.json`)).status).toBe(403);
