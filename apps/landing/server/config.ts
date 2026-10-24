@@ -24,7 +24,7 @@
 import { mkdirSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import { isLikelyDeployed } from './deploy-env';
-import { isBitcoinConfigured, serverBtcNetwork, isLoopbackServiceUrl } from './bitcoin';
+import { isBitcoinConfigured, serverBtcNetwork, isLoopbackServiceUrl, serverAnchoringEnabled } from './bitcoin';
 
 /** Block notifications are hints; QuickNode still verifies commit confirmation. */
 export function resolveBlockEventsUrl(env: Record<string, string | undefined>): string | undefined {
@@ -315,6 +315,32 @@ export function validateConfig(input: ConfigInput): ConfigIssue[] {
       'VITE_BTC_NETWORK',
       `VITE_BTC_NETWORK is unset/off while the server is fully configured for ${serverChain} — the real path is silently disabled for every visitor. Set it and REBUILD the SPA (Vite bakes it at build time).`
     );
+  }
+
+  // bitcoinAnchoring (plan 011, PR 10b). Off on both halves by default. On,
+  // it needs the Bitcoin routes, and the bundle and the server must agree, or
+  // the page offers a step the server refuses (or hides one it would take).
+  // On a deployment it is reported as an error whatever else holds: turning
+  // it on there is the owner's release gate (#975), not a configuration.
+  const anchoringServer = serverAnchoringEnabled(env);
+  const anchoringBrowser = env.VITE_ORIGINALS_BITCOIN_ANCHORING === '1';
+  if (anchoringServer && !serverReal) {
+    report('ORIGINALS_BITCOIN_ANCHORING', 'ORIGINALS_BITCOIN_ANCHORING=1 but the server\'s Bitcoin routes are not mounted — nothing can be anchored.');
+  }
+  if (anchoringServer !== anchoringBrowser) {
+    report(
+      'VITE_ORIGINALS_BITCOIN_ANCHORING',
+      anchoringServer
+        ? 'ORIGINALS_BITCOIN_ANCHORING=1 but the bundle was built without VITE_ORIGINALS_BITCOIN_ANCHORING=1 — no visitor is offered anchoring.'
+        : 'VITE_ORIGINALS_BITCOIN_ANCHORING=1 but ORIGINALS_BITCOIN_ANCHORING is not 1 — the page offers anchoring the server refuses.'
+    );
+  }
+  if (anchoringServer && deployed) {
+    issues.push({
+      key: 'ORIGINALS_BITCOIN_ANCHORING',
+      severity: 'error',
+      message: 'Bitcoin anchoring is on for a deployed instance. It stays off until the owner\'s release gate passes (#975); unset ORIGINALS_BITCOIN_ANCHORING unless the owner approved this deployment.',
+    });
   }
 
   // The did:webvh host (#529). `demoHost()` in the SPA falls back to

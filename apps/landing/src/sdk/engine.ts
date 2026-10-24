@@ -12,12 +12,22 @@
  * `inscribe` refuse by name rather than doing something else.
  */
 import { sha256 } from "@noble/hashes/sha2.js";
-import { MemoryStore, OriginalsSDK, type EditInput, type HostedFetch, type OriginalView, type OriginalsSigner, type SharedHost, type SubmitResult } from "@originals/sdk/originals";
+import { MemoryStore, OriginalsSDK, btcoAlias, type EditInput, type HostedFetch, type OriginalView, type OriginalsSigner, type SharedHost, type SubmitResult } from "@originals/sdk/originals";
+import type { OffChainEvidence } from "@originals/sdk/originals/bitcoin";
+import type { BitcoinSigner, Utxo } from "@originals/sdk";
+import * as btc from "@scure/btc-signer";
+import { hex } from "@scure/base";
 import type { AliasEvidence, AuthorDidEvidence, AuthorRef } from "@originals/vh/originals";
 import { didWebvhLogUrl } from "@originals/vh/webvh";
 import { base58AddressToEd25519Multikey } from "@originals/sdk";
 import { parseJson } from "@originals/vh/json";
-import { ensureAuthorshipAccount, ensureIdentityAccount, type TurnkeyBitcoinClient } from "../auth/turnkey-session";
+import { ensureAuthorshipAccount, ensureIdentityAccount, fundingSignerAddress, type TurnkeyBitcoinClient } from "../auth/turnkey-session";
+import {
+  AnchoringSubmitError, guardedSign, httpAnchoringTransport, indexedDbOutbox, publishNextEntry, resendWaiting, signingGuard,
+  type AnchoringOutbox, type AnchoringStatus, type AnchoringTransport, type PublishNextResult, type SubmitAnswer,
+} from "./anchoring";
+import { HttpOrdinalsProvider } from "./http-ordinals-provider";
+import { TurnkeySatSigner } from "./turnkey-sat-signer";
 import { DEFAULT_WEBVH_DOMAIN, TurnkeyWebVHSigner, readUserWebVHDid, userWebvhSlug, type WebVHSigner } from "../auth/webvh";
 import { FEATURES, type Feature } from "./features";
 import { publishOriginal, type HostedUpload } from "./publish";
@@ -86,6 +96,23 @@ export interface DemoAssetState {
     feeRate?: number;
     explorerUrl?: string;
   };
+  /**
+   * The Original's anchoring on Bitcoin (plan 011, PR 10b), reported in parts
+   * (section 7): the server's status (publication label, next step, heads,
+   * the sat's holder), what the last submission did, and what Bitcoin will
+   * not hold (P9.18).
+   */
+  anchoring?: {
+    status: AnchoringStatus | null;
+    lastSent?: SubmitAnswer;
+    offChain?: OffChainEvidence;
+    /**
+     * Entries committed in this browser after the head Bitcoin accepts, oldest
+     * first: still to inscribe, one per block (P9.13). The server's status
+     * describes its own copy and cannot see these until they are submitted.
+     */
+    unpublished: string[];
+  };
   /** The verification report of the current checkpoint. */
   provenance: unknown;
 }
@@ -125,7 +152,7 @@ interface LogLine {
     operation: string;
     author: { verificationMethod: string };
     transitions: Array<{ resource: string; to: string | null }>;
-    asset: { name: string };
+    asset: { name: string; aliases?: string[] };
   };
 }
 
@@ -173,6 +200,10 @@ export class DemoEngine {
   private readonly target?: PublishTarget;
   private alias: AliasEvidence | null = null;
 
+  private readonly networkFlag: BtcNetworkFlag;
+  private readonly anchoringOpts: AnchoringOptions;
+  private anchoring: Omit<NonNullable<DemoAssetState["anchoring"]>, "unpublished"> | undefined = undefined;
+
   constructor(opts?: {
     authed?: boolean;
     subOrgId?: string;
@@ -181,14 +212,26 @@ export class DemoEngine {
     features?: Partial<Record<Feature, boolean>>;
     /** Overrides the signed-in account's host and Turnkey identity key, for tests. */
     publishTarget?: PublishTarget;
+    /**
+     * Overrides the signed-in author (Turnkey `#key-1`), for tests and the
+     * regtest journey, which sign with local keys and say so.
+     */
+    author?: Authoring;
+    /** Overrides how anchoring reaches the network, stores its outbox and signs the commit; for tests and the regtest journey. */
+    anchoring?: AnchoringOptions;
   }) {
     this.authed = opts?.authed ?? false;
     this.subOrgId = opts?.subOrgId;
     this.features = { ...FEATURES, ...opts?.features };
     this.target = opts?.publishTarget;
+    this.authorOverride = opts?.author;
+    this.anchoringOpts = opts?.anchoring ?? {};
+    this.networkFlag = opts?.networkFlag ?? btcNetwork();
     (globalThis as Record<string, unknown>).__originalsDemo = this;
-    this.tier = demoTier(opts?.networkFlag ?? btcNetwork(), this.authed);
+    this.tier = demoTier(this.networkFlag, this.authed);
   }
+
+  private readonly authorOverride?: Authoring;
 
   on(listener: Listener): () => void {
     this.listeners.add(listener);
@@ -212,7 +255,7 @@ export class DemoEngine {
   /** The author this engine signs as, set up once per engine. */
   private async author(): Promise<Authoring> {
     if (this.authoring) return this.authoring;
-    this.authoring = this.authed ? await this.signedInAuthor() : await createLocalAuthor();
+    this.authoring = this.authorOverride ?? (this.authed ? await this.signedInAuthor() : await createLocalAuthor());
     this.setAuthorEvidence(this.authoring.evidence);
     this.sdk = OriginalsSDK.create({
       store: this.store,
@@ -244,7 +287,12 @@ export class DemoEngine {
     if (!versionId) throw new Error("Your DID log could not be read.");
     return {
       ref: { did: found.did, verificationMethod, versionId },
-      signer: turnkeyAuthorshipSigner({ client, subOrgId: this.subOrgId, signWith: address, verificationMethod }),
+      signer: turnkeyAuthorshipSigner({
+        // Re-auth replaces the session credential, while this Original and its
+        // author stay fixed (P5.3). Never retain the expired client's key.
+        client: async () => (await openSessionKey(this.subOrgId!)).client as unknown as TurnkeyBitcoinClient,
+        subOrgId: this.subOrgId, signWith: address, verificationMethod,
+      }),
       evidence: { did: found.did, log: entries },
     };
   }
@@ -459,10 +507,149 @@ export class DemoEngine {
     };
   }
 
-  /** Bitcoin anchoring returns with plan 011, PR 10. */
-  inscribe(_opts?: unknown): Promise<DemoAssetState> {
-    return Promise.reject(new FeatureUnavailableError("bitcoinAnchoring", "Anchoring on Bitcoin returns with the Bitcoin phase of the Originals Protocol."));
+  /**
+   * Anchor the Original on a sat, or publish its next entry on that sat
+   * (plan 011, PR 10b; behind `bitcoinAnchoring`, off). Signed-in authors
+   * only: the commit is funded from, and returns the sat to, the account's
+   * bound deposit address.
+   *
+   * The first time, the sat is the first sat of `fundingUtxos[0]`, and the
+   * author key signs the anchoring entry that names it (P9.10). After that
+   * the sat's current output is input 0 (P9.12). Then the next entry Bitcoin
+   * can accept is prepared, verified (P9.18), signed by the deposit key and
+   * handed to the server (anchoring.ts). Each signature is checked against
+   * the session first (`sessionActive`) and against `signal`; a cancel or an
+   * expiry before the hand-off sends nothing. A retry never re-signs a
+   * committed entry: the anchoring entry, once committed, stays, and the next
+   * call goes straight to the pair.
+   */
+  async inscribe(opts?: {
+    funding?: { fundingUtxos: Utxo[]; changeAddress: string; signingClient?: TurnkeyBitcoinClient };
+    signal?: AbortSignal;
+    sessionActive?: () => boolean;
+  }): Promise<DemoAssetState> {
+    if (!this.features.bitcoinAnchoring) {
+      throw new FeatureUnavailableError("bitcoinAnchoring", "Anchoring on Bitcoin is not open yet.");
+    }
+    if (!this.did || !this.view || !this.sdk) throw new Error("Create an asset first");
+    if (!this.authed && !this.authorOverride) throw new Error("Sign in to anchor: the sat is funded from, and returned to, your own address.");
+    const network = this.anchoringNetwork();
+    const transport = this.anchoringTransport();
+    const outbox = this.outbox();
+    // A pair whose answer was lost goes first, identical, needing no funding or signature (P9.6).
+    const resent = await resendWaiting(transport, outbox, this.did);
+    if (resent) return this.afterSend(transport, resent);
+    const funding = opts?.funding;
+    if (!funding || funding.fundingUtxos.length === 0) throw new Error("Anchoring needs funding from your deposit address.");
+    const guard = signingGuard({ signal: opts?.signal, sessionActive: opts?.sessionActive });
+    const { ref, signer } = await this.author();
+    const script = p2wpkhScript(funding.changeAddress, network);
+    let fundingUtxos = funding.fundingUtxos.map((u) => ({ ...u, scriptPubKey: u.scriptPubKey ?? script }));
+
+    const alias = this.btcoAlias();
+    if (!alias) {
+      // The anchoring entry: the author key names the sat (P9.10). Once committed it is never signed again.
+      const sat = await transport.provider.getFirstSatOfOutput!(fundingUtxos[0]);
+      const anchored = await guardedSign(guard, () => this.sdk!.anchor(this.did!, { parent: this.view!.checkpoint, author: ref, signer, sat: btcoAlias(network, sat) }));
+      this.view = anchored.original;
+      await this.refresh();
+      this.emit("asset:anchoring", `Anchoring ${short(this.did)} to sat ${sat}`, { sat, checkpoint: this.view.checkpoint });
+    } else {
+      fundingUtxos = await this.satFirst(alias, fundingUtxos, transport, script);
+    }
+
+    const satSigner: BitcoinSigner = this.anchoringOpts.satSigner ?? (() => {
+      if (!funding.signingClient) throw new Error("Sign in again: the deposit key signs the commit.");
+      return new TurnkeySatSigner({ client: funding.signingClient, signWith: fundingSignerAddress(funding.changeAddress) });
+    })();
+    const feeRate = await transport.provider.estimateFee(1);
+    const result = await publishNextEntry({
+      sdk: this.sdk, did: this.did, network, transport, outbox, satSigner, changeAddress: funding.changeAddress, fundingUtxos, feeRate,
+      index: this.anchoringOpts.index ?? `ord@landing-${network}`, guard,
+    });
+    return this.afterSend(transport, result);
   }
+
+  private async afterSend(transport: AnchoringTransport, result: PublishNextResult): Promise<DemoAssetState> {
+    this.lastSubmission = { broadcast: result.sent.broadcast };
+    this.anchoring = { status: await this.readStatus(transport), lastSent: result.sent, offChain: result.offChain };
+    this.view = await this.sdk!.get(this.did!);
+    await this.refresh();
+    this.emit("asset:inscribed", `${result.resent ? "Resent" : "Sent"} ${short(result.sent.versionId)} for inscription (${result.sent.broadcast})`, {
+      versionId: result.sent.versionId, commitTxId: result.sent.commitTxId, revealTxId: result.sent.revealTxId, broadcast: result.sent.broadcast,
+    });
+    return this.snapshot();
+  }
+
+  /** Re-read the anchoring from the server: the publication label and next step (P9.18). */
+  async anchoringStatus(): Promise<DemoAssetState> {
+    if (!this.did) throw new Error("Create an asset first");
+    this.anchoring = { ...this.anchoring, status: await this.readStatus(this.anchoringTransport()) };
+    return this.snapshot();
+  }
+
+  /** A pair handed to the server whose answer never came back: it is sent again identically on the next inscribe (P9.6). */
+  async pendingHandOff(): Promise<boolean> {
+    return !!this.did && !!(await this.outbox().get(this.did));
+  }
+
+  private readStatus(transport: AnchoringTransport): Promise<AnchoringStatus | null> {
+    return transport.status(this.did!).catch((error) => {
+      if (error instanceof AnchoringSubmitError && error.status === 404) return null;
+      throw error;
+    });
+  }
+
+  /** After Bitcoin's accepted head; before the anchor is accepted, from the anchoring entry on (P9.17). */
+  private unpublished(status: AnchoringStatus | null): string[] {
+    const ids = this.logEntries.map((e) => e.versionId);
+    const accepted = status?.heads.accepted;
+    if (accepted && ids.includes(accepted)) return ids.slice(ids.indexOf(accepted) + 1);
+    const anchor = this.logEntries.findIndex((e) => e.state.asset.aliases?.some((a) => a.startsWith("did:btco:")));
+    return anchor < 0 ? [] : ids.slice(anchor);
+  }
+
+  private btcoAlias(): string | undefined {
+    return this.view?.state.aliases.find((a) => a.startsWith("did:btco:"));
+  }
+
+  /**
+   * Input 0 is the output holding the sat (P9.12): the one the server reports
+   * at this account's address, or, before the server has seen the anchor (a
+   * retry after a cancel or an expiry), the candidate whose first sat it is.
+   */
+  private async satFirst(alias: string, utxos: FundingUtxo[], transport: AnchoringTransport, script: string): Promise<FundingUtxo[]> {
+    const status = await this.readStatus(transport);
+    if (status?.satUtxo) {
+      const holder = { ...status.satUtxo, scriptPubKey: script };
+      return [holder, ...utxos.filter((u) => u.txid !== holder.txid || u.vout !== holder.vout)];
+    }
+    if (status && status.heldByThisAccount === false) {
+      throw new Error("The sat is no longer at your address. Whoever holds it now is the one who can inscribe next.");
+    }
+    const sat = alias.slice(alias.lastIndexOf(":") + 1);
+    for (const [k, u] of utxos.slice(0, 25).entries()) {
+      const first = await transport.provider.getFirstSatOfOutput!(u).catch(() => null);
+      if (first === sat) return [u, ...utxos.filter((_, j) => j !== k)];
+    }
+    throw new Error(`None of your deposit's outputs holds sat ${sat}, the one this Original is anchored to.`);
+  }
+
+  private anchoringNetwork(): "mainnet" | "regtest" {
+    const network = this.anchoringOpts.network ?? (this.networkFlag === "mainnet" || this.networkFlag === "regtest" ? this.networkFlag : undefined);
+    if (!network) throw new Error("Anchoring runs on regtest and mainnet only.");
+    return network;
+  }
+
+  private anchoringTransport(): AnchoringTransport {
+    return (this.transport ??= this.anchoringOpts.transport ?? httpAnchoringTransport({ provider: new HttpOrdinalsProvider() }));
+  }
+  private transport?: AnchoringTransport;
+
+  private outbox(): AnchoringOutbox {
+    return (this.outboxStore ??= this.anchoringOpts.outbox ?? indexedDbOutbox());
+  }
+  private outboxStore?: AnchoringOutbox;
 
   /** The Original's evidence package (a ZIP), verifiable offline by anyone (spec section 7). */
   async evidencePackage(): Promise<Uint8Array> {
@@ -478,11 +665,14 @@ export class DemoEngine {
     const meta = rest.find((r) => r.id === "metadata.json");
     const versionOf = (id: string) => view.resources.filter((r) => r.resource === id).length;
     const bytesOf = (digest: string) => this.bytes.get(digest) ?? new Uint8Array();
-    const alias = state.aliases[0];
+    const alias = state.aliases.find((a) => a.startsWith("did:webvh:"));
+    const btco = state.aliases.find((a) => a.startsWith("did:btco:"));
     return {
-      layer: alias ? "did:webvh" : "did:vh",
+      layer: btco ? "did:btco" : alias ? "did:webvh" : "did:vh",
       did: this.did,
       ...(alias ? { webvhDid: alias, webvhLogUrl: didWebvhLogUrl(alias) } : {}),
+      ...(btco ? { btcoDid: btco } : {}),
+      ...(this.anchoring ? { anchoring: { ...this.anchoring, unpublished: this.unpublished(this.anchoring.status) } } : {}),
       author: view.report.identityEvidence.author ?? "",
       resource: {
         id: primary.id,
@@ -520,6 +710,26 @@ export class DemoEngine {
       if (bytes) this.bytes.set(v.digest, bytes);
     }
   }
+}
+
+/** A funding UTXO with its script, as the commit's witness UTXO needs. */
+type FundingUtxo = Utxo & { scriptPubKey: string };
+
+export interface AnchoringOptions {
+  transport?: AnchoringTransport;
+  outbox?: AnchoringOutbox;
+  /** Signs the commit; defaults to the Turnkey deposit key. */
+  satSigner?: BitcoinSigner;
+  network?: "mainnet" | "regtest";
+  /** The index named on the browser's sat reads (P9.11). */
+  index?: string;
+}
+
+/** The bound deposit address's script, for the funding inputs' witness UTXOs. */
+function p2wpkhScript(address: string, network: "mainnet" | "regtest"): string {
+  const decoded = btc.Address(network === "regtest" ? { ...btc.TEST_NETWORK, bech32: "bcrt" } : btc.NETWORK).decode(address);
+  if (!decoded || decoded.type !== "wpkh") throw new Error("The deposit address must be P2WPKH.");
+  return hex.encode(btc.OutScript.encode(decoded as Parameters<typeof btc.OutScript.encode>[0]));
 }
 
 /** A public read of a hosted file, as any reader makes it. */

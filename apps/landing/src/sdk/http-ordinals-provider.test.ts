@@ -24,6 +24,22 @@ describe('HttpOrdinalsProvider', () => {
     expect(calls[0].body).toEqual({ txid: 'a'.repeat(64), vout: 0 });
   });
 
+  test('getTransactionStatus reads /api/btc/tx, for the anchoring writer\'s sat reads (plan 011, PR 10b)', async () => {
+    const { impl, calls } = mockFetch({ '/api/btc/tx': { confirmed: false, confirmations: 0, inMempool: true } });
+    const p = new HttpOrdinalsProvider({ baseUrl: '', fetchImpl: impl });
+    expect(await p.getTransactionStatus('b'.repeat(64))).toEqual({ confirmed: false, confirmations: 0, inMempool: true });
+    expect(calls[0].url).toBe(`/api/btc/tx?txid=${'b'.repeat(64)}`);
+  });
+
+  test('getSatSnapshot asks for Originals bodies only when the writer does (P9.12)', async () => {
+    const snapshot = { network: 'regtest', sat: '5', publications: [], ownership: { owner: null, satpoint: null } };
+    const { impl, calls } = mockFetch({ '/api/btc/sat-snapshot/5': snapshot });
+    const p = new HttpOrdinalsProvider({ baseUrl: '', fetchImpl: impl });
+    await p.getSatSnapshot('5', { bodies: 'originals' });
+    await p.getSatSnapshot('5');
+    expect(calls.map((c) => c.url)).toEqual(['/api/btc/sat-snapshot/5?bodies=originals', '/api/btc/sat-snapshot/5']);
+  });
+
   test('estimateFee hits /api/btc/fee', async () => {
     const { impl } = mockFetch({ '/api/btc/fee': { feeRate: 4 } });
     const p = new HttpOrdinalsProvider({ baseUrl: '', fetchImpl: impl });

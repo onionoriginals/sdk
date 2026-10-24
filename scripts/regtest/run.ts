@@ -24,12 +24,12 @@ const check = Bun.spawn([process.execPath, 'run', 'typecheck:regtest'], {
 });
 if (await check.exited) throw new Error('Regtest harness typecheck failed');
 
-// The creator journey (create, publish, inscribe, fault recovery) and its
-// browser variant ran the CEL 3 flow, which plan 011 PR 5 deleted. They return
-// with Bitcoin anchoring on the Originals Protocol (PR 10). Until then this
-// runs the generic Core/ord checks below.
+// The CEL 3 creator journey and its browser variant were deleted with plan 011
+// PR 5. The landing's anchoring path now runs below (landing-anchor.ts) with the
+// landing's engine in this process; a real browser with a live Turnkey session
+// is #975's stage A (docs/regtest/originals-live-acceptance.md), owner-run.
 if (process.argv.includes('--browser')) {
-  console.log('regtest: the browser creator journey returns with Bitcoin anchoring (plan 011, PR 10); nothing to run.');
+  console.log('regtest: the real-browser journey with live Turnkey signing is #975 stage A, run by the owner (docs/regtest/originals-live-acceptance.md); nothing to run here.');
   process.exit(0);
 }
 
@@ -82,3 +82,19 @@ const originalsRestart = Bun.spawn([process.execPath, 'scripts/regtest/originals
   stdout: 'inherit', stderr: 'inherit',
 });
 if (await originalsRestart.exited) process.exit(originalsRestart.exitCode ?? 1);
+
+// The landing's anchoring path (plan 011 PR 10b, #975): apps/landing/serve.ts with
+// ORIGINALS_BITCOIN_ANCHORING=1 and the landing's own engine over HTTP; anchor,
+// reinscribe the Original's own sat, the server killed between commit and reveal
+// and a fresh one resuming the identical pair, a reorg, a fresh reader. Local
+// keys stand in for Turnkey and say so in the receipt.
+const landingAnchor = Bun.spawn([process.execPath, 'scripts/regtest/landing-anchor.ts'], {
+  cwd: root,
+  env: {
+    ...process.env, ...binaries,
+    ...(restartReceipt && !process.env.ORIGINALS_REGTEST_LANDING_EVIDENCE ? { ORIGINALS_REGTEST_LANDING_EVIDENCE: `${restartReceipt}-landing-anchor.json` } : {}),
+    ...(process.env.REGTEST_LOGS_DIR ? { ORIGINALS_REGTEST_LOGS: `${process.env.REGTEST_LOGS_DIR}/landing-anchor` } : {}),
+  },
+  stdout: 'inherit', stderr: 'inherit',
+});
+if (await landingAnchor.exited) process.exit(landingAnchor.exitCode ?? 1);

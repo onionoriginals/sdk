@@ -14,8 +14,7 @@ import {
   signingStatus,
   restoreDecision,
   type SigningStatus,
-  type TurnkeyBitcoinClient,
-} from './turnkey-session';
+  type TurnkeyBitcoinClient, sessionExpirationSeconds } from './turnkey-session';
 import type { SessionKeyHandle } from './turnkey-browser-client';
 import { browserKeyStorage } from './browser-storage';
 import { DurableHostingStorageAdapter } from '../sdk/durable-hosting-adapter';
@@ -213,6 +212,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         subOrgId: result.subOrgId,
         verificationToken: result.verificationToken,
         signer: bound.signer,
+        expirationSeconds: sessionExpirationSeconds(),
       });
       const storage = browserKeyStorage();
       if (storage) writeSessionMeta(storage, meta);

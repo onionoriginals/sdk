@@ -8,6 +8,7 @@
  */
 
 import * as btc from '@scure/btc-signer';
+import { hex, base64 } from '@scure/base';
 import { StructuredError } from '../../utils/telemetry.js';
 import * as ordinals from 'micro-ordinals';
 import { schnorr } from '@noble/curves/secp256k1.js';
@@ -242,8 +243,8 @@ export async function createRevealTransaction(
   }
 
   const scureNetwork = getScureNetwork(network);
-  const internalKey = Buffer.from(revealPublicKey, 'hex');
-  const privKey = Buffer.from(revealPrivateKey, 'hex');
+  const internalKey = hex.decode(revealPublicKey);
+  const privKey = hex.decode(revealPrivateKey);
 
   // Reconstruct the committed P2TR payment from the single-leaf inscription
   // tree. p2tr_ord_reveal returns `{ type: 'tr', script }`, and the commit
@@ -280,7 +281,7 @@ export async function createRevealTransaction(
   tx.sign(privKey, undefined, new Uint8Array(32));
   tx.finalize();
 
-  const revealTxHex = Buffer.from(tx.extract()).toString('hex');
+  const revealTxHex = hex.encode(tx.extract());
   const revealTxId = tx.id;
 
   return {
@@ -321,7 +322,7 @@ function verifiedPrevTx(utxo: Utxo): Uint8Array {
   if (!/^[0-9a-fA-F]+$/.test(raw) || raw.length % 2 !== 0) {
     throw new StructuredError('INVALID_PREV_TX', `prevTxHex for ${at} is not raw transaction hex.`, { outpoint: at });
   }
-  const bytes = Uint8Array.from(Buffer.from(raw, 'hex'));
+  const bytes = Uint8Array.from(hex.decode(raw));
   // Even-length hex can still be anything. Left unguarded, @scure's parser
   // error ("Reader(inputs/arrayLen): readByte: Unexpected end of buffer")
   // escapes with no code, so a consumer cannot classify the very failure this
@@ -355,7 +356,7 @@ function verifiedPrevTx(utxo: Utxo): Uint8Array {
       { outpoint: at, prevTxSats: String(out.amount), utxoSats: utxo.value }
     );
   }
-  if (Buffer.from(out.script).toString('hex') !== String(utxo.scriptPubKey).toLowerCase()) {
+  if (hex.encode(out.script) !== String(utxo.scriptPubKey).toLowerCase()) {
     throw new StructuredError('INVALID_PREV_TX', `prevTxHex output ${at} pays a different script than the UTXO.`, {
       outpoint: at
     });
@@ -799,7 +800,7 @@ export async function createCommitTransaction(
       index: utxo.vout,
       sequence: RBF_SEQUENCE,
       witnessUtxo: {
-        script: Buffer.from(utxo.scriptPubKey, 'hex'),
+        script: hex.decode(utxo.scriptPubKey),
         amount: BigInt(utxo.value)
       },
       // Optional, and only when the caller supplied it (see Utxo.prevTxHex).
@@ -867,7 +868,7 @@ export async function createCommitTransaction(
   // the fee was not sized for would underpay it.
   if (willHaveChange) {
     tx.addOutput({
-      script: Buffer.from(scriptPubKeyForAddress(changeAddress, network), 'hex'),
+      script: hex.decode(scriptPubKeyForAddress(changeAddress, network)),
       amount: BigInt(finalChange)
     });
   } else if (finalChange > 0) {
@@ -880,7 +881,7 @@ export async function createCommitTransaction(
 
   // Step 11: Get the PSBT as base64
   const txPsbt = tx.toPSBT();
-  const commitPsbtBase64 = typeof txPsbt === 'string' ? txPsbt : Buffer.from(txPsbt).toString('base64');
+  const commitPsbtBase64 = typeof txPsbt === 'string' ? txPsbt : base64.encode(txPsbt);
 
   return {
     commitAddress,
@@ -892,8 +893,8 @@ export async function createCommitTransaction(
       // Include dust in final fee if no change output
       commit: willHaveChange ? finalFee : finalFee + finalChange
     },
-    revealPrivateKey: Buffer.from(revealPrivateKey).toString('hex'),
-    revealPublicKey: Buffer.from(revealPublicKey).toString('hex'),
+    revealPrivateKey: hex.encode(revealPrivateKey),
+    revealPublicKey: hex.encode(revealPublicKey),
     inscriptionScript: {
       script: leaf.script,
       controlBlock,

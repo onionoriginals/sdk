@@ -1,0 +1,172 @@
+{
+  "journey": "landing-anchor",
+  "plan": "plan 011 PR 10b",
+  "issue": "#975",
+  "revision": "b4e56bb159fd70232094d0cdaeb102a165ce2f09",
+  "dirty": false,
+  "versions": {
+    "core": "Bitcoin Core daemon version v31.1.0 bitcoind",
+    "ord": "ord 0.29.0"
+  },
+  "network": "regtest",
+  "server": {
+    "entry": "apps/landing/serve.ts",
+    "processes": 2,
+    "index": "ord@regtest-local",
+    "indexesCompared": false,
+    "recoveryStore": "fileRecoveryStore (per Original, on disk)"
+  },
+  "browser": {
+    "entry": "apps/landing/src/sdk/engine.ts (DemoEngine) in the journey process",
+    "outbox": "memory"
+  },
+  "signers": {
+    "author": "local did:vh key (not the Turnkey did:webvh #key-1)",
+    "commit": "local P2WPKH key (not Turnkey)",
+    "reveal": "SDK ephemeral key"
+  },
+  "liveTurnkeySigning": "not exercised here: #975 stage A",
+  "faultInjection": "Core RPC proxy held the reveal broadcast; the server process was SIGKILLed",
+  "steps": [
+    {
+      "step": "anchored",
+      "did": "did:vh:Qmf6zB9J3QPKakhUWeny4CXumVLh8c4nKRhvB3yvG2zBuE",
+      "sat": "did:btco:reg:9999789436",
+      "entry": "2-QmUaZ15fbP3m2UcdJd8yo859N8ZyEfRWfJXzo6JbQN7m6v",
+      "commit": "1257f458102c26d091f3f8c71392df057abe2926c113062c4b87b571f00d1737",
+      "reveal": "211cdec3ea41f9528e7db084789793ab13a72cb0e35195db2ca5ed9b7b18b1ac",
+      "holder": "211cdec3ea41f9528e7db084789793ab13a72cb0e35195db2ca5ed9b7b18b1ac:0",
+      "confirmations": 1,
+      "offChain": {
+        "original": "did:vh:Qmf6zB9J3QPKakhUWeny4CXumVLh8c4nKRhvB3yvG2zBuE",
+        "through": "2-QmUaZ15fbP3m2UcdJd8yo859N8ZyEfRWfJXzo6JbQN7m6v",
+        "resources": [
+          {
+            "resource": "artwork.svg",
+            "version": 1,
+            "digest": "zQmQFsf99ZwdsmPdG8TztucYfqUADcoqFHSPZTEiHSVKTSK",
+            "mediaType": "image/svg+xml",
+            "size": 1736,
+            "versionId": "1-QmQRbthd3xpteu9qpYJBVc6QhjfFN3XYk1XG15Kh5p8GKU",
+            "held": true
+          },
+          {
+            "resource": "metadata.json",
+            "version": 1,
+            "digest": "zQmP1EBsushqasmuZpjx4oc1NWzztqrMq9kuXLK9acucGYv",
+            "mediaType": "application/json",
+            "size": 241,
+            "versionId": "1-QmQRbthd3xpteu9qpYJBVc6QhjfFN3XYk1XG15Kh5p8GKU",
+            "held": true
+          }
+        ],
+        "identities": [
+          {
+            "did": "did:vh:QmWeygoyeL29iqKKau7vbFaBEee2Ji2VpiF21Y6LXxAGEd",
+            "role": "author",
+            "held": true
+          }
+        ],
+        "onBitcoin": [],
+        "replication": "not-guaranteed"
+      }
+    },
+    {
+      "step": "reinscribed",
+      "entry": "3-QmaGTfo3KRZqwub7hjmKHUZF6ufQTy6hMpfynjynf8YSkw",
+      "inputZero": "211cdec3ea41f9528e7db084789793ab13a72cb0e35195db2ca5ed9b7b18b1ac:0",
+      "commit": "d1361ab31e491bcb934db679c376f58aa19657b4325abaff573805216a4b116c",
+      "reveal": "b5630f7233ef0161b60ef2bd792564c5e7bba751dffcb3e04c44c74d80fb10be"
+    },
+    {
+      "step": "killed-between-commit-and-reveal",
+      "entry": "4-QmVUEg1LcZid74qRtDrHdpQdAZ3MzpC1f87ahEYvTYekM3",
+      "recoveryId": "9eb094e2301a2e4920e6453798dff0d59da4c76e8bc94dcf29f73b2b5944a1fd",
+      "recordState": "reveal_broadcast_unknown",
+      "killedExit": 137,
+      "signal": "SIGKILL",
+      "commitMined": true,
+      "revealSent": false,
+      "acceptedHeadStill": "3-QmaGTfo3KRZqwub7hjmKHUZF6ufQTy6hMpfynjynf8YSkw"
+    },
+    {
+      "step": "resumed-by-a-fresh-server",
+      "reveal": "f20a890f6397f077d875c30b0f01ecf6e6a287a1b15b2366bede15162f0a4b0d",
+      "identicalBytes": true,
+      "browserRetry": "recorded",
+      "acceptedHead": "4-QmVUEg1LcZid74qRtDrHdpQdAZ3MzpC1f87ahEYvTYekM3"
+    },
+    {
+      "step": "reorg",
+      "invalidated": "7f55e3946be07d7fcadc0599e6ca6fb82788992934d92e88e3a09ecfcdd679a7",
+      "duringReorg": {
+        "publication": "anchored",
+        "action": "wait-for-confirmation"
+      },
+      "after": "4-QmVUEg1LcZid74qRtDrHdpQdAZ3MzpC1f87ahEYvTYekM3"
+    },
+    {
+      "step": "fresh-reader",
+      "network": "regtest",
+      "index": "ord-0.29.0-regtest",
+      "indexesConsulted": 1,
+      "history": "valid",
+      "authorBinding": "valid",
+      "identity": "complete",
+      "head": "4-QmVUEg1LcZid74qRtDrHdpQdAZ3MzpC1f87ahEYvTYekM3",
+      "current": true,
+      "ownership": {
+        "status": "provisional",
+        "sat": "did:btco:reg:9999789436",
+        "output": "f20a890f6397f077d875c30b0f01ecf6e6a287a1b15b2366bede15162f0a4b0d:0",
+        "address": "bcrt1qrzykqys8rzlza8dmc25y9dmlvv8eqjwf3mljyd",
+        "confirmations": 3,
+        "indexes": [
+          "ord-0.29.0-regtest"
+        ]
+      },
+      "resources": [
+        {
+          "resource": "artwork.svg",
+          "version": 1,
+          "bytes": "verified",
+          "sha256": "1c7e1c740158039636aa1c8970d273053477901adc1d81771074796794126014"
+        },
+        {
+          "resource": "metadata.json",
+          "version": 1,
+          "bytes": "verified",
+          "sha256": "09e1ece562ecdd66569b54539542c1e2b1258f3c0a7438d3249c9cf1ff3e262f"
+        },
+        {
+          "resource": "artwork.svg",
+          "version": 2,
+          "bytes": "verified",
+          "sha256": "507d59ec5382d96cf832fbcb26e418783358a6c83ec88965c4d6ea3469f38692"
+        },
+        {
+          "resource": "metadata.json",
+          "version": 2,
+          "bytes": "verified",
+          "sha256": "f367e64ebd9c9bec00b5c435f9d0fd0910bb63d748e270fb94827fbe793e5619"
+        },
+        {
+          "resource": "artwork.svg",
+          "version": 3,
+          "bytes": "verified",
+          "sha256": "2810aedc1457bb2b4d43bc28b23d2553cdd66ca751f0107f2bafa6996fe258aa"
+        },
+        {
+          "resource": "metadata.json",
+          "version": 3,
+          "bytes": "verified",
+          "sha256": "0afaadb171572b462d6bbf67f40a55f729c38ca053568ebac2c3c81ff7ff11b6"
+        }
+      ],
+      "fromBitcoinAlone": {
+        "copy": "absent",
+        "head": "4-QmVUEg1LcZid74qRtDrHdpQdAZ3MzpC1f87ahEYvTYekM3"
+      }
+    }
+  ]
+}

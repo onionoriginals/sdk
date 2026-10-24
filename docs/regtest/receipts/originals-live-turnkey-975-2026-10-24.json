@@ -1,0 +1,409 @@
+{
+  "stage": "#975 stage A (regtest, live client-authorized Turnkey)",
+  "revision": "b4e56bb159fd70232094d0cdaeb102a165ce2f09",
+  "dirty": false,
+  "versions": {
+    "core": "Bitcoin Core daemon version v31.1.0 bitcoind",
+    "ord": "ord 0.29.0"
+  },
+  "turnkey": {
+    "organization": "sha256:319ada06ef49fa9b9be7b3fab6878eadbf4db661226f8cb13c4bd77d081bafd3",
+    "statedNonProduction": false,
+    "productionOrganizationApproved": true,
+    "sessionSeconds": 300,
+    "apiBase": "https://api.turnkey.com"
+  },
+  "signers": {
+    "author": "Turnkey authorship key (#key-1, Ed25519), via the browser session",
+    "commit": "Turnkey deposit key (P2WPKH), via the browser session",
+    "reveal": "SDK ephemeral key"
+  },
+  "server": {
+    "entry": "apps/landing/serve.ts",
+    "processes": 2,
+    "index": "ord@regtest-local",
+    "indexesCompared": false
+  },
+  "pairs": [
+    {
+      "sub": "00da079c-a004-474a-b09f-0ea12dcbeccb",
+      "did": "did:vh:QmRBdNNBMkjWTtXDhGTMY3E5eWKY7nGaAfMHDYXKxehtTB",
+      "recoveryId": "2b24dc77149d893344cc31ded969f756c105299c583aa5e4bdd6674e1d4d3b23",
+      "inscriptionId": "4634210c1d29d42e3cf4e818b21135eb576f7ed5c57850dccabf6f6b778cbe7ci0",
+      "broadcast": "reveal_broadcast",
+      "inputZero": "f8739bd67f00c4a31c504a58484ff4ce82baae4636926e19aff53e8527409fc2:0",
+      "commitSignedBy": [
+        "bcrt1qk9p0hh304r2jhxv4vaj9awg5hc69zsrvva8c0v"
+      ],
+      "boundDepositAddress": [
+        "bcrt1qk9p0hh304r2jhxv4vaj9awg5hc69zsrvva8c0v"
+      ],
+      "signedByBoundAddressKey": true,
+      "reveal": {
+        "confirmed": true,
+        "confirmations": 3
+      }
+    },
+    {
+      "sub": "00da079c-a004-474a-b09f-0ea12dcbeccb",
+      "did": "did:vh:QmRBdNNBMkjWTtXDhGTMY3E5eWKY7nGaAfMHDYXKxehtTB",
+      "recoveryId": "0d4012a467a23153de9c9927730f444619a72573adfaea03b79f6204daf7d33a",
+      "inscriptionId": "3b6d60c061642d5c5f218a3aa04a231bc60e773ca0bde9e713ed512f921d356fi0",
+      "broadcast": "reveal_broadcast",
+      "inputZero": "acb1385b7e7b39145ceec2575276a2993414516664d7953d25a2acc7f3ab2f1c:0",
+      "commitSignedBy": [
+        "bcrt1qk9p0hh304r2jhxv4vaj9awg5hc69zsrvva8c0v",
+        "bcrt1qk9p0hh304r2jhxv4vaj9awg5hc69zsrvva8c0v"
+      ],
+      "boundDepositAddress": [
+        "bcrt1qk9p0hh304r2jhxv4vaj9awg5hc69zsrvva8c0v"
+      ],
+      "signedByBoundAddressKey": true,
+      "reveal": {
+        "confirmed": true,
+        "confirmations": 1
+      }
+    },
+    {
+      "sub": "00da079c-a004-474a-b09f-0ea12dcbeccb",
+      "did": "did:vh:QmRBdNNBMkjWTtXDhGTMY3E5eWKY7nGaAfMHDYXKxehtTB",
+      "recoveryId": "367dc72067115a299e4ba9102b2d9a78a4489a2475c801688f52b8e712592a86",
+      "inscriptionId": "acb1385b7e7b39145ceec2575276a2993414516664d7953d25a2acc7f3ab2f1ci0",
+      "broadcast": "reveal_broadcast",
+      "inputZero": "4634210c1d29d42e3cf4e818b21135eb576f7ed5c57850dccabf6f6b778cbe7c:0",
+      "commitSignedBy": [
+        "bcrt1qk9p0hh304r2jhxv4vaj9awg5hc69zsrvva8c0v",
+        "bcrt1qk9p0hh304r2jhxv4vaj9awg5hc69zsrvva8c0v"
+      ],
+      "boundDepositAddress": [
+        "bcrt1qk9p0hh304r2jhxv4vaj9awg5hc69zsrvva8c0v"
+      ],
+      "signedByBoundAddressKey": true,
+      "reveal": {
+        "confirmed": true,
+        "confirmations": 2
+      }
+    }
+  ],
+  "moneyLog": [
+    "[landing][money] {\"event\":\"originals_anchor_attempted\",\"at\":\"2026-10-24T03:51:27.072Z\",\"sub\":\"00da079c-a004-474a-b09f-0ea12dcbeccb\",\"did\":\"did:vh:QmRBdNNBMkjWTtXDhGTMY3E5eWKY7nGaAfMHDYXKxehtTB\",\"versionId\":\"2-QmUXGNhMT8q4irjvsu4FHkPa3e9fGsHbGRiQfXdX6LBsC8\",\"commitTxId\":\"2b24dc77149d893344cc31ded969f756c105299c583aa5e4bdd6674e1d4d3b23\",\"inputs\":1}",
+    "[landing][money] {\"event\":\"originals_anchor_broadcast\",\"at\":\"2026-10-24T03:51:27.108Z\",\"sub\":\"00da079c-a004-474a-b09f-0ea12dcbeccb\",\"did\":\"did:vh:QmRBdNNBMkjWTtXDhGTMY3E5eWKY7nGaAfMHDYXKxehtTB\",\"versionId\":\"2-QmUXGNhMT8q4irjvsu4FHkPa3e9fGsHbGRiQfXdX6LBsC8\",\"commitTxId\":\"2b24dc77149d893344cc31ded969f756c105299c583aa5e4bdd6674e1d4d3b23\",\"revealTxId\":\"4634210c1d29d42e3cf4e818b21135eb576f7ed5c57850dccabf6f6b778cbe7c\",\"broadcast\":\"reveal_broadcast\"}",
+    "[landing][money] {\"event\":\"originals_anchor_attempted\",\"at\":\"2026-10-24T03:52:45.594Z\",\"sub\":\"00da079c-a004-474a-b09f-0ea12dcbeccb\",\"did\":\"did:vh:QmRBdNNBMkjWTtXDhGTMY3E5eWKY7nGaAfMHDYXKxehtTB\",\"versionId\":\"3-QmVSiv1b2saM8jTAeuWyHYFTRBUFKyXTsiTjkK7qrV25k2\",\"commitTxId\":\"367dc72067115a299e4ba9102b2d9a78a4489a2475c801688f52b8e712592a86\",\"inputs\":2}",
+    "[landing][money] {\"event\":\"originals_anchor_broadcast\",\"at\":\"2026-10-24T03:52:45.658Z\",\"sub\":\"00da079c-a004-474a-b09f-0ea12dcbeccb\",\"did\":\"did:vh:QmRBdNNBMkjWTtXDhGTMY3E5eWKY7nGaAfMHDYXKxehtTB\",\"versionId\":\"3-QmVSiv1b2saM8jTAeuWyHYFTRBUFKyXTsiTjkK7qrV25k2\",\"commitTxId\":\"367dc72067115a299e4ba9102b2d9a78a4489a2475c801688f52b8e712592a86\",\"revealTxId\":\"acb1385b7e7b39145ceec2575276a2993414516664d7953d25a2acc7f3ab2f1c\",\"broadcast\":\"reveal_broadcast\"}",
+    "[landing][money] {\"event\":\"originals_anchor_attempted\",\"at\":\"2026-10-24T03:53:57.943Z\",\"sub\":\"00da079c-a004-474a-b09f-0ea12dcbeccb\",\"did\":\"did:vh:QmRBdNNBMkjWTtXDhGTMY3E5eWKY7nGaAfMHDYXKxehtTB\",\"versionId\":\"4-QmTfH5NP9qQs2YUTUafCodBefqHdeW4udiKwpgsWbG1MYS\",\"commitTxId\":\"0d4012a467a23153de9c9927730f444619a72573adfaea03b79f6204daf7d33a\",\"inputs\":2}",
+    "[landing][money] {\"event\":\"originals_anchor_resumed\",\"at\":\"2026-10-24T03:54:15.036Z\",\"sub\":\"00da079c-a004-474a-b09f-0ea12dcbeccb\",\"did\":\"did:vh:QmRBdNNBMkjWTtXDhGTMY3E5eWKY7nGaAfMHDYXKxehtTB\",\"versionId\":\"4-QmTfH5NP9qQs2YUTUafCodBefqHdeW4udiKwpgsWbG1MYS\",\"commitTxId\":\"0d4012a467a23153de9c9927730f444619a72573adfaea03b79f6204daf7d33a\",\"broadcast\":\"reveal_broadcast\"}"
+  ],
+  "readers": [
+    {
+      "did": "did:vh:QmRBdNNBMkjWTtXDhGTMY3E5eWKY7nGaAfMHDYXKxehtTB",
+      "packageFor": "did:vh:QmRBdNNBMkjWTtXDhGTMY3E5eWKY7nGaAfMHDYXKxehtTB",
+      "sat": "did:btco:reg:5000000000",
+      "network": "regtest",
+      "index": "ord-0.29.0-regtest",
+      "indexesConsulted": 1,
+      "history": "valid",
+      "authorBinding": "valid",
+      "identity": "complete",
+      "author": "did:webvh:QmT9ZNtY2M4ebXhM2jNuzDmxeAsYC67MDKwYgusBGKBeFf:magby.originals.build:user-00da079c-a004-47",
+      "anchoring": "anchored",
+      "head": "4-QmTfH5NP9qQs2YUTUafCodBefqHdeW4udiKwpgsWbG1MYS",
+      "current": true,
+      "ownership": {
+        "status": "provisional",
+        "sat": "did:btco:reg:5000000000",
+        "output": "3b6d60c061642d5c5f218a3aa04a231bc60e773ca0bde9e713ed512f921d356f:0",
+        "address": "bcrt1qk9p0hh304r2jhxv4vaj9awg5hc69zsrvva8c0v",
+        "confirmations": 1,
+        "indexes": [
+          "ord-0.29.0-regtest"
+        ]
+      },
+      "resources": [
+        {
+          "resource": "artwork.svg",
+          "version": 1,
+          "bytes": "verified",
+          "sha256": "6c88285c80f6dbb976fe4174c6b0debdaf88f0586ebe968fd6da54d78431ccb8"
+        },
+        {
+          "resource": "metadata.json",
+          "version": 1,
+          "bytes": "verified",
+          "sha256": "4d8869622a60608beb4a7bc541dd76650169815c9ca9e405fc3c642cd1eb0718"
+        },
+        {
+          "resource": "artwork.svg",
+          "version": 2,
+          "bytes": "verified",
+          "sha256": "094e64c9a609913b308ddca81eb4c961fa984f196258f46486fca3d598b554b0"
+        },
+        {
+          "resource": "metadata.json",
+          "version": 2,
+          "bytes": "verified",
+          "sha256": "d49cf81b92f06ba598adbe51f7c1f1c92397b9665f27c6f8a2fd45db43b89599"
+        },
+        {
+          "resource": "artwork.svg",
+          "version": 3,
+          "bytes": "verified",
+          "sha256": "8a6c6847c41b867572906de51d8cb4136f8fc0d999c9e78f44895390e1e8dc7a"
+        },
+        {
+          "resource": "metadata.json",
+          "version": 3,
+          "bytes": "verified",
+          "sha256": "3fb330c30f423fa0017999c4ba861b6a9c25ff7feea9393408e92c6763ac994d"
+        }
+      ],
+      "fromBitcoinAlone": {
+        "anchoring": "anchored",
+        "head": "4-QmTfH5NP9qQs2YUTUafCodBefqHdeW4udiKwpgsWbG1MYS",
+        "history": "valid",
+        "authorBinding": "valid"
+      }
+    }
+  ],
+  "notes": [
+    {
+      "at": "2026-10-24T03:37:20.444Z",
+      "text": "Owner completed email OTP in shared preview. Created did:webvh identity through browser Turnkey session; UI reports identity ready."
+    },
+    {
+      "at": "2026-10-24T03:38:27.046Z",
+      "text": "Created text Original using real Turnkey browser signing. Two 0.002 BTC regtest deposits confirmed. Before-you-sign UI lists asset.txt, metadata.json and author DID history as off-chain. Clicked Add to Bitcoin then Cancel as soon as Cancel appeared; UI says Cancelled before anything was sent. Nothing was spent. After mining, progress receipt has zero recorded pairs. This early cancellation did not commit an anchoring entry, so it does not yet establish reuse of an already-signed entry."
+    },
+    {
+      "at": "2026-10-24T03:40:14.534Z",
+      "text": "Signing session expired naturally at its configured five-minute lifetime minus the 60-second guard. UI displays Your signing session expired and a Sign in again to keep going action."
+    },
+    {
+      "at": "2026-10-24T03:45:56.066Z",
+      "text": "Live reauthentication exposed stale cached author client: renewed browser session was active, but old Original signing got Turnkey 401 and nothing was sent. Fixed in b4e56bb1; regression first failed then passed. Reloaded updated SPA and created a fresh Original using the still-active real session."
+    },
+    {
+      "at": "2026-10-24T03:45:56.066Z",
+      "text": "Stronger cancellation check on fixed build: observed the engine asset:anchoring event after the real Turnkey authorship signature and clicked the normal Cancel button then. Anchoring entry 2-QmUXGNhMT8q4irjvsu4FHkPa3e9fGsHbGRiQfXdX6LBsC8 is committed locally; UI reports cancellation before send. No signing or network responses were mocked."
+    },
+    {
+      "at": "2026-10-24T03:47:41.144Z",
+      "text": "Fixed build signing session expired naturally with the anchoring entry retained. Add to Bitcoin was refused with the expired-session message; no signature calls observed by the pass-through browser fetch audit. Requested fresh email OTP for live retry."
+    },
+    {
+      "at": "2026-10-24T03:51:46.105Z",
+      "text": "Retry after real reauthentication reached Pending Bitcoin acceptance. The retained anchoring entry 2-QmUXGNhMT8q4irjvsu4FHkPa3e9fGsHbGRiQfXdX6LBsC8 was unchanged; pass-through audit observed exactly one SIGN_TRANSACTION_V2 activity and no sign_raw_payload request. Commit activity id 01a16c08-ed46-71e2-9e02-177111e5b4bd."
+    },
+    {
+      "at": "2026-10-24T03:52:57.887Z",
+      "text": "UI showed Anchored on Bitcoin, 1 confirmation, holder output and no authority to change it, and one index not cross-checked. Saved a revision through real Turnkey authorship signing and clicked Inscribe the next version."
+    },
+    {
+      "at": "2026-10-24T03:54:14.469Z",
+      "text": "Crash test: reveal 3b6d60c061642d5c5f218a3aa04a231bc60e773ca0bde9e713ed512f921d356f held after commit broadcast; server killed with SIGKILL (exit 137). Browser retained outbox pair, showed failed send and enabled Send again."
+    },
+    {
+      "at": "2026-10-24T03:55:10.387Z",
+      "text": "Fresh server resumed the held pair on boot (originals_anchor_resumed for entry 4-QmTfH5NP9qQs2YUTUafCodBefqHdeW4udiKwpgsWbG1MYS). Browser clicked Send again; checking identical reveal and no new signing."
+    },
+    {
+      "at": "2026-10-24T03:56:22.580Z",
+      "text": "Browser pass-through signing audit (real response metadata only; no altered requests or responses): [{\"activityId\":\"01a16c08-ed46-71e2-9e02-177111e5b4bd\",\"activityType\":\"ACTIVITY_TYPE_SIGN_TRANSACTION_V2\",\"at\":\"2026-10-24T03:51:26.964Z\",\"endpoint\":\"/public/v1/submit/sign_transaction\",\"status\":200},{\"activityId\":\"01a16c09-5350-7c76-8e5d-12f637eaa346\",\"activityType\":\"ACTIVITY_TYPE_SIGN_RAW_PAYLOAD_V2\",\"at\":\"2026-10-24T03:51:53.046Z\",\"endpoint\":\"/public/v1/submit/sign_raw_payload\",\"status\":200},{\"activityId\":\"01a16c0a-2023-7f47-a0ac-aab9471289fb\",\"activityType\":\"ACTIVITY_TYPE_SIGN_TRANSACTION_V2\",\"at\":\"2026-10-24T03:52:45.505Z\",\"endpoint\":\"/public/v1/submit/sign_transaction\",\"status\":200},{\"activityId\":\"01a16c0a-52a4-731d-8522-60fec121466f\",\"activityType\":\"ACTIVITY_TYPE_SIGN_RAW_PAYLOAD_V2\",\"at\":\"2026-10-24T03:52:58.427Z\",\"endpoint\":\"/public/v1/submit/sign_raw_payload\",\"status\":200},{\"activityId\":\"01a16c0b-3abf-7900-93b5-0510763b81f4\",\"activityType\":\"ACTIVITY_TYPE_SIGN_TRANSACTION_V2\",\"at\":\"2026-10-24T03:53:57.863Z\",\"endpoint\":\"/public/v1/submit/sign_transaction\",\"status\":200}]. Crash retry had five signing activities before and after; outbox cleared, server outcome recorded, held reveal txid unchanged. Final UI reports Anchored on Bitcoin, 1 confirmation, held in 3b6d60c061642d5c5f218a3aa04a231bc60e773ca0bde9e713ed512f921d356f:0."
+    }
+  ],
+  "events": [
+    {
+      "at": "2026-10-24T03:34:05.111Z",
+      "event": "spa-built",
+      "VITE_BTC_NETWORK": "regtest",
+      "VITE_ORIGINALS_BITCOIN_ANCHORING": "1",
+      "VITE_TURNKEY_SESSION_SECONDS": "300",
+      "outDir": "apps/landing/dist"
+    },
+    {
+      "at": "2026-10-24T03:34:05.420Z",
+      "event": "server-started",
+      "pid": 20071,
+      "url": "http://localhost:3000",
+      "generation": 0
+    },
+    {
+      "at": "2026-10-24T03:37:25.781Z",
+      "event": "funded",
+      "address": "bcrt1qk9p0hh304r2jhxv4vaj9awg5hc69zsrvva8c0v",
+      "btc": 0.002,
+      "txid": "f8739bd67f00c4a31c504a58484ff4ce82baae4636926e19aff53e8527409fc2"
+    },
+    {
+      "at": "2026-10-24T03:37:26.127Z",
+      "event": "funded",
+      "address": "bcrt1qk9p0hh304r2jhxv4vaj9awg5hc69zsrvva8c0v",
+      "btc": 0.002,
+      "txid": "bd8b167d169b2b7f6cb7d10bd76e2fdba2225b8ed90c2c2f489d58d671c095d2"
+    },
+    {
+      "at": "2026-10-24T03:37:50.777Z",
+      "event": "mined",
+      "blocks": 1,
+      "tip": 104
+    },
+    {
+      "at": "2026-10-24T03:37:50.856Z",
+      "event": "receipt-written",
+      "file": "/tmp/originals-stage-a-progress.json"
+    },
+    {
+      "at": "2026-10-24T03:38:27.094Z",
+      "event": "receipt-written",
+      "file": "/tmp/originals-stage-a-progress.json"
+    },
+    {
+      "at": "2026-10-24T03:40:14.578Z",
+      "event": "receipt-written",
+      "file": "/tmp/originals-stage-a-progress.json"
+    },
+    {
+      "at": "2026-10-24T03:45:56.088Z",
+      "event": "receipt-written",
+      "file": "/tmp/originals-stage-a-progress.json"
+    },
+    {
+      "at": "2026-10-24T03:47:41.170Z",
+      "event": "receipt-written",
+      "file": "/tmp/originals-stage-a-progress.json"
+    },
+    {
+      "at": "2026-10-24T03:51:46.210Z",
+      "event": "mined",
+      "blocks": 1,
+      "tip": 105
+    },
+    {
+      "at": "2026-10-24T03:51:46.256Z",
+      "event": "receipt-written",
+      "file": "/tmp/originals-stage-a-progress.json"
+    },
+    {
+      "at": "2026-10-24T03:52:57.992Z",
+      "event": "mined",
+      "blocks": 1,
+      "tip": 106
+    },
+    {
+      "at": "2026-10-24T03:52:58.047Z",
+      "event": "receipt-written",
+      "file": "/tmp/originals-stage-a-progress.json"
+    },
+    {
+      "at": "2026-10-24T03:53:19.689Z",
+      "event": "holding-next-reveal"
+    },
+    {
+      "at": "2026-10-24T03:53:58.012Z",
+      "event": "reveal-held",
+      "reveal": "3b6d60c061642d5c5f218a3aa04a231bc60e773ca0bde9e713ed512f921d356f",
+      "next": "kill, then restart"
+    },
+    {
+      "at": "2026-10-24T03:54:03.758Z",
+      "event": "server-killed",
+      "exit": 137,
+      "mempool": [
+        "0d4012a467a23153de9c9927730f444619a72573adfaea03b79f6204daf7d33a"
+      ]
+    },
+    {
+      "at": "2026-10-24T03:54:14.900Z",
+      "event": "server-started",
+      "pid": 86431,
+      "url": "http://localhost:3000",
+      "generation": 1
+    },
+    {
+      "at": "2026-10-24T03:55:10.490Z",
+      "event": "mined",
+      "blocks": 1,
+      "tip": 107
+    },
+    {
+      "at": "2026-10-24T03:55:10.531Z",
+      "event": "receipt-written",
+      "file": "/tmp/originals-stage-a-progress.json"
+    },
+    {
+      "at": "2026-10-24T03:55:19.151Z",
+      "event": "fresh-reader",
+      "did": "did:vh:QmRBdNNBMkjWTtXDhGTMY3E5eWKY7nGaAfMHDYXKxehtTB",
+      "packageFor": "did:vh:QmRBdNNBMkjWTtXDhGTMY3E5eWKY7nGaAfMHDYXKxehtTB",
+      "sat": "did:btco:reg:5000000000",
+      "network": "regtest",
+      "index": "ord-0.29.0-regtest",
+      "indexesConsulted": 1,
+      "history": "valid",
+      "authorBinding": "valid",
+      "identity": "complete",
+      "author": "did:webvh:QmT9ZNtY2M4ebXhM2jNuzDmxeAsYC67MDKwYgusBGKBeFf:magby.originals.build:user-00da079c-a004-47",
+      "anchoring": "anchored",
+      "head": "4-QmTfH5NP9qQs2YUTUafCodBefqHdeW4udiKwpgsWbG1MYS",
+      "current": true,
+      "ownership": {
+        "status": "provisional",
+        "sat": "did:btco:reg:5000000000",
+        "output": "3b6d60c061642d5c5f218a3aa04a231bc60e773ca0bde9e713ed512f921d356f:0",
+        "address": "bcrt1qk9p0hh304r2jhxv4vaj9awg5hc69zsrvva8c0v",
+        "confirmations": 1,
+        "indexes": [
+          "ord-0.29.0-regtest"
+        ]
+      },
+      "resources": [
+        {
+          "resource": "artwork.svg",
+          "version": 1,
+          "bytes": "verified",
+          "sha256": "6c88285c80f6dbb976fe4174c6b0debdaf88f0586ebe968fd6da54d78431ccb8"
+        },
+        {
+          "resource": "metadata.json",
+          "version": 1,
+          "bytes": "verified",
+          "sha256": "4d8869622a60608beb4a7bc541dd76650169815c9ca9e405fc3c642cd1eb0718"
+        },
+        {
+          "resource": "artwork.svg",
+          "version": 2,
+          "bytes": "verified",
+          "sha256": "094e64c9a609913b308ddca81eb4c961fa984f196258f46486fca3d598b554b0"
+        },
+        {
+          "resource": "metadata.json",
+          "version": 2,
+          "bytes": "verified",
+          "sha256": "d49cf81b92f06ba598adbe51f7c1f1c92397b9665f27c6f8a2fd45db43b89599"
+        },
+        {
+          "resource": "artwork.svg",
+          "version": 3,
+          "bytes": "verified",
+          "sha256": "8a6c6847c41b867572906de51d8cb4136f8fc0d999c9e78f44895390e1e8dc7a"
+        },
+        {
+          "resource": "metadata.json",
+          "version": 3,
+          "bytes": "verified",
+          "sha256": "3fb330c30f423fa0017999c4ba861b6a9c25ff7feea9393408e92c6763ac994d"
+        }
+      ],
+      "fromBitcoinAlone": {
+        "anchoring": "anchored",
+        "head": "4-QmTfH5NP9qQs2YUTUafCodBefqHdeW4udiKwpgsWbG1MYS",
+        "history": "valid",
+        "authorBinding": "valid"
+      }
+    }
+  ],
+  "limits": [
+    "Turnkey activity ids are not visible to this process: record them from the Turnkey dashboard with `note`.",
+    "One ord index; no second index compared (PROVISIONAL, owner decision).",
+    "Regtest only: no public mempool, fee market or QuickNode provider behaviour."
+  ]
+}

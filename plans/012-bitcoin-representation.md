@@ -276,9 +276,11 @@ owner. A copy of the same evidence on another sat confers none (C12-33).
 - **PR 10 — writer.** Anchor and reinscribe through the existing sat
   inscription builder and recovery store; durable boundary and retries
   (P9.4–P9.6). The writer's own sat reads use `getSatSnapshot(sat, {
-  bodies: 'originals' })`: only Originals bodies are fetched. The landing
-  server still refuses inscribed inputs (`funding_outpoint_inscribed`); its
-  reinscription of the Original's own sat is plan 011 PR 10b. The anchoring inscription is the whole
+  bodies: 'originals' })`: only Originals bodies are fetched. The landing's
+  generic inscribe route still refuses inscribed inputs
+  (`funding_outpoint_inscribed`); its Originals route (plan 011 PR 10b)
+  accepts an inscribed input 0 only when every inscription on it is on the
+  Original's own sat. The anchoring inscription is the whole
   stored log through the anchoring entry, then one entry per inscription
   (P9.17), with the size refusal; the log and every signer's identity
   evidence are verified before inscribing (the entry must not be

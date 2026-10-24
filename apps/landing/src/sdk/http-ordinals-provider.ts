@@ -42,11 +42,13 @@ export class HttpOrdinalsProvider implements OrdinalsProvider {
     return (await res.json()) as T;
   }
 
-  async getSatSnapshot(sat: string): Promise<SatSnapshot> {
+  async getSatSnapshot(sat: string, options?: { bodies?: "all" | "originals" }): Promise<SatSnapshot> {
     if (!/^(0|[1-9][0-9]*)$/.test(sat))
       throw new Error("Invalid satoshi number");
+    // The anchoring writer reads only Originals bodies (P9.12); the server passes that on.
+    const query = options?.bodies === "originals" ? "?bodies=originals" : "";
     const response = await this.fetchImpl(
-      `${this.baseUrl}/api/btc/sat-snapshot/${sat}`,
+      `${this.baseUrl}/api/btc/sat-snapshot/${sat}${query}`,
       { credentials: "same-origin" },
     );
     if (!response.ok)
@@ -63,6 +65,14 @@ export class HttpOrdinalsProvider implements OrdinalsProvider {
       outpoint,
     );
     return satoshi;
+  }
+
+  /** A transaction's status through /api/btc/tx: the anchoring writer's sat reads need it (plan 011, PR 10b). */
+  async getTransactionStatus(txid: string): Promise<{ confirmed: boolean; confirmations?: number; blockHeight?: number; blockHash?: string; inMempool?: boolean }> {
+    if (!/^[0-9a-f]{64}$/i.test(txid)) throw new Error("Invalid txid");
+    const res = await this.fetchImpl(`${this.baseUrl}/api/btc/tx?txid=${txid}`, { credentials: "same-origin" });
+    if (!res.ok) throw new Error(`HttpOrdinalsProvider /api/btc/tx failed: ${res.status}`);
+    return (await res.json()) as { confirmed: boolean; confirmations?: number; blockHeight?: number; blockHash?: string; inMempool?: boolean };
   }
 
   async estimateFee(blocks = 1): Promise<number> {
@@ -134,7 +144,7 @@ export class HttpOrdinalsProvider implements OrdinalsProvider {
     status: "commit_broadcast" | "reveal_broadcast";
   } | null = null;
 
-  // --- Not implemented (the sat-selected inscribe path never calls these). ---
+  // --- Not implemented (neither inscribe path calls these). ---
   getInscriptionById(): Promise<never> {
     return Promise.reject(
       new Error(
@@ -146,13 +156,6 @@ export class HttpOrdinalsProvider implements OrdinalsProvider {
     return Promise.reject(
       new Error(
         "HttpOrdinalsProvider.getInscriptionsBySatoshi is not implemented in the browser demo.",
-      ),
-    );
-  }
-  getTransactionStatus(): Promise<never> {
-    return Promise.reject(
-      new Error(
-        "HttpOrdinalsProvider.getTransactionStatus is not implemented in the browser demo.",
       ),
     );
   }

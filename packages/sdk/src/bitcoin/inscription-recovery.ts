@@ -1,4 +1,5 @@
 import * as btc from '@scure/btc-signer';
+import { hex } from '@scure/base';
 import { schnorr } from '@noble/curves/secp256k1.js';
 import { equalBytes } from '@noble/curves/utils.js';
 import { OutOrdinalReveal, parseInscriptions } from 'micro-ordinals';
@@ -61,7 +62,7 @@ function invalid(message: string): never {
 /** Validate the writer's single-leaf inscription spend; txids do not commit witness bytes. */
 export function validateInscriptionReveal(commit: btc.Transaction, reveal: btc.Transaction): void {
   if (reveal.inputsLength !== 1 || reveal.getInput(0).index !== 0 ||
-      Buffer.from(reveal.getInput(0).txid!).toString('hex') !== commit.id) {
+      hex.encode(reveal.getInput(0).txid!) !== commit.id) {
     invalid('Recovery reveal must spend output zero of the exact commit.');
   }
   const witness = reveal.getInput(0).finalScriptWitness;
@@ -102,22 +103,22 @@ export function validatePreparedInscriptionOnSat(prepared: PreparedInscriptionOn
       if (typeof hex !== 'string' || !/^(?:[0-9a-fA-F]{2})+$/.test(hex)) invalid('Recovery transactions must be exact hexadecimal bytes.');
     }
     const options = { allowUnknownInputs: true, allowUnknownOutputs: true };
-    const commit = btc.Transaction.fromRaw(Buffer.from(prepared.signedCommitHex, 'hex'), options);
-    const reveal = btc.Transaction.fromRaw(Buffer.from(prepared.revealTxHex, 'hex'), options);
+    const commit = btc.Transaction.fromRaw(hex.decode(prepared.signedCommitHex), options);
+    const reveal = btc.Transaction.fromRaw(hex.decode(prepared.revealTxHex), options);
     if (commit.id !== prepared.commitTxId || reveal.id !== prepared.revealTxId || prepared.inscriptionId !== `${reveal.id}i0`) {
       invalid('Recovery identities do not match the locally computed transaction ids.');
     }
     if (reveal.inputsLength !== 1 || reveal.getInput(0).index !== 0 ||
-        Buffer.from(reveal.getInput(0).txid!).toString('hex') !== commit.id) {
+        hex.encode(reveal.getInput(0).txid!) !== commit.id) {
       invalid('Recovery reveal must spend output zero of the exact commit.');
     }
     if (commit.inputsLength !== prepared.fundingUtxos.length || prepared.fundingUtxos.some((utxo, index) => {
       const input = commit.getInput(index);
-      return Buffer.from(input.txid!).toString('hex') !== utxo.txid.toLowerCase() || input.index !== utxo.vout;
+      return hex.encode(input.txid!) !== utxo.txid.toLowerCase() || input.index !== utxo.vout;
     })) invalid('Recovery funding order does not match the identity input.');
     const outpoints = prepared.fundingUtxos.map((u) => `${u.txid.toLowerCase()}:${u.vout}`);
     if (new Set(outpoints).size !== outpoints.length) invalid('Recovery funding inputs contain duplicates.');
-    if (reveal.outputsLength !== 1 || Buffer.from(reveal.getOutput(0).script!).toString('hex') !==
+    if (reveal.outputsLength !== 1 || hex.encode(reveal.getOutput(0).script!) !==
         scriptPubKeyForAddress(prepared.changeAddress, prepared.network)) invalid('Recovery reveal destination does not match.');
     validateInscriptionReveal(commit, reveal);
   } catch (error) {

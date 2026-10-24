@@ -53,7 +53,8 @@ export function authorshipPublicKeyMultibase(address: string): string | null {
  * rather than trusting a caller's.
  */
 export function turnkeyAuthorshipSigner(opts: {
-  client: TurnkeyBitcoinClient;
+  /** Resolve per signature when the signer outlives a browser session. */
+  client: TurnkeyBitcoinClient | (() => Promise<TurnkeyBitcoinClient>);
   subOrgId: string;
   /** The authorship account address (`ensureAuthorshipAccount`). */
   signWith: string;
@@ -71,11 +72,12 @@ export function turnkeyAuthorshipSigner(opts: {
       if (request.proofOptions.cryptosuite !== 'eddsa-jcs-2022' || !/^did:vh:/.test(String((request.entry.state as { id?: unknown }).id))) {
         throw new Error('Not an Originals entry for this key; refusing to sign it.');
       }
-      if (typeof opts.client.signRawPayload !== 'function') {
+      const client = typeof opts.client === 'function' ? await opts.client() : opts.client;
+      if (typeof client.signRawPayload !== 'function') {
         throw new Error('This Turnkey client cannot sign raw payloads, so it cannot author Originals.');
       }
       return turnkeySignBytes(
-        { turnkeyClient: asTurnkeyApiClient(opts.client), organizationId: opts.subOrgId, signWith: opts.signWith },
+        { turnkeyClient: asTurnkeyApiClient(client), organizationId: opts.subOrgId, signWith: opts.signWith },
         proofHashData(request.entry as unknown as JsonObject, request.proofOptions),
       );
     },
