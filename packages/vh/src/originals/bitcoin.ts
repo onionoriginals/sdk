@@ -79,7 +79,8 @@ export type IgnoredReason =
    * has no verified copy of, numbered past the newest it holds (or of a DID
    * it holds no history for, or of a did:btco whose sat was not read in full
    * through the inscription). It is reported in `unverifiable` and holds
-   * nothing back (P9.12, P9.15; owner decision, 23 Oct 2026).
+   * nothing back (P9.12, P9.15; owner decision, 23 Oct 2026;
+   * originals-spec #51 (open, head 8d6326c1b), PROVISIONAL until it merges).
    */
   | "later-inscription-unverifiable"
   | "author-version-not-yet-in-effect"
@@ -131,7 +132,7 @@ export interface AnchoringReport {
    * has no authority (P9.12), so these never change the accepted head or its
    * identity evidence; a verifier that obtains the named version can verify
    * them, and reports the change of head when it does (`headChange`; P9.15,
-   * P5.6; owner decision, 23 Oct 2026).
+   * P5.6; owner decision, 23 Oct 2026; originals-spec #51 (open, head 8d6326c1b), PROVISIONAL until it merges).
    */
   unverifiable: Array<{ sat: string; inscription: string; versionId?: string; signer: string; signerVersionId: string }>;
   /** Inscriptions whose placement the indexes used disagree on: missing evidence until they agree (P9.10). */
@@ -315,7 +316,8 @@ function btcoReadThrough(history: AuthorHistory, inscription: SatInscription): b
 }
 
 /**
- * P9.12, P9.15, P5.13 (owner decision, 23 Oct 2026): why an inscription after
+ * P9.12, P9.15, P5.13 (owner decision, 23 Oct 2026; originals-spec #51 (open, head 8d6326c1b), PROVISIONAL until it merges):
+ * why an inscription after
  * the anchor whose signer could not be verified is ignored. A named version
  * the signer's history shows is not that DID's makes the entry invalid
  * (AUTHOR_VERSION_NOT_IN_HISTORY): for a did:vh or did:webvh, one numbered at

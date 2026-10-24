@@ -1,4 +1,7 @@
 /**
+ * P14.10 (originals-spec #51 (open, head 8d6326c1b), PROVISIONAL until it merges): the sort, date, UTF-8 flag and mode rules bind the writer
+ * (`writeZip`); the reader may ignore them, and does.
+ *
  * A minimal, strict ZIP codec for evidence packages (PROVISIONAL format, D4;
  * owner decision Q3). Only uncompressed ("stored") entries are written or
  * accepted, so sizes are known from the central directory and no

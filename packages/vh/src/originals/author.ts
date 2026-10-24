@@ -180,8 +180,8 @@ function btcoHistory(evidence: AuthorDidEvidence, options: AuthorHistoryOptions)
     // Metadata not read could hold a version: the history stops before it, never skips it (M1).
     // A delegated or encoded inscription carries its own metadata, which delegation and body
     // encoding do not affect, so it is a version candidate like any other; metadata the reader
-    // did not establish for it (absent, not null) fails closed. Whether such an inscription
-    // counts as a did:btco version is open in P5.13: PROVISIONAL.
+    // did not establish for it (absent, not null) fails closed (P5.13, P14.12;
+    // originals-spec #51 (open, head 8d6326c1b), PROVISIONAL until it merges).
     if (i.unsupported === "not-read" || (i.unsupported && i.metadata === undefined)) {
       unread = i;
       break;

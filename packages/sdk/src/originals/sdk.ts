@@ -107,7 +107,7 @@ export interface OriginalsSDKOptions {
    * when it was retrieved and its latest versionId. Its freshness is
    * established only when the DID's own witnesses approve that version and
    * the version's `id` names the location (P7.8; owner decision, 23 Oct
-   * 2026); otherwise, or if it cannot be obtained, it is not established.
+   * 2026; originals-spec #51 (open, head 8d6326c1b), PROVISIONAL until it merges); otherwise, or if it cannot be obtained, it is not established.
    *
    * Bounded (08b review R1, R2, A4): only the author DID fixed at genesis is
    * an identity to retrieve, and its location is read from the log's
@@ -450,7 +450,7 @@ function retrievableIdentities(chained: ChainedEntry[], verified: number): strin
  * verified. An editor entry is signed by its editor; the author reference it
  * carries is its parent's and says nothing of where the author is now.
  *
- * PROVISIONAL (P5.14; 08b review r4 #5): when the evidence held verifies no
+ * P5.14 (08b review r4 #5; originals-spec #51 (open, head 8d6326c1b), PROVISIONAL until it merges): when the evidence held verifies no
  * entry `did` signed (a reader with no evidence for it), no proof can be
  * checked before the log is retrieved. The location named by the earliest
  * chained entry `did` signed (the genesis entry for the author), which is

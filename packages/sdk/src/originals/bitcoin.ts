@@ -481,7 +481,7 @@ export async function satEvidence(snapshot: SatSnapshot, options: SatEvidenceOpt
             mediaType: ("mediaType" in body ? body.mediaType : null) ?? "application/octet-stream",
             content: new Uint8Array(),
             // A delegated or encoded inscription's own metadata, when read (null: it carries none).
-            // Absent, it was not read: a did:btco history fails closed there (P5.13, PROVISIONAL).
+            // Absent, it was not read: a did:btco history fails closed there (P5.13; originals-spec #51 (open, head 8d6326c1b), PROVISIONAL until it merges).
             ...(!unread && "metadata" in body && body.metadata !== undefined ? { metadata: body.metadata } : {}),
             unsupported: unread ? ("not-read" as const) : (body as { reason: "delegated" | "content-encoding" }).reason,
             ...(unread ? { contentLength: body.contentLength } : {}),
