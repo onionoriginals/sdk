@@ -12,7 +12,9 @@
  *   alias's sat only when every index read for that alias reports it on that
  *   sat number on that network. The label a read is supplied under does not
  *   count. Indexes that disagree leave the inscription, and everything after
- *   it on that sat, undecided: missing evidence until they agree.
+ *   it on that sat, undecided: missing evidence until they agree. A disputed
+ *   inscription that no index reports as an Originals inscription cannot be
+ *   an entry: it is ignored and holds back nothing after it (`couldCount`).
  * - Inscriptions carry complete entries as JSON Lines of
  *   `application/vnd.originals.vh+jsonl`, with no metadata, at most 350,000
  *   bytes (P9.17, P14.12; owner decision, D6; spec PR #50 (open)). The anchoring inscription carries the whole
@@ -26,9 +28,16 @@
  * - Entries before the anchoring entry are checked against the signer DID
  *   version they name, with claimed ordering; the anchoring entry and every
  *   later one also against the signer's DID state at the inscription time
- *   (P9.15). After the anchor, an inscription is accepted when it extends the
- *   head at a strictly greater height (P9.13). Everything else is ignored and
- *   reported.
+ *   (P9.15). For a did:btco signer DID that state is the latest version
+ *   before the inscription in chain order, and a named version must precede
+ *   the inscription carrying the entry, or the anchoring inscription for an
+ *   entry before it (P5.13). The signer is the editor DID for an editor
+ *   entry, which is also refused when the author DID's state at its
+ *   inscription time is deactivated (P5.18). Only an author entry anchors
+ *   (P5.16). After the anchor, an inscription is accepted when it extends the
+ *   head at a strictly greater height (P9.13), so chain order decides between
+ *   an editor entry and a revocation of its grant with the same parent
+ *   (P5.17). Everything else is ignored and reported.
  * - An inscription counts from 1 confirmation on every network, mainnet
  *   included, with its depth reported (P9.5, D6; owner decision, spec PR #50
  *   (open)). There is no per-network confirmation policy.
@@ -37,7 +46,7 @@ import { OriginalsError } from "../errors.js";
 import { isJsonObject } from "../json/index.js";
 import { parseLog, type LogEntry, type LogVerification } from "../log/index.js";
 import { authorKey, stillAuthorized, versionNumberOf, type AuthorHistory, type AuthorVersion } from "./author.js";
-import { btcoAliasOf, parseBtcoAlias, type BitcoinNetwork, type BtcoAlias } from "./btco.js";
+import { btcoAliasOf, chainOrder, parseBtcoAlias, readSat, type PlacementReason, type SatEvidence, type SatInscription, type SatRead } from "./btco.js";
 import { signerOf, type AuthorRef, type EntryState } from "./state.js";
 
 /** The media type of an Originals inscription (P9.17, P14.12; owner decision, D6; spec PR #50 (open)). */
@@ -45,147 +54,6 @@ export const ORIGINALS_INSCRIPTION_TYPE = "application/vnd.originals.vh+jsonl";
 
 /** The largest inscription body, in bytes (P9.17, P14.12; owner decision, D6; spec PR #50 (open)). */
 export const ORIGINALS_INSCRIPTION_MAX_BYTES = 350_000;
-
-/**
- * One inscription, as one index reports it. The same shape serves any sat:
- * an Original's anchoring sat, or a did:btco signer DID's sat (P5.13).
- */
-export interface SatInscription {
-  id: string;
-  /** The sat number, in decimal, that the index reports the inscription on (P9.10). */
-  sat: string;
-  /** The network the index read it from (P9.10). */
-  network: BitcoinNetwork;
-  height: number;
-  transactionIndex: number;
-  inscriptionIndex: number;
-  /** 0 while unconfirmed. */
-  confirmations: number;
-  /** The greatest block timestamp of its block and the block's ancestors, epoch ms (P9.15). */
-  inscriptionTime: number;
-  mediaType: string;
-  content: Uint8Array;
-  /** The inscription's raw metadata, or null or absent when it carries none. Originals inscriptions carry none (P9.17). */
-  metadata?: Uint8Array | null;
-  /**
-   * Set when the reader observed the inscription but did not establish its
-   * own body; `content` is then empty and `metadata` absent. PROVISIONAL.
-   * - `delegated`, `content-encoding`: its body is another inscription's, or
-   *   encoded, and P9.14 defines no encoding. It is never an Originals entry
-   *   (an Originals media type is rejected, `unsupported-encoding`; P9.14,
-   *   P9.17) and never a did:btco version (P5.13).
-   * - `not-read`: its body was past the reader's byte budget, or not asked
-   *   for. An unread Originals inscription is missing evidence: the
-   *   verification fails (`SAT_READ_INCOMPLETE`, P9.17), unless `contentLength`
-   *   or `metadataPresent` already rejects it.
-   * Inscriptions of other media types are not Originals inscriptions either way.
-   */
-  unsupported?: "delegated" | "content-encoding" | "not-read";
-  /** For a `not-read` inscription, the body length the index reports. PROVISIONAL. */
-  contentLength?: number;
-  /** For a `not-read` inscription: it carries metadata, which the reader did not read. PROVISIONAL. */
-  metadataPresent?: boolean;
-}
-
-/** What one index reported for one sat at one tip. */
-export interface SatEvidence {
-  /**
-   * The did:btco alias whose sat this read was asked about. A label only:
-   * each inscription counts for it by the sat and network the index reports
-   * (P9.10).
-   */
-  sat: string;
-  /** Which index served the read (P9.11). Reads of one sat by different indexes are compared. */
-  index: string;
-  tip: { height: number; hash: string };
-  inscriptions: SatInscription[];
-  /** The output holding the sat now, or null when the adapter observed none. */
-  owner: { output: string; address?: string; confirmations: number } | null;
-}
-
-/** Why an inscription did not count for the sat it was read under. */
-export type PlacementReason = "not-on-sat" | "other-network" | "placement-disputed" | "after-disputed-placement";
-
-/** The inscriptions every index used places on one sat, merged (P9.10, P9.11). */
-export interface SatRead {
-  alias: BtcoAlias;
-  /** The indexes whose reads were compared, in the order first supplied. */
-  indexes: string[];
-  /** The lowest tip among the reads. */
-  tip: { height: number; hash: string };
-  /**
-   * Inscriptions every index places on the sat, in chain order, before the
-   * first disputed one. Confirmations are the lowest any index reports.
-   */
-  inscriptions: SatInscription[];
-  /** Inscriptions supplied under this alias that do not count for it. */
-  excluded: Array<{ inscription: string; reason: PlacementReason }>;
-  /** Inscriptions whose placement the indexes disagree on: missing evidence until they agree. */
-  disputed: string[];
-  /** The sat's holder when every index agrees on it; null when none was observed or they disagree. */
-  owner: SatEvidence["owner"];
-  ownerDisputed: boolean;
-}
-
-const sameBytes = (a: Uint8Array | null | undefined, b: Uint8Array | null | undefined) =>
-  (a ?? null) === null ? (b ?? null) === null : !!b && a!.length === b.length && a!.every((x, k) => x === b[k]);
-
-function sameReport(a: SatInscription, b: SatInscription): boolean {
-  return a.height === b.height && a.transactionIndex === b.transactionIndex && a.inscriptionIndex === b.inscriptionIndex &&
-    a.inscriptionTime === b.inscriptionTime && a.mediaType === b.mediaType && sameBytes(a.content, b.content) && sameBytes(a.metadata, b.metadata) &&
-    (a.unsupported ?? null) === (b.unsupported ?? null) && (a.contentLength ?? null) === (b.contentLength ?? null) &&
-    (a.metadataPresent ?? false) === (b.metadataPresent ?? false);
-}
-
-export function chainOrder(a: Pick<SatInscription, "height" | "transactionIndex" | "inscriptionIndex">, b: Pick<SatInscription, "height" | "transactionIndex" | "inscriptionIndex">): number {
-  return a.height - b.height || a.transactionIndex - b.transactionIndex || a.inscriptionIndex - b.inscriptionIndex;
-}
-
-/**
- * Merge the reads of one sat by the indexes the verifier uses (P9.10). An
- * inscription counts only when every read reports it on the alias's sat
- * number and network, consistently; when they disagree, it and everything
- * after it in chain order on this sat are undecided. Unconfirmed
- * inscriptions are never disputed: they are only observed (P9.5).
- */
-export function readSat(alias: string, reads: SatEvidence[]): SatRead {
-  const parsed = parseBtcoAlias(alias);
-  if (reads.length === 0) throw new OriginalsError("incomplete-evidence", "SAT_READ_MISSING", `no read of ${alias}`);
-  const on = (i: SatInscription) => i.sat === parsed.sat && i.network === parsed.network;
-  const ids = new Map<string, SatInscription[]>();
-  for (const r of reads) for (const i of r.inscriptions) ids.set(i.id, [...(ids.get(i.id) ?? []), i]);
-
-  const placed: SatInscription[] = [];
-  const excluded: SatRead["excluded"] = [];
-  const disputes: SatInscription[] = [];
-  for (const [id, reports] of ids) {
-    const placing = reports.filter(on);
-    const everyIndex = placing.length === reads.length && reads.every((r) => r.inscriptions.some((i) => i.id === id && on(i)));
-    if (everyIndex && placing.every((p) => sameReport(p, placing[0]))) {
-      placed.push({ ...placing[0], confirmations: Math.min(...placing.map((p) => p.confirmations)) });
-    } else if (placing.length === 0) {
-      excluded.push({ inscription: id, reason: reports.some((i) => i.network !== parsed.network) ? "other-network" : "not-on-sat" });
-    } else if (placing.every((p) => p.confirmations < 1)) {
-      placed.push({ ...placing[0], confirmations: 0 }); // observed only
-    } else {
-      disputes.push(placing[0]);
-    }
-  }
-  placed.sort(chainOrder);
-  disputes.sort(chainOrder);
-  const cut = disputes[0];
-  const inscriptions = cut ? placed.filter((i) => chainOrder(i, cut) < 0) : placed;
-  if (cut) {
-    for (const d of disputes) excluded.push({ inscription: d.id, reason: "placement-disputed" });
-    for (const i of placed) if (chainOrder(i, cut) >= 0) excluded.push({ inscription: i.id, reason: "after-disputed-placement" });
-  }
-
-  const owners = reads.map((r) => r.owner);
-  const ownerDisputed = owners.some((o) => (o?.output ?? null) !== (owners[0]?.output ?? null) || (o?.address ?? null) !== (owners[0]?.address ?? null));
-  const owner = !ownerDisputed && owners[0] ? { ...owners[0], confirmations: Math.min(...owners.map((o) => o!.confirmations)) } : null;
-  const tip = reads.map((r) => r.tip).reduce((low, t) => (t.height < low.height ? t : low));
-  return { alias: parsed, indexes: [...new Set(reads.map((r) => r.index))], tip, inscriptions, excluded, disputed: disputes.map((d) => d.id), owner, ownerDisputed };
-}
 
 export type IgnoredReason =
   | PlacementReason
@@ -213,6 +81,7 @@ export type IgnoredReason =
    * nothing back (P9.12; PROVISIONAL; a spec question raised on originals-spec #47 that master 1039c471c does not adopt).
    */
   | "later-inscription-unverifiable"
+  | "author-version-not-yet-in-effect"
   | "author-key-not-valid-at-inscription-time"
   | "author-deactivated-at-inscription-time";
 
@@ -304,7 +173,7 @@ export function anchoringIndex(entries: unknown[]): number {
 
 function decode(content: Uint8Array): LogEntry[] | undefined {
   try {
-    const entries = parseLog(new TextDecoder("utf-8", { fatal: true }).decode(content));
+    const entries = parseLog(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(content));
     return entries.length > 0 && entries.every(isJsonObject) ? (entries as unknown as LogEntry[]) : undefined;
   } catch (error) {
     if (error instanceof OriginalsError || error instanceof TypeError) return undefined;
@@ -322,22 +191,67 @@ function signerRefOf(entry: unknown): AuthorRef | undefined {
 }
 
 /**
- * P9.15: the signer DID's state at an inscription is the later of the version
- * the entry names and the latest version whose versionTime is no later than
- * the inscription time. The key must hold in that state, which must not be
- * deactivated. (A did:btco signer DID is selected by chain order instead,
- * P5.13; that arrives with did:btco author DIDs.)
+ * A DID's state at an inscription (P9.15, P5.13): for did:btco, the latest
+ * version preceding the inscription in chain order, established through it
+ * (not past the tip read, nor past an inscription the indexes dispute); for
+ * did:vh and did:webvh, the later of the named version, when there is one,
+ * and the latest version whose versionTime is no later than the inscription
+ * time.
  */
-export function checkAtInscriptionTime(entry: LogEntry, inscriptionTime: number, histories: AuthorHistory[]): IgnoredReason | null {
-  const ref = signerRefOf(entry);
-  const history = ref ? histories.find((h) => h.did === ref.did) : undefined;
-  if (!ref || !history) return "author-version-unavailable";
-  const named = history.versions.find((v) => v.versionId === ref.versionId);
-  if (!named) return "author-version-unavailable";
-  let before: AuthorVersion | undefined;
-  for (const v of history.versions) if (v.time <= inscriptionTime) before = v;
-  const state = before && before.versionNumber > named.versionNumber ? before : named;
+function stateAt(history: AuthorHistory, named: AuthorVersion | undefined, inscription: SatInscription): AuthorVersion | IgnoredReason {
+  let state: AuthorVersion | undefined;
+  if (history.method === "did:btco") {
+    if (history.establishedBefore && chainOrder(inscription, history.establishedBefore) >= 0) return "author-version-unavailable";
+    for (const v of history.versions) if (v.position && chainOrder(v.position, inscription) < 0) state = v;
+  } else {
+    for (const v of history.versions) if (v.time <= inscription.inscriptionTime) state = v;
+    if (named && (!state || named.versionNumber > state.versionNumber)) state = named;
+  }
+  return state ?? "author-version-unavailable";
+}
+
+/**
+ * The signer DID's state at an inscription, and whether the entry's key holds
+ * there. The key must meet P5.3 at the version the entry names and in that
+ * state, which must not be deactivated.
+ *
+ * - did:btco (P5.13): the named version must precede the inscription in
+ *   chain order, so a version mined later, even later in the same block, is
+ *   not yet in effect: its id can be known before it is mined. The state is
+ *   the latest version preceding the inscription. The history must be
+ *   established through the inscription: not past the tip read, nor past an
+ *   inscription the indexes dispute.
+ * - did:vh and did:webvh (P9.15): the state is the later of the named version
+ *   and the latest version whose versionTime is no later than the inscription
+ *   time, so a named later version can list a removed key again (C12-98,
+ *   C12-44).
+ *
+ * The signer is the entry's, through `signerOf`: the editor DID for an editor
+ * entry, so these rules apply to editor DIDs as they do to the author DID
+ * (P5.18), and the `author-*` reasons name the signer DID's state. An editor
+ * entry is also refused when the author DID's state at the inscription is
+ * deactivated (P5.18, P9.15): `author-deactivated-at-inscription-time`.
+ */
+export function checkAtInscriptionTime(entry: LogEntry, inscription: SatInscription, histories: AuthorHistory[]): IgnoredReason | null {
+  const found = signerVersion(entry, histories);
+  if (typeof found === "string") return found;
+  const { ref, history, named } = found;
+  if (history.method === "did:btco") {
+    if (!named.position) return "author-version-unavailable";
+    if (chainOrder(named.position, inscription) >= 0) return "author-version-not-yet-in-effect";
+  }
+  const state = stateAt(history, named, inscription);
+  if (typeof state === "string") return state;
   if (state.deactivated) return "author-deactivated-at-inscription-time";
+  const editorEntry = stateOf(entry);
+  if (editorEntry.editor && editorEntry.author) {
+    const author = editorEntry.author;
+    const authorHistory = histories.find((h) => h.did === author.did);
+    if (!authorHistory) return "author-version-unavailable";
+    const authorState = stateAt(authorHistory, authorHistory.versions.find((v) => v.versionId === author.versionId), inscription);
+    if (typeof authorState === "string") return authorState;
+    if (authorState.deactivated) return "author-deactivated-at-inscription-time";
+  }
   let key: string;
   try {
     key = authorKey(named, ref);
@@ -346,6 +260,29 @@ export function checkAtInscriptionTime(entry: LogEntry, inscriptionTime: number,
     throw error;
   }
   return stillAuthorized(state, ref, key) ? null : "author-key-not-valid-at-inscription-time";
+}
+
+/**
+ * An entry before the anchoring entry has claimed ordering and is checked
+ * against the version it names (P9.15); that check is the log's. But a
+ * did:btco version must precede the anchoring inscription that carries the
+ * entry, so one mined at or after it is not yet in effect (P5.13).
+ */
+export function checkBeforeAnchor(entry: LogEntry, anchoring: SatInscription, histories: AuthorHistory[]): IgnoredReason | null {
+  const found = signerVersion(entry, histories);
+  if (typeof found === "string") return found;
+  const { history, named } = found;
+  if (history.method !== "did:btco") return null;
+  if (!named.position) return "author-version-unavailable";
+  return chainOrder(named.position, anchoring) >= 0 ? "author-version-not-yet-in-effect" : null;
+}
+
+function signerVersion(entry: LogEntry, histories: AuthorHistory[]): { ref: AuthorRef; history: AuthorHistory; named: AuthorVersion } | IgnoredReason {
+  const ref = signerRefOf(entry);
+  const history = ref ? histories.find((h) => h.did === ref.did) : undefined;
+  if (!ref || !history) return "author-version-unavailable";
+  const named = history.versions.find((v) => v.versionId === ref.versionId);
+  return named ? { ref, history, named } : "author-version-unavailable";
 }
 
 /**
@@ -425,7 +362,10 @@ export async function assembleFromBitcoin(
     const did = parseBtcoAlias(e.sat).did;
     byAlias.set(did, [...(byAlias.get(did) ?? []), e]);
   }
-  const reads = [...byAlias].map(([did, list]) => readSat(did, list));
+  // A disputed inscription no index reports as an Originals inscription cannot be an entry, so it
+  // holds back nothing after it; a disputed Originals inscription does (P9.10; L3).
+  const couldCount = (reports: SatInscription[]) => reports.some((r) => r.mediaType === ORIGINALS_INSCRIPTION_TYPE);
+  const reads = [...byAlias].map(([did, list]) => readSat(did, list, { couldCount }));
   // The report lists what was ignored in chain order.
   const position = new Map<string, SatInscription>();
   for (const e of evidence) for (const i of e.inscriptions) if (!position.has(i.id)) position.set(i.id, i);
@@ -462,7 +402,11 @@ export async function assembleFromBitcoin(
       const code = v.failure?.error.code;
       return [code && CHAIN_CODES.has(code) ? "not-one-log" : "invalid-entry", code];
     }
-    const author = checkAtInscriptionTime(last, i.inscriptionTime, histories);
+    for (const e of entries.slice(0, -1)) {
+      const before = checkBeforeAnchor(e, i, histories);
+      if (before) return [before];
+    }
+    const author = checkAtInscriptionTime(last, i, histories);
     return author ? [author] : entries;
   };
 
@@ -511,7 +455,12 @@ export async function assembleFromBitcoin(
     for (const r of rejected) ignore(r.read.alias.did, r.inscription, r.reason, r.entries[r.entries.length - 1], r.code);
     const status = evidence.length === 0 || disputed.length > 0 ? "unverified" : "not-anchored";
     const copyAnchor = copy ? anchoringIndex(copy) : -1;
-    const entries = !copy ? [] : status === "unverified" || copyAnchor < 0 ? copy : copy.slice(0, copyAnchor);
+    // Without an anchor on Bitcoin the copy's anchoring entry and what follows are not established,
+    // so the head is the last entry before it (claimed ordering, P7.6), as for not-anchored. With no
+    // Bitcoin evidence at all the copy is the local committed log, reported whole and not current
+    // (bitcoin-evidence-missing): the SDK extends it locally before inscribing (P9.18).
+    const local = status === "unverified" && evidence.length === 0;
+    const entries = !copy ? [] : local || copyAnchor < 0 ? copy : copy.slice(0, copyAnchor);
     const change = status === "not-anchored" && options.previousAnchor ? { previous: options.previousAnchor, current: null } : null;
     inChainOrder();
     return {
@@ -569,7 +518,7 @@ export async function assembleFromBitcoin(
       ignoreLater(sat, i, entry, !v || v.failure?.error.code === "ENTRY_HASH_MISMATCH" ? "does-not-extend-head" : "invalid-entry", v?.failure?.error.code);
       continue;
     }
-    const author = checkAtInscriptionTime(entry, i.inscriptionTime, histories);
+    const author = checkAtInscriptionTime(entry, i, histories);
     if (author) {
       ignoreLater(sat, i, entry, author);
       continue;

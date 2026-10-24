@@ -29,7 +29,8 @@ export function encodeSubmission(submission: Submission): string {
     original: submission.original,
     entry: submission.entry,
     resources: Object.fromEntries(Object.entries(submission.resources).map(([digest, bytes]) => [digest, base64.encode(bytes)])),
-    identities: submission.identities.map((i) => ({ did: i.did, log: typeof i.log === 'string' ? i.log : i.log.map((e) => `${JSON.stringify(e)}\n`).join(''), ...(i.witness !== undefined ? { witness: i.witness } : {}) })),
+    // A did:btco identity has no log to submit: its history is read from Bitcoin (P5.13).
+    identities: submission.identities.flatMap((i) => (i.log === undefined ? [] : [{ did: i.did, log: typeof i.log === 'string' ? i.log : i.log.map((e) => `${JSON.stringify(e)}\n`).join(''), ...(i.witness !== undefined ? { witness: i.witness } : {}) }])),
   });
 }
 

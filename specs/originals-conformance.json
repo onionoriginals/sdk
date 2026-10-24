@@ -574,7 +574,8 @@
       ],
       "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/bitcoin.test.ts"
+        "packages/vh/tests/bitcoin.test.ts",
+        "packages/vh/tests/btco-author.test.ts"
       ]
     },
     {
@@ -775,8 +776,10 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "did:btco author DIDs arrive in plan 011 PR 9b (method spec v0.2.0, owner decision Q15)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-59",
@@ -786,8 +789,10 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "did:btco author DIDs arrive in plan 011 PR 9b (method spec v0.2.0, owner decision Q15)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-60",
@@ -797,8 +802,10 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "did:btco author DIDs arrive in plan 011 PR 9b (method spec v0.2.0, owner decision Q15)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-61",
@@ -808,8 +815,10 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "did:btco author DIDs arrive in plan 011 PR 9b (method spec v0.2.0, owner decision Q15)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-62",
@@ -1248,7 +1257,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-93",
@@ -1258,7 +1270,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-94",
@@ -1268,7 +1283,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-95",
@@ -1278,7 +1296,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-96",
@@ -1288,7 +1309,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-97",
@@ -1311,7 +1335,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-99",
@@ -1397,7 +1424,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/btco-author.test.ts"
+      ]
     },
     {
       "id": "C12-106",
@@ -1422,6 +1452,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/vh/tests/bitcoin-editors.test.ts",
         "packages/vh/tests/bitcoin.test.ts"
       ]
     },
@@ -1528,12 +1559,12 @@
       "phases": [
         2
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/editors.test.ts",
+        "packages/vh/tests/bitcoin-editors.test.ts",
         "packages/vh/tests/editors.test.ts"
-      ],
-      "note": "Grants, aliases, lifecycle, parameters and deactivation are covered as author-only (P5.16). An editor entry adding a did:btco alias is rejected today only because did:btco aliases are not yet accepted; the Bitcoin branch adds anchoring as an author-only change."
+      ]
     },
     {
       "id": "C12-116",
@@ -1571,12 +1602,12 @@
         2,
         4
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/editors.test.ts",
+        "packages/vh/tests/bitcoin-editors.test.ts",
         "packages/vh/tests/editors.test.ts"
-      ],
-      "note": "Unanchored part covered: an editor entry and a revoking author entry with the same parent are an unresolved fork (verifier and SDK import). After anchoring, the first inscribed in chain order extending the head is accepted: the Bitcoin branch."
+      ]
     },
     {
       "id": "C12-119",
@@ -1614,12 +1645,12 @@
         2,
         4
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
+        "packages/vh/tests/bitcoin-editors.test.ts",
         "packages/vh/tests/editors.test.ts",
         "packages/vh/tests/unanchored.test.ts"
-      ],
-      "note": "Unanchored part covered (historically authorized only while the latest editor DID state does not list the key, P7.9). The anchored part (P9.15, P5.13 for did:btco editors) belongs to the Bitcoin branch; profile.ts marks the hook."
+      ]
     },
     {
       "id": "C12-122",
@@ -1630,12 +1661,12 @@
         2,
         4
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
+        "packages/vh/tests/bitcoin-editors.test.ts",
         "packages/vh/tests/editors.test.ts",
         "packages/vh/tests/unanchored.test.ts"
-      ],
-      "note": "Unanchored part covered (historically authorized only once the author DID is deactivated, P5.18, P7.9). The anchored part belongs to the Bitcoin branch."
+      ]
     },
     {
       "id": "C12-123",
@@ -1645,7 +1676,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin-editors.test.ts"
+      ]
     },
     {
       "id": "C12-124",
@@ -1925,6 +1959,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts",
         "packages/vh/tests/editors.test.ts"
       ]
     },

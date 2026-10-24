@@ -292,7 +292,18 @@ await sdk.edit(did, { parent, resources: [{ id: "photo", bytes }], editor: bobRe
 - An editor entry and a revoking author entry with the same parent are a fork,
   unresolved until anchoring (P6.6). Branch length and the number of signers
   decide nothing; an entry bringing content from another branch is an ordinary
-  single-parent entry and the fork remains.
+  single-parent entry and the fork remains. After anchoring, chain order on
+  the sat decides: whichever is inscribed first extends the head, and the
+  other does not (P5.17, P9.13).
+- Anchored editor entries (P5.18, P9.15): an editor entry inscribed on the
+  anchoring sat is checked against the editor DID's state at its inscription
+  time, exactly as an author entry is against the author DID's (versionTime
+  with the named-later-version exception for did:vh and did:webvh, chain order
+  for did:btco, P5.13), and is refused once the author DID's state at its
+  inscription time is deactivated (`author-deactivated-at-inscription-time`).
+  The `author-*` reasons of `anchoring.ignored` name the signer DID's state.
+  An editor entry inscribed by the sat's holder is accepted (P9.12); only an
+  author entry anchors.
 - Editor authority is VH-Log PR 11's "Editors from a Controller" [S25]
   (swcurran/VH-Log#11 at `2fe380dbf`, treated as merged): the generic engine's
   editor hook (`ControllerKeys.editors` in `@originals/vh/log`) enforces that
@@ -301,9 +312,7 @@ await sdk.edit(did, { parent, resources: [{ id: "photo", bytes }], editor: bobRe
   against the editors in its parent (`EDITOR_NOT_GRANTED`), leaves the grants
   unchanged and carries one proof by its editor; the Originals profile
   supplies the grants, the `editor` reference, the editor key rules and the
-  grant's scope. Anchored editor
-  entries (P9.15 at inscription time, P9.12 inscription by the owner) arrive
-  with Bitcoin anchoring. No signer is required to use did:btco.
+  grant's scope. No signer is required to use did:btco.
 
 ## Moved author DIDs — identity continuity (P5.14, implemented)
 
@@ -598,8 +607,15 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
 - Placement rests on the index (P9.10): an inscription counts for a sat only
   when every index read supplied reports it on that sat number on that
   network. Indexes that disagree leave it `disputed`
-  (`bitcoin-placement-disputed`), and disagreement on the holder gives no
-  owner (`ownership-indexes-disagree`).
+  (`bitcoin-placement-disputed`), and with it everything after it on the
+  sat, and disagreement on the holder gives no owner
+  (`ownership-indexes-disagree`). A disputed inscription that no index
+  reports as an Originals inscription (by media type) cannot be an entry: it
+  is ignored as `placement-disputed` and holds back nothing after it. On a
+  did:btco DID's sat every disputed inscription holds back what follows.
+  Without an anchor the report's head is the copy's last entry before its
+  anchoring entry, as for `not-anchored`; with no Bitcoin evidence at all it
+  is the local committed head, not current (`bitcoin-evidence-missing`).
 - Bitcoin decides from the anchor on (P9.12, P9.13): an inscription counts
   from 1 confirmation on every network, mainnet included (P9.5; depth
   reported) when it extends the head at a strictly
@@ -623,7 +639,8 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   chain (#971).
 - The holder of the anchoring sat can inscribe anything on it, but cannot
   make reading it fail (P9.12). The sat reader (`getSatSnapshot`) reports a
-  delegated or encoded inscription as observed but unsupported, and a body
+  delegated or encoded inscription as observed but unsupported (with its own
+  metadata, read on a full read: P5.13, PROVISIONAL), and a body
   or metadata past its byte budget or the transport's response cap (for
   example QuickNode's 1 MiB JSON cap) as observed but unread, and reads on;
   `satEvidence` passes them on flagged `unsupported` (PROVISIONAL). The
@@ -709,8 +726,9 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   October 2026, #47; nothing in the SDK requires them); a did:btco author is
   how Bitcoin alone suffices (P9.18).
 - After anchoring, deactivating the author DID leaves the accepted state
-  current and refuses later inscriptions; a key the author removes later does
-  not unseat entries accepted before (P9.15).
+  current and refuses later inscriptions, editor entries included (P5.18); a
+  key the author or an editor removes later does not unseat entries accepted
+  before (P9.15). See Editors above for editor entries on the sat.
 - An anchored log with no Bitcoin evidence is `unverified`, and one whose
   evidence holds no valid anchor is `not-anchored`; neither is current, and
   neither advances the retained versionId. A
@@ -718,7 +736,35 @@ view.report.ownership; // { status: "provisional", sat, output, confirmations, i
   `authoritative-source-changed`, and an author DID version that would reject
   an accepted inscription as `retroactive-revocation-conflict`.
 - Ownership is the anchoring sat's holder, always provisional, never authority
-  (P9.11, P9.12). did:btco author DIDs arrive in PR 9b. Spending requires the
+  (P9.11, P9.12).
+- **did:btco author DIDs** (P5.13; method v0.2.0): supply
+  `{ did, bitcoin: [await satEvidence(snapshotOfTheDidSat, { index, … })] }`
+  as the author evidence, one read per Bitcoin index; their placement is
+  compared as for the anchoring sat (P9.10). A version is a confirmed
+  inscription that every index reports on the sat number the DID names, on its
+  network, whose CBOR metadata is the DID document (strictly decoded), in
+  chain order; an inscription the index places on another sat is not a version
+  (C12-105), and one the indexes disagree on stops the history there with
+  `AUTHOR_PLACEMENT_DISPUTED` (missing evidence). A delegated or encoded
+  inscription carries its own metadata, which delegation and body encoding do
+  not affect: the sat reader reads it, and it is a version candidate like any
+  other (PROVISIONAL: whether such an inscription counts as a did:btco
+  version is an open P5.13 question). An inscription whose metadata the reader
+  did not read (past its byte budget) stops the history there with
+  `AUTHOR_SAT_READ_INCOMPLETE` (missing evidence); it is never skipped. An entry names its version
+  by inscription id (PROVISIONAL); `deactivated: true` is terminal. For an
+  anchored Original, the version an entry names must precede, in chain order,
+  the inscription that carries it, or the anchoring inscription for an entry
+  before the anchor: one mined later, even later in the same block, is
+  rejected as `author-version-not-yet-in-effect` (C12-92, C12-93, C12-95), because
+  its id can be known before it is mined. The author DID's state at the
+  inscription is the latest version before it, and the key must hold there
+  too (C12-96); there is no later-named-version exception for did:btco, unlike
+  did:vh and did:webvh (C12-98). A state the author read cannot establish,
+  past its tip or a disputed placement, is `author-version-unavailable`. An
+  Original is never anchored to its author DID's own sat. A did:btco author's
+  history is read from Bitcoin, not packaged: packages list it as missing
+  identity evidence. Spending requires the
   owner's explicit approval, and release evidence comes from real Core/ord
   regtest.
 

@@ -19,6 +19,8 @@ import { parseLog, verifyLog, type LogFailure } from "../log/index.js";
 import { didVh } from "../didvh/index.js";
 import { didWebvh, parseDidWebvh } from "../webvh/index.js";
 import { ORIGINALS_LIMITS, type AuthorRef } from "./state.js";
+import { chainOrder, parseBtcoAlias, readSat, type ChainPosition, type SatEvidence, type SatInscription } from "./btco.js";
+import { decodeCbor } from "./cbor.js";
 
 /** The author DID methods the baseline profile lists (P5.8). did:btco arrives with Bitcoin (plan 011, PR 9). */
 export type AuthorMethod = "did:vh" | "did:webvh" | "did:btco";
@@ -28,11 +30,15 @@ export function authorMethod(did: string): AuthorMethod {
   return fail("unsupported-profile", "AUTHOR_METHOD_NOT_LISTED", `author DID ${did} uses a method the profile does not list`);
 }
 
-/** The author DID's log and witness file, as supplied in evidence. */
+/**
+ * The author DID's history, as supplied in evidence: the log and witness file
+ * of a did:vh or did:webvh, or what an adapter read from a did:btco's sat
+ * (P5.13).
+ */
 export interface AuthorDidEvidence {
   /** The identity DID: the DID the asset log's signed state names (P5.14). */
   did: string;
-  log: string | unknown[];
+  log?: string | unknown[];
   witness?: unknown;
   /**
    * PROVISIONAL (P5.14, P7.8): the URL this log was just retrieved from, with
@@ -50,6 +56,8 @@ export interface AuthorDidEvidence {
    */
   obtainedAt?: string;
   source?: EvidenceSource;
+  /** For a did:btco: one read of the DID's sat per Bitcoin index used; their placement is compared (P9.10). */
+  bitcoin?: SatEvidence | SatEvidence[];
 }
 
 /**
@@ -68,6 +76,8 @@ export interface AuthorVersion {
   /** The author DID log's update keys in effect after this version. */
   updateKeys: string[];
   deactivated: boolean;
+  /** A did:btco version's chain position (P5.13). */
+  position?: ChainPosition;
 }
 
 export interface AuthorHistory {
@@ -77,6 +87,13 @@ export interface AuthorHistory {
   versions: AuthorVersion[];
   /** Why verification stopped before the end of the supplied log, if it did. */
   failure?: LogFailure;
+  /**
+   * did:btco only: the chain position before which the history is
+   * established, the block after the lowest tip read or the first inscription
+   * whose placement the indexes dispute. Absent once deactivated, which is
+   * terminal (P5.13, P9.15).
+   */
+  establishedBefore?: ChainPosition;
 }
 
 export interface AuthorHistoryOptions {
@@ -87,9 +104,10 @@ export interface AuthorHistoryOptions {
 /** Verify a did:vh or did:webvh author DID log. Invalid trailing entries are dropped and reported. */
 export async function verifyAuthorHistory(evidence: AuthorDidEvidence, options: AuthorHistoryOptions = {}): Promise<AuthorHistory> {
   const method = authorMethod(evidence.did);
-  if (method === "did:btco") fail("unsupported-profile", "AUTHOR_METHOD_NOT_IMPLEMENTED", "did:btco author DIDs are verified from Bitcoin (plan 011, PR 9)");
+  if (method === "did:btco") return btcoHistory(evidence, options);
   let entries: unknown[];
   try {
+    if (evidence.log === undefined) fail("incomplete-evidence", "AUTHOR_HISTORY_MISSING", `no log for author DID ${evidence.did}`);
     entries = typeof evidence.log === "string" ? parseLog(evidence.log) : evidence.log;
   } catch (error) {
     if (!(error instanceof OriginalsError)) throw error;
@@ -119,6 +137,92 @@ export async function verifyAuthorHistory(evidence: AuthorDidEvidence, options: 
   }
   return { did: evidence.did, method, versions, ...(log.failure ? { failure: log.failure } : {}) };
 }
+
+/**
+ * A did:btco author DID's versions, from its sat (P5.13; did:btco method
+ * v0.2.0, owner decision Q15). A version is a confirmed inscription that every
+ * index read reports on the sat number the DID names, on the DID's network
+ * (P9.10; the label a read is supplied under does not count), whose metadata
+ * is a CBOR DID document with this DID as its `id`, in chain order. A
+ * document with `deactivated: true` is terminal, even as the first: later
+ * inscriptions on the sat are not versions. Control is the sat's holder, so
+ * there are no update keys. An entry names a version by its inscription id
+ * (PROVISIONAL). Where the indexes disagree on an inscription's placement, it
+ * and everything after it are undecided: the history stops before it and
+ * reports missing evidence (P9.10).
+ */
+function btcoHistory(evidence: AuthorDidEvidence, options: AuthorHistoryOptions): AuthorHistory {
+  const did = evidence.did;
+  const failed = (category: "incomplete-evidence" | "invalid-evidence", code: string, message: string): AuthorHistory =>
+    ({ did, method: "did:btco", versions: [], failure: { index: 0, error: new OriginalsError(category, code, message) } });
+  let alias;
+  try {
+    alias = parseBtcoAlias(did);
+  } catch {
+    return failed("invalid-evidence", "AUTHOR_DID_INVALID", `${did} is not a did:btco`);
+  }
+  const reads = evidence.bitcoin === undefined ? [] : Array.isArray(evidence.bitcoin) ? evidence.bitcoin : [evidence.bitcoin];
+  if (reads.length === 0) return failed("incomplete-evidence", "AUTHOR_BITCOIN_EVIDENCE_MISSING", `no Bitcoin read of ${did}'s sat`);
+  const mislabelled = reads.find((r) => r.sat !== alias.did);
+  if (mislabelled) return failed("invalid-evidence", "AUTHOR_LOG_MISMATCH", `the sat read is ${mislabelled.sat}, not ${did}`);
+  const read = readSat(alias.did, reads);
+  const versions: AuthorVersion[] = [];
+  const max = options.maxVersions ?? ORIGINALS_LIMITS.authorVersions;
+  let unread: SatInscription | undefined;
+  for (const i of read.inscriptions) {
+    if (i.confirmations < 1) continue;
+    // Metadata not read could hold a version: the history stops before it, never skips it (M1).
+    // A delegated or encoded inscription carries its own metadata, which delegation and body
+    // encoding do not affect, so it is a version candidate like any other; metadata the reader
+    // did not establish for it (absent, not null) fails closed. Whether such an inscription
+    // counts as a did:btco version is open in P5.13: PROVISIONAL.
+    if (i.unsupported === "not-read" || (i.unsupported && i.metadata === undefined)) {
+      unread = i;
+      break;
+    }
+    if (!i.metadata) continue;
+    let doc;
+    try {
+      doc = decodeCbor(i.metadata);
+    } catch (error) {
+      if (error instanceof OriginalsError) continue;
+      throw error;
+    }
+    if (!isJsonObject(doc) || doc.id !== did) continue;
+    const position = { height: i.height, transactionIndex: i.transactionIndex, inscriptionIndex: i.inscriptionIndex };
+    const deactivated = doc.deactivated === true;
+    const previous = versions[versions.length - 1];
+    versions.push({
+      versionId: i.id,
+      versionNumber: versions.length + 1,
+      time: i.inscriptionTime,
+      document: deactivated && previous ? previous.document : doc,
+      updateKeys: [],
+      deactivated,
+      position,
+    });
+    // Deactivation is terminal: the state is settled at every later position.
+    if (deactivated) return { did, method: "did:btco", versions };
+    if (versions.length > max) return failed("invalid-evidence", "AUTHOR_HISTORY_TOO_LONG", `${did} has more than ${max} versions`);
+  }
+  // Established through the lowest tip read, and only before the first disputed placement (P9.10, P9.15).
+  const disputed = new Set(read.disputed);
+  const firstDisputed = reads.flatMap((r) => r.inscriptions).filter((i) => disputed.has(i.id)).sort(chainOrder)[0];
+  const afterTip: ChainPosition = { height: read.tip.height + 1, transactionIndex: 0, inscriptionIndex: 0 };
+  const establishedBefore = unread ? positionOf(unread) : firstDisputed && chainOrder(firstDisputed, afterTip) < 0 ? positionOf(firstDisputed) : afterTip;
+  if (unread) {
+    const error = new OriginalsError("incomplete-evidence", "AUTHOR_SAT_READ_INCOMPLETE", `inscription ${unread.id} on ${did}'s sat was not read in full: it could be a version (P5.13)`);
+    return { did, method: "did:btco", versions, establishedBefore, failure: { index: versions.length, error } };
+  }
+  if (firstDisputed) {
+    const error = new OriginalsError("incomplete-evidence", "AUTHOR_PLACEMENT_DISPUTED", `the indexes used disagree on whether inscription ${firstDisputed.id} is on ${did}'s sat (P9.10)`);
+    return { did, method: "did:btco", versions, establishedBefore, failure: { index: versions.length, error } };
+  }
+  if (versions.length === 0) return failed("incomplete-evidence", "AUTHOR_DID_NOT_FOUND", `no DID document is inscribed on ${did}'s sat`);
+  return { did, method: "did:btco", versions, establishedBefore };
+}
+
+const positionOf = (p: ChainPosition): ChainPosition => ({ height: p.height, transactionIndex: p.transactionIndex, inscriptionIndex: p.inscriptionIndex });
 
 function webvhScid(did: string): string | undefined {
   try {

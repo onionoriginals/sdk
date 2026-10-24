@@ -38,7 +38,8 @@ import {
   type VerifiedEntry,
 } from "../log/index.js";
 import { checkAlias, aliasTarget, type AliasEvidence, type AliasReport } from "./alias.js";
-import { anchoringIndex, assembleFromBitcoin, type AnchoringReport, type OwnershipReport, type RetainedAnchor, type SatEvidence } from "./bitcoin.js";
+import { anchoringIndex, assembleFromBitcoin, type AnchoringReport, type OwnershipReport, type RetainedAnchor } from "./bitcoin.js";
+import type { SatEvidence } from "./btco.js";
 import { authorKey, signerLocation, stillAuthorized, verifyAuthorHistory, versionNumberOf, type AuthorDidEvidence, type AuthorHistory, type EvidenceSource } from "./author.js";
 import { didWebvhLogUrl } from "../webvh/index.js";
 import { deriveDocument, originalsSpecialisation } from "./profile.js";
@@ -333,9 +334,11 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       if (h.failure) noteFailure(h.did, { code: h.failure.error.code, message: `DID ${h.did}: ${h.failure.error.message}` });
       const retained = retainedAuthors[h.did];
       if (retained !== undefined) {
-        const at = h.versions[versionNumberOf(retained) - 1];
-        if (!at) staleAuthors.add(h.did);
-        else if (at.versionId !== retained) {
+        // By versionId: a did:btco version is an inscription id, with no number in it.
+        const found = h.versions.some((v) => v.versionId === retained);
+        const sameNumber = h.versions[versionNumberOf(retained) - 1];
+        if (!found && !sameNumber) staleAuthors.add(h.did);
+        else if (!found) {
           forkedAuthors.add(h.did);
           noteFailure(h.did, { code: "AUTHOR_DID_FORK", message: `DID ${h.did} diverges from the retained version ${retained}` });
         }

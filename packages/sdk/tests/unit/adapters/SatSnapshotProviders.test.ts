@@ -122,16 +122,18 @@ for (const kind of ['quicknode', 'regtest'] as const) describe(`${kind} sat snap
     const { provider } = fixture(kind, { content: new Uint8Array([0, 255]) });
     await expect(provider.getSatSnapshot('123')).rejects.toThrow(/content|body/i);
   });
-  test('reports delegated content as observed but unsupported, without reading it (M1; P9.12)', async () => {
+  test('reports delegated content as observed but unsupported, without reading its body; its own metadata is read (M1; P9.12; finding 9, P5.13)', async () => {
     const { provider, calls } = fixture(kind, { info: { delegate: 'd'.repeat(64) + 'i0' } });
     const result = await provider.getSatSnapshot('123');
-    expect(result.publications[0].body).toEqual({ status: 'unsupported', reason: 'delegated', mediaType: 'image/png' });
+    expect(result.publications[0].body).toEqual({ status: 'unsupported', reason: 'delegated', mediaType: 'image/png', metadata: new Uint8Array([191, 99, 108, 111, 103, 159, 255, 255]) });
     expect(result.publications[0].creation).toEqual({ height: 100, blockHash: hash, transactionIndex: 1, inscriptionIndex: 0 });
-    expect(calls.some(call => /content|metadata/i.test(call.method))).toBe(false);
+    expect(calls.some(call => /content/i.test(call.method))).toBe(false);
   });
-  test('reports an encoded body as observed but unsupported (M1; P9.14)', async () => {
+  test('reports an encoded body as observed but unsupported, with its own metadata (M1; P9.14; finding 9, P5.13)', async () => {
     const { provider } = fixture(kind, { info: { content_encoding: 'br' } });
-    expect((await provider.getSatSnapshot('123')).publications[0].body).toEqual({ status: 'unsupported', reason: 'content-encoding', mediaType: 'image/png' });
+    expect((await provider.getSatSnapshot('123')).publications[0].body).toEqual({ status: 'unsupported', reason: 'content-encoding', mediaType: 'image/png', metadata: new Uint8Array([191, 99, 108, 111, 103, 159, 255, 255]) });
+    const none = fixture(kind, { info: { content_encoding: 'br' }, metadata: null });
+    expect((await none.provider.getSatSnapshot('123')).publications[0].body).toEqual({ status: 'unsupported', reason: 'content-encoding', mediaType: 'image/png', metadata: null });
   });
   test('rejects missing content type rather than hiding a continuation', async () => {
     const { provider } = fixture(kind, { info: { content_type: undefined } });
