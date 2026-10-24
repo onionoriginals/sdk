@@ -25,6 +25,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { recordPhaseResult } from "./lib/phase-result.mjs";
+
 const here = dirname(fileURLToPath(import.meta.url));
 const root = realpathSync(join(here, "..", ".."));
 const args = process.argv.slice(2);
@@ -69,10 +71,7 @@ function runPhase(name, cmd, cmdArgs, input, { interactive = false } = {}) {
   const env = { PATH: process.env.PATH, HOME: home, TMPDIR: tmp, LANG: "C.UTF-8", ACCEPTANCE_INPUT: JSON.stringify({ phaseName: name, ...input }), ACCEPTANCE_RESULT: resultFile, ...(process.env.CHROMIUM_PATH ? { CHROMIUM_PATH: process.env.CHROMIUM_PATH } : {}) };
   const started = Date.now();
   const run = spawnSync(cmd, cmdArgs, { cwd: tmp, env, encoding: "utf8", timeout: 600_000, stdio: interactive ? ["inherit", "pipe", "inherit"] : "pipe" });
-  const result = existsSync(resultFile) ? JSON.parse(readFileSync(resultFile, "utf8")) : { phase: name, status: "FAIL", checks: [{ id: "result", title: "the phase wrote a result", status: "FAIL" }] };
-  result.phase = name;
-  result.process = { command: [cmd, ...cmdArgs].map((a) => (a.startsWith(root) ? relative(root, a) : a)), exit: run.status, signal: run.signal, ms: Date.now() - started };
-  if (run.status !== 0 || result.status !== "PASS") result.process.output = `${run.stdout ?? ""}\n${run.stderr ?? ""}`.trim().split("\n").filter((l) => !l.startsWith("[originals-sdk]")).slice(-40);
+  const result = recordPhaseResult({ name, resultFile, run, command: [cmd, ...cmdArgs], root, ms: Date.now() - started });
   results.push(result);
   process.stderr.write(`phase ${name}: ${result.status} (${result.checks.filter((c) => c.status === "PASS").length}/${result.checks.length} checks)\n`);
   return result;
