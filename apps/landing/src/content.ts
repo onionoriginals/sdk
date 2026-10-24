@@ -665,6 +665,11 @@ export const demo = {
    * failed: 507` was reaching the page before this existed — a transport string
    * on screen, and a breach of the mechanical floor in GRADING.md.
    */
+  /** Where signed-in work is kept on this device (#976 B, G2). */
+  storage: {
+    notKeptAcrossRestarts:
+      'This browser can’t keep your work on this device, so it isn’t saved across restarts. Keep this page open, and download its evidence before you leave.'
+  },
   hosting: {
     rateLimited:
       'Publishing is temporarily limited. Wait a few seconds and try again. Your signed Original is still in this tab.',

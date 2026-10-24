@@ -962,6 +962,11 @@ export function Demo() {
                   })}
                 </ol>
 
+                {/* #976 B, G2: signed in without IndexedDB, the work is in
+                    memory only. Said, never failed silently. */}
+                {asset?.notKeptAcrossRestarts && (
+                  <p className="demo-step-note" role="status">{demo.storage.notKeptAcrossRestarts}</p>
+                )}
                 {asset && (
                   <div className="demo-evidence">
                     <button

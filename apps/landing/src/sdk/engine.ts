@@ -117,6 +117,8 @@ export interface DemoAssetState {
   };
   /** The verification report of the current checkpoint. */
   provenance: unknown;
+  /** Signed in, but this browser has no IndexedDB, so the work is in memory only (#976 B, G2). */
+  notKeptAcrossRestarts?: true;
 }
 
 export interface AssetSource {
@@ -274,17 +276,33 @@ export class DemoEngine {
     this.authorEvidence.set(evidence);
   }
 
-  /** This engine's store: the account's durable one when signed in and the browser has IndexedDB. */
+  /**
+   * This engine's store: the account's durable one when signed in and the
+   * browser has IndexedDB. Signed in without IndexedDB, a MemoryStore, and the
+   * snapshot says the work isn't kept across restarts rather than failing
+   * silently. A failed open isn't cached, so the next action tries again.
+   */
   private openStore(): Promise<OriginalsStore> {
-    this.storeOpening ??= (
-      this.openStoreWith
-        ? this.openStoreWith()
-        : this.authed && this.subOrgId && globalThis.indexedDB
-          ? IndexedDbStore.open(this.subOrgId)
-          : Promise.resolve(new MemoryStore())
-    ).then((store) => (this.store = store));
+    if (this.storeOpening) return this.storeOpening;
+    const durable = this.authed && !!this.subOrgId;
+    const opening = this.openStoreWith
+      ? this.openStoreWith()
+      : durable && globalThis.indexedDB
+        ? IndexedDbStore.open(this.subOrgId!)
+        : Promise.resolve(new MemoryStore());
+    this.notKeptAcrossRestarts = !this.openStoreWith && durable && !globalThis.indexedDB;
+    this.storeOpening = opening.then(
+      (store) => (this.store = store),
+      (error: unknown) => {
+        this.storeOpening = null;
+        throw error;
+      },
+    );
     return this.storeOpening;
   }
+
+  /** Signed in, but the work is in memory only: this browser has no IndexedDB. */
+  private notKeptAcrossRestarts = false;
 
   /** The author this engine signs as, set up once per engine. */
   private async author(): Promise<Authoring> {
@@ -755,6 +773,7 @@ export class DemoEngine {
       credentials: 0,
       history: this.history(),
       provenance: view.report,
+      ...(this.notKeptAcrossRestarts ? { notKeptAcrossRestarts: true as const } : {}),
     };
   }
 
