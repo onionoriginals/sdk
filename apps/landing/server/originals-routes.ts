@@ -105,8 +105,13 @@ export function createOriginalsRoutes(deps: {
   store: OriginalsStore;
   now?: () => number;
   library?: AnchoringLibrary;
+  // The did:webvh hosts this instance serves (webvh-hosts.ts). Set, a write
+  // or save under any other host is refused (#976 B, G1; P3.6). Unset (dev,
+  // tests), any host is accepted.
+  hosts?: readonly string[];
 }): OriginalsRoutes {
   const { store } = deps;
+  const servedHost = (key: string) => !deps.hosts || deps.hosts.includes(key.split('/', 1)[0]);
   const now = deps.now ?? (() => Date.now());
   // 120 writes/min per resolved client identity (client-ip.ts) — never a raw
   // X-Forwarded-For. A publish issues a handful of writes, so this is ~20
@@ -154,6 +159,7 @@ export function createOriginalsRoutes(deps: {
     // no write can shadow the app's static assets or another author's files.
     const hosted = classifyHostedKey(key, userSlug(sub));
     if (!hosted) return json({ error: 'forbidden_path' }, 403);
+    if (!servedHost(key)) return json({ error: 'forbidden_host' }, 403);
     // Cap the upload in bytes while reading it, declared or chunked (the rate
     // limiter bounds request COUNT, not per-request size).
     const bytes = await readBodyCapped(req, MAX_UPLOAD_BYTES);
@@ -239,6 +245,7 @@ export function createOriginalsRoutes(deps: {
     if (siteKey === null || rest.length > 0 || !ns || !classifyHostedKey(`${siteKey}/originals/asset/did.jsonl`, ns)) {
       return json({ error: 'bad_key' }, 400);
     }
+    if (!servedHost(siteKey)) return json({ error: 'forbidden_host' }, 403);
     // Who may submit is decided before the body is read (shared-saves.ts, owner decision of 22 October 2026).
     const caller = { sub, slug: userSlug(sub) };
     const refused = sharedSaves.mayCall(siteKey, caller);

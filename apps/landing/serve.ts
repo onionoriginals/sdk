@@ -48,6 +48,7 @@ import { createOriginalsStore } from './server/originals-store';
 import { createInscriptionsStore } from './server/inscriptions-store';
 import { createAnchoringLibrary } from './server/originals-library';
 import { createOriginalsRoutes, type OriginalsRoutes } from './server/originals-routes';
+import { servedWebvhHosts } from './server/webvh-hosts';
 import { checkConfig, isStrictConfig, resolveDataDir, isBareHost, resolveBlockEventsUrl } from './server/config';
 import { acquireInstanceLock, releaseOnExit } from './server/instance-lock';
 
@@ -231,7 +232,8 @@ function buildApiRoutes(): {
       `[landing] ${btcNet} inscription disabled (QUICKNODE_ENDPOINT${btcNet === 'mainnet' ? '' : '/BTC_FAUCET_*'} absent) — inscribe stays mock`
     );
   }
-  const originals = createOriginalsRoutes({ jwtSecret, store: originalsStore, library: createAnchoringLibrary(originalsDataDir, originalsStore) });
+  // Writes only under this instance's own did:webvh hosts (#976 B, G1; P3.6).
+  const originals = createOriginalsRoutes({ jwtSecret, store: originalsStore, library: createAnchoringLibrary(originalsDataDir, originalsStore), hosts: servedWebvhHosts(canonicalWebvhHost()) });
   return {
     routes: buildRoutes({ turnkey, sessions: createInMemorySessionStorage(), jwtSecret, bitcoin, originals }),
     originals,
