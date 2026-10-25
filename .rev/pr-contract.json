@@ -1,0 +1,50 @@
+{
+  "request": {
+    "source": "Owner instruction in REV rollout thread, 2026-10-25",
+    "text": "Merge the stronger REV gate and update the SDK integration to use it. Require whole-PR request/change coverage rather than unrelated regression approval, preserve existing checks, use the reviewed contract through trusted configuration, and validate the migration. Do not change application behavior or publish a release."
+  },
+  "requiredChecks": [
+    "typecheck",
+    "lint",
+    "tests",
+    "coverage",
+    "esm-importable",
+    "landing",
+    "audit",
+    "changeset",
+    "rev-evidence"
+  ],
+  "mappings": {
+    ".github/workflows/ci.yml": [
+      "complete-inputs",
+      "reviewed-gate",
+      "preserve-checks",
+      "operator-contract"
+    ],
+    ".rev/prepare-pr.mjs": [
+      "complete-inputs",
+      "reviewed-gate",
+      "preserve-checks"
+    ],
+    ".rev/pr-coverage.test.mjs": [
+      "complete-inputs",
+      "reviewed-gate",
+      "preserve-checks"
+    ],
+    ".rev/pr-task.json": [
+      "operator-contract"
+    ],
+    ".rev/pr-contract.json": [
+      "operator-contract"
+    ],
+    ".rev/pr-sources.json": [
+      "operator-contract"
+    ],
+    ".rev/PR-COVERAGE.md": [
+      "operator-contract"
+    ],
+    ".changeset/rev-pr-coverage.md": [
+      "operator-contract"
+    ]
+  }
+}

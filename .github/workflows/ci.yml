@@ -239,31 +239,39 @@ jobs:
     name: Collect REV acceptance evidence
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@v4
         with:
-          bun-version: 1.2.22
-      - run: bun install --frozen-lockfile
-      - name: Run criterion-specific probes without secrets
-        run: bash -euo pipefail .rev/collect.sh
-      - name: Bind evidence to the checked-out PR revision
+          repository: aviarytech/rev
+          ref: 44a8872696c238a4da89ef42153587a3278895e2
+          path: .rev-tool
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Exercise PR evidence without secrets
         env:
+          REV_TOOL_PATH: ${{ github.workspace }}/.rev-tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test .rev/pr-coverage.test.mjs .rev-tool/test/coverage.test.js .rev-tool/test/action.test.js .rev-tool/test/change.test.js | tee .rev/pr-observations.txt
+      - name: Bind complete changes and evidence to the PR revisions
+        env:
+          REV_TOOL_PATH: ${{ github.workspace }}/.rev-tool
           REV_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REV_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: node scripts/rev-evidence.mjs
+        run: node .rev/prepare-pr.mjs
       - uses: actions/upload-artifact@v7
         with:
           name: rev-acceptance-evidence
-          path: |
-            .rev/task.json
-            .rev/evidence.json
-          include-hidden-files: true
+          path: ${{ runner.temp }}/rev-pr-input/
           if-no-files-found: error
           retention-days: 7
 
@@ -282,11 +290,16 @@ jobs:
           path: rev-input
       - name: Evaluate acceptance criteria
         if: ${{ !cancelled() }}
-        uses: aviarytech/rev@b54dc9be88d370f2d1b51f4aee2a117a961294b8
+        uses: aviarytech/rev@44a8872696c238a4da89ef42153587a3278895e2
         with:
-          api-key: ${{ secrets.TYPESAFE_API_KEY }}
+          scope: pull-request
+          # Accept the existing misspelled secret until its owner renames it.
+          api-key: ${{ secrets.TYPESAFE_API_KEY || secrets.TUPESAFE_API_KEY }}
           task-file: rev-input/task.json
           evidence-file: rev-input/evidence.json
+          change-file: rev-input/change.json
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          contract-sha256: ${{ vars[format('REV_CONTRACT_PR_{0}', github.event.pull_request.number)] }}
           head-sha: ${{ github.event.pull_request.head.sha }}
           needs: ${{ toJSON(needs) }}
           steps: ${{ toJSON(steps) }}

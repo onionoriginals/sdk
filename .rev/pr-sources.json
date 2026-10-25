@@ -1,0 +1,44 @@
+[
+  {
+    "id": "workflow",
+    "kind": "code",
+    "paths": [
+      ".github/workflows/ci.yml"
+    ]
+  },
+  {
+    "id": "collector",
+    "kind": "code",
+    "paths": [
+      ".rev/prepare-pr.mjs",
+      ".rev-tool/src/coverage.js",
+      ".rev-tool/src/gate.js"
+    ]
+  },
+  {
+    "id": "expectations",
+    "kind": "test",
+    "paths": [
+      ".rev/pr-coverage.test.mjs",
+      ".rev-tool/test/coverage.test.js",
+      ".rev-tool/test/action.test.js",
+      ".rev-tool/test/change.test.js"
+    ]
+  },
+  {
+    "id": "observations",
+    "kind": "behavior",
+    "paths": [
+      ".rev/pr-observations.txt"
+    ]
+  },
+  {
+    "id": "operator",
+    "kind": "code",
+    "paths": [
+      ".rev/PR-COVERAGE.md",
+      ".rev/pr-contract.json",
+      ".rev/pr-sources.json"
+    ]
+  }
+]

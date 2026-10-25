@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "task": "Migrate SDK to REV 0.3 with whole-PR coverage and retain existing checks.",
+  "criteria": [
+    {
+      "id": "complete-inputs",
+      "description": "The unprivileged preparation job collects the complete committed PR diff using the pinned REV collector, including changed workflow and acceptance files, and packages the exact head/base revisions, original request, task and actual behavioral observations. A mismatched checkout or unmapped changed file fails collection. Tests exercise successful packaging and both negative cases."
+    },
+    {
+      "id": "reviewed-gate",
+      "description": "The PR evaluator uses pinned REV 0.3 in pull-request scope with change-file, explicit head and base, and a PR-specific trusted repository variable for the reviewed contract digest. The evaluator job reads artifacts only and executes no application PR code. Missing or altered contracts and incomplete coverage deny; accepted criteria alone cannot approve. Tests exercise these negative cases."
+    },
+    {
+      "id": "preserve-checks",
+      "description": "SDK retains all existing CI checks as required REV dependencies. It recognizes both the standard TYPESAFE_API_KEY and the existing TUPESAFE_API_KEY secret names, without printing secret values. Collection and evaluator jobs do not install or execute application code with the API key."
+    },
+    {
+      "id": "operator-contract",
+      "description": "Documentation explains how to update request, criteria, file mappings and relevant evidence per PR, obtain review and pin a PR-specific digest outside PR content. It distinguishes coverage from merge readiness and forbids automatic digest approval or acceptance-mode bypasses. The rollout supplies these configuration files, preserves existing public APIs and introduces no release payload."
+    }
+  ]
+}
