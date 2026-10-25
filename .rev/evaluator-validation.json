@@ -1,0 +1,21 @@
+{
+  "suite": "synthetic-acceptance-and-coverage-v3",
+  "thresholds": {
+    "model": "jev-1.14.0",
+    "minProbability": 0.9,
+    "minConfidence": 0.8,
+    "timeoutMs": 10000
+  },
+  "cases": 20,
+  "falseApprovals": 0,
+  "falseDenials": 0,
+  "mismatches": 0,
+  "errors": 0,
+  "pin": "81686246e89f9dd93f58397b508a01925b5eb32d",
+  "upstreamMerge": "https://github.com/aviarytech/rev/pull/5",
+  "mergedMain": "fdb388e3374a3c52a0ff56901b218e2f5e110618",
+  "pinIsAncestorOfMergedMain": true,
+  "run": "https://github.com/aviarytech/tv/actions/runs/40240205167",
+  "fullReportSha256": "e5eb607d5a8984a747f210752f3d3f3ff5bd14e7bd98ab3089347e4d0f131e7b",
+  "scope": "Recorded synthetic validation of the pinned evaluator, not approval of this integration PR."
+}

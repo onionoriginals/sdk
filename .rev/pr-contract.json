@@ -22,22 +22,31 @@
       "operator-contract"
     ],
     ".rev/prepare-pr.mjs": [
-      "complete-inputs",
-      "reviewed-gate",
-      "preserve-checks"
+      "complete-inputs"
     ],
     ".rev/pr-coverage.test.mjs": [
       "complete-inputs",
       "reviewed-gate",
-      "preserve-checks"
+      "preserve-checks",
+      "operator-contract",
+      "validate-evaluator"
     ],
     ".rev/pr-task.json": [
-      "operator-contract"
+      "complete-inputs",
+      "reviewed-gate",
+      "preserve-checks",
+      "operator-contract",
+      "validate-evaluator"
     ],
     ".rev/pr-contract.json": [
-      "operator-contract"
+      "complete-inputs",
+      "reviewed-gate",
+      "preserve-checks",
+      "operator-contract",
+      "validate-evaluator"
     ],
     ".rev/pr-sources.json": [
+      "complete-inputs",
       "operator-contract"
     ],
     ".rev/PR-COVERAGE.md": [
@@ -45,6 +54,9 @@
     ],
     ".changeset/rev-pr-coverage.md": [
       "operator-contract"
+    ],
+    ".rev/evaluator-validation.json": [
+      "validate-evaluator"
     ]
   }
 }

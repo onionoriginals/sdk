@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -35,6 +35,11 @@ test('PR evidence contains the complete committed change and actual observations
     assert.equal(evidence.headSha, head);
     assert.match(evidence.items[1].content, /"expected":2,"observed":2/);
     await assert.rejects(prepare(dir, tool, base, base, output), /head-not-checked-out/);
+    const sourceManifest = await readFile(resolve(dir, '.rev/pr-sources.json'), 'utf8');
+    await symlink(tmpdir(), resolve(dir, 'outside'));
+    await writeFile(resolve(dir, '.rev/pr-sources.json'), JSON.stringify([{ id: 'escape', kind: 'code', paths: ['outside'] }]));
+    await assert.rejects(prepare(dir, tool, base, head, output), /Evidence source escapes repository/);
+    await writeFile(resolve(dir, '.rev/pr-sources.json'), sourceManifest);
     await writeFile(resolve(dir, 'extra.js'), 'export const extra = true;\n');
     git('add', 'extra.js'); git('commit', '-m', 'unmapped');
     await assert.rejects(prepare(dir, tool, base, git('rev-parse', 'HEAD'), output), /Map every changed file/);
@@ -58,4 +63,45 @@ test('workflow requires full PR coverage with a pinned evaluator and trusted PR-
 test('SDK evaluator recognizes the existing secret spelling without exposing credentials', async () => {
   const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
   assert.ok(workflow.includes('secrets.TYPESAFE_API_KEY || secrets.TUPESAFE_API_KEY'));
+});
+
+test('operator procedure and rollout manifest cover the committed configuration without application or release changes', async t => {
+  const task = JSON.parse(await readFile('.rev/pr-task.json', 'utf8'));
+  const contract = JSON.parse(await readFile('.rev/pr-contract.json', 'utf8'));
+  const sources = JSON.parse(await readFile('.rev/pr-sources.json', 'utf8'));
+  const docs = await readFile('.rev/PR-COVERAGE.md', 'utf8');
+  for (const text of ['full original request', 'every', 'relevant evidence', 'independent review', 'REV_CONTRACT_PR_<number>', 'Never set it automatically', 'merge readiness', 'Never switch']) {
+    assert.ok(docs.includes(text), `Missing operator instruction: ${text}`);
+  }
+  const ids = new Set(task.criteria.map(c => c.id));
+  for (const [path, criteria] of Object.entries(contract.mappings)) {
+    assert.ok(criteria.length > 0, path);
+    for (const id of criteria) assert.ok(ids.has(id), `${path}: unknown criterion ${id}`);
+  }
+  const paths = sources.flatMap(s => s.paths);
+  for (const path of ['.rev-tool/scripts/change.js', '.rev-tool/src/corpus.js', '.rev/pr-task.json', '.rev/pr-contract.json', '.rev/pr-observations.txt']) assert.ok(paths.includes(path), path);
+  const base = process.env.REV_BASE_SHA || 'origin/main';
+  const files = execFileSync('git', ['diff', '--name-only', `${base}...HEAD`], {encoding:'utf8'}).trim().split('\n').filter(Boolean);
+  for (const path of files) {
+    assert.ok(Object.hasOwn(contract.mappings, path), `Unmapped committed file: ${path}`);
+    assert.match(path, /^(\.rev\/|\.github\/workflows\/(ci|rev-validation)\.yml$|\.changeset\/rev-pr-coverage\.md$)/);
+  }
+  t.diagnostic(JSON.stringify({changedFiles:files, knownCriteria:[...ids], requiredChecks:contract.requiredChecks, operatorInstructionsChecked:true, applicationFilesChanged:false}));
+});
+
+test('reruns replace the REV report artifact', async () => {
+  const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
+  assert.match(workflow, /name: rev-report\n\s+overwrite: true/);
+});
+test('recorded upstream validation has no mismatches and identifies the reviewed merged pin', async () => {
+  const result = JSON.parse(await readFile('.rev/evaluator-validation.json', 'utf8'));
+  assert.equal(result.pin, '81686246e89f9dd93f58397b508a01925b5eb32d');
+  assert.equal(result.pinIsAncestorOfMergedMain, true);
+  assert.equal(result.cases, 20);
+  for (const field of ['falseApprovals', 'falseDenials', 'mismatches', 'errors']) assert.equal(result[field], 0);
+  assert.match(result.run, /^https:\/\/github.com\/aviarytech\/tv\/actions\/runs\/40240205167$/);
+});
+
+test('rollout changeset declares no package releases', async () => {
+  assert.match(await readFile('.changeset/rev-pr-coverage.md', 'utf8'), /^---\r?\n---\r?\n/);
 });

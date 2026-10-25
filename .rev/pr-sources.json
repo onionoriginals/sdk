@@ -12,7 +12,9 @@
     "paths": [
       ".rev/prepare-pr.mjs",
       ".rev-tool/src/coverage.js",
-      ".rev-tool/src/gate.js"
+      ".rev-tool/src/gate.js",
+      ".rev-tool/scripts/change.js",
+      ".rev-tool/src/corpus.js"
     ]
   },
   {
@@ -38,7 +40,15 @@
     "paths": [
       ".rev/PR-COVERAGE.md",
       ".rev/pr-contract.json",
-      ".rev/pr-sources.json"
+      ".rev/pr-sources.json",
+      ".rev/pr-task.json"
+    ]
+  },
+  {
+    "id": "evaluator-validation",
+    "kind": "report",
+    "paths": [
+      ".rev/evaluator-validation.json"
     ]
   }
 ]

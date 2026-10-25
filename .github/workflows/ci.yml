@@ -258,6 +258,7 @@ jobs:
       - name: Exercise PR evidence without secrets
         env:
           REV_TOOL_PATH: ${{ github.workspace }}/.rev-tool
+          REV_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -308,6 +309,7 @@ jobs:
         if: ${{ !cancelled() }}
         with:
           name: rev-report
+          overwrite: true
           path: rev-report.json
           if-no-files-found: error
           retention-days: 14
