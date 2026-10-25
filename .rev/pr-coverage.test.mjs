@@ -46,7 +46,7 @@ test('workflow requires full PR coverage with a pinned evaluator and trusted PR-
   const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
   const evaluator = workflow.split('\n  rev:')[1].split(/\n  [a-zA-Z_][a-zA-Z_-]*:/)[0];
   assert.match(evaluator, /scope: pull-request/);
-  assert.match(evaluator, /aviarytech\/rev@44a8872696c238a4da89ef42153587a3278895e2/);
+  assert.match(evaluator, /aviarytech\/rev@81686246e89f9dd93f58397b508a01925b5eb32d/);
   assert.match(evaluator, /change-file: rev-input\/change.json/);
   assert.match(evaluator, /vars\[format\('REV_CONTRACT_PR_\{0\}'/);
   assert.doesNotMatch(evaluator, /uses: actions\/checkout|run:/);

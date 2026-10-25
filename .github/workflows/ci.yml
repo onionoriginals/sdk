@@ -249,7 +249,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: aviarytech/rev
-          ref: 44a8872696c238a4da89ef42153587a3278895e2
+          ref: 81686246e89f9dd93f58397b508a01925b5eb32d
           path: .rev-tool
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -290,7 +290,7 @@ jobs:
           path: rev-input
       - name: Evaluate acceptance criteria
         if: ${{ !cancelled() }}
-        uses: aviarytech/rev@44a8872696c238a4da89ef42153587a3278895e2
+        uses: aviarytech/rev@81686246e89f9dd93f58397b508a01925b5eb32d
         with:
           scope: pull-request
           # Accept the existing misspelled secret until its owner renames it.
