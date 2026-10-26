@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "task": "Migrate SDK to REV 0.3 with whole-PR coverage and retain existing checks.",
+  "criteria": [
+    {
+      "id": "complete-inputs",
+      "description": "The unprivileged preparation job collects the complete committed PR diff using the pinned REV collector, including changed workflow and acceptance files, and packages the exact head/base revisions, original request, task and actual behavioral observations. A mismatched checkout or unmapped changed file fails collection. Tests exercise successful packaging and both negative cases. The preparation helper confines source files to the repository, validates evidence format and size with the pinned corpus validator, and emits task/change/evidence JSON plus a candidate digest that is never used as trusted approval. Source manifests include the collector and validator implementation and their tests."
+    },
+    {
+      "id": "reviewed-gate",
+      "description": "The PR evaluator uses pinned REV 0.3 in pull-request scope with change-file, explicit head and base, and a PR-specific trusted repository variable for the reviewed contract digest. The evaluator job reads artifacts only and executes no application PR code. Missing or altered contracts and incomplete coverage deny; accepted criteria alone cannot approve. Tests exercise these negative cases. The evaluator report artifact is replaced on reruns so it represents the latest evaluation attempt."
+    },
+    {
+      "id": "preserve-checks",
+      "description": "SDK retains all existing CI checks as required REV dependencies. It recognizes both the standard TYPESAFE_API_KEY and the existing TUPESAFE_API_KEY secret names, without printing secret values. Collection and evaluator jobs do not install or execute application code with the API key."
+    },
+    {
+      "id": "operator-contract",
+      "description": "Documentation explains how to update request, criteria, file mappings and relevant evidence per PR, obtain review and pin a PR-specific digest outside PR content. It distinguishes coverage from merge readiness and forbids automatic digest approval or acceptance-mode bypasses. The rollout supplies these configuration files, preserves existing public APIs and introduces no release payload. The task and contract JSON explicitly encode the original request, observable criteria, required CI job IDs and complete file mappings; the source manifest groups implementation, tests and observed test output. Tests check these configuration relationships and the documented operator procedure, and inspect the committed changed-file list to exclude application and release-payload changes."
+    },
+    {
+      "id": "validate-evaluator",
+      "description": "The pinned stronger REV implementation has been merged upstream. The rollout records its upstream merge, immutable pin and successful live synthetic validation run URL with 20 cases and zero false approvals, false denials, mismatches or errors. Integration tests run locally and in the unprivileged evidence job, including pinned REV negative coverage tests. This evaluator validation is explicitly distinct from approval of the integration PR."
+    }
+  ]
+}
