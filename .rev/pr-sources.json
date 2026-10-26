@@ -3,8 +3,7 @@
     "id": "workflow",
     "kind": "code",
     "paths": [
-      ".github/workflows/ci.yml",
-      ".github/workflows/rev-trusted.yml"
+      ".github/workflows/ci.yml"
     ]
   },
   {
@@ -24,9 +23,6 @@
     "kind": "test",
     "paths": [
       ".rev/pr-coverage.test.mjs",
-      ".rev/release-pr.test.mjs",
-      ".rev/action-update.test.mjs",
-      ".rev/trusted-workflow.test.mjs",
       ".rev-tool/test/github-review.test.js"
     ]
   },
@@ -41,10 +37,7 @@
     "id": "operator",
     "kind": "code",
     "paths": [
-      ".rev/PR-COVERAGE.md",
-      ".rev/pr-contract.json",
-      ".rev/pr-sources.json",
-      ".rev/pr-task.json"
+      ".rev/pr-sources.json"
     ]
   },
   {

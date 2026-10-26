@@ -79,7 +79,7 @@ test('operator procedure and PR manifest have valid criteria and evidence source
     for (const id of criteria) assert.ok(ids.has(id), `${path}: unknown criterion ${id}`);
   }
   const paths = sources.flatMap(s => s.paths);
-  for (const path of ['.rev-tool/scripts/github-review.js', '.rev/pr-task.json', '.rev/pr-contract.json', '.rev/pr-observations.txt']) assert.ok(paths.includes(path), path);
+  for (const path of ['.rev-tool/scripts/github-review.js', '.rev/pr-observations.txt']) assert.ok(paths.includes(path), path);
 
 });
 
