@@ -51,7 +51,8 @@ test('workflow requires full PR coverage with a pinned evaluator and trusted PR-
   const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
   const evaluator = workflow.split('\n  rev:')[1].split(/\n  [a-zA-Z_][a-zA-Z_-]*:/)[0];
   assert.match(evaluator, /scope: pull-request/);
-  assert.match(evaluator, /aviarytech\/rev@81686246e89f9dd93f58397b508a01925b5eb32d/);
+  assert.match(evaluator, /diagnose-denials: 'true'/);
+  assert.match(evaluator, /aviarytech\/rev@3f580df7d3b6e367f21b6e11923980853aae1380/);
   assert.match(evaluator, /change-file: rev-input\/change.json/);
   assert.match(evaluator, /vars\[format\('REV_CONTRACT_PR_\{0\}'/);
   assert.doesNotMatch(evaluator, /uses: actions\/checkout|run:/);
@@ -84,7 +85,7 @@ test('operator procedure and rollout manifest cover the committed configuration 
   const files = execFileSync('git', ['diff', '--name-only', `${base}...HEAD`], {encoding:'utf8'}).trim().split('\n').filter(Boolean);
   for (const path of files) {
     assert.ok(Object.hasOwn(contract.mappings, path), `Unmapped committed file: ${path}`);
-    assert.match(path, /^(\.rev\/|\.github\/workflows\/(ci|rev-validation)\.yml$|\.changeset\/rev-pr-coverage\.md$)/);
+    assert.match(path, /^(\.rev\/|\.github\/workflows\/(ci|rev-validation)\.yml$|\.changeset\/rev-(pr-coverage|denial-diagnostics)\.md$)/);
   }
   t.diagnostic(JSON.stringify({changedFiles:files, knownCriteria:[...ids], requiredChecks:contract.requiredChecks, operatorInstructionsChecked:true, applicationFilesChanged:false}));
 });
@@ -104,4 +105,8 @@ test('recorded upstream validation has no mismatches and identifies the reviewed
 
 test('rollout changeset declares no package releases', async () => {
   assert.match(await readFile('.changeset/rev-pr-coverage.md', 'utf8'), /^---\r?\n---\r?\n/);
+});
+
+test('diagnostic rollout declares no package release', async () => {
+  assert.match(await readFile('.changeset/rev-denial-diagnostics.md', 'utf8'), /^---\r?\n---\r?\n/);
 });

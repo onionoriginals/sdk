@@ -1,6 +1,6 @@
 # Whole-PR REV gate
 
-REV is pinned to `81686246e89f9dd93f58397b508a01925b5eb32d` (0.3). Its approval requires coverage of the original request and every changed file, verified criteria, and successful named CI dependencies. Overall merge readiness still requires independent review and appropriate runtime/release evidence.
+The complete-PR evaluator is pinned to `3f580df7d3b6e367f21b6e11923980853aae1380` (0.3). Its approval requires coverage of the original request and every changed file, verified criteria, and successful named CI dependencies. Overall merge readiness still requires independent review and appropriate runtime/release evidence.
 
 For each PR:
 
@@ -19,3 +19,17 @@ REV_TOOL_PATH=/absolute/path/to/pinned/rev node --test .rev/pr-coverage.test.mjs
 ```
 
 SDK credential compatibility: the evaluator prefers `TYPESAFE_API_KEY`; SDK also accepts its existing `TUPESAFE_API_KEY` spelling. No secret is downloaded or printed. TV uses the correctly named secret.
+
+## Advisory denial diagnostics
+
+The complete-PR evaluator sets `diagnose-denials: 'true'`. After model denial it
+can report a requirement span, cited supplied-evidence line range, gap category
+and next check. The ranges refer to supplied source content, not repository line
+numbers. Reference existence is checked locally; the interpretation remains
+advisory. Unsupported findings explicitly report evaluator uncertainty.
+
+This pass never changes approval, denial reasons, thresholds or exit status.
+It makes at most two extra requests with a shared deadline; errors retain the
+original denial. Diagnostic regression tests run without the API key. The
+recorded evaluator-validation.json describes an earlier gate evaluation and is
+not proof that this diagnostic rollout is approved.

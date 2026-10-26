@@ -1,7 +1,7 @@
 {
   "request": {
-    "source": "Owner instruction in REV rollout thread, 2026-10-25",
-    "text": "Merge the stronger REV gate and update the SDK integration to use it. Require whole-PR request/change coverage rather than unrelated regression approval, preserve existing checks, use the reviewed contract through trusted configuration, and validate the migration. Do not change application behavior or publish a release."
+    "source": "Owner REV rollout thread, 2026-10-25/26: requested cited diagnostic findings and instructed implementation.",
+    "text": "Enable advisory denial diagnostics in the SDK REV integration. Reports should identify the requirement, relevant evidence location, gap and next check, or state evaluator uncertainty when no concrete issue can be grounded. Verify citations, keep diagnostics separate from approval, preserve existing checks and thresholds, and do not change application behavior or publish a release."
   },
   "requiredChecks": [
     "typecheck",
@@ -16,47 +16,37 @@
   ],
   "mappings": {
     ".github/workflows/ci.yml": [
-      "complete-inputs",
-      "reviewed-gate",
+      "advisory-diagnostics",
       "preserve-checks",
       "operator-contract"
     ],
-    ".rev/prepare-pr.mjs": [
-      "complete-inputs"
-    ],
     ".rev/pr-coverage.test.mjs": [
-      "complete-inputs",
-      "reviewed-gate",
+      "advisory-diagnostics",
       "preserve-checks",
-      "operator-contract",
-      "validate-evaluator"
+      "operator-contract"
     ],
     ".rev/pr-task.json": [
-      "complete-inputs",
-      "reviewed-gate",
+      "advisory-diagnostics",
       "preserve-checks",
-      "operator-contract",
-      "validate-evaluator"
+      "operator-contract"
     ],
     ".rev/pr-contract.json": [
-      "complete-inputs",
-      "reviewed-gate",
+      "advisory-diagnostics",
       "preserve-checks",
-      "operator-contract",
-      "validate-evaluator"
+      "operator-contract"
     ],
     ".rev/pr-sources.json": [
-      "complete-inputs",
+      "advisory-diagnostics",
+      "preserve-checks",
       "operator-contract"
     ],
     ".rev/PR-COVERAGE.md": [
+      "advisory-diagnostics",
+      "preserve-checks",
       "operator-contract"
     ],
-    ".changeset/rev-pr-coverage.md": [
+    ".changeset/rev-denial-diagnostics.md": [
       "operator-contract"
-    ],
-    ".rev/evaluator-validation.json": [
-      "validate-evaluator"
     ]
   }
 }
