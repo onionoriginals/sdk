@@ -252,7 +252,7 @@ jobs:
           ref: 81686246e89f9dd93f58397b508a01925b5eb32d
           path: .rev-tool
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - name: Exercise PR evidence without secrets
