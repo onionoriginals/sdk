@@ -249,7 +249,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: aviarytech/rev
-          ref: 3f580df7d3b6e367f21b6e11923980853aae1380
+          ref: 4a7f17341cd38cf110193b3d785da9bedf88f580
           path: .rev-tool
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -291,7 +291,7 @@ jobs:
           path: rev-input
       - name: Evaluate acceptance criteria
         if: ${{ !cancelled() }}
-        uses: aviarytech/rev@3f580df7d3b6e367f21b6e11923980853aae1380
+        uses: aviarytech/rev@4a7f17341cd38cf110193b3d785da9bedf88f580
         with:
           scope: pull-request
           diagnose-denials: 'true'
