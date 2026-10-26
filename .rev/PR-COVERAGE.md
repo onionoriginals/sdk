@@ -1,6 +1,6 @@
 # Whole-PR REV gate
 
-REV is pinned to `81686246e89f9dd93f58397b508a01925b5eb32d` (0.3). Its approval requires coverage of the original request and every changed file, verified criteria, and successful named CI dependencies. Overall merge readiness still requires independent review and appropriate runtime/release evidence.
+REV is pinned to `f165259e3dbc87ee34e236a79a1da346170d1e83` (0.3). Its approval requires coverage of the original request and every changed file, verified criteria, and successful named CI dependencies. Overall merge readiness still requires independent review and appropriate runtime/release evidence.
 
 For each PR:
 
