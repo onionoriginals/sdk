@@ -72,3 +72,9 @@ bug. The updated immutable evaluator pin accepts hundredth-rounded probability
 totals from 0.99 through 1.01 without normalizing scores or lowering thresholds.
 The old evaluator-validation.json is historical evidence for its recorded pin,
 not a live validation of the updated evaluator.
+
+Model denials also request advisory diagnostics from the pinned evaluator. These
+may cite a requirement span and supplied-evidence lines, or explicitly report
+evaluator uncertainty. Supplied-evidence lines are not repository line numbers.
+Diagnostic failures and findings cannot change the original approval decision,
+thresholds or exit status; they help investigate a denial, not override it.

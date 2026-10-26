@@ -303,6 +303,7 @@ jobs:
         uses: aviarytech/rev@f165259e3dbc87ee34e236a79a1da346170d1e83
         with:
           scope: pull-request
+          diagnose-denials: 'true'
           # Accept the existing misspelled secret until its owner renames it.
           api-key: ${{ secrets.TYPESAFE_API_KEY || secrets.TUPESAFE_API_KEY }}
           task-file: rev-input/task.json
