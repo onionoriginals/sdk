@@ -1,19 +1,22 @@
 import { readFile, writeFile, mkdir, realpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
+import { releaseInputs } from './release-pr.mjs';
 import { pathToFileURL } from 'node:url';
 
 // This runs without secrets. The evaluator consumes only the resulting JSON.
-export async function prepare(root, toolPath, base, head, output) {
+export async function prepare(root, toolPath, base, head, output, profile = 'pr') {
   const read = path => readFile(resolve(root, path), 'utf8');
-  const task = JSON.parse(await read('.rev/pr-task.json'));
-  const contract = JSON.parse(await read('.rev/pr-contract.json'));
+  if (!['pr', 'release'].includes(profile)) throw new Error('Unknown evidence profile');
+  const release = profile === 'release' ? await releaseInputs(root, base, head) : null;
+  const task = release?.task ?? JSON.parse(await read('.rev/pr-task.json'));
+  const contract = release?.contract ?? JSON.parse(await read('.rev/pr-contract.json'));
   const { collectChange } = await import(pathToFileURL(resolve(toolPath, 'scripts/change.js')));
   const { buildCorpus } = await import(pathToFileURL(resolve(toolPath, 'src/corpus.js')));
   const { change, digest } = collectChange(base, head, contract, task, root);
   if (change.files.some(file => !file.criteria.length)) throw new Error('Map every changed file to relevant PR criteria');
-  const sources = JSON.parse(await read('.rev/pr-sources.json'));
+  const sources = release ? [{ id: 'release-probe', kind: 'code', paths: ['.rev/release-pr.mjs', '.rev/release-task.json', '.rev/release-contract.json', '.rev/release-pr.test.mjs'] }] : JSON.parse(await read('.rev/pr-sources.json'));
   const rootPath = await realpath(root);
-  const items = [];
+  const items = release ? [release.observation] : [];
   for (const source of sources) {
     const content = [];
     for (const path of source.paths) {
@@ -37,5 +40,5 @@ export async function prepare(root, toolPath, base, head, output) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const { REV_TOOL_PATH, REV_BASE_SHA, REV_HEAD_SHA, RUNNER_TEMP } = process.env;
   if (!REV_TOOL_PATH || !RUNNER_TEMP) throw new Error('Expected pinned tool path and runner temp');
-  console.log(JSON.stringify(await prepare(process.cwd(), REV_TOOL_PATH, REV_BASE_SHA, REV_HEAD_SHA, resolve(RUNNER_TEMP, 'rev-pr-input'))));
+  console.log(JSON.stringify(await prepare(process.cwd(), REV_TOOL_PATH, REV_BASE_SHA, REV_HEAD_SHA, resolve(RUNNER_TEMP, 'rev-pr-input'), process.env.REV_PR_BRANCH === 'changeset-release/main' ? 'release' : 'pr')));
 }

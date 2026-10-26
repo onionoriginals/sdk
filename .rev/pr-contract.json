@@ -1,7 +1,7 @@
 {
   "request": {
-    "source": "Owner instruction in REV rollout thread, 2026-10-25",
-    "text": "Merge the stronger REV gate and update the SDK integration to use it. Require whole-PR request/change coverage rather than unrelated regression approval, preserve existing checks, use the reviewed contract through trusted configuration, and validate the migration. Do not change application behavior or publish a release."
+    "source": "SDK status thread, owner instruction: Do it, 2026-10-25",
+    "text": "Fix the REV evidence workflow for release PRs: scope rollout-only assertions correctly and support release-specific evidence. The observed Version Packages PR fails because the rollout tests reject release files and require an already-consumed changeset. Preserve the whole-PR acceptance gate, prepare a reviewable fix and validate it against the release PR."
   },
   "requiredChecks": [
     "typecheck",
@@ -16,47 +16,64 @@
   ],
   "mappings": {
     ".github/workflows/ci.yml": [
-      "complete-inputs",
-      "reviewed-gate",
-      "preserve-checks",
-      "operator-contract"
+      "reusable-checks",
+      "release-evidence",
+      "preserve-gate"
     ],
     ".rev/prepare-pr.mjs": [
-      "complete-inputs"
+      "reusable-checks",
+      "release-evidence",
+      "preserve-gate"
     ],
     ".rev/pr-coverage.test.mjs": [
-      "complete-inputs",
-      "reviewed-gate",
-      "preserve-checks",
-      "operator-contract",
-      "validate-evaluator"
+      "reusable-checks",
+      "release-evidence",
+      "preserve-gate"
+    ],
+    ".rev/release-pr.mjs": [
+      "reusable-checks",
+      "release-evidence",
+      "preserve-gate"
+    ],
+    ".rev/release-pr.test.mjs": [
+      "reusable-checks",
+      "release-evidence",
+      "preserve-gate"
+    ],
+    ".rev/release-task.json": [
+      "reusable-checks",
+      "release-evidence",
+      "preserve-gate"
+    ],
+    ".rev/release-contract.json": [
+      "reusable-checks",
+      "release-evidence",
+      "preserve-gate"
     ],
     ".rev/pr-task.json": [
-      "complete-inputs",
-      "reviewed-gate",
-      "preserve-checks",
-      "operator-contract",
-      "validate-evaluator"
+      "reusable-checks",
+      "release-evidence",
+      "preserve-gate"
     ],
     ".rev/pr-contract.json": [
-      "complete-inputs",
-      "reviewed-gate",
-      "preserve-checks",
-      "operator-contract",
-      "validate-evaluator"
+      "reusable-checks",
+      "release-evidence",
+      "preserve-gate"
     ],
     ".rev/pr-sources.json": [
-      "complete-inputs",
-      "operator-contract"
+      "reusable-checks",
+      "release-evidence",
+      "preserve-gate"
     ],
     ".rev/PR-COVERAGE.md": [
-      "operator-contract"
+      "reusable-checks",
+      "release-evidence",
+      "preserve-gate"
     ],
-    ".changeset/rev-pr-coverage.md": [
-      "operator-contract"
-    ],
-    ".rev/evaluator-validation.json": [
-      "validate-evaluator"
+    ".changeset/rev-release-evidence.md": [
+      "reusable-checks",
+      "release-evidence",
+      "preserve-gate"
     ]
   }
 }

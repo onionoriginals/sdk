@@ -19,3 +19,29 @@ REV_TOOL_PATH=/absolute/path/to/pinned/rev node --test .rev/pr-coverage.test.mjs
 ```
 
 SDK credential compatibility: the evaluator prefers `TYPESAFE_API_KEY`; SDK also accepts its existing `TUPESAFE_API_KEY` spelling. No secret is downloaded or printed. TV uses the correctly named secret.
+
+## Generated release PRs
+
+For `changeset-release/main`, preparation selects `.rev/release-task.json` and
+`.rev/release-contract.json` instead of the ordinary PR contract. The unprivileged
+probe creates a temporary detached worktree at the PR merge base, runs
+`bun install --frozen-lockfile` and `bun run version`, and compares the entire
+tracked diff with the PR. It rejects any difference, including unrelated files,
+wrong package versions or missing generated files. Temporary worktrees are removed
+on success and failure. The probe never merges, tags or publishes.
+
+Each changed path receives the `release-output` criterion only after this exact
+comparison succeeds. The complete diff and revision-bound reproduction observations
+still undergo the pinned collector's size/format checks and model coverage review.
+This branch name selects a profile; it does not grant approval or skip checks.
+
+Review the release request, criterion and actual artifact before setting
+`REV_CONTRACT_PR_<number>` to its candidate digest, as above. Release PRs do not
+inherit the rollout PR's approval. A maintainer must approve the release contract
+independently; generation must never set that trusted variable. All existing CI
+jobs remain required. Merging the release PR still triggers the separate publish
+workflow and is a maintainer decision.
+
+Reusable integration tests check the evidence plumbing. They do not enforce the
+old rollout's file allowlist or require a changeset that versioning consumes.
+Ordinary PRs must still supply their own complete mappings and behavioral evidence.

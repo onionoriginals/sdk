@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "task": "Prepare the pending Changesets package release for review without publishing it.",
+  "criteria": [{
+    "id": "release-output",
+    "description": "Every committed change exactly matches running bun install --frozen-lockfile followed by bun run version in an isolated checkout of the PR merge base. This includes consumed changesets, package versions, dependency ranges, changelogs and bun.lock metadata. No unrelated application, workflow, acceptance-contract or other changes are included. Evidence identifies the exact base, merge base, head and complete changed-file list. The pinned collector supplies every full diff, and all required SDK CI jobs must pass. This prepares release metadata only; merging and publishing remain separate maintainer decisions."
+  }]
+}

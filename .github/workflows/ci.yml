@@ -262,9 +262,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --test .rev/pr-coverage.test.mjs .rev-tool/test/coverage.test.js .rev-tool/test/action.test.js .rev-tool/test/change.test.js | tee .rev/pr-observations.txt
+          node --test .rev/pr-coverage.test.mjs .rev/release-pr.test.mjs .rev-tool/test/coverage.test.js .rev-tool/test/action.test.js .rev-tool/test/change.test.js | tee .rev/pr-observations.txt
       - name: Bind complete changes and evidence to the PR revisions
         env:
+          REV_PR_BRANCH: ${{ github.head_ref }}
           REV_TOOL_PATH: ${{ github.workspace }}/.rev-tool
           REV_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REV_BASE_SHA: ${{ github.event.pull_request.base.sha }}

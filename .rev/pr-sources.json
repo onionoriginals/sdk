@@ -14,7 +14,10 @@
       ".rev-tool/src/coverage.js",
       ".rev-tool/src/gate.js",
       ".rev-tool/scripts/change.js",
-      ".rev-tool/src/corpus.js"
+      ".rev-tool/src/corpus.js",
+      ".rev/release-pr.mjs",
+      ".rev/release-task.json",
+      ".rev/release-contract.json"
     ]
   },
   {
@@ -24,7 +27,8 @@
       ".rev/pr-coverage.test.mjs",
       ".rev-tool/test/coverage.test.js",
       ".rev-tool/test/action.test.js",
-      ".rev-tool/test/change.test.js"
+      ".rev-tool/test/change.test.js",
+      ".rev/release-pr.test.mjs"
     ]
   },
   {

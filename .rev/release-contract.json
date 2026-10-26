@@ -1,0 +1,7 @@
+{
+  "request": {
+    "source": "Repository Changesets release workflow (.github/workflows/release.yml), Version Packages PR",
+    "text": "Prepare the pending package release using the repository's bun run version command, consuming pending changesets and updating package versions, dependency ranges, changelogs and lockfile metadata exactly as generated. Include no unrelated changes. Validate the generated release and existing SDK checks before maintainer review. Do not merge or publish automatically."
+  },
+  "requiredChecks": ["typecheck", "lint", "tests", "coverage", "esm-importable", "landing", "audit", "changeset", "rev-evidence"]
+}
