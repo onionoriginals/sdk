@@ -1,6 +1,6 @@
 # Whole-PR REV gate
 
-The complete-PR evaluator is pinned to `4a7f17341cd38cf110193b3d785da9bedf88f580` (0.3). Its approval requires coverage of the original request and every changed file, verified criteria, and successful named CI dependencies. Overall merge readiness still requires independent review and appropriate runtime/release evidence.
+The complete-PR evaluator is pinned to `8a8a3889e57dd8e7498af201ade6e34a4c731bfe` (0.3). Its approval requires coverage of the original request and every changed file, verified criteria, and successful named CI dependencies. Overall merge readiness still requires independent review and appropriate runtime/release evidence.
 
 For each PR:
 

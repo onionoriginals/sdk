@@ -249,7 +249,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: aviarytech/rev
-          ref: 4a7f17341cd38cf110193b3d785da9bedf88f580
+          ref: 8a8a3889e57dd8e7498af201ade6e34a4c731bfe
           path: .rev-tool
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -262,7 +262,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --test .rev/pr-coverage.test.mjs .rev-tool/test/coverage.test.js .rev-tool/test/action.test.js .rev-tool/test/change.test.js .rev-tool/test/diagnose.test.js | tee .rev/pr-observations.txt
+          node --test .rev/pr-coverage.test.mjs .rev-tool/test/coverage.test.js .rev-tool/test/action.test.js .rev-tool/test/change.test.js .rev-tool/test/diagnose.test.js .rev-tool/test/gate.test.js | tee .rev/pr-observations.txt
       - name: Bind complete changes and evidence to the PR revisions
         env:
           REV_TOOL_PATH: ${{ github.workspace }}/.rev-tool
@@ -291,7 +291,7 @@ jobs:
           path: rev-input
       - name: Evaluate acceptance criteria
         if: ${{ !cancelled() }}
-        uses: aviarytech/rev@4a7f17341cd38cf110193b3d785da9bedf88f580
+        uses: aviarytech/rev@8a8a3889e57dd8e7498af201ade6e34a4c731bfe
         with:
           scope: pull-request
           diagnose-denials: 'true'
