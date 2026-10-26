@@ -100,14 +100,6 @@ for (const kind of ['quicknode', 'regtest'] as const) describe(`${kind} sat snap
     await expect(provider.getSatSnapshot('123')).rejects.toMatchObject({ code: 'SAT_SNAPSHOT_BUDGET_EXCEEDED' });
     expect(calls).toHaveLength(4);
   });
-  test('bounds a stalled dependency by the snapshot deadline and stops subsequent reads', async () => {
-    const { provider, calls } = fixture(kind, { snapshotBudget: { timeoutMs: 20 }, delayStatusMs: 100 });
-    const started = performance.now();
-    await expect(provider.getSatSnapshot('123')).rejects.toMatchObject({ code: 'SAT_SNAPSHOT_BUDGET_EXCEEDED' });
-    expect(performance.now() - started).toBeLessThan(90);
-    await Bun.sleep(110);
-    expect(calls).toHaveLength(2);
-  });
   test('retains exact body and raw CBOR with Core creation order and ownership', async () => {
     const { provider, calls } = fixture(kind);
     const result = await provider.getSatSnapshot('123');

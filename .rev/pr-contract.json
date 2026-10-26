@@ -1,7 +1,7 @@
 {
   "request": {
     "source": "Owner instruction in REV rollout thread: Fix things",
-    "text": "Fix SDK REV failures: remove migration-only assumptions, support reproducible release evidence and scoped Dependabot action-update evidence, clearly identify missing per-PR setup and collection errors, and use bounded provider probability-rounding support. Preserve whole-PR coverage, reviewed contract configuration, CI dependencies and approval thresholds. Owner additionally approved moving REV evaluation into a trusted workflow using the existing repository secret, with no PR code execution in that workflow and verified source run, revisions and CI checks. Stage deployment without bypassing the existing gate."
+    "text": "Fix SDK REV failures: remove migration-only assumptions, support reproducible release evidence and scoped Dependabot action-update evidence, clearly identify missing per-PR setup and collection errors, and use bounded provider probability-rounding support. Preserve whole-PR coverage, reviewed contract configuration, CI dependencies and approval thresholds. Owner additionally approved moving REV evaluation into a trusted workflow using the existing repository secret, with no PR code execution in that workflow and verified source run, revisions and CI checks. Stage deployment without bypassing the existing gate. Fix the repeatedly failing snapshot deadline regression test without changing production behavior or weakening its timeout/cancellation assertions."
   },
   "requiredChecks": [
     "typecheck",
@@ -60,21 +60,24 @@
       "release-evidence",
       "preserve-gate",
       "action-evidence",
-      "trusted-evaluation"
+      "trusted-evaluation",
+      "deadline-test"
     ],
     ".rev/pr-contract.json": [
       "reusable-checks",
       "release-evidence",
       "preserve-gate",
       "action-evidence",
-      "trusted-evaluation"
+      "trusted-evaluation",
+      "deadline-test"
     ],
     ".rev/pr-sources.json": [
       "reusable-checks",
       "release-evidence",
       "preserve-gate",
       "action-evidence",
-      "trusted-evaluation"
+      "trusted-evaluation",
+      "deadline-test"
     ],
     ".rev/PR-COVERAGE.md": [
       "reusable-checks",
@@ -100,6 +103,12 @@
     ],
     ".rev/trusted-workflow.test.mjs": [
       "trusted-evaluation"
+    ],
+    "packages/sdk/tests/unit/adapters/SatSnapshotProviders.test.ts": [
+      "deadline-test"
+    ],
+    "packages/sdk/tests/unit/adapters/SatSnapshotDeadline.test.ts": [
+      "deadline-test"
     ]
   },
   "pullRequest": 1003

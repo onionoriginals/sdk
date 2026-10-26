@@ -23,7 +23,8 @@
     "kind": "test",
     "paths": [
       ".rev/pr-coverage.test.mjs",
-      ".rev-tool/test/github-review.test.js"
+      ".rev-tool/test/github-review.test.js",
+      "packages/sdk/tests/unit/adapters/SatSnapshotDeadline.test.ts"
     ]
   },
   {
@@ -45,6 +46,13 @@
     "kind": "report",
     "paths": [
       ".rev/evaluator-validation.json"
+    ]
+  },
+  {
+    "id": "deadline-test-implementation",
+    "kind": "code",
+    "paths": [
+      "packages/sdk/tests/unit/adapters/SatSnapshotDeadline.test.ts"
     ]
   }
 ]
