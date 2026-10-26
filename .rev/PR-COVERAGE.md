@@ -1,6 +1,6 @@
 # Whole-PR REV gate
 
-REV is pinned to `25be089809fbffe0590b2360182d7f532f0c144c` (0.3). Its approval requires coverage of the original request and every changed file, verified criteria, and successful named CI dependencies. Overall merge readiness still requires independent review and appropriate runtime/release evidence.
+REV is pinned to `c17b501ef43d9014f33479f55b17012bf0062842` (0.3). Its approval requires coverage of the original request and every changed file, verified criteria, and successful named CI dependencies. Overall merge readiness still requires independent review and appropriate runtime/release evidence.
 
 For each PR:
 
@@ -62,8 +62,9 @@ requested action's major-version upgrade in workflow `uses:` lines, and rejects
 all other changed bytes and file types. The complete diffs still go to REV;
 all required checks and the independently reviewed PR-specific digest remain
 mandatory. Unsupported dependency updates need an ordinary PR contract.
-Dependabot also needs `TYPESAFE_API_KEY` in **Dependabot secrets**; an Actions
-secret of the same name is not available to Dependabot-triggered workflows.
+The staged trusted evaluator uses the existing Actions `TYPESAFE_API_KEY`
+(or existing misspelled fallback) even for Dependabot PRs. No additional
+Dependabot secret is needed after the trusted workflow is deployed.
 Never switch to executing PR code in a privileged pull_request_target workflow.
 
 If evidence collection fails, the REV job points to the original collection
@@ -78,3 +79,30 @@ may cite a requirement span and supplied-evidence lines, or explicitly report
 evaluator uncertainty. Supplied-evidence lines are not repository line numbers.
 Diagnostic failures and findings cannot change the original approval decision,
 thresholds or exit status; they help investigate a denial, not override it.
+
+
+### Trusted evaluator deployment
+
+The new `rev-trusted.yml` is a default-branch `workflow_run` consumer. It checks
+out only the immutable REV tool, verifies the source CI run and its current PR
+revisions through GitHub, and downloads a specific artifact ID as untrusted
+JSON into an isolated temporary directory. Only the pinned evaluator step gets
+the TypeSafe secret. It never executes PR scripts or installs PR dependencies.
+The report lives outside the artifact directory. Publication rechecks freshness
+and attaches **REV trusted** to the PR head, not the default-branch commit on
+which the consumer workflow runs. All nine SDK CI jobs and the independently
+reviewed PR-specific contract remain mandatory.
+
+Deploy in two stages. Keep the current REV job while this workflow is introduced
+on main. Verify the new check with real successful and failed runs, then require
+**REV trusted** in branch policy before removing the old evaluator job. The new
+workflow cannot run from an unmerged PR; green local or upstream tests are not
+proof of live deployment. Until cutover, Dependabot's old direct evaluator can
+still fail for lack of a secret. Do not add a second secret or bypass that gate
+to conceal an incomplete deployment.
+
+Rerun the entire CI workflow after a failure when using the trusted evaluator:
+artifacts must be created during the run attempt being reviewed. Upload replaces
+the prior evidence artifact. Failed/skipped/absent/duplicate required jobs, stale
+head/base or attempts, superseded runs and mismatched artifacts cannot approve.
+Fork runs without a unique GitHub PR association also fail closed.

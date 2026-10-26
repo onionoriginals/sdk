@@ -1,0 +1,89 @@
+name: Trusted REV
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [requested, in_progress, completed]
+
+# This workflow is loaded from the default branch. Never check out PR code here.
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  checks: write
+
+concurrency:
+  group: rev-trusted-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+env:
+  # Distinct during deployment: the existing REV gate remains in place until
+  # this check has been validated on the default branch and made required.
+  REV_CHECK_NAME: REV trusted
+  REV_REQUIRED_JOBS: >-
+    {"typecheck":"Typecheck passes","lint":"Lint","tests":"Tests pass","coverage":"Coverage meets thresholds","esm-importable":"ESM importable (Node)","landing":"Landing app typechecks, tests and builds","audit":"Dependency audit","changeset":"Changeset present","rev-evidence":"Collect REV acceptance evidence"}
+
+jobs:
+  evaluate:
+    name: Trusted REV evaluator
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out only the immutable evaluator tool
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: aviarytech/rev
+          ref: c17b501ef43d9014f33479f55b17012bf0062842
+          path: .rev-trusted-tool
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+      - name: Verify source run, PR revisions, checks and artifact
+        id: prepare
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REV_REVIEW_PHASE: prepare
+        run: node .rev-trusted-tool/scripts/github-review.js
+      - name: Download verified evidence as data only
+        if: steps.prepare.outputs.ready == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.prepare.outputs.run_id }}
+          artifact-ids: ${{ steps.prepare.outputs.artifact_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/rev-untrusted-input
+      - name: Evaluate verified PR evidence
+        if: steps.prepare.outputs.ready == 'true'
+        uses: aviarytech/rev@c17b501ef43d9014f33479f55b17012bf0062842
+        with:
+          scope: pull-request
+          diagnose-denials: 'true'
+          api-key: ${{ secrets.TYPESAFE_API_KEY || secrets.TUPESAFE_API_KEY }}
+          task-file: ${{ runner.temp }}/rev-untrusted-input/task.json
+          evidence-file: ${{ runner.temp }}/rev-untrusted-input/evidence.json
+          change-file: ${{ runner.temp }}/rev-untrusted-input/change.json
+          base-sha: ${{ steps.prepare.outputs.base_sha }}
+          head-sha: ${{ steps.prepare.outputs.head_sha }}
+          contract-sha256: ${{ vars[format('REV_CONTRACT_PR_{0}', steps.prepare.outputs.pr_number)] }}
+          needs: ${{ steps.prepare.outputs.needs }}
+          report-file: ${{ runner.temp }}/rev-trusted-report.json
+      - name: Publish result on the still-current PR head
+        if: always() && steps.prepare.outputs.ready == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REV_REVIEW_PHASE: publish
+          REV_REPORT_FILE: ${{ runner.temp }}/rev-trusted-report.json
+        run: node .rev-trusted-tool/scripts/github-review.js
+      - name: Save trusted evaluator report
+        if: always() && steps.prepare.outputs.ready == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: rev-trusted-report-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          overwrite: true
+          path: ${{ runner.temp }}/rev-trusted-report.json
+          if-no-files-found: ignore
+          retention-days: 14

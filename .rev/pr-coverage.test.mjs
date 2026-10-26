@@ -51,7 +51,7 @@ test('workflow requires full PR coverage with a pinned evaluator and trusted PR-
   const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
   const evaluator = workflow.split('\n  rev:')[1].split(/\n  [a-zA-Z_][a-zA-Z_-]*:/)[0];
   assert.match(evaluator, /scope: pull-request/);
-  assert.match(evaluator, /aviarytech\/rev@25be089809fbffe0590b2360182d7f532f0c144c/);
+  assert.match(evaluator, /aviarytech\/rev@c17b501ef43d9014f33479f55b17012bf0062842/);
   assert.match(evaluator, /change-file: rev-input\/change.json/);
   assert.match(evaluator, /vars\[format\('REV_CONTRACT_PR_\{0\}'/);
   assert.doesNotMatch(evaluator, /uses: actions\/checkout|npm install|bun install/);
@@ -79,7 +79,7 @@ test('operator procedure and PR manifest have valid criteria and evidence source
     for (const id of criteria) assert.ok(ids.has(id), `${path}: unknown criterion ${id}`);
   }
   const paths = sources.flatMap(s => s.paths);
-  for (const path of ['.rev-tool/scripts/change.js', '.rev-tool/src/corpus.js', '.rev/pr-task.json', '.rev/pr-contract.json', '.rev/pr-observations.txt']) assert.ok(paths.includes(path), path);
+  for (const path of ['.rev-tool/scripts/github-review.js', '.rev/pr-task.json', '.rev/pr-contract.json', '.rev/pr-observations.txt']) assert.ok(paths.includes(path), path);
 
 });
 

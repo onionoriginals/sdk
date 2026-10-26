@@ -249,12 +249,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: aviarytech/rev
-          ref: 25be089809fbffe0590b2360182d7f532f0c144c
+          ref: c17b501ef43d9014f33479f55b17012bf0062842
           path: .rev-tool
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.2.22
       - name: Exercise PR evidence without secrets
         env:
           REV_TOOL_PATH: ${{ github.workspace }}/.rev-tool
@@ -262,7 +265,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --test .rev/pr-coverage.test.mjs .rev/release-pr.test.mjs .rev/action-update.test.mjs .rev-tool/test/coverage.test.js .rev-tool/test/action.test.js .rev-tool/test/change.test.js | tee .rev/pr-observations.txt
+          node --test .rev/pr-coverage.test.mjs .rev/release-pr.test.mjs .rev/action-update.test.mjs .rev/trusted-workflow.test.mjs .rev-tool/test/github-review.test.js .rev-tool/test/coverage.test.js .rev-tool/test/action.test.js .rev-tool/test/change.test.js | tee .rev/pr-observations.txt
       - name: Bind complete changes and evidence to the PR revisions
         env:
           REV_PR_BRANCH: ${{ github.head_ref }}
@@ -274,6 +277,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: rev-acceptance-evidence
+          overwrite: true
           path: ${{ runner.temp }}/rev-pr-input/
           if-no-files-found: error
           retention-days: 7
@@ -300,7 +304,7 @@ jobs:
           path: rev-input
       - name: Evaluate acceptance criteria
         if: ${{ !cancelled() && steps.evidence.outcome == 'success' }}
-        uses: aviarytech/rev@25be089809fbffe0590b2360182d7f532f0c144c
+        uses: aviarytech/rev@c17b501ef43d9014f33479f55b17012bf0062842
         with:
           scope: pull-request
           diagnose-denials: 'true'

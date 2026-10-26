@@ -17,6 +17,10 @@
     {
       "id": "action-evidence",
       "description": "Dependabot checkout/setup-node major updates use a bounded action-update profile. The revision-bound probe accepts only upgrades of the requested action reference in workflow files, preserves all other bytes and file types, and rejects unrelated edits, downgrades and unsupported branches. Full diffs and probe evidence still undergo model review and all required CI checks. Other PRs must supply a matching pullRequest number and their own reviewed contract; inherited migration contracts fail with clear guidance. Collection errors identify the original failed job instead of reporting missing input artifacts. The evaluator and collector use the same immutable REV pin with bounded probability-rounding support; thresholds remain unchanged."
+    },
+    {
+      "id": "trusted-evaluation",
+      "description": "Stage a workflow_run evaluator on the default branch that uses the existing Actions TypeSafe secret with no PR code execution, dependency install or cache restore. Only immutable evaluator and action pins execute in that workflow. Verify the CI workflow identity, associated open PR and exact head/base, latest run attempt, all nine required job results and a unique fresh evidence artifact through GitHub. Download only that artifact ID to an isolated data directory; the pinned action validates revisions and the independently reviewed PR-specific contract. Publish REV trusted on the still-current PR head only for an approved report written outside the artifact directory. Invalid or stale inputs cannot approve. Keep the existing REV job during staged deployment until the new check is live and required; do not bypass a denial or require a separate Dependabot secret. Replace evidence artifacts on reruns and provide Bun for release reproduction."
     }
   ]
 }

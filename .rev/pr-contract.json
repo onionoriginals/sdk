@@ -1,7 +1,7 @@
 {
   "request": {
     "source": "Owner instruction in REV rollout thread: Fix things",
-    "text": "Fix SDK REV failures: remove migration-only assumptions, support reproducible release evidence and scoped Dependabot action-update evidence, clearly identify missing per-PR setup and collection errors, and use bounded provider probability-rounding support. Preserve whole-PR coverage, reviewed contract configuration, CI dependencies and approval thresholds."
+    "text": "Fix SDK REV failures: remove migration-only assumptions, support reproducible release evidence and scoped Dependabot action-update evidence, clearly identify missing per-PR setup and collection errors, and use bounded provider probability-rounding support. Preserve whole-PR coverage, reviewed contract configuration, CI dependencies and approval thresholds. Owner additionally approved moving REV evaluation into a trusted workflow using the existing repository secret, with no PR code execution in that workflow and verified source run, revisions and CI checks. Stage deployment without bypassing the existing gate."
   },
   "requiredChecks": [
     "typecheck",
@@ -19,7 +19,8 @@
       "reusable-checks",
       "release-evidence",
       "preserve-gate",
-      "action-evidence"
+      "action-evidence",
+      "trusted-evaluation"
     ],
     ".rev/prepare-pr.mjs": [
       "reusable-checks",
@@ -31,7 +32,8 @@
       "reusable-checks",
       "release-evidence",
       "preserve-gate",
-      "action-evidence"
+      "action-evidence",
+      "trusted-evaluation"
     ],
     ".rev/release-pr.mjs": [
       "reusable-checks",
@@ -57,25 +59,29 @@
       "reusable-checks",
       "release-evidence",
       "preserve-gate",
-      "action-evidence"
+      "action-evidence",
+      "trusted-evaluation"
     ],
     ".rev/pr-contract.json": [
       "reusable-checks",
       "release-evidence",
       "preserve-gate",
-      "action-evidence"
+      "action-evidence",
+      "trusted-evaluation"
     ],
     ".rev/pr-sources.json": [
       "reusable-checks",
       "release-evidence",
       "preserve-gate",
-      "action-evidence"
+      "action-evidence",
+      "trusted-evaluation"
     ],
     ".rev/PR-COVERAGE.md": [
       "reusable-checks",
       "release-evidence",
       "preserve-gate",
-      "action-evidence"
+      "action-evidence",
+      "trusted-evaluation"
     ],
     ".changeset/rev-release-evidence.md": [
       "reusable-checks",
@@ -88,6 +94,12 @@
     ],
     ".rev/action-update.test.mjs": [
       "action-evidence"
+    ],
+    ".github/workflows/rev-trusted.yml": [
+      "trusted-evaluation"
+    ],
+    ".rev/trusted-workflow.test.mjs": [
+      "trusted-evaluation"
     ]
   },
   "pullRequest": 1003
