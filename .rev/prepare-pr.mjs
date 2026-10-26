@@ -1,20 +1,26 @@
 import { readFile, writeFile, mkdir, realpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
+import { actionUpdateInputs } from './action-update.mjs';
 import { releaseInputs } from './release-pr.mjs';
 import { pathToFileURL } from 'node:url';
 
 // This runs without secrets. The evaluator consumes only the resulting JSON.
-export async function prepare(root, toolPath, base, head, output, profile = 'pr') {
+export async function prepare(root, toolPath, base, head, output, profile = 'pr', branch = '', prNumber = '') {
   const read = path => readFile(resolve(root, path), 'utf8');
-  if (!['pr', 'release'].includes(profile)) throw new Error('Unknown evidence profile');
-  const release = profile === 'release' ? await releaseInputs(root, base, head) : null;
+  if (!['pr', 'release', 'action-update'].includes(profile)) throw new Error('Unknown evidence profile');
+  const generic = JSON.parse(await read('.rev/pr-contract.json'));
+  if (profile === 'pr' && prNumber && String(generic.pullRequest) !== String(prNumber)) {
+    throw new Error(`PR #${prNumber} needs its own reviewed .rev/pr-task.json, pr-contract.json (pullRequest), and pr-sources.json; inherited rollout contracts cannot evaluate another PR`);
+  }
+  const release = profile === 'release' ? await releaseInputs(root, base, head)
+    : profile === 'action-update' ? actionUpdateInputs(root, base, head, branch, generic.requiredChecks) : null;
   const task = release?.task ?? JSON.parse(await read('.rev/pr-task.json'));
   const contract = release?.contract ?? JSON.parse(await read('.rev/pr-contract.json'));
   const { collectChange } = await import(pathToFileURL(resolve(toolPath, 'scripts/change.js')));
   const { buildCorpus } = await import(pathToFileURL(resolve(toolPath, 'src/corpus.js')));
   const { change, digest } = collectChange(base, head, contract, task, root);
   if (change.files.some(file => !file.criteria.length)) throw new Error('Map every changed file to relevant PR criteria');
-  const sources = release ? [{ id: 'release-probe', kind: 'code', paths: ['.rev/release-pr.mjs', '.rev/release-task.json', '.rev/release-contract.json', '.rev/release-pr.test.mjs'] }] : JSON.parse(await read('.rev/pr-sources.json'));
+  const sources = profile === 'action-update' ? [{ id: 'action-update-implementation', kind: 'code', paths: ['.rev/action-update.mjs', '.rev/action-update.test.mjs'] }] : release ? [{ id: 'release-probe', kind: 'code', paths: ['.rev/release-pr.mjs', '.rev/release-task.json', '.rev/release-contract.json', '.rev/release-pr.test.mjs'] }] : JSON.parse(await read('.rev/pr-sources.json'));
   const rootPath = await realpath(root);
   const items = release ? [release.observation] : [];
   for (const source of sources) {
@@ -40,5 +46,5 @@ export async function prepare(root, toolPath, base, head, output, profile = 'pr'
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const { REV_TOOL_PATH, REV_BASE_SHA, REV_HEAD_SHA, RUNNER_TEMP } = process.env;
   if (!REV_TOOL_PATH || !RUNNER_TEMP) throw new Error('Expected pinned tool path and runner temp');
-  console.log(JSON.stringify(await prepare(process.cwd(), REV_TOOL_PATH, REV_BASE_SHA, REV_HEAD_SHA, resolve(RUNNER_TEMP, 'rev-pr-input'), process.env.REV_PR_BRANCH === 'changeset-release/main' ? 'release' : 'pr')));
+  console.log(JSON.stringify(await prepare(process.cwd(), REV_TOOL_PATH, REV_BASE_SHA, REV_HEAD_SHA, resolve(RUNNER_TEMP, 'rev-pr-input'), process.env.REV_PR_BRANCH === 'changeset-release/main' ? 'release' : process.env.REV_PR_BRANCH?.startsWith('dependabot/github_actions/') ? 'action-update' : 'pr', process.env.REV_PR_BRANCH, process.env.REV_PR_NUMBER)));
 }

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task": "Fix release PR evidence collection while preserving whole-PR REV approval.",
+  "task": "Repair SDK REV evidence for ordinary, release and action-update PRs.",
   "criteria": [
     {
       "id": "reusable-checks",
@@ -13,6 +13,10 @@
     {
       "id": "preserve-gate",
       "description": "Keep pull-request scope, pinned evaluator, trusted PR-specific digest, existing required CI jobs and the secret-free evidence / artifact-only evaluator separation. Document release review requirements and ensure no merge or publish is performed by the evidence probe."
+    },
+    {
+      "id": "action-evidence",
+      "description": "Dependabot checkout/setup-node major updates use a bounded action-update profile. The revision-bound probe accepts only upgrades of the requested action reference in workflow files, preserves all other bytes and file types, and rejects unrelated edits, downgrades and unsupported branches. Full diffs and probe evidence still undergo model review and all required CI checks. Other PRs must supply a matching pullRequest number and their own reviewed contract; inherited migration contracts fail with clear guidance. Collection errors identify the original failed job instead of reporting missing input artifacts. The evaluator and collector use the same immutable REV pin with bounded probability-rounding support; thresholds remain unchanged."
     }
   ]
 }

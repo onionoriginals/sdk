@@ -51,10 +51,10 @@ test('workflow requires full PR coverage with a pinned evaluator and trusted PR-
   const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
   const evaluator = workflow.split('\n  rev:')[1].split(/\n  [a-zA-Z_][a-zA-Z_-]*:/)[0];
   assert.match(evaluator, /scope: pull-request/);
-  assert.match(evaluator, /aviarytech\/rev@81686246e89f9dd93f58397b508a01925b5eb32d/);
+  assert.match(evaluator, /aviarytech\/rev@f165259e3dbc87ee34e236a79a1da346170d1e83/);
   assert.match(evaluator, /change-file: rev-input\/change.json/);
   assert.match(evaluator, /vars\[format\('REV_CONTRACT_PR_\{0\}'/);
-  assert.doesNotMatch(evaluator, /uses: actions\/checkout|run:/);
+  assert.doesNotMatch(evaluator, /uses: actions\/checkout|npm install|bun install/);
   for (const job of ["typecheck", "lint", "tests", "coverage", "esm-importable", "landing", "audit", "changeset", "rev-evidence"]) assert.ok(evaluator.includes(job), `Missing required job ${job}`);
   assert.match(workflow, /fetch-depth: 0/);
   assert.match(workflow, /persist-credentials: false/);
@@ -94,4 +94,8 @@ test('recorded upstream validation has no mismatches and identifies the reviewed
   assert.equal(result.cases, 20);
   for (const field of ['falseApprovals', 'falseDenials', 'mismatches', 'errors']) assert.equal(result[field], 0);
   assert.match(result.run, /^https:\/\/github.com\/aviarytech\/tv\/actions\/runs\/40240205167$/);
+});
+
+test('inherited PR contracts fail with actionable setup guidance', async () => {
+  await assert.rejects(prepare(process.cwd(), tool, 'a'.repeat(40), 'b'.repeat(40), '/unused', 'pr', 'feature/unrelated', '999999'), /needs its own reviewed/);
 });

@@ -1,7 +1,7 @@
 {
   "request": {
-    "source": "SDK status thread, owner instruction: Do it, 2026-10-25",
-    "text": "Fix the REV evidence workflow for release PRs: scope rollout-only assertions correctly and support release-specific evidence. The observed Version Packages PR fails because the rollout tests reject release files and require an already-consumed changeset. Preserve the whole-PR acceptance gate, prepare a reviewable fix and validate it against the release PR."
+    "source": "Owner instruction in REV rollout thread: Fix things",
+    "text": "Fix SDK REV failures: remove migration-only assumptions, support reproducible release evidence and scoped Dependabot action-update evidence, clearly identify missing per-PR setup and collection errors, and use bounded provider probability-rounding support. Preserve whole-PR coverage, reviewed contract configuration, CI dependencies and approval thresholds."
   },
   "requiredChecks": [
     "typecheck",
@@ -18,17 +18,20 @@
     ".github/workflows/ci.yml": [
       "reusable-checks",
       "release-evidence",
-      "preserve-gate"
+      "preserve-gate",
+      "action-evidence"
     ],
     ".rev/prepare-pr.mjs": [
       "reusable-checks",
       "release-evidence",
-      "preserve-gate"
+      "preserve-gate",
+      "action-evidence"
     ],
     ".rev/pr-coverage.test.mjs": [
       "reusable-checks",
       "release-evidence",
-      "preserve-gate"
+      "preserve-gate",
+      "action-evidence"
     ],
     ".rev/release-pr.mjs": [
       "reusable-checks",
@@ -53,27 +56,39 @@
     ".rev/pr-task.json": [
       "reusable-checks",
       "release-evidence",
-      "preserve-gate"
+      "preserve-gate",
+      "action-evidence"
     ],
     ".rev/pr-contract.json": [
       "reusable-checks",
       "release-evidence",
-      "preserve-gate"
+      "preserve-gate",
+      "action-evidence"
     ],
     ".rev/pr-sources.json": [
       "reusable-checks",
       "release-evidence",
-      "preserve-gate"
+      "preserve-gate",
+      "action-evidence"
     ],
     ".rev/PR-COVERAGE.md": [
       "reusable-checks",
       "release-evidence",
-      "preserve-gate"
+      "preserve-gate",
+      "action-evidence"
     ],
     ".changeset/rev-release-evidence.md": [
       "reusable-checks",
       "release-evidence",
-      "preserve-gate"
+      "preserve-gate",
+      "action-evidence"
+    ],
+    ".rev/action-update.mjs": [
+      "action-evidence"
+    ],
+    ".rev/action-update.test.mjs": [
+      "action-evidence"
     ]
-  }
+  },
+  "pullRequest": 1003
 }

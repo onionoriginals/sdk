@@ -45,3 +45,30 @@ workflow and is a maintainer decision.
 Reusable integration tests check the evidence plumbing. They do not enforce the
 old rollout's file allowlist or require a changeset that versioning consumes.
 Ordinary PRs must still supply their own complete mappings and behavioral evidence.
+
+### Ordinary and action-update PRs
+
+For ordinary PRs, set `pullRequest` in `pr-contract.json` to the PR number and
+replace the task, request, file mappings and sources with that PR's actual
+requirements and relevant evidence. Inheriting the last rollout's contract is
+an input error, not a model denial. The trusted `REV_CONTRACT_PR_<number>` is
+still configured only after independent review; never copy a candidate digest
+automatically into trusted configuration.
+
+Branches matching `dependabot/github_actions/actions/checkout-N` or
+`dependabot/github_actions/actions/setup-node-N` select the action-update
+profile. Its probe compares immutable merge-base/head files, permits only the
+requested action's major-version upgrade in workflow `uses:` lines, and rejects
+all other changed bytes and file types. The complete diffs still go to REV;
+all required checks and the independently reviewed PR-specific digest remain
+mandatory. Unsupported dependency updates need an ordinary PR contract.
+Dependabot also needs `TYPESAFE_API_KEY` in **Dependabot secrets**; an Actions
+secret of the same name is not available to Dependabot-triggered workflows.
+Never switch to executing PR code in a privileged pull_request_target workflow.
+
+If evidence collection fails, the REV job points to the original collection
+job and fails without claiming that the model identified an implementation
+bug. The updated immutable evaluator pin accepts hundredth-rounded probability
+totals from 0.99 through 1.01 without normalizing scores or lowering thresholds.
+The old evaluator-validation.json is historical evidence for its recorded pin,
+not a live validation of the updated evaluator.

@@ -249,7 +249,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: aviarytech/rev
-          ref: 81686246e89f9dd93f58397b508a01925b5eb32d
+          ref: f165259e3dbc87ee34e236a79a1da346170d1e83
           path: .rev-tool
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -262,10 +262,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --test .rev/pr-coverage.test.mjs .rev/release-pr.test.mjs .rev-tool/test/coverage.test.js .rev-tool/test/action.test.js .rev-tool/test/change.test.js | tee .rev/pr-observations.txt
+          node --test .rev/pr-coverage.test.mjs .rev/release-pr.test.mjs .rev/action-update.test.mjs .rev-tool/test/coverage.test.js .rev-tool/test/action.test.js .rev-tool/test/change.test.js | tee .rev/pr-observations.txt
       - name: Bind complete changes and evidence to the PR revisions
         env:
           REV_PR_BRANCH: ${{ github.head_ref }}
+          REV_PR_NUMBER: ${{ github.event.pull_request.number }}
           REV_TOOL_PATH: ${{ github.workspace }}/.rev-tool
           REV_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REV_BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -285,14 +286,21 @@ jobs:
     timeout-minutes: 5
     steps:
       # Data only: no PR checkout, installs, or PR-authored scripts in this job.
+      - name: Explain evidence collection failure
+        if: ${{ needs.rev-evidence.result != 'success' }}
+        run: |
+          echo '::error::REV evidence collection failed. Open the Collect REV acceptance evidence job for the original error; no model verdict was produced.'
+          echo 'REV could not evaluate this PR. See **Collect REV acceptance evidence** in this run for the original error.' >> "$GITHUB_STEP_SUMMARY"
+          exit 1
       - uses: actions/download-artifact@v8
+        if: ${{ needs.rev-evidence.result == 'success' }}
         id: evidence
         with:
           name: rev-acceptance-evidence
           path: rev-input
       - name: Evaluate acceptance criteria
-        if: ${{ !cancelled() }}
-        uses: aviarytech/rev@81686246e89f9dd93f58397b508a01925b5eb32d
+        if: ${{ !cancelled() && steps.evidence.outcome == 'success' }}
+        uses: aviarytech/rev@f165259e3dbc87ee34e236a79a1da346170d1e83
         with:
           scope: pull-request
           # Accept the existing misspelled secret until its owner renames it.
@@ -312,5 +320,5 @@ jobs:
           name: rev-report
           overwrite: true
           path: rev-report.json
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 14
