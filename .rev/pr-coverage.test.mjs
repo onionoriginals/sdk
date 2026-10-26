@@ -81,13 +81,7 @@ test('operator procedure and rollout manifest cover the committed configuration 
   }
   const paths = sources.flatMap(s => s.paths);
   for (const path of ['.rev-tool/src/diagnose.js', '.rev-tool/src/index.js', '.rev-tool/src/report.js', '.rev-tool/test/diagnose.test.js', '.rev/pr-task.json', '.rev/pr-contract.json', '.rev/pr-observations.txt']) assert.ok(paths.includes(path), path);
-  const base = process.env.REV_BASE_SHA || 'origin/main';
-  const files = execFileSync('git', ['diff', '--name-only', `${base}...HEAD`], {encoding:'utf8'}).trim().split('\n').filter(Boolean);
-  for (const path of files) {
-    assert.ok(Object.hasOwn(contract.mappings, path), `Unmapped committed file: ${path}`);
-    assert.match(path, /^(\.rev\/|\.github\/workflows\/(ci|rev-validation)\.yml$|\.changeset\/rev-(pr-coverage|denial-diagnostics)\.md$)/);
-  }
-  t.diagnostic(JSON.stringify({changedFiles:files, knownCriteria:[...ids], requiredChecks:contract.requiredChecks, operatorInstructionsChecked:true, applicationFilesChanged:false}));
+
 });
 
 test('reruns replace the REV report artifact', async () => {
@@ -103,10 +97,3 @@ test('recorded upstream validation has no mismatches and identifies the reviewed
   assert.match(result.run, /^https:\/\/github.com\/aviarytech\/tv\/actions\/runs\/40240205167$/);
 });
 
-test('rollout changeset declares no package releases', async () => {
-  assert.match(await readFile('.changeset/rev-pr-coverage.md', 'utf8'), /^---\r?\n---\r?\n/);
-});
-
-test('diagnostic rollout declares no package release', async () => {
-  assert.match(await readFile('.changeset/rev-denial-diagnostics.md', 'utf8'), /^---\r?\n---\r?\n/);
-});

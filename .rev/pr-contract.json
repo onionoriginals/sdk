@@ -48,5 +48,6 @@
     ".changeset/rev-denial-diagnostics.md": [
       "operator-contract"
     ]
-  }
+  },
+  "pullRequest": 1002
 }
