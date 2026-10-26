@@ -7,15 +7,11 @@
     ]
   },
   {
-    "id": "collector",
+    "id": "diagnostic-implementation",
     "kind": "code",
     "paths": [
-      ".rev/prepare-pr.mjs",
-      ".rev-tool/src/coverage.js",
-      ".rev-tool/src/gate.js",
-      ".rev-tool/scripts/change.js",
-      ".rev-tool/src/corpus.js",
       ".rev-tool/src/diagnose.js",
+      ".rev-tool/src/index.js",
       ".rev-tool/src/report.js"
     ]
   },
@@ -24,9 +20,6 @@
     "kind": "test",
     "paths": [
       ".rev/pr-coverage.test.mjs",
-      ".rev-tool/test/coverage.test.js",
-      ".rev-tool/test/action.test.js",
-      ".rev-tool/test/change.test.js",
       ".rev-tool/test/diagnose.test.js"
     ]
   },
@@ -45,13 +38,6 @@
       ".rev/pr-contract.json",
       ".rev/pr-sources.json",
       ".rev/pr-task.json"
-    ]
-  },
-  {
-    "id": "evaluator-validation",
-    "kind": "report",
-    "paths": [
-      ".rev/evaluator-validation.json"
     ]
   }
 ]

@@ -80,7 +80,7 @@ test('operator procedure and rollout manifest cover the committed configuration 
     for (const id of criteria) assert.ok(ids.has(id), `${path}: unknown criterion ${id}`);
   }
   const paths = sources.flatMap(s => s.paths);
-  for (const path of ['.rev-tool/scripts/change.js', '.rev-tool/src/corpus.js', '.rev/pr-task.json', '.rev/pr-contract.json', '.rev/pr-observations.txt']) assert.ok(paths.includes(path), path);
+  for (const path of ['.rev-tool/src/diagnose.js', '.rev-tool/src/index.js', '.rev-tool/src/report.js', '.rev-tool/test/diagnose.test.js', '.rev/pr-task.json', '.rev/pr-contract.json', '.rev/pr-observations.txt']) assert.ok(paths.includes(path), path);
   const base = process.env.REV_BASE_SHA || 'origin/main';
   const files = execFileSync('git', ['diff', '--name-only', `${base}...HEAD`], {encoding:'utf8'}).trim().split('\n').filter(Boolean);
   for (const path of files) {
