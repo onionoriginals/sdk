@@ -246,7 +246,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: aviarytech/rev
           ref: 81686246e89f9dd93f58397b508a01925b5eb32d
