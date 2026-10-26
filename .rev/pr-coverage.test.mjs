@@ -52,7 +52,7 @@ test('workflow requires full PR coverage with a pinned evaluator and trusted PR-
   const evaluator = workflow.split('\n  rev:')[1].split(/\n  [a-zA-Z_][a-zA-Z_-]*:/)[0];
   assert.match(evaluator, /scope: pull-request/);
   assert.match(evaluator, /diagnose-denials: 'true'/);
-  assert.match(evaluator, /aviarytech\/rev@8a8a3889e57dd8e7498af201ade6e34a4c731bfe/);
+  assert.match(evaluator, /aviarytech\/rev@f165259e3dbc87ee34e236a79a1da346170d1e83/);
   assert.match(evaluator, /change-file: rev-input\/change.json/);
   assert.match(evaluator, /vars\[format\('REV_CONTRACT_PR_\{0\}'/);
   assert.doesNotMatch(evaluator, /uses: actions\/checkout|run:/);
