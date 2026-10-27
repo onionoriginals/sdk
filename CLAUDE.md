@@ -21,6 +21,11 @@ terminology. Cite spec rules by ID (P5.3, D4) in code comments, tests and PRs.
 - `packages/auth` (`@originals/auth`) creates and updates author DIDs with
   `didwebvh-ts` (did:webvh 1.0). Those DIDs are verified by our own engine
   under experimental did:webvh (PR 302).
+- `packages/host` (`@originals/host`, Bun) is the hosted publication server:
+  hosted layout and durable Originals routes, shared-host saves, the
+  inscriptions store, reconciliation and anchoring. The landing injects its
+  session check; faucet, deposit and inscribe admission stay in
+  `apps/landing/server/bitcoin.ts`.
 - The CEL 3 implementation (`packages/cel`, `packages/sdk/src/v3`,
   `OriginalsSDK3.ts`) and the earlier formats were deleted in plan 011 PR 5.
   Do not reintroduce them, add compatibility shims for them, or port their
