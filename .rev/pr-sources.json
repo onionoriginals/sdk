@@ -3,7 +3,8 @@
     "id": "workflow",
     "kind": "code",
     "paths": [
-      ".github/workflows/ci.yml"
+      ".github/workflows/ci.yml",
+      ".github/workflows/rev-trusted.yml"
     ]
   },
   {
@@ -35,17 +36,18 @@
     ]
   },
   {
-    "id": "operator",
-    "kind": "code",
+    "id": "release-tests",
+    "kind": "test",
     "paths": [
-      ".rev/pr-sources.json"
+      ".rev/release-pr.test.mjs",
+      ".rev/release-e2e.test.mjs"
     ]
   },
   {
-    "id": "evaluator-validation",
-    "kind": "report",
+    "id": "action-tests",
+    "kind": "test",
     "paths": [
-      ".rev/evaluator-validation.json"
+      ".rev/action-update.test.mjs"
     ]
   },
   {

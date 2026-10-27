@@ -109,6 +109,9 @@
     ],
     "packages/sdk/tests/unit/adapters/SatSnapshotDeadline.test.ts": [
       "deadline-test"
+    ],
+    ".rev/release-e2e.test.mjs": [
+      "release-evidence"
     ]
   },
   "pullRequest": 1003

@@ -265,7 +265,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --test .rev/pr-coverage.test.mjs .rev/release-pr.test.mjs .rev/action-update.test.mjs .rev/trusted-workflow.test.mjs .rev-tool/test/github-review.test.js .rev-tool/test/coverage.test.js .rev-tool/test/action.test.js .rev-tool/test/change.test.js | tee .rev/pr-observations.txt
+          node --test .rev/pr-coverage.test.mjs .rev/release-pr.test.mjs .rev/release-e2e.test.mjs .rev/action-update.test.mjs .rev/trusted-workflow.test.mjs .rev-tool/test/github-review.test.js .rev-tool/test/coverage.test.js .rev-tool/test/action.test.js .rev-tool/test/change.test.js | tee .rev/pr-observations.txt
+          bun install --frozen-lockfile
+          bun test packages/sdk/tests/unit/adapters/SatSnapshotDeadline.test.ts 2>&1 | tee -a .rev/pr-observations.txt
       - name: Bind complete changes and evidence to the PR revisions
         env:
           REV_PR_BRANCH: ${{ github.head_ref }}
