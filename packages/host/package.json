@@ -1,6 +1,6 @@
 {
   "name": "@originals/host",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Protocol-side server for Originals hosting: did:webvh hosted layout, durable per-user Originals store and routes, shared-host saves, the JSON-LD context route, and Bitcoin inscription tracking, anchoring and reconciliation. Bun runtime.",
   "type": "module",
   "main": "./dist/index.js",
@@ -44,8 +44,8 @@
   },
   "dependencies": {
     "@noble/hashes": "^2.0.1",
-    "@originals/sdk": "^5.0.0",
-    "@originals/vh": "^0.2.0",
+    "@originals/sdk": "^5.1.0",
+    "@originals/vh": "^0.3.0",
     "@scure/base": "^2.2.0"
   },
   "devDependencies": {

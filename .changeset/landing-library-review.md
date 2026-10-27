@@ -1,5 +1,0 @@
----
-"@originals/landing": patch
----
-
-Your Originals reports what it used to hide (#992 review). A reopened Original with divergent branches shows "Fork unresolved — no current branch", is flagged in the library, and refuses revise, publish and preparing a new anchoring pair (S1, P6.6, P9.16); for an Original with a did:btco alias the fork is judged against a fresh Bitcoin read first, so a branch Bitcoin already settled does not freeze it, and an already-signed pair is always resent byte for byte (P9.6). A Bitcoin submission is marked refused only for errors its signed bytes can never pass, judged by the server's code and category; it is then kept with its reason, not resent, and can be explicitly abandoned, while transient, unknown, auth, rate, server and network failures are still resent. Damaged, unverified, forked and divergent account records are listed as incomplete with a problem instead of being dropped or labelled saved, a stale prefix copy is not divergence, and the evidence route answers 409 `diverged` instead of a silent 404 (section 7). Guest mode says that the guest key is stored in this browser and usable by anyone using it.
