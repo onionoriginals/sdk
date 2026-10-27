@@ -1,7 +1,7 @@
 {
   "request": {
     "source": "Owner instruction in REV thread, 2026-10-26",
-    "text": "Remove the per-push Jev REV gate from the SDK and add REV's deterministic tests gate instead: named tests per criterion that must pass on head and not pass on merge-base sources, path-glob coverage of every changed file, CI results, and Jev used only to review each PR's contract once per digest. Document how operators write criteria and review and pin contracts. No package release. (Out of scope here: the earlier REV PRs #1002, #1003 and #1006 were closed separately, and local Claude review staging existed only on #1006, never on main.)"
+    "text": "Remove the per-push Jev REV gate from the SDK repository and add REV's deterministic tests gate in its place. The gate's REV job must run without an API key, after all other CI, using only artifacts. A rev-tests job runs each criterion's named tests on head and on merge-base sources. Document how to write criteria and review and pin contracts. No package release."
   },
   "requiredChecks": [
     "typecheck",
