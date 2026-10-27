@@ -84,7 +84,7 @@ test('operator procedure and rollout manifest cover the committed configuration 
   const files = execFileSync('git', ['diff', '--name-only', `${base}...HEAD`], {encoding:'utf8'}).trim().split('\n').filter(Boolean);
   for (const path of files) {
     assert.ok(Object.hasOwn(contract.mappings, path), `Unmapped committed file: ${path}`);
-    assert.match(path, /^(\.rev\/|\.github\/workflows\/(ci|rev-validation)\.yml$|\.changeset\/rev-pr-coverage\.md$)/);
+    assert.match(path, /^(\.rev\/|\.github\/workflows\/(ci|rev-validation|rev-local-review)\.yml$|\.changeset\/rev-pr-coverage\.md$)/);
   }
   t.diagnostic(JSON.stringify({changedFiles:files, knownCriteria:[...ids], requiredChecks:contract.requiredChecks, operatorInstructionsChecked:true, applicationFilesChanged:false}));
 });
@@ -104,4 +104,23 @@ test('recorded upstream validation has no mismatches and identifies the reviewed
 
 test('rollout changeset declares no package releases', async () => {
   assert.match(await readFile('.changeset/rev-pr-coverage.md', 'utf8'), /^---\r?\n---\r?\n/);
+});
+
+test('local review verifier executes only immutable trusted code with public-key configuration', async () => {
+  const workflow = await readFile('.github/workflows/rev-local-review.yml', 'utf8');
+  assert.match(workflow, /repository: aviarytech\/rev\n\s+ref: 055b327f1d11a26966f244be7d263708ecd72502/);
+  assert.match(workflow, /persist-credentials: false/);
+  assert.match(workflow, /checks: write/);
+  assert.match(workflow, /REV_LOCAL_REVIEW_PUBLIC_KEY: \$\{\{ vars.REV_LOCAL_REVIEW_PUBLIC_KEY \}\}/);
+  assert.doesNotMatch(workflow, /secrets\.|pull_request\.head|head_ref|client_payload.*run:/);
+  assert.deepEqual([...workflow.matchAll(/\brun: (.+)/g)].map(m => m[1]), ['node scripts/local-review-gate.js']);
+  for (const trigger of ['repository_dispatch:', 'pull_request_target:', 'workflow_run:', 'schedule:', 'workflow_dispatch:']) assert.ok(workflow.includes(trigger));
+  assert.match(workflow, /cancel-in-progress: false/);
+  const policy = JSON.parse(await readFile('.rev/local-review.json', 'utf8'));
+  assert.deepEqual(policy, {version:1,workflows:[{file:'ci.yml',jobs:['Typecheck passes','Lint','Tests pass','Coverage meets thresholds','ESM importable (Node)','Landing app typechecks, tests and builds','Dependency audit','Changeset present']}]});
+  const ci = await readFile('.github/workflows/ci.yml','utf8');
+  for (const name of policy.workflows[0].jobs) assert.ok(ci.includes(`name: ${name}`), name);
+  const docs = await readFile('.rev/LOCAL_REVIEW.md','utf8');
+  assert.match(docs, /one PR at a time/);
+  assert.match(docs, /Do not replace required checks until live positive and negative validation is complete/);
 });

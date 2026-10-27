@@ -3,7 +3,9 @@
     "id": "workflow",
     "kind": "code",
     "paths": [
-      ".github/workflows/ci.yml"
+      ".github/workflows/ci.yml",
+      ".github/workflows/rev-local-review.yml",
+      ".rev/local-review.json"
     ]
   },
   {
@@ -41,7 +43,8 @@
       ".rev/PR-COVERAGE.md",
       ".rev/pr-contract.json",
       ".rev/pr-sources.json",
-      ".rev/pr-task.json"
+      ".rev/pr-task.json",
+      ".rev/LOCAL_REVIEW.md"
     ]
   },
   {

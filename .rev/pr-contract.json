@@ -1,7 +1,7 @@
 {
   "request": {
-    "source": "Owner instruction in REV rollout thread, 2026-10-25",
-    "text": "Merge the stronger REV gate and update the SDK integration to use it. Require whole-PR request/change coverage rather than unrelated regression approval, preserve existing checks, use the reviewed contract through trusted configuration, and validate the migration. Do not change application behavior or publish a release."
+    "source": "Owner instruction in REV thread, 2026-10-26",
+    "text": "Set REV up for local Claude Code subscription reviews and update TV and SDK. Start automatically, one review at a time. Stage the signed verifier in SDK, retain existing gates until live validation, and do not require an additional Dependabot secret."
   },
   "requiredChecks": [
     "typecheck",
@@ -15,48 +15,30 @@
     "rev-evidence"
   ],
   "mappings": {
-    ".github/workflows/ci.yml": [
-      "complete-inputs",
-      "reviewed-gate",
-      "preserve-checks",
-      "operator-contract"
+    ".github/workflows/rev-local-review.yml": [
+      "local-verifier"
     ],
-    ".rev/prepare-pr.mjs": [
-      "complete-inputs"
+    ".rev/local-review.json": [
+      "ci-policy"
     ],
-    ".rev/pr-coverage.test.mjs": [
-      "complete-inputs",
-      "reviewed-gate",
-      "preserve-checks",
-      "operator-contract",
-      "validate-evaluator"
+    ".rev/LOCAL_REVIEW.md": [
+      "rollout-evidence"
     ],
     ".rev/pr-task.json": [
-      "complete-inputs",
-      "reviewed-gate",
-      "preserve-checks",
-      "operator-contract",
-      "validate-evaluator"
+      "local-verifier",
+      "ci-policy",
+      "rollout-evidence"
     ],
     ".rev/pr-contract.json": [
-      "complete-inputs",
-      "reviewed-gate",
-      "preserve-checks",
-      "operator-contract",
-      "validate-evaluator"
+      "rollout-evidence"
     ],
     ".rev/pr-sources.json": [
-      "complete-inputs",
-      "operator-contract"
+      "rollout-evidence"
     ],
-    ".rev/PR-COVERAGE.md": [
-      "operator-contract"
-    ],
-    ".changeset/rev-pr-coverage.md": [
-      "operator-contract"
-    ],
-    ".rev/evaluator-validation.json": [
-      "validate-evaluator"
+    ".rev/pr-coverage.test.mjs": [
+      "local-verifier",
+      "ci-policy",
+      "rollout-evidence"
     ]
   }
 }
