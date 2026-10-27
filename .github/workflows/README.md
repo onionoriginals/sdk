@@ -71,11 +71,3 @@ bun run changeset
 This records the affected packages and the semver bump (patch/minor/major) plus a
 summary that becomes the CHANGELOG entry. The Version PR aggregates pending
 changesets into the next release.
-
-## REV tests gate (`ci.yml`)
-
-`rev-tests` runs each PR's named tests on head sources and on merge-base
-sources. `REV` then runs the commit-pinned `aviarytech/rev` action in tests scope
-after all CI jobs. It is deterministic and needs no API key; Jev reviews each
-PR's contract once, outside CI. Keep `REV` nonrequired during evaluation.
-See the [per-PR task and contract guide](../../.rev/README.md).

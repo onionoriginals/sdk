@@ -40,11 +40,3 @@ Describe how you tested your changes:
 ## Screenshots / Output (if applicable)
 
 <!-- Add screenshots or relevant command output -->
-
-## REV acceptance criteria
-
-- [ ] Updated `.rev/task.json`: observable criteria, the named tests that establish each, and path globs covering every changed file
-- [ ] Named tests pass on this branch and fail without the change
-- [ ] Contract reviewed with `review-contract.js` and `REV_CONTRACT_PR_<number>` pinned
-
-See the [REV tests gate guide](../.rev/README.md).
