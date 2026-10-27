@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "workflows": [
+    {
+      "file": "ci.yml",
+      "jobs": [
+        "Typecheck passes",
+        "Lint",
+        "Tests pass",
+        "Coverage meets thresholds",
+        "ESM importable (Node)",
+        "Landing app typechecks, tests and builds",
+        "Dependency audit",
+        "Changeset present"
+      ]
+    }
+  ]
+}
