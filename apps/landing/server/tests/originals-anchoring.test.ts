@@ -10,8 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore, OriginalsSDK } from '@originals/sdk/originals';
 import { prepareEntryInscription } from '@originals/sdk/originals/bitcoin';
-import { createOriginalsAnchoring, type AnchoringStatus } from '../originals-anchoring';
-import { createMoneyLogger } from '../money-log';
+import { createOriginalsAnchoring, createMoneyLogger, type AnchoringStatus } from '@originals/host';
 import { INDEX, NETWORK, WALLET_ADDRESS, authorWithOriginal, fakeChain, headerClock, walletSigner } from './originals-chain-fixture';
 
 const SUB = 'sub-org-anchoring';
@@ -226,7 +225,7 @@ test('durable library discovers anchoring without summaries and exports verified
   const pair = await prepare(a, chain);
   await server.submit(SUB, { did: a.did, evidence: await evidence(a), pair });
   chain.mine();
-  const { createAnchoringLibrary } = await import('../originals-library');
+  const { createAnchoringLibrary } = await import('@originals/host');
   const library = createAnchoringLibrary(dataDir);
   expect(await library.list('another-account')).toEqual([]);
   expect(await library.evidence('another-account', a.did)).toBeNull();

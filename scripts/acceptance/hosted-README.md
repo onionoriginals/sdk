@@ -175,7 +175,7 @@ through the page's own modal.
   (fake-indexeddb), and by the staging run's real browser profiles.
 - The account library is main's: the loopback server mounts
   `GET /api/originals` and `GET /api/originals/evidence` with
-  `server/originals-library.ts`, as the app does.
+  `@originals/host` (`originals-library.ts`), as the app does.
 - The signed-out phase installs fake-indexeddb as the page's IndexedDB, so it
   can check which databases a signed-out page opens (Bun has none of its
   own): the guest database, and no account database.
@@ -391,7 +391,7 @@ shape as the section A receipt:
     "hostedPublicationBuild": true,
     "production": { "baseUrl": "https://originals.build", "revision": "…", "hostedPublication": false }
   },
-  "packages": { "@originals/sdk": "…", "@originals/vh": "…", "@originals/auth": "…", "@originals/landing": "…", "didwebvh-ts": "…" },
+  "packages": { "@originals/sdk": "…", "@originals/vh": "…", "@originals/auth": "…", "@originals/host": "…", "@originals/landing": "…", "didwebvh-ts": "…" },
   "runtimes": { "node": "…", "bun": "…", "chromium": "…", "platform": "…" },
   "profile": { "protocol": "originals:1.0", "cryptosuite": "eddsa-jcs-2022", "witnesses": "none (Q14)", "ordering": "claimed (unanchored)", "freshness": "never current unanchored (P7.10)" },
   "signerMode": "Turnkey client-held session (non-extractable P-256 session key in IndexedDB; Ed25519 wallet accounts held by Turnkey)",

@@ -14,9 +14,8 @@ import { hex } from '@scure/base';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
 import { StructuredError } from '@originals/sdk';
-import { serializeCookie } from '../cookies';
+import { serializeCookie, createInscriptionsStore, type InscriptionRecord } from '@originals/host';
 import { createBitcoinRoutes, isAlreadyKnownTxError, type OrdinalLookup } from '../bitcoin';
-import { createInscriptionsStore, type InscriptionRecord } from '../inscriptions-store';
 
 const JWT = 'test-secret-at-least-32-chars-long!!';
 

@@ -1,5 +1,5 @@
 /**
- * The account library's server half (server/originals-library.ts) never hides
+ * The account library's server half (@originals/host originals-library.ts) never hides
  * a record: damaged, unverified, forked or duplicated evidence is listed as an
  * explicit incomplete row with a problem, never dropped or labelled saved
  * (section 7; P6.6, P7.5).
@@ -13,8 +13,7 @@ import { hex } from '@scure/base';
 import { MemoryStore, OriginalsSDK, readZip } from '@originals/sdk/originals';
 import { OriginalsError } from '@originals/vh';
 import { FileStore } from '@originals/sdk/originals/fs';
-import { createAnchoringLibrary } from '../originals-library';
-import type { OriginalsStore } from '../originals-store';
+import { createAnchoringLibrary, type OriginalsStore } from '@originals/host';
 import { createLocalAuthor } from '../../src/sdk/local-author';
 
 const keyOf = (did: string) => hex.encode(sha256(new TextEncoder().encode(did)));

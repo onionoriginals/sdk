@@ -1,14 +1,10 @@
 import { createInMemorySessionStorage, type SessionStorage, type SubOrgLock } from '@originals/auth/server';
 import type { Turnkey } from '@turnkey/sdk-server';
-import { json, type Handler } from './router';
+import { json, buildFetch, createWebvhHostStore, createOriginalsStore, createAnchoringLibrary, createOriginalsRoutes, type Handler, type OriginalsRoutes } from '@originals/host';
+import { jwtAuthenticate } from './originals-auth';
 import { getTurnkey } from './turnkey';
 import { createAuthRoutes } from './auth-routes';
-import { buildFetch } from './app';
-import { createWebvhHostStore } from './webvh-host';
 import type { BitcoinRoutes } from './bitcoin';
-import { createOriginalsStore } from './originals-store';
-import { createAnchoringLibrary } from './originals-library';
-import { createOriginalsRoutes, type OriginalsRoutes } from './originals-routes';
 
 // did:webvh creation is client-side (browser Ed25519 key, see src/auth/webvh.ts):
 // the parent Turnkey key can't sign for a credential-less sub-org, so there is
@@ -70,7 +66,7 @@ if (import.meta.main) {
   if (!jwtSecret) throw new Error('JWT_SECRET environment variable is required');
   const dataDir = process.env.ORIGINALS_DATA_DIR ?? './.originals-data';
   const originalsStore = createOriginalsStore({ dataDir });
-  const originals = createOriginalsRoutes({ jwtSecret, store: originalsStore, library: createAnchoringLibrary(dataDir, originalsStore) });
+  const originals = createOriginalsRoutes({ authenticate: jwtAuthenticate(jwtSecret), store: originalsStore, library: createAnchoringLibrary(dataDir, originalsStore) });
   const apiRoutes = buildRoutes({
     turnkey: getTurnkey(),
     sessions: createInMemorySessionStorage(),

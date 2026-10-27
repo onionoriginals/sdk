@@ -4,7 +4,7 @@ import { hex, base58check } from '@scure/base';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
-import { serializeCookie } from '../cookies';
+import { serializeCookie, createInscriptionsStore } from '@originals/host';
 import {
   cachedOrdinalLookup,
   classifySpendableUtxos,
@@ -19,7 +19,6 @@ import {
   P2WPKH_OUTPUT_VB,
   type OrdinalLookup,
 } from '../bitcoin';
-import { createInscriptionsStore } from '../inscriptions-store';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

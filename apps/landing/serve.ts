@@ -15,8 +15,9 @@
 import { createInMemorySessionStorage } from '@originals/auth/server';
 import { QuickNodeProvider, RegtestProvider } from '@originals/sdk';
 import { regtestOrdinalLookup } from './server/regtest';
-import { buildFetch } from './server/app';
-import { createWebvhHostStore } from './server/webvh-host';
+import { buildFetch, createWebvhHostStore, startBlockCompletion, coreBlockHeaderBatches, coreBlockHeaders, createOriginalsAnchoring, createMoneyLogger, createOriginalsStore, createInscriptionsStore, createAnchoringLibrary, createOriginalsRoutes, servedWebvhHosts, acquireInstanceLock, releaseOnExit, type OriginalsAnchoring, type Handler, type OriginalsRoutes } from '@originals/host';
+import { jwtAuthenticate } from './server/originals-auth';
+import { LEGACY_WEBVH_DOMAIN } from './src/auth/webvh-domain';
 import { buildRoutes } from './server/index';
 import { getTurnkey } from './server/turnkey';
 import {
@@ -36,21 +37,10 @@ import {
   type FaucetTxSigner,
   type OrdinalLookup,
 } from './server/bitcoin';
-import { startBlockCompletion } from './server/block-completion';
 import { join } from 'node:path';
 import { InscriptionClock } from '@originals/sdk/originals';
 import { fileClockStore } from '@originals/sdk/originals/fs';
-import { coreBlockHeaderBatches, coreBlockHeaders } from './server/block-headers';
-import { createOriginalsAnchoring, type OriginalsAnchoring } from './server/originals-anchoring';
-import { createMoneyLogger } from './server/money-log';
-import type { Handler } from './server/router';
-import { createOriginalsStore } from './server/originals-store';
-import { createInscriptionsStore } from './server/inscriptions-store';
-import { createAnchoringLibrary } from './server/originals-library';
-import { createOriginalsRoutes, type OriginalsRoutes } from './server/originals-routes';
-import { servedWebvhHosts } from './server/webvh-hosts';
 import { checkConfig, isStrictConfig, resolveDataDir, isBareHost, resolveBlockEventsUrl } from './server/config';
-import { acquireInstanceLock, releaseOnExit } from './server/instance-lock';
 
 // The configuration contract (R10/R23), FIRST: a deployed instance missing or
 // malforming a required value says so by name here, before a single request is
@@ -233,7 +223,7 @@ function buildApiRoutes(): {
     );
   }
   // Writes only under this instance's own did:webvh hosts (#976 B, G1; P3.6).
-  const originals = createOriginalsRoutes({ jwtSecret, store: originalsStore, library: createAnchoringLibrary(originalsDataDir, originalsStore, anchoring ? { bitcoin: anchoring.bitcoinEvidence } : {}), hosts: servedWebvhHosts(canonicalWebvhHost()) });
+  const originals = createOriginalsRoutes({ authenticate: jwtAuthenticate(jwtSecret), store: originalsStore, library: createAnchoringLibrary(originalsDataDir, originalsStore, anchoring ? { bitcoin: anchoring.bitcoinEvidence } : {}), hosts: servedWebvhHosts(canonicalWebvhHost(), [LEGACY_WEBVH_DOMAIN]) });
   return {
     routes: buildRoutes({ turnkey, sessions: createInMemorySessionStorage(), jwtSecret, bitcoin, originals }),
     originals,
@@ -270,6 +260,8 @@ const server = Bun.serve({
     // bakes in, read at runtime here so the redirect and the DID agree; a bad
     // value is already a named violation in the boot config report.
     canonicalHost: canonicalWebvhHost(),
+    // Identities minted before VITE_WEBVH_HOST stay readable on their domain (#976 B, G1).
+    extraWebvhHosts: [LEGACY_WEBVH_DOMAIN],
     // Railway sets this for the deployed commit; /api/version reports it (#976 B, G6).
     revision: process.env.RAILWAY_GIT_COMMIT_SHA || null,
   }),

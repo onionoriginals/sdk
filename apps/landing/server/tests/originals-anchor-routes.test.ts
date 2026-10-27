@@ -13,11 +13,8 @@ import { join } from 'node:path';
 import { base64 } from '@scure/base';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
 import { prepareEntryInscription } from '@originals/sdk/originals/bitcoin';
-import { serializeCookie } from '../cookies';
+import { serializeCookie, createInscriptionsStore, createOriginalsAnchoring, createMoneyLogger } from '@originals/host';
 import { createBitcoinRoutes } from '../bitcoin';
-import { createInscriptionsStore } from '../inscriptions-store';
-import { createOriginalsAnchoring } from '../originals-anchoring';
-import { createMoneyLogger } from '../money-log';
 import { INDEX, NETWORK, SAT, WALLET_ADDRESS, authorWithOriginal, blockHeader, fakeChain, headerClock, walletSigner } from './originals-chain-fixture';
 
 const JWT = 'test-secret-at-least-32-chars-long!!';

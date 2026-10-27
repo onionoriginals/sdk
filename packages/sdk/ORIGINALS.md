@@ -596,7 +596,7 @@ Stores implement `putRefused`/`getRefused`/`dropRefused` and
 `sdk.retrieveHosted(aliasDid, fetch)` reads a hosted snapshot, unverified and
 within the `loadPublished` bounds, for a host's `accepted`.
 
-The landing host (`apps/landing/server/shared-saves.ts`, PROVISIONAL wire
+The landing host (`packages/host/src/shared-saves.ts`, PROVISIONAL wire
 format) takes `POST /api/originals/submit/<domain>/<user-slug>/o-<name>` with
 `{ original, entry, resources: { digest: base64 }, identities }` and answers
 `200 { status: "accepted" | "already-accepted", checkpoint, head }` or

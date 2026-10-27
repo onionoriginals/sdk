@@ -5,7 +5,7 @@
  */
 import { expect, test } from 'bun:test';
 import { OriginalsError } from '@originals/vh';
-import { refusal } from '../originals-anchoring';
+import { refusal } from '@originals/host';
 import { AnchoringSubmitError, isPairRefusal } from '../../src/sdk/anchoring';
 
 test('unavailable-bytes is 503 and the browser keeps the pair (P9.6)', () => {

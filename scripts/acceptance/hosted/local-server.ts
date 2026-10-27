@@ -6,10 +6,8 @@
  * Env: ACCEPTANCE_DATA_DIR, ACCEPTANCE_JWT_SECRET, ACCEPTANCE_PORT_FILE.
  */
 import { writeFileSync } from "node:fs";
-import { createOriginalsStore } from "../../../apps/landing/server/originals-store.ts";
-import { createOriginalsRoutes } from "../../../apps/landing/server/originals-routes.ts";
-import { createAnchoringLibrary } from "../../../apps/landing/server/originals-library.ts";
-import { buildFetch } from "../../../apps/landing/server/app.ts";
+import { verifyToken } from "@originals/auth/server";
+import { createOriginalsStore, createOriginalsRoutes, createAnchoringLibrary, buildFetch, extractToken } from "@originals/host";
 
 const dataDir = process.env.ACCEPTANCE_DATA_DIR;
 const jwtSecret = process.env.ACCEPTANCE_JWT_SECRET;
@@ -18,7 +16,15 @@ if (!dataDir || !jwtSecret || !portFile) throw new Error("local-server needs ACC
 
 const store = createOriginalsStore({ dataDir });
 // main's account library (/me): GET /api/originals discovers hosted snapshots, and its evidence route restores them.
-const originals = createOriginalsRoutes({ jwtSecret, store, library: createAnchoringLibrary(dataDir, store) });
+const originals = createOriginalsRoutes({
+  // The landing's session check (apps/landing/server/originals-auth.ts): the JWT's subject.
+  authenticate: (req) => {
+    const token = extractToken(req);
+    return token ? verifyToken(token, { secret: jwtSecret }).sub : null;
+  },
+  store,
+  library: createAnchoringLibrary(dataDir, store),
+});
 const noHostStore = {
   async handlePut() {
     return new Response(null, { status: 501 });

@@ -191,7 +191,7 @@ describe('restore stops at a fork or a divergence (S1, P6.6, C12-23)', () => {
     const idb = new IDBFactory();
     const b = w.client(w.author, { idb, read });
     const { library } = await import('../content');
-    // The account's evidence route answers 409 diverged (server/originals-library.ts).
+    // The account's evidence route answers 409 diverged (@originals/host originals-library.ts).
     const target = (b as unknown as { target: { upload: { evidence: (did: string) => Promise<Uint8Array | null> } } }).target;
     target.upload = Object.assign(Object.create(target.upload), {
       evidence: () => new DurableHostingStorageAdapter({ baseUrl: 'http://x', fetchImpl: (async () => new Response(JSON.stringify({ error: 'diverged' }), { status: 409 })) as unknown as typeof fetch }).evidence(published.did),

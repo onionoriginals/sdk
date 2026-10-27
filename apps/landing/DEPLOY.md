@@ -148,7 +148,7 @@ signing in finds it and never mints a second one. Its log is served on the
 host it names. A hosted-layout read (`/user-<slug>/…`) for an object stored
 under the request's own host is answered there, not redirected, only when that
 host is one this instance serves: `VITE_WEBVH_HOST` or the legacy domain
-(`server/webvh-hosts.ts`). Any other host still gets the 301, and a hosted
+(`@originals/host` `webvh-hosts.ts`). Any other host still gets the 301, and a hosted
 write or save under any other host is refused (`403 forbidden_host`). The
 legacy host must still route to this service for a reader to reach it.
 

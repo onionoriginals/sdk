@@ -18,14 +18,12 @@ import * as btc from '@scure/btc-signer';
 import { hex } from '@scure/base';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
-import { serializeCookie } from '../cookies';
+import { serializeCookie, createInscriptionsStore, formatMoneyLog, createMoneyLogger } from '@originals/host';
 import {
   createBitcoinRoutes,
   createDepositBalanceSweep,
   type OrdinalLookup,
 } from '../bitcoin';
-import { createInscriptionsStore } from '../inscriptions-store';
-import { formatMoneyLog, createMoneyLogger } from '../money-log';
 
 const JWT = 'test-secret-at-least-32-chars-long!!';
 const EMAIL = 'stranger@example.com';

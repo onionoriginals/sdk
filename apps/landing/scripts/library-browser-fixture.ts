@@ -6,9 +6,8 @@
 import { prepareEntryInscription } from '@originals/sdk/originals/bitcoin';
 import { base64 } from '@scure/base';
 import { signToken } from '@originals/auth/server';
-import { createOriginalsStore } from '../server/originals-store';
-import { createOriginalsRoutes } from '../server/originals-routes';
-import { createAnchoringLibrary } from '../server/originals-library';
+import { createOriginalsStore, createOriginalsRoutes, createAnchoringLibrary } from '@originals/host';
+import { jwtAuthenticate } from '../server/originals-auth';
 import { inProcessLanding } from '../server/tests/landing-server-fixture';
 import { authorWithOriginal, fakeChain, headerClock, INDEX, WALLET_ADDRESS, walletSigner } from '../server/tests/originals-chain-fixture';
 
@@ -20,7 +19,7 @@ const zip = (await a.sdk.package(a.did)).bytes;
 await landing.anchoring.submit('alice', { did: a.did, evidence: zip, pair });
 chain.mine();
 const secret = 'library-browser-fixture-secret-32-chars';
-const originals = createOriginalsRoutes({ jwtSecret: secret, store: createOriginalsStore({ dataDir: landing.dataDir }), library: createAnchoringLibrary(landing.dataDir) });
+const originals = createOriginalsRoutes({ authenticate: jwtAuthenticate(secret), store: createOriginalsStore({ dataDir: landing.dataDir }), library: createAnchoringLibrary(landing.dataDir) });
 const server = Bun.serve({ hostname: '127.0.0.1', port: 3102, async fetch(req) {
   const url = new URL(req.url);
   const account = /(?:^|;\s*)fixture_account=(alice|bob)/.exec(req.headers.get('cookie') ?? '')?.[1];

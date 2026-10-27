@@ -1,7 +1,8 @@
 /**
  * Shared-host saves, client side (P6.4, P6.7, P6.8). The host here is a small
- * in-memory stand-in that applies P6.7's acceptance order; the landing's real
- * route and durable store are exercised in apps/landing (shared-host tests).
+ * in-memory stand-in that applies P6.7's acceptance order; the real route and
+ * durable store live in packages/host (@originals/host) and are exercised by
+ * its tests and the landing's shared-host tests.
  * Rows cited are the section 12 matrix rows 131-137 (spec a432aa67).
  */
 import { describe, expect, test } from "bun:test";
