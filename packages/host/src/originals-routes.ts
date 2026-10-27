@@ -7,8 +7,10 @@
  *   GET  /api/originals                     list the user's Originals
  *   serve(url)                              durable read at the resolver URL
  *
- * Every route requires a valid JWT (cookie or Bearer); the store is namespaced
- * by the JWT `sub`, so a user only ever writes/reads under their own account.
+ * Every route requires an authenticated session: the injected `authenticate`
+ * names the caller's subject (the landing verifies its JWT from the cookie or
+ * Bearer header); the store is namespaced by that subject, so a user only ever
+ * writes/reads under their own account.
  * The one exception is a shared-host save into someone's namespace: the
  * entry's validity under the profile authorizes the change (P5.4, P6.7), and
  * the caller must be the namespace owner or an account whose landing DID the
@@ -25,9 +27,7 @@
  * (409), so an upload can neither roll back nor advance, unverified, a head
  * the host accepted (shared-host PR review C4).
  */
-import { verifyToken } from '@originals/auth/server';
 import { json, type Handler } from './router.js';
-import { extractToken } from './cookies.js';
 import { createRateLimiter } from './rate-limit.js';
 import type { OriginalsStore, OriginalInscription } from './originals-store.js';
 import { bytesMatchDigest, classifyHostedKey, hostedContentType, parseWitnessFile, signedMediaType, signerLogVerdict, signerWitnessVerdict } from './hosted-layout.js';
@@ -107,8 +107,15 @@ export interface OriginalsRoutes {
   serve(url: URL): Response | null;
 }
 
+/**
+ * Names the authenticated subject of a request (the per-user namespace key),
+ * or null when the request carries no valid session. A throw is treated as
+ * null: every route answers 401.
+ */
+export type Authenticate = (req: Request) => string | null;
+
 export function createOriginalsRoutes(deps: {
-  jwtSecret: string;
+  authenticate: Authenticate;
   store: OriginalsStore;
   now?: () => number;
   library?: AnchoringLibrary;
@@ -131,10 +138,8 @@ export function createOriginalsRoutes(deps: {
 
   /** Authenticated subOrgId, or null (→ 401). */
   function authSub(req: Request): string | null {
-    const token = extractToken(req);
-    if (!token) return null;
     try {
-      return verifyToken(token, { secret: deps.jwtSecret }).sub;
+      return deps.authenticate(req);
     } catch {
       return null;
     }

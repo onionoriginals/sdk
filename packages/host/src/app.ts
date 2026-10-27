@@ -118,6 +118,10 @@ export function buildFetch(deps: {
   // requests on any other host are redirected here. Undefined in dev and tests,
   // where no redirect happens at all.
   canonicalHost?: string;
+  // Further did:webvh hosts this instance serves alongside the canonical one
+  // (webvh-hosts.ts), such as the domain earlier identities were minted on.
+  // Only consulted when canonicalHost is set.
+  extraWebvhHosts?: readonly string[];
   // The deployed revision (RAILWAY_GIT_COMMIT_SHA), reported by /api/version.
   revision?: string | null;
   log?: (message: string) => void;
@@ -139,7 +143,7 @@ export function buildFetch(deps: {
   // published under, and the durable store serves by that host. Only this
   // instance's own did:webvh hosts are served off the canonical host; a
   // stored object under any other Host header still redirects (P3.6).
-  const servedHosts = servedWebvhHosts(canonicalHost);
+  const servedHosts = servedWebvhHosts(canonicalHost, deps.extraWebvhHosts);
   const durableHosted = (url: URL): Response | null =>
     servedHosts?.includes(url.host) && /^\/user-[^/]+\//.test(url.pathname)
       ? ((deps.publications ?? originals)?.serve(url) ?? null)

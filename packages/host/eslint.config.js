@@ -31,6 +31,23 @@ export default tseslint.config(
     },
   },
   {
+    // The modules moved verbatim from apps/landing/server, which was never
+    // linted. These findings predate the move and are style-only; they warn
+    // until a follow-up cleans them up, so the move stays behavior-preserving.
+    files: ['src/**/*.ts'],
+    rules: {
+      'no-empty': 'warn',
+      '@typescript-eslint/require-await': 'warn',
+      '@typescript-eslint/unbound-method': 'warn',
+      '@typescript-eslint/no-base-to-string': 'warn',
+      '@typescript-eslint/no-unnecessary-type-assertion': 'warn',
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
+      ],
+    },
+  },
+  {
     ignores: ['dist/', 'node_modules/', '*.js', 'tests/'],
   }
 );
