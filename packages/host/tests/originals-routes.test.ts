@@ -2,8 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { signToken, getAuthCookieConfig } from '@originals/auth/server';
-import { serializeCookie } from '../src/cookies.js';
+import { extractToken, serializeCookie } from '../src/cookies.js';
 import { createOriginalsStore } from '../src/originals-store.js';
 import { createOriginalsRoutes } from '../src/originals-routes.js';
 import { buildFetch } from '../src/app.js';
@@ -37,19 +36,25 @@ async function signerLog(versions = 2, opts: { witnessed?: boolean } = {}) {
   return { did, hex: createHash('sha256').update(did).digest('hex'), logs, witness: { pruned, full } };
 }
 
-const JWT = 'test-secret-at-least-32-chars-long!!';
+// The host takes an injected authenticator; the landing verifies its JWT.
+// Here a session token is `test-session:<sub>`, carried in the same cookie.
+const SESSION = 'test-session:';
+const authenticate = (req: Request): string | null => {
+  const token = extractToken(req);
+  return token?.startsWith(SESSION) ? token.slice(SESSION.length) : null;
+};
 
 function tmpStore() {
   const dir = mkdtempSync(join(tmpdir(), 'originals-routes-'));
   return createOriginalsStore({ dataDir: dir });
 }
 function cookieFor(sub: string): string {
-  return serializeCookie(getAuthCookieConfig(signToken(sub, `${sub}@b.com`, undefined, { secret: JWT })));
+  return serializeCookie({ name: 'auth_token', value: `${SESSION}${sub}`, options: { httpOnly: true, sameSite: 'strict', path: '/' } });
 }
 
 describe('originals routes — auth gating', () => {
   test('GET/POST /api/originals + PUT host are 401 when anonymous', async () => {
-    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    const routes = createOriginalsRoutes({ authenticate, store: tmpStore() });
     const listRes = await routes.list(new Request('http://h/api/originals'), new URL('http://h/api/originals'));
     expect(listRes.status).toBe(401);
     const recRes = await routes.record(
@@ -66,7 +71,7 @@ describe('originals routes — auth gating', () => {
 
   test('PUT then GET on /api/originals/host/* round-trips (adapter.get path)', async () => {
     const store = tmpStore();
-    const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
+    const originals = createOriginalsRoutes({ authenticate, store });
     const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
     const key = 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/did.jsonl';
     const endpoint = `http://demo.local/api/originals/host/${encodeURIComponent(key)}`;
@@ -89,7 +94,7 @@ describe('originals routes — auth gating', () => {
   });
 
   test('rejects a non-artifact key that would shadow a static asset (403)', async () => {
-    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    const routes = createOriginalsRoutes({ authenticate, store: tmpStore() });
     const shadow = (key: string) => {
       const url = new URL(`http://h/api/originals/host/${encodeURIComponent(key)}`);
       return routes.hostPut(
@@ -122,7 +127,7 @@ describe('originals routes — auth gating', () => {
   // instance serves only its own did:webvh hosts, so a write under any other
   // host would be bytes no reader of that DID can fetch here.
   test('with served hosts configured, refuses a write or a save under any other host (403)', async () => {
-    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore(), hosts: ['originals.build', 'magby.originals.build'] });
+    const routes = createOriginalsRoutes({ authenticate, store: tmpStore(), hosts: ['originals.build', 'magby.originals.build'] });
     const put = (key: string) => {
       const url = new URL(`http://h/api/originals/host/${encodeURIComponent(key)}`);
       return routes.hostPut(new Request(url, { method: 'PUT', headers: { cookie: cookieFor('sub-1') }, body: '{"v":1}' }), url, '1.1.1.1');
@@ -141,7 +146,7 @@ describe('originals routes — auth gating', () => {
   });
 
   test('rejects an oversized upload by Content-Length (413)', async () => {
-    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    const routes = createOriginalsRoutes({ authenticate, store: tmpStore() });
     const url = new URL(`http://h/api/originals/host/${encodeURIComponent('h/user-sub-1/did.jsonl')}`);
     const res = await routes.hostPut(
       new Request(url, {
@@ -156,7 +161,7 @@ describe('originals routes — auth gating', () => {
   });
 
   test('a second user cannot overwrite the first user’s object (403)', async () => {
-    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    const routes = createOriginalsRoutes({ authenticate, store: tmpStore() });
     const key = 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/did.jsonl';
     const url = new URL(`http://h/api/originals/host/${encodeURIComponent(key)}`);
     const put = (sub: string) =>
@@ -173,7 +178,7 @@ describe('originals routes — auth gating', () => {
   test('orphaned bytes with no owner marker are refused with 409, not silently claimed (#690)', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'originals-routes-'));
     const store = createOriginalsStore({ dataDir });
-    const routes = createOriginalsRoutes({ jwtSecret: JWT, store });
+    const routes = createOriginalsRoutes({ authenticate, store });
     // Every hosted key is inside its author's namespace; the owner sidecar still
     // guards against claiming bytes whose ownership was never recorded (#690).
     const key = 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/originals-evidence.json';
@@ -198,7 +203,7 @@ describe('originals routes — auth gating', () => {
   });
 
   test('pre-squat blocked: cannot write another user’s namespace even when unclaimed (403)', async () => {
-    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    const routes = createOriginalsRoutes({ authenticate, store: tmpStore() });
     // sub-2 targets sub-1's PREDICTABLE publisher path BEFORE sub-1 ever writes —
     // the owner sidecar alone wouldn't stop this (unclaimed key); the namespace
     // guard does.
@@ -213,7 +218,7 @@ describe('originals routes — auth gating', () => {
   });
 
   test('a malformed percent-encoded key is a clean 400, not a 500', async () => {
-    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    const routes = createOriginalsRoutes({ authenticate, store: tmpStore() });
     // %GG is an invalid escape: the URL constructor accepts it, decodeURIComponent throws.
     const url = new URL('http://h/api/originals/host/demo.example.com/%GG/did.jsonl');
     const putRes = await routes.hostPut(
@@ -227,7 +232,7 @@ describe('originals routes — auth gating', () => {
   });
 
   test('record then list under the authenticated sub', async () => {
-    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    const routes = createOriginalsRoutes({ authenticate, store: tmpStore() });
     const cookie = cookieFor('sub-1');
     const rec = await routes.record(
       new Request('http://h/api/originals', {
@@ -249,7 +254,7 @@ describe('originals routes — auth gating', () => {
   });
 
   test('record accepts optional inscription fields and list returns them', async () => {
-    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    const routes = createOriginalsRoutes({ authenticate, store: tmpStore() });
     const cookie = cookieFor('sub-1');
     const did = 'did:webvh:S:demo.example.com:studio:you:abc';
     const post = (body: unknown) =>
@@ -293,7 +298,7 @@ describe('originals routes — auth gating', () => {
 
   test('PUT host stores durably and buildFetch serves it at the resolver URL', async () => {
     const store = tmpStore();
-    const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
+    const originals = createOriginalsRoutes({ authenticate, store });
     const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
 
     const key = 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/did.jsonl';
@@ -333,7 +338,7 @@ describe('hosted Original layout (plan 011, PR 8)', () => {
 
   function setup() {
     const store = tmpStore();
-    const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
+    const originals = createOriginalsRoutes({ authenticate, store });
     const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
     const put = (key: string, body: BodyInit, contentType = 'text/html') =>
       fetchFn(new Request(`http://demo.local/api/originals/host/${encodeURIComponent(key)}`, { method: 'PUT', headers: { 'content-type': contentType, cookie: cookieFor('sub-1') }, body }));
@@ -399,7 +404,7 @@ describe('hosted PUT bounds and signer DID logs (#965 review R4, C2)', () => {
 
   function setup() {
     const store = tmpStore();
-    const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
+    const originals = createOriginalsRoutes({ authenticate, store });
     const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
     const put = (key: string, body: BodyInit) =>
       fetchFn(new Request(`http://demo.local/api/originals/host/${encodeURIComponent(key)}`, { method: 'PUT', headers: { cookie: cookieFor('sub-1') }, body }));
@@ -564,7 +569,7 @@ describe('a hosted asset log changes only through the verifying submit route (P6
   const base = 'demo.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals';
   test('an upload creates the asset log or repeats it; a prefix of it is already published (08d review r2 #9); one that changes or extends it is refused', async () => {
     const store = tmpStore();
-    const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
+    const originals = createOriginalsRoutes({ authenticate, store });
     const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
     const put = (body: string) =>
       fetchFn(new Request(`http://demo.local/api/originals/host/${encodeURIComponent(`${base}/asset/did.jsonl`)}`, { method: 'PUT', headers: { cookie: cookieFor('sub-1') }, body }));
@@ -584,7 +589,7 @@ describe('a hosted asset log changes only through the verifying submit route (P6
 
   test('a submission needs a signed-in caller and a well-formed site key', async () => {
     const store = tmpStore();
-    const originals = createOriginalsRoutes({ jwtSecret: JWT, store });
+    const originals = createOriginalsRoutes({ authenticate, store });
     const fetchFn = buildFetch({ apiRoutes: null, hostStore: noopHostStore(), distDir: '/nonexistent/', originals });
     const post = (key: string, cookie?: string, method = 'POST') =>
       fetchFn(new Request(`http://demo.local/api/originals/submit/${encodeURIComponent(key)}`, { method, headers: cookie ? { cookie } : {}, body: method === 'POST' ? '{}' : undefined }));
@@ -627,13 +632,13 @@ describe('the account index records a published Original\'s alias', () => {
     ((await (await routes.list(new Request('http://h/api/originals', { headers: { cookie: cookieFor(sub) } }), new URL('http://h/api/originals'))).json()) as { originals: Array<{ did: string; alias?: string }> }).originals;
 
   test('an alias in the caller\'s own namespace, named for the Original, is kept and listed', async () => {
-    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    const routes = createOriginalsRoutes({ authenticate, store: tmpStore() });
     expect((await post(routes, { did, title: 'Piece', resourceHash: 'ab', alias: alias() })).status).toBe(200);
     expect(await listed(routes)).toMatchObject([{ did, alias: alias() }]);
   });
 
   test('an alias in another namespace, for another Original, or malformed is refused', async () => {
-    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    const routes = createOriginalsRoutes({ authenticate, store: tmpStore() });
     for (const bad of [alias('user-someoneelse0000'), alias(undefined, 'o-QmOtherOriginal00'), 'did:webvh:x', 42]) {
       expect((await post(routes, { did, title: 'Piece', resourceHash: 'ab', alias: bad })).status).toBe(400);
     }
@@ -641,7 +646,7 @@ describe('the account index records a published Original\'s alias', () => {
   });
 
   test('once recorded, the alias never changes', async () => {
-    const routes = createOriginalsRoutes({ jwtSecret: JWT, store: tmpStore() });
+    const routes = createOriginalsRoutes({ authenticate, store: tmpStore() });
     await post(routes, { did, title: 'Piece', resourceHash: 'ab' });
     await post(routes, { did, title: 'Piece', resourceHash: 'ab', alias: alias() });
     await post(routes, { did, title: 'Piece', resourceHash: 'ab', alias: alias().replace('QmScid', 'QmOther') });

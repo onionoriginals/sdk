@@ -311,6 +311,8 @@ test('a mixed-case canonical host still redirects a foreign host, to the lowerca
  * doesn't serve, still redirects.
  */
 describe('hosted-layout reads on the host they were published under', () => {
+  // The landing passes its legacy did:webvh domain as an extra served host.
+  const LEGACY_WEBVH_DOMAIN = 'magby.originals.build';
   const stored = '/user-abc0123456789ab/did.jsonl';
   // The store answers for any host it holds; only the served did:webvh hosts may bypass the redirect.
   const publications = {
@@ -318,7 +320,7 @@ describe('hosted-layout reads on the host they were published under', () => {
       (url.host === 'magby.originals.build' || url.host === 'intruder.example.com') && url.pathname === stored ? new Response('log') : null,
   };
   const fetchFn = () =>
-    buildFetch({ apiRoutes: configuredRoutes, hostStore: noopHostStore, distDir, trustedProxyHops: 0, canonicalHost: 'originals.build', publications });
+    buildFetch({ apiRoutes: configuredRoutes, hostStore: noopHostStore, distDir, trustedProxyHops: 0, canonicalHost: 'originals.build', extraWebvhHosts: [LEGACY_WEBVH_DOMAIN], publications });
 
   test('a stored object is served, not redirected', async () => {
     const res = await fetchFn()(new Request(`https://magby.originals.build${stored}`));

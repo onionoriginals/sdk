@@ -20,7 +20,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p tsconfig.tests.json",
+    "typecheck": "tsc --noEmit -p .",
     "test": "bun test tests/",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\""

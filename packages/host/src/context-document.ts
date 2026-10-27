@@ -10,8 +10,9 @@
  * has nothing to load, so every Originals credential is unprocessable outside
  * this repo. That is the whole interop surface, broken by a missing route.
  *
- * The bytes come from the SAME module the SDK bundles, imported across the
- * workspace rather than copied, so the hosted document cannot drift from the
+ * The bytes come from the SAME module the SDK bundles, taken from the SDK's
+ * own preloaded-context map (`PRELOADED_CONTEXTS`, the document loader's
+ * source) rather than copied, so the hosted document cannot drift from the
  * one credentials are actually verified against. A copy here would be a second
  * source of truth for a document whose only job is to be the single one.
  *
@@ -21,7 +22,10 @@
  * are all satisfied by one route. They resolve to identical documents by
  * design; see the network table for why the domains differ at all.
  */
-import originalsContext from '../../../packages/sdk/src/contexts/originals.json' with { type: 'json' };
+import { PRELOADED_CONTEXTS } from '@originals/sdk';
+
+const originalsContext = PRELOADED_CONTEXTS['https://originals.build/context'];
+if (originalsContext === undefined) throw new Error('@originals/sdk no longer preloads https://originals.build/context');
 
 /**
  * The served representation. Pretty-printed for a document humans read as
