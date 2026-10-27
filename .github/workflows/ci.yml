@@ -246,7 +246,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: aviarytech/rev
-          ref: 4ad28656aaccfc3aafd16b0753e002d160cfd41d
+          ref: d19aad77afa4d21858e6c78edd2fa1696845ae3e
           path: .rev-tool
           persist-credentials: false
       - uses: oven-sh/setup-bun@v2
@@ -296,7 +296,7 @@ jobs:
           path: rev-input
       - name: Check named tests, file coverage and CI deterministically
         if: ${{ !cancelled() }}
-        uses: aviarytech/rev@4ad28656aaccfc3aafd16b0753e002d160cfd41d
+        uses: aviarytech/rev@d19aad77afa4d21858e6c78edd2fa1696845ae3e
         with:
           scope: tests
           task-file: rev-input/task.json
