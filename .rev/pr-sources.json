@@ -61,7 +61,8 @@
       ".rev-local-tool/scripts/local-review-gate.js",
       ".rev-local-tool/src/local/github.js",
       ".rev-local-tool/src/local/protocol.js",
-      ".rev-local-tool/scripts/github-review.js"
+      ".rev-local-tool/scripts/github-review.js",
+      ".rev-local-tool/src/local/events.js"
     ]
   }
 ]

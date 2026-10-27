@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: aviarytech/rev
-          ref: b15d1c19fb63b5f5752c4a012f7b3bf99a4936e5
+          ref: 09afd54ea25aad8f6dd7d72216fdd291646ae58c
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -38,12 +38,41 @@ jobs:
           REV_LOCAL_INGEST_ONLY: 'true'
           GITHUB_TOKEN: ${{ github.token }}
           REV_LOCAL_REVIEW_PUBLIC_KEY: ${{ vars.REV_LOCAL_REVIEW_PUBLIC_KEY }}
-  verify:
-    name: Verify signed review
+  plan:
+    name: Select affected PRs
     needs: record
     if: ${{ !cancelled() && (needs.record.result == 'success' || needs.record.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      numbers: ${{ steps.plan.outputs.numbers }}
+    steps:
+      # Never check out or execute a pull request revision in this workflow.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: aviarytech/rev
+          ref: 09afd54ea25aad8f6dd7d72216fdd291646ae58c
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - id: plan
+        run: node scripts/local-review-gate.js
+        env:
+          REV_LOCAL_PLAN_ONLY: 'true'
+          GITHUB_TOKEN: ${{ github.token }}
+          REV_LOCAL_REVIEW_PUBLIC_KEY: ${{ vars.REV_LOCAL_REVIEW_PUBLIC_KEY }}
+  verify:
+    name: Verify signed review
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.numbers != '[]' }}
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        pr: ${{ fromJSON(needs.plan.outputs.numbers) }}
     concurrency:
-      group: rev-local-review-verifier
+      group: rev-local-review-${{ matrix.pr }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -52,12 +81,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: aviarytech/rev
-          ref: b15d1c19fb63b5f5752c4a012f7b3bf99a4936e5
+          ref: 09afd54ea25aad8f6dd7d72216fdd291646ae58c
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: '24'
       - run: node scripts/local-review-gate.js
         env:
+          REV_LOCAL_PR_NUMBER: ${{ matrix.pr }}
           GITHUB_TOKEN: ${{ github.token }}
           REV_LOCAL_REVIEW_PUBLIC_KEY: ${{ vars.REV_LOCAL_REVIEW_PUBLIC_KEY }}

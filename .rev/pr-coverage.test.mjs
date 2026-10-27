@@ -108,12 +108,12 @@ test('rollout changeset declares no package releases', async () => {
 
 test('local review verifier executes only immutable trusted code with public-key configuration', async () => {
   const workflow = await readFile('.github/workflows/rev-local-review.yml', 'utf8');
-  assert.match(workflow, /repository: aviarytech\/rev\n\s+ref: b15d1c19fb63b5f5752c4a012f7b3bf99a4936e5/);
+  assert.match(workflow, /repository: aviarytech\/rev\n\s+ref: 09afd54ea25aad8f6dd7d72216fdd291646ae58c/);
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /checks: write/);
   assert.match(workflow, /REV_LOCAL_REVIEW_PUBLIC_KEY: \$\{\{ vars.REV_LOCAL_REVIEW_PUBLIC_KEY \}\}/);
   assert.doesNotMatch(workflow, /secrets\.|pull_request\.head|head_ref|client_payload.*run:/);
-  assert.deepEqual([...workflow.matchAll(/\brun: (.+)/g)].map(m => m[1]), ['node scripts/local-review-gate.js', 'node scripts/local-review-gate.js']);
+  assert.deepEqual([...workflow.matchAll(/\brun: (.+)/g)].map(m => m[1]), ['node scripts/local-review-gate.js', 'node scripts/local-review-gate.js', 'node scripts/local-review-gate.js']);
   for (const trigger of ['repository_dispatch:', 'pull_request_target:', 'workflow_run:', 'schedule:', 'workflow_dispatch:', 'push:']) assert.ok(workflow.includes(trigger));
   assert.match(workflow, /cancel-in-progress: false/);
   const policy = JSON.parse(await readFile('.rev/local-review.json', 'utf8'));

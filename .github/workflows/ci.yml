@@ -258,7 +258,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: aviarytech/rev
-          ref: b15d1c19fb63b5f5752c4a012f7b3bf99a4936e5
+          ref: 09afd54ea25aad8f6dd7d72216fdd291646ae58c
           path: .rev-local-tool
           persist-credentials: false
       - name: Exercise PR evidence without secrets
