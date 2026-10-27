@@ -2,9 +2,9 @@ import { describe, test, expect } from 'bun:test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveClientIp, trustedProxyHops } from '../client-ip';
-import { buildFetch } from '../app';
-import { json, type Handler } from '../router';
+import { resolveClientIp, trustedProxyHops } from '../src/client-ip.js';
+import { buildFetch } from '../src/app.js';
+import { json, type Handler } from '../src/router.js';
 
 // A request as it arrives at the socket, with whatever chain the caller claims.
 function req(xff?: string): Request {
@@ -153,7 +153,7 @@ describe('rate limits bind to the resolved client identity', () => {
   });
 
   test('one client exceeding the host-write limit is throttled; another is not', async () => {
-    const { createWebvhHostStore } = await import('../webvh-host');
+    const { createWebvhHostStore } = await import('../src/webvh-host.js');
     const hostStore = createWebvhHostStore({ limit: 2, windowMs: 60_000 });
     const fetchFn = buildFetch({ apiRoutes: null, hostStore, distDir, trustedProxyHops: 1 });
     const put = (client: string, key: string) =>
@@ -174,7 +174,7 @@ describe('rate limits bind to the resolved client identity', () => {
   });
 
   test('rotating the forwarded header from a non-proxy source does not mint buckets', async () => {
-    const { createWebvhHostStore } = await import('../webvh-host');
+    const { createWebvhHostStore } = await import('../src/webvh-host.js');
     const hostStore = createWebvhHostStore({ limit: 1, windowMs: 60_000 });
     // hops: 0 — nothing in front of this server, so the header is not evidence.
     const fetchFn = buildFetch({ apiRoutes: null, hostStore, distDir, trustedProxyHops: 0 });

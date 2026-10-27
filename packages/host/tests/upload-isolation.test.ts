@@ -2,9 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildFetch } from '../app';
-import { createWebvhHostStore } from '../webvh-host';
-import type { OriginalsRoutes } from '../originals-routes';
+import { buildFetch } from '../src/app.js';
+import { createWebvhHostStore } from '../src/webvh-host.js';
+import type { OriginalsRoutes } from '../src/originals-routes.js';
 
 // Capture before the repository test preload installs its per-test fetch spy.
 const httpFetch = globalThis.fetch.bind(globalThis);

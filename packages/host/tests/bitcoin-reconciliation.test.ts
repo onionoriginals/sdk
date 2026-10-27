@@ -14,9 +14,9 @@ import { describe, test, expect } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createInscriptionsStore, type InscriptionRecord } from '../inscriptions-store';
-import { createMoneyLogger } from '../money-log';
-import { createInscriptionReconciler, rotate, type ReconciliationProvider } from '../bitcoin-reconciliation';
+import { createInscriptionsStore, type InscriptionRecord } from '../src/inscriptions-store.js';
+import { createMoneyLogger } from '../src/money-log.js';
+import { createInscriptionReconciler, rotate, type ReconciliationProvider } from '../src/bitcoin-reconciliation.js';
 
 const rec = (over: Partial<InscriptionRecord> & { commitTxId: string }): InscriptionRecord => ({
   revealTxId: `${over.commitTxId.slice(0, 62)}r0`,

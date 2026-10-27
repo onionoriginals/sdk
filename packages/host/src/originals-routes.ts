@@ -26,15 +26,15 @@
  * the host accepted (shared-host PR review C4).
  */
 import { verifyToken } from '@originals/auth/server';
-import { json, type Handler } from './router';
-import { extractToken } from './cookies';
-import { createRateLimiter } from './rate-limit';
-import type { OriginalsStore, OriginalInscription } from './originals-store';
-import { bytesMatchDigest, classifyHostedKey, hostedContentType, parseWitnessFile, signedMediaType, signerLogVerdict, signerWitnessVerdict } from './hosted-layout';
-import { readBodyCapped } from './body';
-import { createSharedSaves, parseSubmission } from './shared-saves';
+import { json, type Handler } from './router.js';
+import { extractToken } from './cookies.js';
+import { createRateLimiter } from './rate-limit.js';
+import type { OriginalsStore, OriginalInscription } from './originals-store.js';
+import { bytesMatchDigest, classifyHostedKey, hostedContentType, parseWitnessFile, signedMediaType, signerLogVerdict, signerWitnessVerdict } from './hosted-layout.js';
+import { readBodyCapped } from './body.js';
+import { createSharedSaves, parseSubmission } from './shared-saves.js';
 
-import type { AnchoringLibrary } from './originals-library';
+import type { AnchoringLibrary } from './originals-library.js';
 
 const HOST_PREFIX = '/api/originals/host/';
 const SUBMIT_PREFIX = '/api/originals/submit/';

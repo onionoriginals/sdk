@@ -112,9 +112,9 @@ import { vhHash } from '@originals/vh/log';
 import { parseDidWebvh } from '@originals/vh/webvh';
 import { ORIGINALS_LIMITS, btcoAliasOf, resourceDigest, verifyOriginal, type AuthorDidEvidence, type OriginalsReport } from '@originals/vh/originals';
 import { signerPath } from '@originals/sdk/originals';
-import { json } from './router';
-import { deeperThan, logPrefix, MAX_WITNESS_DEPTH, parseWitnessFile, signedMediaType, verifiedSignerLog } from './hosted-layout';
-import type { OriginalsStore } from './originals-store';
+import { json } from './router.js';
+import { deeperThan, logPrefix, MAX_WITNESS_DEPTH, parseWitnessFile, signedMediaType, verifiedSignerLog } from './hosted-layout.js';
+import type { OriginalsStore } from './originals-store.js';
 
 const DIGEST = /^z[1-9A-HJ-NP-Za-km-z]{40,60}$/;
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;

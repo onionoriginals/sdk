@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { coreBlockHeaderBatches, coreBlockHeaders } from '../block-headers';
+import { coreBlockHeaderBatches, coreBlockHeaders } from '../src/block-headers.js';
 
 const H = (n: number) => n.toString(16).padStart(64, '0');
 

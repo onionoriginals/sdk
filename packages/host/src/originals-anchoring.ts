@@ -46,7 +46,7 @@ import {
   type SatIndexRead,
 } from '@originals/sdk/originals/bitcoin';
 import type { OrdinalsProvider } from '@originals/sdk';
-import type { MoneyLogger } from './money-log';
+import type { MoneyLogger } from './money-log.js';
 
 export interface OriginalsAnchoringDeps {
   dataDir: string;

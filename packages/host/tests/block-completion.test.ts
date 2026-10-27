@@ -2,10 +2,10 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { startBlockCompletion } from '../block-completion';
-import { createInscriptionReconciler } from '../bitcoin-reconciliation';
-import { createInscriptionsStore, type InscriptionRecord } from '../inscriptions-store';
-import { createMoneyLogger } from '../money-log';
+import { startBlockCompletion } from '../src/block-completion.js';
+import { createInscriptionReconciler } from '../src/bitcoin-reconciliation.js';
+import { createInscriptionsStore, type InscriptionRecord } from '../src/inscriptions-store.js';
+import { createMoneyLogger } from '../src/money-log.js';
 
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
 function harness(complete = async () => {}) {

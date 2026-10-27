@@ -12,7 +12,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { hex } from '@scure/base';
-import type { OriginalsStore } from './originals-store';
+import type { OriginalsStore } from './originals-store.js';
 import { OriginalsSDK, readManifest, writeZip, type OriginalView } from '@originals/sdk/originals';
 import { FileStore } from '@originals/sdk/originals/fs';
 import { OriginalsError } from '@originals/vh';

@@ -28,8 +28,8 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { untrustedHeaders } from './webvh-host';
-import { signedMediaType } from './hosted-layout';
+import { untrustedHeaders } from './webvh-host.js';
+import { signedMediaType } from './hosted-layout.js';
 
 /** Bitcoin inscription state carried on an Original once it migrates to did:btco. */
 export interface OriginalInscription {

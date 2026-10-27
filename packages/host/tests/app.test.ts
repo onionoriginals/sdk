@@ -2,8 +2,8 @@ import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildFetch } from '../app';
-import { json, type Handler } from '../router';
+import { buildFetch } from '../src/app.js';
+import { json, type Handler } from '../src/router.js';
 
 // A no-op host store matching the WebvhHostStore surface buildFetch depends on.
 const noopHostStore = {
