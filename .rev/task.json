@@ -4,33 +4,74 @@
   "criteria": [
     {
       "id": "old-gate-removed",
-      "description": "The per-push Jev evaluation is removed: no CI job sends PR evidence to TypeSafe or references a TypeSafe API key, and the old evidence collector, PR coverage contract, source manifests and their CI step are deleted.",
-      "tests": [".rev/tests-gate.test.mjs > REV tests gate > removes the per-push Jev gate and its evidence collector"],
-      "paths": [".github/workflows/ci.yml", ".rev/**", "scripts/rev-evidence.mjs", "scripts/rev-evidence.test.mjs"]
+      "description": "The per-push Jev evaluation is removed: no workflow references a TypeSafe API key or endpoint or the rev-evidence job, the tests job no longer runs REV evidence steps, scripts/rev-evidence.mjs and its test are deleted, and .rev/ contains only the new gate's files.",
+      "tests": [
+        ".rev/tests-gate.test.mjs > REV tests gate > removes the per-push Jev gate and its evidence collector"
+      ],
+      "paths": [
+        ".github/workflows/ci.yml",
+        ".rev/.gitignore",
+        ".rev/PR-COVERAGE.md",
+        ".rev/collect.sh",
+        ".rev/evaluator-validation.json",
+        ".rev/pr-*",
+        ".rev/prepare-pr.mjs",
+        ".rev/sources.json",
+        ".rev/task.json",
+        ".rev/tests-gate.test.mjs",
+        "scripts/rev-evidence.mjs",
+        "scripts/rev-evidence.test.mjs"
+      ]
     },
     {
       "id": "deterministic-gate",
-      "description": "The REV job runs aviarytech/rev pinned to a full commit SHA in tests scope, after every other CI job, which are also the contract's required checks. It reads only downloaded artifacts: no checkout, install, run step or secret. It takes the reviewed digest from the PR-specific REV_CONTRACT_PR_<number> repository variable. The rev-tests job checks out the same REV commit.",
-      "tests": [".rev/tests-gate.test.mjs > REV tests gate > runs pinned REV in tests scope after every CI job, from artifacts only, without an API key"],
-      "paths": [".github/workflows/ci.yml", ".rev/task.json", ".rev/contract.json", ".rev/tests-gate.test.mjs"]
+      "description": "The REV job runs aviarytech/rev pinned to a full commit SHA in tests scope unless cancelled, for pull requests, after every other CI job; those jobs are also the contract's required checks. Its only steps download the input artifact, run REV and upload the report: no run step, API key or secret. It takes the reviewed digest from the PR-specific REV_CONTRACT_PR_<number> repository variable. The rev-tests job checks out the same REV commit.",
+      "tests": [
+        ".rev/tests-gate.test.mjs > REV tests gate > runs pinned REV in tests scope after every CI job, from artifacts only, without an API key"
+      ],
+      "paths": [
+        ".github/workflows/ci.yml",
+        ".rev/task.json",
+        ".rev/contract.json",
+        ".rev/tests-gate.test.mjs"
+      ]
     },
     {
       "id": "named-test-runs",
-      "description": "The rev-tests job runs the task's named test files twice and writes REV reports: on head sources, and with the head's named test files copied onto merge-base sources. TypeScript tests run under Bun from their package directory, and .mjs/.js tests under Node from the repository root; other files are rejected. A test that fails on base is reported as failed, not as an error.",
-      "tests": [".rev/tests-gate.test.mjs > REV tests gate > runs named tests on head and on merge-base sources with head tests copied in"],
-      "paths": [".github/workflows/ci.yml", ".rev/run-tests.mjs", ".rev/tests-gate.test.mjs"]
+      "description": "The rev-tests job checks out the PR head without credentials, collects the change, then runs .rev/run-tests.mjs on head sources and on a merge-base worktree, in that order. run-tests.mjs copies the head's named test files onto the base sources, runs .test.ts files under Bun from their nearest package directory and .test.mjs/.test.js files under Node from the repository root, rejects other files, and writes repository-relative test IDs bound to the given source and test SHAs. Tests that fail or cannot load on base are reported as not passed rather than aborting the run.",
+      "tests": [
+        ".rev/tests-gate.test.mjs > REV tests gate > rev-tests runs the named tests on head sources and on a merge-base worktree",
+        ".rev/tests-gate.test.mjs > REV tests gate > runs Node and Bun named tests on head and base, copying head tests onto base sources"
+      ],
+      "paths": [
+        ".github/workflows/ci.yml",
+        ".rev/run-tests.mjs",
+        ".rev/tests-gate.test.mjs"
+      ]
     },
     {
       "id": "operator-docs",
-      "description": "The REV guide, workflow README and PR template explain writing per-PR criteria with named tests and path globs, collecting the change with tests-change.js, reviewing the contract with review-contract.js and pinning REV_CONTRACT_PR_<number> with --pin. They state that Jev never runs per push.",
-      "tests": [".rev/tests-gate.test.mjs > REV tests gate > documents per-PR criteria, Jev contract review and digest pinning"],
-      "paths": [".rev/README.md", ".github/workflows/README.md", ".github/PULL_REQUEST_TEMPLATE.md", ".rev/tests-gate.test.mjs"]
+      "description": "The REV guide shows the tests-change.js and review-contract.js commands in the argument order those scripts accept, including --pin onionoriginals/sdk PR_NUMBER and a dry run without --pin. It explains version 2 criteria with tests and paths, REV_CONTRACT_PR_<number>, that Jev never runs per push, and that changing a named test file causes contract-mismatch. The workflow README says the gate needs no API key and Jev reviews each contract once; the PR template's checklist covers criteria, path globs, tests that fail without the change, and contract review. Both link the guide.",
+      "tests": [
+        ".rev/tests-gate.test.mjs > REV tests gate > documents per-PR criteria, Jev contract review and digest pinning"
+      ],
+      "paths": [
+        ".rev/README.md",
+        ".github/workflows/README.md",
+        ".github/PULL_REQUEST_TEMPLATE.md",
+        ".rev/tests-gate.test.mjs"
+      ]
     },
     {
       "id": "no-release",
       "description": "The PR adds an empty changeset, so no package release is produced.",
-      "tests": [".rev/tests-gate.test.mjs > REV tests gate > adds an empty changeset so no package is released"],
-      "paths": [".changeset/rev-tests-gate.md", ".rev/tests-gate.test.mjs"]
+      "tests": [
+        ".rev/tests-gate.test.mjs > REV tests gate > adds an empty changeset so no package is released"
+      ],
+      "paths": [
+        ".changeset/rev-tests-gate.md",
+        ".rev/tests-gate.test.mjs"
+      ]
     }
   ]
 }
