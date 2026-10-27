@@ -39,6 +39,10 @@
       "local-verifier",
       "ci-policy",
       "rollout-evidence"
+    ],
+    ".github/workflows/ci.yml": [
+      "rollout-evidence",
+      "ci-policy"
     ]
   }
 }

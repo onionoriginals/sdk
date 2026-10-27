@@ -8,7 +8,7 @@
     },
     {
       "id": "ci-policy",
-      "description": "Configure every ordinary SDK PR CI job as required for local approval, including typecheck, lint, tests, coverage, ESM, landing, audit and changeset. Keep the existing CI workflow and REV gate unchanged during staging; do not claim this PR completes live validation or required-check cutover."
+      "description": "Configure every ordinary SDK PR CI job as required for local approval, including typecheck, lint, tests, coverage, ESM, landing, audit and changeset. Keep existing CI checks and the REV gate unchanged during staging; the evidence job additionally checks out the immutable local verifier source without credentials; do not claim this PR completes live validation or required-check cutover."
     },
     {
       "id": "rollout-evidence",

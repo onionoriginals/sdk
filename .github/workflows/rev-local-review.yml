@@ -17,12 +17,10 @@ permissions:
   actions: read
   pull-requests: read
   checks: write
-concurrency:
-  group: rev-local-review-verifier
-  cancel-in-progress: false
 jobs:
-  verify:
-    name: Verify signed review
+  record:
+    name: Record signed review
+    if: github.event_name == 'repository_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -30,7 +28,31 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: aviarytech/rev
-          ref: 055b327f1d11a26966f244be7d263708ecd72502
+          ref: b15d1c19fb63b5f5752c4a012f7b3bf99a4936e5
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - run: node scripts/local-review-gate.js
+        env:
+          REV_LOCAL_INGEST_ONLY: 'true'
+          GITHUB_TOKEN: ${{ github.token }}
+          REV_LOCAL_REVIEW_PUBLIC_KEY: ${{ vars.REV_LOCAL_REVIEW_PUBLIC_KEY }}
+  verify:
+    name: Verify signed review
+    needs: record
+    if: ${{ !cancelled() && (needs.record.result == 'success' || needs.record.result == 'skipped') }}
+    concurrency:
+      group: rev-local-review-verifier
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Never check out or execute a pull request revision in this workflow.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: aviarytech/rev
+          ref: b15d1c19fb63b5f5752c4a012f7b3bf99a4936e5
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:

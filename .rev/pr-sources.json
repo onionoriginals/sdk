@@ -53,5 +53,15 @@
     "paths": [
       ".rev/evaluator-validation.json"
     ]
+  },
+  {
+    "id": "local-verifier-source",
+    "kind": "code",
+    "paths": [
+      ".rev-local-tool/scripts/local-review-gate.js",
+      ".rev-local-tool/src/local/github.js",
+      ".rev-local-tool/src/local/protocol.js",
+      ".rev-local-tool/scripts/github-review.js"
+    ]
   }
 ]

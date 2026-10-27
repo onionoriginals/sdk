@@ -108,18 +108,23 @@ test('rollout changeset declares no package releases', async () => {
 
 test('local review verifier executes only immutable trusted code with public-key configuration', async () => {
   const workflow = await readFile('.github/workflows/rev-local-review.yml', 'utf8');
-  assert.match(workflow, /repository: aviarytech\/rev\n\s+ref: 055b327f1d11a26966f244be7d263708ecd72502/);
+  assert.match(workflow, /repository: aviarytech\/rev\n\s+ref: b15d1c19fb63b5f5752c4a012f7b3bf99a4936e5/);
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /checks: write/);
   assert.match(workflow, /REV_LOCAL_REVIEW_PUBLIC_KEY: \$\{\{ vars.REV_LOCAL_REVIEW_PUBLIC_KEY \}\}/);
   assert.doesNotMatch(workflow, /secrets\.|pull_request\.head|head_ref|client_payload.*run:/);
-  assert.deepEqual([...workflow.matchAll(/\brun: (.+)/g)].map(m => m[1]), ['node scripts/local-review-gate.js']);
-  for (const trigger of ['repository_dispatch:', 'pull_request_target:', 'workflow_run:', 'schedule:', 'workflow_dispatch:']) assert.ok(workflow.includes(trigger));
+  assert.deepEqual([...workflow.matchAll(/\brun: (.+)/g)].map(m => m[1]), ['node scripts/local-review-gate.js', 'node scripts/local-review-gate.js']);
+  for (const trigger of ['repository_dispatch:', 'pull_request_target:', 'workflow_run:', 'schedule:', 'workflow_dispatch:', 'push:']) assert.ok(workflow.includes(trigger));
   assert.match(workflow, /cancel-in-progress: false/);
   const policy = JSON.parse(await readFile('.rev/local-review.json', 'utf8'));
   assert.deepEqual(policy, {version:1,workflows:[{file:'ci.yml',jobs:['Typecheck passes','Lint','Tests pass','Coverage meets thresholds','ESM importable (Node)','Landing app typechecks, tests and builds','Dependency audit','Changeset present']}]});
   const ci = await readFile('.github/workflows/ci.yml','utf8');
-  for (const name of policy.workflows[0].jobs) assert.ok(ci.includes(`name: ${name}`), name);
+  assert.match(ci, /^name: CI$/m);
+  const ordinaryNames = [...ci.matchAll(/^    name: (.+)$/gm)].map(m => m[1]).filter(n => !['REV', 'Collect REV acceptance evidence'].includes(n));
+  assert.deepEqual([...policy.workflows[0].jobs].sort(), ordinaryNames.sort());
+  assert.match(workflow, /needs: record/);
+  assert.match(workflow, /REV_LOCAL_INGEST_ONLY: 'true'/);
+  assert.doesNotMatch(workflow, /^concurrency:/m);
   const docs = await readFile('.rev/LOCAL_REVIEW.md','utf8');
   assert.match(docs, /one PR at a time/);
   assert.match(docs, /Do not replace required checks until live positive and negative validation is complete/);
