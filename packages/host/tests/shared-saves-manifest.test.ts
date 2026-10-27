@@ -6,7 +6,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { OriginalsReport } from '@originals/vh/originals';
-import { hostedMissing } from '../shared-saves';
+import { hostedMissing } from '../src/shared-saves.js';
 
 const AUTHOR = 'did:webvh:QmAuthor:example.com';
 const EDITOR = 'did:vh:QmEditor';

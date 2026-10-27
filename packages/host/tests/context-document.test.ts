@@ -14,19 +14,21 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { buildFetch } from '../app';
-import { json } from '../router';
-import { createWebvhHostStore, shadowsReservedPath } from '../webvh-host';
+import { dirname, join } from 'node:path';
+import { buildFetch } from '../src/app.js';
+import { json } from '../src/router.js';
+import { createWebvhHostStore, shadowsReservedPath } from '../src/webvh-host.js';
 
 // Read from disk rather than importing it: the route imports this same file,
 // so an import here would compare it to itself. Reading the SDK's copy
 // independently is what catches the realistic regression — someone
 // "simplifying" the route by pasting a local copy of the context, which then
 // silently stops tracking the document credentials are verified against.
+// Located through the @originals/sdk package boundary: the built copy of
+// src/contexts/originals.json that the SDK ships and verifies against.
 const SDK_CONTEXT_FILE = join(
-  import.meta.dir,
-  '../../../../packages/sdk/src/contexts/originals.json'
+  dirname(Bun.resolveSync('@originals/sdk/package.json', import.meta.dir)),
+  'dist/contexts/originals.json'
 );
 const sdkContext = JSON.parse(readFileSync(SDK_CONTEXT_FILE, 'utf8'));
 

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { json, route, type Handler } from '../router';
+import { json, route, type Handler } from '../src/router.js';
 
 describe('router', () => {
   test('json() sets content-type and status', async () => {

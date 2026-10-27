@@ -10,10 +10,10 @@
  * store primitives it injects in. Behavior is unchanged — this is the same
  * code, moved.
  */
-import { json } from './router';
-import { outpointsOf } from './inscriptions-store';
-import type { InscriptionsStore, InscriptionRecord, StatusExpectation } from './inscriptions-store';
-import type { MoneyLogger } from './money-log';
+import { json } from './router.js';
+import { outpointsOf } from './inscriptions-store.js';
+import type { InscriptionsStore, InscriptionRecord, StatusExpectation } from './inscriptions-store.js';
+import type { MoneyLogger } from './money-log.js';
 
 /**
  * Start a stably ordered worklist at `cursor % length`. Advancing the cursor

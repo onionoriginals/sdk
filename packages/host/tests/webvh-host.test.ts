@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { createWebvhHostStore, publishGroupOf } from '../webvh-host';
+import { createWebvhHostStore, publishGroupOf } from '../src/webvh-host.js';
 
 function putReq(key: string, body: string, contentType: string) {
   return new Request(`http://host/api/host/${encodeURIComponent(key)}`, {

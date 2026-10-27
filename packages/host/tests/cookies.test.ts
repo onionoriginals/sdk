@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { parseCookies, extractToken, serializeCookie } from '../cookies';
+import { parseCookies, extractToken, serializeCookie } from '../src/cookies.js';
 
 describe('cookies', () => {
   test('parseCookies splits pairs and keeps = in values', () => {

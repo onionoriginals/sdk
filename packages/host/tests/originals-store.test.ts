@@ -2,7 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { createOriginalsStore } from '../originals-store';
+import { createOriginalsStore } from '../src/originals-store.js';
 
 function tmpDir(): string {
   return mkdtempSync(join(tmpdir(), 'originals-store-'));

@@ -3,10 +3,10 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
-import { serializeCookie } from '../cookies';
-import { createOriginalsStore } from '../originals-store';
-import { createOriginalsRoutes } from '../originals-routes';
-import { buildFetch } from '../app';
+import { serializeCookie } from '../src/cookies.js';
+import { createOriginalsStore } from '../src/originals-store.js';
+import { createOriginalsRoutes } from '../src/originals-routes.js';
+import { buildFetch } from '../src/app.js';
 import { resourceDigest } from '@originals/vh/originals';
 import { createHash } from 'node:crypto';
 import { localSigner } from '@originals/vh/crypto';
@@ -602,7 +602,7 @@ describe('a hosted asset log changes only through the verifying submit route (P6
 
 describe('#965 r5 finding 3: a submitted witness file is depth-bounded', () => {
   test('a witness nested beyond the JSON depth limit is a structured 400, never a thrown RangeError', async () => {
-    const { parseSubmission } = await import('../shared-saves');
+    const { parseSubmission } = await import('../src/shared-saves.js');
     for (const n of [65, 50_000]) {
       const text = `{"original":"did:vh:x","entry":"{\\"versionId\\":\\"2-Qa\\"}","identities":[{"did":"did:vh:a","log":"","witness":${JSON.stringify([{ versionId: '1-Qa', proof: [] }]).slice(0, -1)},${'['.repeat(n)}${']'.repeat(n)}]}]}`;
       const out = parseSubmission(text) as { http?: number; body?: { error?: string } };

@@ -1,16 +1,16 @@
-import type { OriginalsStore } from './originals-store';
+import type { OriginalsStore } from './originals-store.js';
 import { file } from 'bun';
 import { normalize } from 'node:path';
-import { route, json, type Handler } from './router';
-import { serveContextDocument, CONTEXT_PATH } from './context-document';
-import type { OriginalsRoutes } from './originals-routes';
+import { route, json, type Handler } from './router.js';
+import { serveContextDocument, CONTEXT_PATH } from './context-document.js';
+import type { OriginalsRoutes } from './originals-routes.js';
 import {
   resolveClientIp,
   trustedProxyHops,
   formatProxySample,
   type SocketPeerSource,
-} from './client-ip';
-import { servedWebvhHosts } from './webvh-hosts';
+} from './client-ip.js';
+import { servedWebvhHosts } from './webvh-hosts.js';
 
 // Minimal surface buildFetch depends on; the real store (webvh-host.ts)
 // implements exactly these two methods. `handlePut` takes the resolved client

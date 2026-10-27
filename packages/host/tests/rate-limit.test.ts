@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { createRateLimiter } from '../rate-limit';
+import { createRateLimiter } from '../src/rate-limit.js';
 
 describe('rate-limit', () => {
   test('allows up to limit then blocks', () => {

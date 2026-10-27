@@ -37,8 +37,8 @@
  * mutate the bookkeeping maps — deliberate, so a log someone is actively
  * resolving is the last thing to go.
  */
-import { json } from './router';
-import { createRateLimiter } from './rate-limit';
+import { json } from './router.js';
+import { createRateLimiter } from './rate-limit.js';
 
 interface Entry {
   body: Uint8Array;

@@ -2,7 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createInscriptionsStore, type InscriptionRecord } from '../inscriptions-store';
+import { createInscriptionsStore, type InscriptionRecord } from '../src/inscriptions-store.js';
 
 const rec = (over: Partial<InscriptionRecord>): InscriptionRecord => ({
   commitTxId: 'c'.repeat(64),

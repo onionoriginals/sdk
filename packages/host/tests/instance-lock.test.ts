@@ -3,11 +3,11 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { acquireInstanceLock, LOCK_FILENAME, MultipleInstanceError } from '../instance-lock';
+import { acquireInstanceLock, LOCK_FILENAME, MultipleInstanceError } from '../src/instance-lock.js';
 
 let dir: string;
 const children: ReturnType<typeof Bun.spawn>[] = [];
-const modulePath = new URL('../instance-lock.ts', import.meta.url).pathname;
+const modulePath = new URL('../src/instance-lock.ts', import.meta.url).pathname;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'instance-lock-'));
