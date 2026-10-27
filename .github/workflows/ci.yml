@@ -249,7 +249,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: aviarytech/rev
-          ref: c17b501ef43d9014f33479f55b17012bf0062842
+          ref: 37c83b2d9b24bb53934eb4ca50dcd62199fbe49c
           path: .rev-tool
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -304,10 +304,12 @@ jobs:
           path: rev-input
       - name: Evaluate acceptance criteria
         if: ${{ !cancelled() && steps.evidence.outcome == 'success' }}
-        uses: aviarytech/rev@c17b501ef43d9014f33479f55b17012bf0062842
+        uses: aviarytech/rev@37c83b2d9b24bb53934eb4ca50dcd62199fbe49c
         with:
           scope: pull-request
           diagnose-denials: 'true'
+          long-context: 'true'
+          timeout-ms: '60000'
           # Accept the existing misspelled secret until its owner renames it.
           api-key: ${{ secrets.TYPESAFE_API_KEY || secrets.TUPESAFE_API_KEY }}
           task-file: rev-input/task.json

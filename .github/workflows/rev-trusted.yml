@@ -34,7 +34,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: aviarytech/rev
-          ref: c17b501ef43d9014f33479f55b17012bf0062842
+          ref: 37c83b2d9b24bb53934eb4ca50dcd62199fbe49c
           path: .rev-trusted-tool
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
@@ -58,10 +58,12 @@ jobs:
           path: ${{ runner.temp }}/rev-untrusted-input
       - name: Evaluate verified PR evidence
         if: steps.prepare.outputs.ready == 'true'
-        uses: aviarytech/rev@c17b501ef43d9014f33479f55b17012bf0062842
+        uses: aviarytech/rev@37c83b2d9b24bb53934eb4ca50dcd62199fbe49c
         with:
           scope: pull-request
           diagnose-denials: 'true'
+          long-context: 'true'
+          timeout-ms: '60000'
           api-key: ${{ secrets.TYPESAFE_API_KEY || secrets.TUPESAFE_API_KEY }}
           task-file: ${{ runner.temp }}/rev-untrusted-input/task.json
           evidence-file: ${{ runner.temp }}/rev-untrusted-input/evidence.json

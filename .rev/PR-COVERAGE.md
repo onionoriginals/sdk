@@ -1,6 +1,6 @@
 # Whole-PR REV gate
 
-REV is pinned to `c17b501ef43d9014f33479f55b17012bf0062842` (0.3). Its approval requires coverage of the original request and every changed file, verified criteria, and successful named CI dependencies. Overall merge readiness still requires independent review and appropriate runtime/release evidence.
+REV is pinned to `37c83b2d9b24bb53934eb4ca50dcd62199fbe49c` (0.3). Its approval requires coverage of the original request and every changed file, verified criteria, and successful named CI dependencies. Overall merge readiness still requires independent review and appropriate runtime/release evidence.
 
 For each PR:
 
@@ -106,3 +106,10 @@ artifacts must be created during the run attempt being reviewed. Upload replaces
 the prior evidence artifact. Failed/skipped/absent/duplicate required jobs, stale
 head/base or attempts, superseded runs and mismatched artifacts cannot approve.
 Fork runs without a unique GitHub PR association also fail closed.
+
+SDK evaluations explicitly enable TypeSafe's documented long-context transport
+(`long-context: 'true'`) and a 60-second request deadline for complete PR evidence.
+This retains every question and evidence item and leaves approval thresholds,
+contract review and denial behavior unchanged. The immutable evaluator pin is
+from https://github.com/aviarytech/rev/pull/13; long context is not automatic in
+REV and HTTP failures still deny.
