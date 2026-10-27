@@ -424,8 +424,8 @@ describe('an anchored Original takes no shared-host saves (P9.12)', () => {
 });
 
 describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
-  const { createOriginalsStore } = require('../../server/originals-store') as typeof import('../../server/originals-store');
-  const { createSharedSaves, parseSubmission } = require('../../server/shared-saves') as typeof import('../../server/shared-saves');
+  const { createOriginalsStore } = require('@originals/host') as typeof import('@originals/host');
+  const { createSharedSaves, parseSubmission } = require('@originals/host') as typeof import('@originals/host');
   const { signerPath } = require('@originals/sdk/originals') as typeof import('@originals/sdk/originals');
 
   /** A third device whose author DID is at v2 (key 0 removed, or deactivated). */
@@ -708,8 +708,8 @@ async function landingDid(sub: string) {
 }
 
 describe('who may submit: the namespace owner, or an account whose landing DID the head state names (owner decision of 22 October 2026; P6.7, P5.15)', () => {
-  const { createOriginalsStore } = require('../../server/originals-store') as typeof import('../../server/originals-store');
-  const { createSharedSaves, namesAccount, parseSubmission } = require('../../server/shared-saves') as typeof import('../../server/shared-saves');
+  const { createOriginalsStore } = require('@originals/host') as typeof import('@originals/host');
+  const { createSharedSaves, namesAccount, parseSubmission } = require('@originals/host') as typeof import('@originals/host');
 
   test('an account the head state does not name is refused before the body is read, and nothing is written', async () => {
     const env = await shared();

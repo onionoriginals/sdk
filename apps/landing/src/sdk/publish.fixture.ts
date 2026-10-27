@@ -9,11 +9,8 @@ import { OriginalsError } from '@originals/vh';
 import type { HostedFetch } from '@originals/sdk/originals';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
 import { DurableHostingStorageAdapter } from './durable-hosting-adapter';
-import { createOriginalsStore } from '../../server/originals-store';
-import { createOriginalsRoutes } from '../../server/originals-routes';
-import { createAnchoringLibrary } from '../../server/originals-library';
-import { buildFetch } from '../../server/app';
-import { serializeCookie } from '../../server/cookies';
+import { createOriginalsStore, createOriginalsRoutes, createAnchoringLibrary, buildFetch, serializeCookie } from '@originals/host';
+import { jwtAuthenticate } from '../../server/originals-auth';
 
 export const JWT = 'test-secret-at-least-32-chars-long!!';
 export const SUB = 'sub-publisher-0001';
@@ -26,7 +23,7 @@ export function cookieFor(sub: string): string {
 export function host() {
   const dataDir = mkdtempSync(join(tmpdir(), 'landing-publish-'));
   const store = createOriginalsStore({ dataDir });
-  const originals = createOriginalsRoutes({ jwtSecret: JWT, store, library: createAnchoringLibrary(dataDir, store) });
+  const originals = createOriginalsRoutes({ authenticate: jwtAuthenticate(JWT), store, library: createAnchoringLibrary(dataDir, store) });
   const noop = { async handlePut() { return new Response(null, { status: 501 }); }, read() { return new Response(null, { status: 404 }); }, serve() { return null as Response | null; } };
   // The account index routes, as server/index.ts mounts them (#976 B, G3).
   const apiRoutes = { 'POST /api/originals': originals.record, 'GET /api/originals': originals.list, 'GET /api/originals/evidence': originals.evidence };

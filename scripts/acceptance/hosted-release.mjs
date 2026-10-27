@@ -51,7 +51,7 @@ const pre = (id, title, ok, detail) => preflight.push({ id, title, status: ok ? 
 const sha = sh("git", ["rev-parse", "HEAD"]).stdout.trim();
 const branch = sh("git", ["rev-parse", "--abbrev-ref", "HEAD"]).stdout.trim();
 const dirty = sh("git", ["status", "--porcelain"]).stdout.trim().split("\n").filter(Boolean);
-const dists = ["packages/sdk/dist/originals/index.js", "packages/sdk/dist/originals/fs-store.js", "packages/vh/dist/originals/index.js"];
+const dists = ["packages/sdk/dist/originals/index.js", "packages/sdk/dist/originals/fs-store.js", "packages/vh/dist/originals/index.js", "packages/host/dist/index.js"];
 pre("built", "built package entry points exist (run `bun run build`)", dists.every((d) => existsSync(join(root, d))), { missing: dists.filter((d) => !existsSync(join(root, d))) });
 // B6 in source (hosted-README.md): resolveFeatures({}) and resolveFeatures(<production env>)
 // both leave hostedPublication off, with or without the switch, and the production deploy
@@ -171,7 +171,7 @@ const receipt = {
   status,
   source: { sha, branch, dirty: dirty.length > 0, dirtyFiles: dirty },
   deployed,
-  packages: { "@originals/sdk": version("packages/sdk"), "@originals/vh": version("packages/vh"), "@originals/auth": version("packages/auth"), "@originals/landing": version("apps/landing") },
+  packages: { "@originals/sdk": version("packages/sdk"), "@originals/vh": version("packages/vh"), "@originals/auth": version("packages/auth"), "@originals/host": version("packages/host"), "@originals/landing": version("apps/landing") },
   runtimes: { node: process.version, bun: sh(bun, ["--version"]).stdout.trim(), platform: `${process.platform}-${process.arch}` },
   profile: { protocol: "originals:1.0 (PROVISIONAL method value)", cryptosuite: "eddsa-jcs-2022", witnesses: "none (Q14)", ordering: "claimed (unanchored)", freshness: "never current unanchored (P7.10)" },
   signerMode: target === "local" ? "dry run: Ed25519 keys from a custody file standing in for Turnkey, in the app's two roles" : "Turnkey client-held session (non-extractable P-256 session key in IndexedDB; Ed25519 wallet accounts held by Turnkey)",

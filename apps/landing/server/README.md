@@ -34,7 +34,7 @@ Requires live `TURNKEY_*` creds, `JWT_SECRET`, and access to the target inbox.
 - Session storage is in-memory (lost on restart; single process). Not for production.
 - Rate limiting is in-memory (per client identity + per email); also
   single-process, with a bounded key map.
-- **Client identity** comes from one helper (`server/client-ip.ts`) that every
+- **Client identity** comes from one helper (`@originals/host` `client-ip.ts`) that every
   rate-limited route uses. It reads `x-forwarded-for` from the RIGHT-hand end at
   a depth of `TRUSTED_PROXY_HOPS` (Railway: `1`), falling back to the socket
   peer when the header is absent or shorter than that. Unset means 0 — trust

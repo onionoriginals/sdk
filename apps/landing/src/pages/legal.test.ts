@@ -17,12 +17,13 @@
  * the deposit screen) is the wrong rule here. These match assertions instead.
  */
 import { describe, test, expect } from 'bun:test';
+import { dirname, join } from 'node:path';
 import { getAuthCookieConfig } from '@originals/auth/server';
 import { legal, footer } from '../content';
 import { legalRouteDoc, legalStrings } from './Legal';
 import { routeForPath } from '../router';
 import { isInternalHref } from '../components/Footer';
-import { formatMoneyLog } from '../../server/money-log';
+import { formatMoneyLog } from '@originals/host';
 import { SESSION_STORAGE_KEY } from '../auth/turnkey-session';
 
 const ALL = legalStrings().join('\n');
@@ -159,7 +160,9 @@ describe('the disclosed categories match what the code stores', () => {
   });
 
   test('the log section lists exactly the money events the code can emit', async () => {
-    const source = await Bun.file(new URL('../../server/money-log.ts', import.meta.url)).text();
+    // The source union (leading `|` on every member), read from the workspace @originals/host package.
+    const hostDir = dirname(Bun.resolveSync('@originals/host/package.json', import.meta.dir));
+    const source = await Bun.file(join(hostDir, 'src/money-log.ts')).text();
     const union = source.slice(source.indexOf('export type MoneyEvent'), source.indexOf('export type MoneyFields'));
     const events = [...union.matchAll(/\|\s*'([a-z_]+)'/g)].map((m) => m[1]);
     expect(events.length).toBeGreaterThan(0);

@@ -9,14 +9,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Turnkey } from '@turnkey/sdk-server';
 import { createInMemorySessionStorage, getAuthCookieConfig, signToken } from '@originals/auth/server';
-import { buildFetch } from '../app';
+import { buildFetch, serializeCookie, createInscriptionsStore, createMoneyLogger, createOriginalsAnchoring, createWebvhHostStore } from '@originals/host';
 import { buildRoutes } from '../index';
 import { createBitcoinRoutes } from '../bitcoin';
-import { serializeCookie } from '../cookies';
-import { createInscriptionsStore } from '../inscriptions-store';
-import { createMoneyLogger } from '../money-log';
-import { createOriginalsAnchoring } from '../originals-anchoring';
-import { createWebvhHostStore } from '../webvh-host';
 import { INDEX, NETWORK, WALLET_ADDRESS, type fakeChain, headerClock } from './originals-chain-fixture';
 
 const JWT = 'test-secret-at-least-32-chars-long!!';

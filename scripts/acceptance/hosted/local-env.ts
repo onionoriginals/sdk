@@ -19,7 +19,7 @@ import { DemoEngine, type Authoring, type PublishTarget } from "../../../apps/la
 import { DurableHostingStorageAdapter } from "../../../apps/landing/src/sdk/durable-hosting-adapter.ts";
 import { higherPublication, type PublicationRecord } from "../../../apps/landing/src/sdk/publication-records.ts";
 import { BrowserWebVHSigner, ed25519PublicKeyMultibase, userWebvhSlug } from "../../../apps/landing/src/auth/webvh.ts";
-import { serializeCookie } from "../../../apps/landing/server/cookies.ts";
+import { serializeCookie } from "@originals/host";
 import * as ed from "@noble/ed25519";
 
 export interface LocalInput {

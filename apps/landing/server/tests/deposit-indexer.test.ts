@@ -12,7 +12,7 @@ import * as btc from '@scure/btc-signer';
 import { hex } from '@scure/base';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
-import { serializeCookie } from '../cookies';
+import { serializeCookie, createInscriptionsStore } from '@originals/host';
 import {
   createBitcoinRoutes,
   fetchAddressUtxos,
@@ -23,7 +23,6 @@ import {
   DEFAULT_INDEXER_API,
   quickNodeOrdinalLookup,
 } from '../bitcoin';
-import { createInscriptionsStore } from '../inscriptions-store';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

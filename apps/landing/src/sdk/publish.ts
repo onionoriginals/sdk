@@ -12,7 +12,7 @@
  * 3. The hosted files: the alias log and the evidence package unpacked under
  *    `originals/` (hostedFiles), uploaded to the author's own namespace. The
  *    asset log goes before the resources, because the host labels each
- *    resource from its descriptor in the uploaded log (server/hosted-layout.ts). The files
+ *    resource from its descriptor in the uploaded log (@originals/host hosted-layout.ts). The files
  *    for a checkpoint are deterministic, so a retry repeats the same snapshot
  *    (P9.2).
  */
@@ -54,7 +54,7 @@ export async function buildOriginalAlias(signer: WebVHSigner, opts: { domain: st
 /**
  * Upload order: the alias log, then the asset log, then everything else.
  * Within a rank paths sort, so a signer's did-witness.json goes before its
- * did.jsonl, which the host verifies with it (server/hosted-layout.ts).
+ * did.jsonl, which the host verifies with it (@originals/host hosted-layout.ts).
  */
 function uploadOrder(path: string): number {
   if (!path.startsWith("originals/")) return 0;

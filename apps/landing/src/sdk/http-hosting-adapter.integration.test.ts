@@ -1,7 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { HttpHostingStorageAdapter } from './http-hosting-adapter';
-import { buildFetch } from '../../server/app';
-import { createWebvhHostStore } from '../../server/webvh-host';
+import { buildFetch, createWebvhHostStore } from '@originals/host';
 
 // Exercises the REAL server dispatch (buildFetch + createWebvhHostStore), not a
 // hand-mocked fetch — this is the path that a unit-level mock hides. Regression

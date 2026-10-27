@@ -32,7 +32,7 @@ function transport(answer: () => Promise<unknown>) {
 
 type Body = { error?: string; code?: string; category?: string; message?: string };
 
-/** Pair-permanent refusals, as server/originals-anchoring.ts and server/bitcoin.ts answer them. */
+/** Pair-permanent refusals, as @originals/host originals-anchoring.ts and server/bitcoin.ts answer them. */
 const refusals: Array<[string, number, Body]> = [
   ['original_forked', 409, { error: 'original_forked', message: 'The copies diverge.' }],
   ['signed_pair_mismatch', 409, { error: 'signed_pair_mismatch', message: 'Different signed bytes.' }],

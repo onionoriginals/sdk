@@ -26,7 +26,7 @@ import { InscriptionClock, type OriginalsSDK } from '@originals/sdk/originals';
 import { prepareEntryInscription, type PreparedEntryInscription, type OffChainEvidence } from '@originals/sdk/originals/bitcoin';
 import type { BitcoinSigner, OrdinalsProvider, Utxo } from '@originals/sdk';
 
-/** What the server's status route reports (server/originals-anchoring.ts), parts kept apart (section 7). */
+/** What the server's status route reports (@originals/host originals-anchoring.ts), parts kept apart (section 7). */
 export interface AnchoringStatus {
   did: string;
   sat: string;

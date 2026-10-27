@@ -9,7 +9,7 @@ const binaries = process.env.BITCOIND_BIN && process.env.ORD_BIN
   ? { BITCOIND_BIN: process.env.BITCOIND_BIN, ORD_BIN: process.env.ORD_BIN }
   : await installRegtestTools();
 
-for (const cwd of ['packages/vh', 'packages/sdk', 'packages/auth']) {
+for (const cwd of ['packages/vh', 'packages/sdk', 'packages/auth', 'packages/host']) {
   const build = Bun.spawn([process.execPath, 'run', 'build'], {
     cwd: root + cwd, stdout: 'inherit', stderr: 'inherit',
   });

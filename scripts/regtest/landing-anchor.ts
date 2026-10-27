@@ -60,7 +60,7 @@ import { RegtestProvider } from '@originals/sdk';
 import { OriginalsSDK, readEvidence, satEvidence } from '../../packages/sdk/src/originals/index';
 import { FileStore } from '../../packages/sdk/src/originals/fs-store';
 import { regtestIndexer } from '../../apps/landing/server/regtest';
-import { serializeCookie } from '../../apps/landing/server/cookies';
+import { serializeCookie } from '@originals/host';
 import { DemoEngine } from '../../apps/landing/src/sdk/engine';
 import { httpAnchoringTransport, memoryOutbox } from '../../apps/landing/src/sdk/anchoring';
 import { HttpOrdinalsProvider } from '../../apps/landing/src/sdk/http-ordinals-provider';

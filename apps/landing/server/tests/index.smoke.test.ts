@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { createInMemorySessionStorage } from '@originals/auth/server';
 import { buildRoutes } from '../index';
-import { route } from '../router';
+import { route } from '@originals/host';
 
 describe('index route table', () => {
   test('health + auth routes are registered', async () => {

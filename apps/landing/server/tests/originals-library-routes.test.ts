@@ -7,9 +7,8 @@ import { hex } from '@scure/base';
 import { signToken } from '@originals/auth/server';
 import { OriginalsSDK } from '@originals/sdk/originals';
 import { FileStore } from '@originals/sdk/originals/fs';
-import { createOriginalsRoutes } from '../originals-routes';
-import { createOriginalsStore } from '../originals-store';
-import { createAnchoringLibrary } from '../originals-library';
+import { createOriginalsRoutes, createOriginalsStore, createAnchoringLibrary } from '@originals/host';
+import { jwtAuthenticate } from '../originals-auth';
 import { authorWithOriginal } from './originals-chain-fixture';
 
 const secret = 'library-test-secret-at-least-32-chars';
@@ -23,7 +22,7 @@ test('account library and evidence are authenticated, private, and available wit
   await writeFile(join(dir, 'did'), a.did);
   const sdk = OriginalsSDK.create({ store: await FileStore.open(join(dir, 'store')), authors: [] });
   await sdk.import((await a.sdk.package(a.did)).bytes);
-  const routes = createOriginalsRoutes({ jwtSecret: secret, store: createOriginalsStore({ dataDir }), library: createAnchoringLibrary(dataDir) });
+  const routes = createOriginalsRoutes({ authenticate: jwtAuthenticate(secret), store: createOriginalsStore({ dataDir }), library: createAnchoringLibrary(dataDir) });
   const url = new URL(`http://landing.test/api/originals/evidence?did=${encodeURIComponent(a.did)}`);
   expect((await routes.list(request(), url)).status).toBe(401);
   expect((await routes.evidence(request(), url)).status).toBe(401);
@@ -74,7 +73,7 @@ test('evidence with two histories, neither chosen, answers 409 diverged rather t
     list: async () => [],
     evidence: async (): Promise<Uint8Array | null> => { throw new OriginalsError('fork', 'EVIDENCE_DIVERGED', 'Two copies disagree.'); },
   };
-  const routes = createOriginalsRoutes({ jwtSecret: secret, store: createOriginalsStore({ dataDir }), library });
+  const routes = createOriginalsRoutes({ authenticate: jwtAuthenticate(secret), store: createOriginalsStore({ dataDir }), library });
   const answer = await routes.evidence(request('alice'), new URL('http://landing.test/api/originals/evidence?did=did:vh:x'));
   expect(answer.status).toBe(409);
   expect(await answer.json()).toEqual({ error: 'diverged', message: 'Two copies disagree.' });

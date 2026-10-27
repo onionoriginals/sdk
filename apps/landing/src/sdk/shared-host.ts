@@ -1,7 +1,7 @@
 /**
  * The landing's shared host, client side (P6.7, P6.8): saves for a hosted
  * Original go to `POST /api/originals/submit/<site key>`
- * (server/originals-routes.ts), where `<site key>` is the alias did:webvh's
+ * (@originals/host originals-routes.ts), where `<site key>` is the alias did:webvh's
  * `#files` base without its scheme: `<domain>/<user-slug>/o-<name>`.
  *
  * Wire format (PROVISIONAL): a JSON body
