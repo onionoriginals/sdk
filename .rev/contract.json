@@ -1,0 +1,7 @@
+{
+  "request": {
+    "source": "Owner instruction in REV thread, 2026-10-26",
+    "text": "Remove the REV setup added to the SDK repo (the per-push Jev gate, local Claude review staging and their PRs) and add REV's deterministic tests gate instead: named tests per criterion that must pass on head and fail or be missing on base, path-glob coverage of every changed file, and Jev used only to review the contract once per digest."
+  },
+  "requiredChecks": ["typecheck", "lint", "tests", "coverage", "esm-importable", "landing", "audit", "changeset", "rev-tests"]
+}

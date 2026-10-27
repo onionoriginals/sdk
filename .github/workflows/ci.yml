@@ -68,9 +68,6 @@ jobs:
       - name: Run tests
         run: bun run test
 
-      - name: REV evidence collector contract
-        run: node --test scripts/rev-evidence.test.mjs
-
       - name: Release workflow contract
         run: node --test scripts/release-workflow.test.mjs scripts/npm-release-check.test.mjs scripts/sync-release-lockfile.test.mjs
 
@@ -235,11 +232,11 @@ jobs:
           github.head_ref != 'changeset-release/main'
         run: bunx changeset status --since=origin/${{ github.base_ref }}
 
-  rev-evidence:
-    name: Collect REV acceptance evidence
+  rev-tests:
+    name: Run REV named tests on head and merge base
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
@@ -249,61 +246,68 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: aviarytech/rev
-          ref: 81686246e89f9dd93f58397b508a01925b5eb32d
+          ref: 4ad28656aaccfc3aafd16b0753e002d160cfd41d
           path: .rev-tool
           persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Exercise PR evidence without secrets
+      # Named tests run twice: on head sources, and with the head's named test
+      # files copied onto merge-base sources. REV requires pass, then not pass.
+      - name: Collect change and named test reports
         env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           REV_TOOL_PATH: ${{ github.workspace }}/.rev-tool
-          REV_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         shell: bash
         run: |
           set -euo pipefail
-          node --test .rev/pr-coverage.test.mjs .rev-tool/test/coverage.test.js .rev-tool/test/action.test.js .rev-tool/test/change.test.js | tee .rev/pr-observations.txt
-      - name: Bind complete changes and evidence to the PR revisions
-        env:
-          REV_TOOL_PATH: ${{ github.workspace }}/.rev-tool
-          REV_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          REV_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: node .rev/prepare-pr.mjs
+          out="$RUNNER_TEMP/rev-input"
+          mkdir -p "$out"
+          cp .rev/task.json "$out/task.json"
+          node .rev-tool/scripts/tests-change.js "$BASE_SHA" "$HEAD_SHA" .rev/contract.json .rev/task.json "$out/change.json"
+          merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          bun install --frozen-lockfile
+          node .rev/run-tests.mjs .rev/task.json . . "$HEAD_SHA" "$HEAD_SHA" "$out/head.json"
+          git worktree add --detach "$RUNNER_TEMP/rev-base" "$merge_base"
+          (cd "$RUNNER_TEMP/rev-base" && bun install --frozen-lockfile)
+          node .rev/run-tests.mjs .rev/task.json "$RUNNER_TEMP/rev-base" . "$merge_base" "$HEAD_SHA" "$out/base.json"
       - uses: actions/upload-artifact@v7
         with:
-          name: rev-acceptance-evidence
-          path: ${{ runner.temp }}/rev-pr-input/
+          name: rev-input
+          path: ${{ runner.temp }}/rev-input/
           if-no-files-found: error
           retention-days: 7
 
   rev:
     name: REV
-    needs: [typecheck, lint, tests, coverage, esm-importable, landing, audit, changeset, rev-evidence]
+    needs: [typecheck, lint, tests, coverage, esm-importable, landing, audit, changeset, rev-tests]
     if: ${{ !cancelled() && github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # Data only: no PR checkout, installs, or PR-authored scripts in this job.
+      # Data only: no checkout, installs, PR-authored scripts or API key in this job.
       - uses: actions/download-artifact@v8
-        id: evidence
         with:
-          name: rev-acceptance-evidence
+          name: rev-input
           path: rev-input
-      - name: Evaluate acceptance criteria
+      - name: Check named tests, file coverage and CI deterministically
         if: ${{ !cancelled() }}
-        uses: aviarytech/rev@81686246e89f9dd93f58397b508a01925b5eb32d
+        uses: aviarytech/rev@4ad28656aaccfc3aafd16b0753e002d160cfd41d
         with:
-          scope: pull-request
-          # Accept the existing misspelled secret until its owner renames it.
-          api-key: ${{ secrets.TYPESAFE_API_KEY || secrets.TUPESAFE_API_KEY }}
+          scope: tests
           task-file: rev-input/task.json
-          evidence-file: rev-input/evidence.json
           change-file: rev-input/change.json
+          head-report: rev-input/head.json
+          base-report: rev-input/base.json
           base-sha: ${{ github.event.pull_request.base.sha }}
-          contract-sha256: ${{ vars[format('REV_CONTRACT_PR_{0}', github.event.pull_request.number)] }}
           head-sha: ${{ github.event.pull_request.head.sha }}
+          # Pinned only by scripts/review-contract.js after Jev approves the contract.
+          contract-sha256: ${{ vars[format('REV_CONTRACT_PR_{0}', github.event.pull_request.number)] }}
           needs: ${{ toJSON(needs) }}
-          steps: ${{ toJSON(steps) }}
           report-file: rev-report.json
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}

@@ -1,56 +1,27 @@
-# REV acceptance evaluation
+# REV tests gate
 
-SDK pull requests run [REV](https://github.com/aviarytech/rev) after all jobs
-in `ci.yml`. Start with this check **nonrequired** in branch protection. A
-missing task, evidence, credential, failed CI job, or uncertain evaluation
-fails visibly; it is never converted into an approval. REV does not merge PRs.
-The separate path-filtered regtest workflow remains an independent check:
-REV's supplied CI results cover `ci.yml`, not all repository workflow history.
+The `REV` check decides each PR push in code, without an API key or model call. Jev never runs per push: it reviews each PR's contract once, before the digest is pinned.
 
-## Repository setup
+## Per PR
 
-Add `TYPESAFE_API_KEY` in repository Settings → Secrets and variables → Actions
-(or run `gh secret set TYPESAFE_API_KEY --repo onionoriginals/sdk` interactively).
-No key is stored in this repository. Fork PRs do not receive this secret and
-cannot obtain an approving evaluation. Leave REV nonrequired while measuring
-false approvals and false denials. Existing PR branches need this workflow
-merged/rebased into them before they can run it.
+1. **Write `.rev/task.json` (version 2).** Each criterion has an observable `description`, the `tests` that establish it, and the `paths` (globs) of the files that serve it. Test IDs are `repository-relative file > describe > … > test name`. Bun runs `.test.ts` files from their package directory; Node runs `.test.mjs` files from the repository root.
+2. **Keep `.rev/contract.json` current.** It holds the original request and the required CI job IDs.
+3. **Collect the change** from a checkout of the PR head:
+   ```sh
+   node ../rev/scripts/tests-change.js BASE_SHA HEAD_SHA .rev/contract.json .rev/task.json /tmp/change.json
+   ```
+4. **Have Jev review the contract and pin it:**
+   ```sh
+   TYPESAFE_API_KEY=… node ../rev/scripts/review-contract.js .rev/task.json /tmp/change.json --pin onionoriginals/sdk PR_NUMBER
+   ```
+   Jev checks that the criteria cover the request and that each criterion's tests would establish it. Only on approval does the script set `REV_CONTRACT_PR_<number>`. Omit `--pin` for a dry run.
 
-## For each PR
+The digest covers the task, request, required checks and the exact contents of every named test file. Changing any of them after review fails the gate with `contract-mismatch` until the contract is reviewed again.
 
-1. Update `.rev/task.json` with the task and 1–20 observable acceptance criteria.
-   Have a reviewer approve these requirements independently of implementation.
-   The collector rejects a task unchanged from the PR base to prevent accidental
-   reuse. This change check does not establish reviewer approval or task quality.
-2. Update `.rev/collect.sh` to run criterion-specific probes, recording actual
-   observations under `.rev/`. It runs after dependency installation on the exact
-   PR head in a job without the TypeSafe secret. Build packages there if needed.
-   Keep `set -euo pipefail` so a failing command piped to `tee` still fails CI.
-3. Update `.rev/sources.json` with `{ "id", "kind", "path" } entries for relevant
-   code, tests, and fresh behavior output. The collector also includes the PR
-   diff (excluding `.rev` and `bun.lock`) and its base/head revisions. A generic
-   passing test count is insufficient: capture inputs, expected behavior, and
-   observed results for each criterion. Review expectations for the same bug
-   as the implementation. Do not commit generated evidence or logs.
-4. Review the `REV` job summary and `rev-report` artifact. Fix missing evidence
-   or investigate violations; do not weaken criteria just to obtain approval.
+## What the gate checks on every push
 
-The checked-in task/probes describe the initial collector integration. Replace
-them for subsequent PRs, including release PRs; there is no automatic release
-exemption or generic green fallback. Upstream REV validates the task and final
-corpus, including its limit of `criteria × (items + 1) ≤ 100` assessments.
+- Each named test passes on the PR head and does not pass when the head's test files run against merge-base sources (`rev-tests` job, `.rev/run-tests.mjs`).
+- Every changed file matches a criterion's path glob.
+- Every required CI job succeeded, and the head, base and contract digest match.
 
-## Data and trust
-
-The evaluator downloads only the task and evidence from the same run and calls
-a commit-pinned external action. It never checks out or executes PR code.
-The TypeSafe key is passed only to that action. Do not switch to
-`pull_request_target` to make fork evaluations work.
-
-Evidence is sent to TypeSafe. Include only source and observations intended for
-that service; never include credentials or private runtime data. The evidence
-artifact is retained for seven days and verdict reports for fourteen days.
-Review task, probe, source-list and workflow changes as carefully as code:
-a PR author can forge observations or weaken criteria, and a matching SHA
-is metadata consistency, not proof of trustworthy evidence. Human review and
-all other required checks remain necessary.
+See the [REV tests gate guide](https://github.com/aviarytech/rev/blob/main/docs/tests-gate.md). A green `REV` shows that reviewed tests pin the change; it does not establish merge readiness.

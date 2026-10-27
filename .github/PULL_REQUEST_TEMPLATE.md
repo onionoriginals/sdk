@@ -43,8 +43,8 @@ Describe how you tested your changes:
 
 ## REV acceptance criteria
 
-- [ ] Updated `.rev/task.json` with observable requirements for this PR
-- [ ] Updated `.rev/collect.sh` and `.rev/sources.json` with relevant code and fresh behavioral evidence
-- [ ] Acceptance criteria and probe expectations are ready for independent review
+- [ ] Updated `.rev/task.json`: observable criteria, the named tests that establish each, and path globs covering every changed file
+- [ ] Named tests pass on this branch and fail without the change
+- [ ] Contract reviewed with `review-contract.js` and `REV_CONTRACT_PR_<number>` pinned
 
-See [REV setup and evidence guide](../.rev/README.md).
+See the [REV tests gate guide](../.rev/README.md).
