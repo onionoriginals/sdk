@@ -273,11 +273,11 @@ export class DIDManager {
     }
 
     // Determine the Bitcoin network. An explicitly configured `network` wins:
-    // OriginalsSDK.create() always injects a default webvhNetwork ('pichu'),
+    // OriginalsSDK.create() always injects a default webvhNetwork ('production'),
     // so deriving from webvhNetwork first would silently override an explicit
     // `network: 'regtest'` and mint mainnet-form identifiers for regtest
-    // inscriptions (issue #247). The WebVH mapping (magby→regtest,
-    // cleffa→signet, pichu→mainnet) applies only when no explicit Bitcoin
+    // inscriptions (issue #247). The WebVH mapping (development→regtest,
+    // staging→signet, production→mainnet) applies only when no explicit Bitcoin
     // network was configured.
     const network: 'mainnet' | 'testnet' | 'regtest' | 'signet' = this.getConfiguredBitcoinNetwork() ?? 'mainnet';
 

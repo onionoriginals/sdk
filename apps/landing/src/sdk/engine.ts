@@ -386,7 +386,10 @@ export class DemoEngine {
   private async signedInAuthor(): Promise<Authoring> {
     if (!this.subOrgId) throw new Error("Sign in again to restore your authorship key.");
     const found = await readUserWebVHDid({ subOrgId: this.subOrgId, hosting: new DurableHostingStorageAdapter() });
-    if (!found) throw new Error("Create your DID first: Originals are signed by your DID's authorship key.");
+    if (!found) throw Object.assign(
+      new Error("Create your identity on this site's configured domain before authoring."),
+      { name: "AuthorIdentityRequiredError" },
+    );
     const document = found.didDocument as { verificationMethod?: Array<{ id?: string; publicKeyMultibase?: string }> };
     const verificationMethod = `${found.did}#key-1`;
     const listed = document?.verificationMethod?.find((vm) => vm.id === verificationMethod || vm.id === "#key-1");

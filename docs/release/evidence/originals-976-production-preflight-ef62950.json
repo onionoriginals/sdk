@@ -1,0 +1,126 @@
+{
+  "receipt": "originals-hosted-preflight/2",
+  "status": "PREFLIGHT-PASS-HOSTED-JOURNEY-BLOCKED",
+  "target": "https://originals.build",
+  "source": {
+    "repository": "aviarytech/originals.build",
+    "revision": "ef629500b620f9133a9df081c5168e436a2ffa98",
+    "sdkRepository": "onionoriginals/sdk",
+    "sdkRevision": "cfa29326bcd9c7e2a4ace1d31b6915c1ff229d34",
+    "equivalence": {
+      "basis": "Owner-reported landing migration from SDK cfa2932, plus packaging changes; not a full independently audited source diff.",
+      "changes": [
+        "npm dependencies instead of workspace links; SDK lockfile used as seed",
+        "Vite sdk-core chunk regex matches npm paths",
+        "Three tests use local fixtures",
+        "Example evidence link uses /example/first-light.originals.zip"
+      ],
+      "independentChecks": [
+        "Deployed features.ts is byte-identical to SDK candidate",
+        "Deployed package.json declares app 0.4.0 and @originals sdk ^5.1.0, auth ^4.0.2, host ^0.2.0, vh ^0.3.0"
+      ],
+      "reportedInstalledVersions": {
+        "@originals/sdk": "5.1.0",
+        "@originals/auth": "4.0.2",
+        "@originals/host": "0.2.0",
+        "@originals/vh": "0.3.0"
+      }
+    }
+  },
+  "isolation": {
+    "browserProfile": "incognito",
+    "probeCredentials": "omit",
+    "signedIn": false
+  },
+  "live": {
+    "acceptanceHook": "undefined",
+    "observedAt": "2026-10-31T15:11:56.521Z",
+    "probes": [
+      {
+        "contentType": "text/html; charset=utf-8",
+        "json": null,
+        "path": "/",
+        "sha256": "5cf9a961c188686a2f082352b05024ad8433a575a74df08323d38b06dcf88a95",
+        "status": 200
+      },
+      {
+        "contentType": "application/json",
+        "json": {
+          "revision": "ef629500b620f9133a9df081c5168e436a2ffa98",
+          "spaRevision": "ef629500b620f9133a9df081c5168e436a2ffa98"
+        },
+        "path": "/api/version",
+        "sha256": "07c5d15d113faddc2ab728134ba0ef6901967feb22b8dbf89215a42dc0984615",
+        "status": 200
+      },
+      {
+        "contentType": "application/json",
+        "json": {
+          "status": "ok"
+        },
+        "path": "/api/health",
+        "sha256": "a29ee2b15c494311c52521766e44af56a3ad2248e7a8ab465e5206463c13d288",
+        "status": 200
+      },
+      {
+        "contentType": "application/ld+json; charset=utf-8",
+        "json": {
+          "@context": {
+            "@version": 1.1,
+            "@vocab": "https://originals.build/vocab#",
+            "Originals": "https://originals.build",
+            "OriginalsBundle": "Originals:OriginalsBundle",
+            "ResourceCreated": "Originals:ResourceCreated",
+            "ResourceMigrated": "Originals:ResourceMigrated",
+            "ResourceUpdated": "Originals:ResourceUpdated",
+            "attributes": {
+              "@container": "@set",
+              "@id": "Originals:attributes"
+            },
+            "content": "Originals:content",
+            "display_type": "Originals:display_type",
+            "fromLayer": "Originals:fromLayer",
+            "id": "@id",
+            "migratedAt": "Originals:migratedAt",
+            "migratedTo": "Originals:migratedTo",
+            "resourceId": "Originals:resourceId",
+            "resources": "Originals:resources",
+            "toLayer": "Originals:toLayer",
+            "trait_type": "Originals:trait_type",
+            "type": "@type",
+            "value": "Originals:value",
+            "verifiableCredentials": "Originals:verifiableCredentials"
+          }
+        },
+        "path": "/context",
+        "sha256": "4f01ac90aa43d90afdb55889dd74650fb9f3b856a0ddc84040f1fd79c3b1b5e4",
+        "status": 200
+      }
+    ],
+    "title": "Originals — Give your work a history",
+    "url": "https://originals.build/"
+  },
+  "ui": {
+    "publishAvailable": false,
+    "copy": "Publishing to the web is being rebuilt on the Originals Protocol and returns soon.",
+    "evidenceLink": "/example/first-light.originals.zip",
+    "signInAvailable": true
+  },
+  "gates": {
+    "deployment-preflight": "PASS",
+    "B1-turnkey-create-revise-publish": "NOT-RUN",
+    "B2-signed-out-reader": "NOT-RUN",
+    "B3-restore-continue": "NOT-RUN",
+    "B4-interrupted-publication": "NOT-RUN",
+    "B5-signed-out-guest": "NOT-RUN",
+    "B6-production-publishing-off": "PASS"
+  },
+  "limitations": [
+    "Endpoint health is not independent verification of a published Original.",
+    "No Turnkey signing, author login, work publication, restart or interruption test was performed.",
+    "Existing acceptance driver requires a staging-only engine hook and assumes deployed app SHA equals SDK checkout SHA; split repository provenance must be represented separately.",
+    "Snapshot requests timed out twice; page content and controls were read using browser evaluation."
+  ],
+  "mutations": "No deployment/environment changes, remote writes, publication, account changes or spending.",
+  "supersedes": "originals-976-production-preflight.json (earlier live deployment observation only)"
+}

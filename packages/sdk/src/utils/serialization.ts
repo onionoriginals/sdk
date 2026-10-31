@@ -28,11 +28,8 @@ export const PRELOADED_CONTEXTS: Record<string, unknown> = {
   // Custom contexts
   'https://ordinals.plus/vocab/v1': ordinalsContext,
 
-  // Originals network contexts (all three networks use the same context document)
-  'https://originals.build/context': originalsContext, // Legacy
-  'https://pichu.originals.build/context': originalsContext, // Production
-  'https://cleffa.originals.build/context': originalsContext, // Staging
-  'https://magby.originals.build/context': originalsContext, // Development
+  // Canonical Originals context, independent of the Bitcoin network.
+  'https://originals.build/context': originalsContext,
 };
 
 

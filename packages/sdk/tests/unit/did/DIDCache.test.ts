@@ -495,7 +495,7 @@ describe('DIDCache', () => {
       // document — but that stub must NOT be written into the cache.
       const { DIDManager } = await import('../../../src/did/DIDManager');
       const didManager = new DIDManager(
-        { network: 'regtest', defaultKeyType: 'Ed25519', webvhNetwork: 'magby' }
+        { network: 'regtest', defaultKeyType: 'Ed25519', webvhNetwork: 'development' }
       );
 
       const unresolvableDid = 'did:webvh:example.invalid:nonexistent';

@@ -1,0 +1,55 @@
+{
+  "receipt": "originals-hosted-preflight/1",
+  "observedAt": "2026-10-31T06:22:12.516470+00:00",
+  "target": "https://originals.build",
+  "status": "BLOCKED",
+  "candidateRevision": "cfa29326bcd9c7e2a4ace1d31b6915c1ff229d34",
+  "railway": {
+    "project": "Onion / Originals",
+    "environment": "production",
+    "service": "builder",
+    "sourceRepository": "aviarytech/originals.build",
+    "deploymentId": "662118f8-c710-414f-b60a-ce6f9bcc5ab2",
+    "deploymentRevision": "2f3275ff46d647c0da3289a1d96e30a5d4e729b8",
+    "deploymentCreatedAt": "2026-10-31T06:19:23.524Z",
+    "deploymentStatus": "SUCCESS",
+    "domains": {
+      "customDomains": [
+        {
+          "domain": "originals.build",
+          "id": "fa0a001e-6002-4ce1-afc0-b669405dd40f",
+          "targetPort": 8080
+        }
+      ],
+      "serviceDomains": [
+        {
+          "domain": "builder-production-2757.up.railway.app",
+          "id": "646f6e14-f090-4ea3-a914-b65844510ca0",
+          "targetPort": 8080
+        }
+      ]
+    }
+  },
+  "browser": {
+    "profile": "incognito",
+    "visibleHeading": "Index of /originals.build/",
+    "acceptanceHook": "undefined",
+    "probes": [
+      {
+        "path": "/api/version",
+        "status": 200,
+        "contentType": "text/html; charset=UTF-8",
+        "result": "HTML document, not API JSON"
+      },
+      {
+        "path": "/api/health",
+        "status": 200,
+        "contentType": "text/html; charset=UTF-8",
+        "result": "HTML document, not API JSON"
+      }
+    ]
+  },
+  "reason": "The domain serves a different repository; no candidate revision or authoring workflow is available for acceptance.",
+  "hostedGates": "NOT-RUN",
+  "mutations": "No remote writes, deployment, configuration changes, account changes, or publication. Local Railway CLI link selected production/builder for read-only inspection."
+}

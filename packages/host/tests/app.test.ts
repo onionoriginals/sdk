@@ -265,7 +265,7 @@ test('the JSON-LD context is served on any host, never redirected', async () => 
     trustedProxyHops: 0,
     canonicalHost: 'originals.build',
   });
-  const res = await fetchFn(new Request('https://pichu.originals.build/context'));
+  const res = await fetchFn(new Request('https://secondary.example/context'));
   expect(res.status).toBe(200);
   expect(res.headers.get('content-type')).toContain('application/ld+json');
 });
@@ -312,29 +312,29 @@ test('a mixed-case canonical host still redirects a foreign host, to the lowerca
  */
 describe('hosted-layout reads on the host they were published under', () => {
   // The landing passes its legacy did:webvh domain as an extra served host.
-  const LEGACY_WEBVH_DOMAIN = 'magby.originals.build';
+  const LEGACY_WEBVH_DOMAIN = 'secondary.example';
   const stored = '/user-abc0123456789ab/did.jsonl';
   // The store answers for any host it holds; only the served did:webvh hosts may bypass the redirect.
   const publications = {
     serve: (url: URL) =>
-      (url.host === 'magby.originals.build' || url.host === 'intruder.example.com') && url.pathname === stored ? new Response('log') : null,
+      (url.host === 'secondary.example' || url.host === 'intruder.example.com') && url.pathname === stored ? new Response('log') : null,
   };
   const fetchFn = () =>
     buildFetch({ apiRoutes: configuredRoutes, hostStore: noopHostStore, distDir, trustedProxyHops: 0, canonicalHost: 'originals.build', extraWebvhHosts: [LEGACY_WEBVH_DOMAIN], publications });
 
   test('a stored object is served, not redirected', async () => {
-    const res = await fetchFn()(new Request(`https://magby.originals.build${stored}`));
+    const res = await fetchFn()(new Request(`https://secondary.example${stored}`));
     expect(res.status).toBe(200);
     expect(await res.text()).toBe('log');
   });
 
   test('a hosted-layout path with nothing stored still redirects', async () => {
-    const res = await fetchFn()(new Request('https://magby.originals.build/user-zzz/did.jsonl'));
+    const res = await fetchFn()(new Request('https://secondary.example/user-zzz/did.jsonl'));
     expect(res.status).toBe(301);
   });
 
   test('a document on that host still redirects', async () => {
-    const res = await fetchFn()(new Request('https://magby.originals.build/some/page'));
+    const res = await fetchFn()(new Request('https://secondary.example/some/page'));
     expect(res.status).toBe(301);
   });
 

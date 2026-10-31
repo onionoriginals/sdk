@@ -16,49 +16,49 @@ import {
 describe('Network Configuration', () => {
   describe('WEBVH_NETWORKS', () => {
     it('should define all three networks', () => {
-      expect(WEBVH_NETWORKS.magby).toBeDefined();
-      expect(WEBVH_NETWORKS.cleffa).toBeDefined();
-      expect(WEBVH_NETWORKS.pichu).toBeDefined();
+      expect(WEBVH_NETWORKS.development).toBeDefined();
+      expect(WEBVH_NETWORKS.staging).toBeDefined();
+      expect(WEBVH_NETWORKS.production).toBeDefined();
     });
 
     it('should have correct domains for each network', () => {
-      expect(WEBVH_NETWORKS.magby.domain).toBe('magby.originals.build');
-      expect(WEBVH_NETWORKS.cleffa.domain).toBe('cleffa.originals.build');
-      expect(WEBVH_NETWORKS.pichu.domain).toBe('pichu.originals.build');
+      expect(WEBVH_NETWORKS.development.domain).toBe('originals.build');
+      expect(WEBVH_NETWORKS.staging.domain).toBe('originals.build');
+      expect(WEBVH_NETWORKS.production.domain).toBe('originals.build');
     });
 
     it('should have correct stability levels', () => {
-      expect(WEBVH_NETWORKS.magby.stability).toBe('patch');
-      expect(WEBVH_NETWORKS.cleffa.stability).toBe('minor');
-      expect(WEBVH_NETWORKS.pichu.stability).toBe('major');
+      expect(WEBVH_NETWORKS.development.stability).toBe('patch');
+      expect(WEBVH_NETWORKS.staging.stability).toBe('minor');
+      expect(WEBVH_NETWORKS.production.stability).toBe('major');
     });
 
     it('should have correct context URLs', () => {
-      expect(WEBVH_NETWORKS.magby.contextUrl).toBe('https://magby.originals.build/context');
-      expect(WEBVH_NETWORKS.cleffa.contextUrl).toBe('https://cleffa.originals.build/context');
-      expect(WEBVH_NETWORKS.pichu.contextUrl).toBe('https://pichu.originals.build/context');
+      expect(WEBVH_NETWORKS.development.contextUrl).toBe('https://originals.build/context');
+      expect(WEBVH_NETWORKS.staging.contextUrl).toBe('https://originals.build/context');
+      expect(WEBVH_NETWORKS.production.contextUrl).toBe('https://originals.build/context');
     });
   });
 
   describe('DEFAULT_WEBVH_NETWORK', () => {
-    it('should default to pichu (production)', () => {
-      expect(DEFAULT_WEBVH_NETWORK).toBe('pichu');
+    it('should default to production (production)', () => {
+      expect(DEFAULT_WEBVH_NETWORK).toBe('production');
     });
   });
 
   describe('getNetworkConfig', () => {
     it('should return correct config for each network', () => {
-      const magbyConfig = getNetworkConfig('magby');
-      expect(magbyConfig.name).toBe('magby');
-      expect(magbyConfig.domain).toBe('magby.originals.build');
+      const developmentConfig = getNetworkConfig('development');
+      expect(developmentConfig.name).toBe('development');
+      expect(developmentConfig.domain).toBe('originals.build');
 
-      const cleffaConfig = getNetworkConfig('cleffa');
-      expect(cleffaConfig.name).toBe('cleffa');
-      expect(cleffaConfig.domain).toBe('cleffa.originals.build');
+      const stagingConfig = getNetworkConfig('staging');
+      expect(stagingConfig.name).toBe('staging');
+      expect(stagingConfig.domain).toBe('originals.build');
 
-      const pichuConfig = getNetworkConfig('pichu');
-      expect(pichuConfig.name).toBe('pichu');
-      expect(pichuConfig.domain).toBe('pichu.originals.build');
+      const productionConfig = getNetworkConfig('production');
+      expect(productionConfig.name).toBe('production');
+      expect(productionConfig.domain).toBe('originals.build');
     });
 
     it('should throw error for invalid network', () => {
@@ -70,206 +70,206 @@ describe('Network Configuration', () => {
 
   describe('getNetworkDomain', () => {
     it('should return correct domain for each network', () => {
-      expect(getNetworkDomain('magby')).toBe('magby.originals.build');
-      expect(getNetworkDomain('cleffa')).toBe('cleffa.originals.build');
-      expect(getNetworkDomain('pichu')).toBe('pichu.originals.build');
+      expect(getNetworkDomain('development')).toBe('originals.build');
+      expect(getNetworkDomain('staging')).toBe('originals.build');
+      expect(getNetworkDomain('production')).toBe('originals.build');
     });
   });
 
   describe('getNetworkContextUrl', () => {
     it('should return correct context URL for each network', () => {
-      expect(getNetworkContextUrl('magby')).toBe('https://magby.originals.build/context');
-      expect(getNetworkContextUrl('cleffa')).toBe('https://cleffa.originals.build/context');
-      expect(getNetworkContextUrl('pichu')).toBe('https://pichu.originals.build/context');
+      expect(getNetworkContextUrl('development')).toBe('https://originals.build/context');
+      expect(getNetworkContextUrl('staging')).toBe('https://originals.build/context');
+      expect(getNetworkContextUrl('production')).toBe('https://originals.build/context');
     });
   });
 
   describe('validateVersionForNetwork', () => {
-    describe('pichu (major releases only)', () => {
+    describe('production (major releases only)', () => {
       it('should accept major releases (X.0.0)', () => {
-        expect(validateVersionForNetwork('1.0.0', 'pichu')).toBe(true);
-        expect(validateVersionForNetwork('2.0.0', 'pichu')).toBe(true);
-        expect(validateVersionForNetwork('10.0.0', 'pichu')).toBe(true);
+        expect(validateVersionForNetwork('1.0.0', 'production')).toBe(true);
+        expect(validateVersionForNetwork('2.0.0', 'production')).toBe(true);
+        expect(validateVersionForNetwork('10.0.0', 'production')).toBe(true);
       });
 
       it('should reject minor releases (X.Y.0 where Y > 0)', () => {
-        expect(validateVersionForNetwork('1.1.0', 'pichu')).toBe(false);
-        expect(validateVersionForNetwork('2.5.0', 'pichu')).toBe(false);
+        expect(validateVersionForNetwork('1.1.0', 'production')).toBe(false);
+        expect(validateVersionForNetwork('2.5.0', 'production')).toBe(false);
       });
 
       it('should reject patch releases (X.Y.Z where Z > 0)', () => {
-        expect(validateVersionForNetwork('1.0.1', 'pichu')).toBe(false);
-        expect(validateVersionForNetwork('1.1.1', 'pichu')).toBe(false);
-        expect(validateVersionForNetwork('2.3.4', 'pichu')).toBe(false);
+        expect(validateVersionForNetwork('1.0.1', 'production')).toBe(false);
+        expect(validateVersionForNetwork('1.1.1', 'production')).toBe(false);
+        expect(validateVersionForNetwork('2.3.4', 'production')).toBe(false);
       });
     });
 
-    describe('cleffa (minor releases)', () => {
+    describe('staging (minor releases)', () => {
       it('should accept major releases (X.0.0)', () => {
-        expect(validateVersionForNetwork('1.0.0', 'cleffa')).toBe(true);
-        expect(validateVersionForNetwork('2.0.0', 'cleffa')).toBe(true);
+        expect(validateVersionForNetwork('1.0.0', 'staging')).toBe(true);
+        expect(validateVersionForNetwork('2.0.0', 'staging')).toBe(true);
       });
 
       it('should accept minor releases (X.Y.0)', () => {
-        expect(validateVersionForNetwork('1.1.0', 'cleffa')).toBe(true);
-        expect(validateVersionForNetwork('2.5.0', 'cleffa')).toBe(true);
-        expect(validateVersionForNetwork('10.20.0', 'cleffa')).toBe(true);
+        expect(validateVersionForNetwork('1.1.0', 'staging')).toBe(true);
+        expect(validateVersionForNetwork('2.5.0', 'staging')).toBe(true);
+        expect(validateVersionForNetwork('10.20.0', 'staging')).toBe(true);
       });
 
       it('should reject patch releases (X.Y.Z where Z > 0)', () => {
-        expect(validateVersionForNetwork('1.0.1', 'cleffa')).toBe(false);
-        expect(validateVersionForNetwork('1.1.1', 'cleffa')).toBe(false);
-        expect(validateVersionForNetwork('2.3.4', 'cleffa')).toBe(false);
+        expect(validateVersionForNetwork('1.0.1', 'staging')).toBe(false);
+        expect(validateVersionForNetwork('1.1.1', 'staging')).toBe(false);
+        expect(validateVersionForNetwork('2.3.4', 'staging')).toBe(false);
       });
     });
 
-    describe('magby (all versions)', () => {
+    describe('development (all versions)', () => {
       it('should accept major releases', () => {
-        expect(validateVersionForNetwork('1.0.0', 'magby')).toBe(true);
-        expect(validateVersionForNetwork('2.0.0', 'magby')).toBe(true);
+        expect(validateVersionForNetwork('1.0.0', 'development')).toBe(true);
+        expect(validateVersionForNetwork('2.0.0', 'development')).toBe(true);
       });
 
       it('should accept minor releases', () => {
-        expect(validateVersionForNetwork('1.1.0', 'magby')).toBe(true);
-        expect(validateVersionForNetwork('2.5.0', 'magby')).toBe(true);
+        expect(validateVersionForNetwork('1.1.0', 'development')).toBe(true);
+        expect(validateVersionForNetwork('2.5.0', 'development')).toBe(true);
       });
 
       it('should accept patch releases', () => {
-        expect(validateVersionForNetwork('1.0.1', 'magby')).toBe(true);
-        expect(validateVersionForNetwork('1.1.1', 'magby')).toBe(true);
-        expect(validateVersionForNetwork('2.3.4', 'magby')).toBe(true);
+        expect(validateVersionForNetwork('1.0.1', 'development')).toBe(true);
+        expect(validateVersionForNetwork('1.1.1', 'development')).toBe(true);
+        expect(validateVersionForNetwork('2.3.4', 'development')).toBe(true);
       });
     });
 
     it('should handle pre-release versions', () => {
-      // A prerelease is NOT a release (issue #352): only magby (all versions)
+      // A prerelease is NOT a release (issue #352): only development (all versions)
       // accepts prerelease builds, regardless of the numeric part.
-      expect(validateVersionForNetwork('1.0.0-beta.1', 'pichu')).toBe(false);
-      expect(validateVersionForNetwork('1.1.0-alpha', 'pichu')).toBe(false);
-      expect(validateVersionForNetwork('1.1.0-beta.1', 'cleffa')).toBe(false);
-      expect(validateVersionForNetwork('1.1.1-rc.1', 'cleffa')).toBe(false);
-      expect(validateVersionForNetwork('1.0.0-beta.1', 'magby')).toBe(true);
+      expect(validateVersionForNetwork('1.0.0-beta.1', 'production')).toBe(false);
+      expect(validateVersionForNetwork('1.1.0-alpha', 'production')).toBe(false);
+      expect(validateVersionForNetwork('1.1.0-beta.1', 'staging')).toBe(false);
+      expect(validateVersionForNetwork('1.1.1-rc.1', 'staging')).toBe(false);
+      expect(validateVersionForNetwork('1.0.0-beta.1', 'development')).toBe(true);
     });
 
     it('should throw error for invalid version format', () => {
-      expect(() => validateVersionForNetwork('invalid', 'pichu')).toThrow('Invalid version format');
-      expect(() => validateVersionForNetwork('1.0', 'pichu')).toThrow('Invalid version format');
-      expect(() => validateVersionForNetwork('v1.0.0', 'pichu')).toThrow('Invalid version format');
+      expect(() => validateVersionForNetwork('invalid', 'production')).toThrow('Invalid version format');
+      expect(() => validateVersionForNetwork('1.0', 'production')).toThrow('Invalid version format');
+      expect(() => validateVersionForNetwork('v1.0.0', 'production')).toThrow('Invalid version format');
     });
   });
 
   describe('getRecommendedNetworkForVersion', () => {
-    it('should recommend pichu for major releases', () => {
-      expect(getRecommendedNetworkForVersion('1.0.0')).toBe('pichu');
-      expect(getRecommendedNetworkForVersion('2.0.0')).toBe('pichu');
-      expect(getRecommendedNetworkForVersion('10.0.0')).toBe('pichu');
+    it('should recommend production for major releases', () => {
+      expect(getRecommendedNetworkForVersion('1.0.0')).toBe('production');
+      expect(getRecommendedNetworkForVersion('2.0.0')).toBe('production');
+      expect(getRecommendedNetworkForVersion('10.0.0')).toBe('production');
     });
 
-    it('should recommend cleffa for minor releases', () => {
-      expect(getRecommendedNetworkForVersion('1.1.0')).toBe('cleffa');
-      expect(getRecommendedNetworkForVersion('2.5.0')).toBe('cleffa');
-      expect(getRecommendedNetworkForVersion('10.20.0')).toBe('cleffa');
+    it('should recommend staging for minor releases', () => {
+      expect(getRecommendedNetworkForVersion('1.1.0')).toBe('staging');
+      expect(getRecommendedNetworkForVersion('2.5.0')).toBe('staging');
+      expect(getRecommendedNetworkForVersion('10.20.0')).toBe('staging');
     });
 
-    it('should recommend magby for patch releases', () => {
-      expect(getRecommendedNetworkForVersion('1.0.1')).toBe('magby');
-      expect(getRecommendedNetworkForVersion('1.1.1')).toBe('magby');
-      expect(getRecommendedNetworkForVersion('2.3.4')).toBe('magby');
+    it('should recommend development for patch releases', () => {
+      expect(getRecommendedNetworkForVersion('1.0.1')).toBe('development');
+      expect(getRecommendedNetworkForVersion('1.1.1')).toBe('development');
+      expect(getRecommendedNetworkForVersion('2.3.4')).toBe('development');
     });
 
     it('should handle pre-release versions correctly', () => {
-      // Prereleases only pass the magby gate (issue #352), so magby is the
+      // Prereleases only pass the development gate (issue #352), so development is the
       // most restrictive network that accepts any prerelease build.
-      expect(getRecommendedNetworkForVersion('1.0.0-beta')).toBe('magby');
-      expect(getRecommendedNetworkForVersion('1.1.0-alpha')).toBe('magby');
-      expect(getRecommendedNetworkForVersion('1.1.1-rc.1')).toBe('magby');
+      expect(getRecommendedNetworkForVersion('1.0.0-beta')).toBe('development');
+      expect(getRecommendedNetworkForVersion('1.1.0-alpha')).toBe('development');
+      expect(getRecommendedNetworkForVersion('1.1.1-rc.1')).toBe('development');
     });
   });
 
   describe('Bitcoin Network Mapping', () => {
     describe('WEBVH_NETWORKS Bitcoin mappings', () => {
-      it('should map magby to regtest', () => {
-        expect(WEBVH_NETWORKS.magby.bitcoinNetwork).toBe('regtest');
+      it('should map development to regtest', () => {
+        expect(WEBVH_NETWORKS.development.bitcoinNetwork).toBe('regtest');
       });
 
-      it('should map cleffa to signet', () => {
-        expect(WEBVH_NETWORKS.cleffa.bitcoinNetwork).toBe('signet');
+      it('should map staging to signet', () => {
+        expect(WEBVH_NETWORKS.staging.bitcoinNetwork).toBe('signet');
       });
 
-      it('should map pichu to mainnet', () => {
-        expect(WEBVH_NETWORKS.pichu.bitcoinNetwork).toBe('mainnet');
+      it('should map production to mainnet', () => {
+        expect(WEBVH_NETWORKS.production.bitcoinNetwork).toBe('mainnet');
       });
     });
 
     describe('getBitcoinNetworkForWebVH', () => {
-      it('should return regtest for magby', () => {
-        expect(getBitcoinNetworkForWebVH('magby')).toBe('regtest');
+      it('should return regtest for development', () => {
+        expect(getBitcoinNetworkForWebVH('development')).toBe('regtest');
       });
 
-      it('should return signet for cleffa', () => {
-        expect(getBitcoinNetworkForWebVH('cleffa')).toBe('signet');
+      it('should return signet for staging', () => {
+        expect(getBitcoinNetworkForWebVH('staging')).toBe('signet');
       });
 
-      it('should return mainnet for pichu', () => {
-        expect(getBitcoinNetworkForWebVH('pichu')).toBe('mainnet');
+      it('should return mainnet for production', () => {
+        expect(getBitcoinNetworkForWebVH('production')).toBe('mainnet');
       });
     });
 
     describe('getWebVHNetworkForBitcoin', () => {
-      it('should return magby for regtest', () => {
-        expect(getWebVHNetworkForBitcoin('regtest')).toBe('magby');
+      it('should return development for regtest', () => {
+        expect(getWebVHNetworkForBitcoin('regtest')).toBe('development');
       });
 
-      it('should return cleffa for signet', () => {
-        expect(getWebVHNetworkForBitcoin('signet')).toBe('cleffa');
+      it('should return staging for signet', () => {
+        expect(getWebVHNetworkForBitcoin('signet')).toBe('staging');
       });
 
-      it('should return pichu for mainnet', () => {
-        expect(getWebVHNetworkForBitcoin('mainnet')).toBe('pichu');
+      it('should return production for mainnet', () => {
+        expect(getWebVHNetworkForBitcoin('mainnet')).toBe('production');
       });
     });
 
     describe('Network mapping consistency', () => {
       it('should have bidirectional mapping for all WebVH networks', () => {
-        // magby ↔ regtest
-        const magbyBitcoin = getBitcoinNetworkForWebVH('magby');
-        expect(getWebVHNetworkForBitcoin(magbyBitcoin)).toBe('magby');
+        // development ↔ regtest
+        const developmentBitcoin = getBitcoinNetworkForWebVH('development');
+        expect(getWebVHNetworkForBitcoin(developmentBitcoin)).toBe('development');
 
-        // cleffa ↔ signet
-        const cleffaBitcoin = getBitcoinNetworkForWebVH('cleffa');
-        expect(getWebVHNetworkForBitcoin(cleffaBitcoin)).toBe('cleffa');
+        // staging ↔ signet
+        const stagingBitcoin = getBitcoinNetworkForWebVH('staging');
+        expect(getWebVHNetworkForBitcoin(stagingBitcoin)).toBe('staging');
 
-        // pichu ↔ mainnet
-        const pichuBitcoin = getBitcoinNetworkForWebVH('pichu');
-        expect(getWebVHNetworkForBitcoin(pichuBitcoin)).toBe('pichu');
+        // production ↔ mainnet
+        const productionBitcoin = getBitcoinNetworkForWebVH('production');
+        expect(getWebVHNetworkForBitcoin(productionBitcoin)).toBe('production');
       });
 
       it('should maintain environment consistency across networks', () => {
-        // Development: magby → regtest
-        expect(getBitcoinNetworkForWebVH('magby')).toBe('regtest');
+        // Development: development → regtest
+        expect(getBitcoinNetworkForWebVH('development')).toBe('regtest');
 
-        // Staging: cleffa → signet
-        expect(getBitcoinNetworkForWebVH('cleffa')).toBe('signet');
+        // Staging: staging → signet
+        expect(getBitcoinNetworkForWebVH('staging')).toBe('signet');
 
-        // Production: pichu → mainnet
-        expect(getBitcoinNetworkForWebVH('pichu')).toBe('mainnet');
+        // Production: production → mainnet
+        expect(getBitcoinNetworkForWebVH('production')).toBe('mainnet');
       });
     });
   });
 });
 
 describe('prerelease versions and network gates (issue #352)', () => {
-  it('rejects prereleases on pichu even when the numeric part is a major release', () => {
-    expect(validateVersionForNetwork('2.0.0-rc.1', 'pichu')).toBe(false);
-    expect(validateVersionForNetwork('1.0.0-beta', 'pichu')).toBe(false);
+  it('rejects prereleases on production even when the numeric part is a major release', () => {
+    expect(validateVersionForNetwork('2.0.0-rc.1', 'production')).toBe(false);
+    expect(validateVersionForNetwork('1.0.0-beta', 'production')).toBe(false);
   });
 
-  it('rejects prereleases on cleffa', () => {
-    expect(validateVersionForNetwork('1.1.0-rc.2', 'cleffa')).toBe(false);
+  it('rejects prereleases on staging', () => {
+    expect(validateVersionForNetwork('1.1.0-rc.2', 'staging')).toBe(false);
   });
 
-  it('accepts prereleases on magby (all versions)', () => {
-    expect(validateVersionForNetwork('2.0.0-rc.1', 'magby')).toBe(true);
-    expect(validateVersionForNetwork('1.2.3-alpha.4', 'magby')).toBe(true);
+  it('accepts prereleases on development (all versions)', () => {
+    expect(validateVersionForNetwork('2.0.0-rc.1', 'development')).toBe(true);
+    expect(validateVersionForNetwork('1.2.3-alpha.4', 'development')).toBe(true);
   });
 });

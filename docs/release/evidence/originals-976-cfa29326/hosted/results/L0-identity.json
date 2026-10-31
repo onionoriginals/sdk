@@ -1,0 +1,69 @@
+{
+  "phase": "L0-identity",
+  "started": "2026-10-31T06:18:01.116Z",
+  "finished": "2026-10-31T06:18:01.233Z",
+  "isolation": {
+    "pid": 84129,
+    "ppid": 83978,
+    "runtime": "bun 1.2.22",
+    "execPath": "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+    "cwd": "/private/tmp/976-final-hosted/tmp/L0-identity",
+    "home": "/private/tmp/976-final-hosted/home/L0-identity",
+    "tmpdir": "/private/tmp/976-final-hosted/tmp/L0-identity",
+    "envNames": [
+      "ACCEPTANCE_INPUT",
+      "ACCEPTANCE_RESULT",
+      "HOME",
+      "LANG",
+      "PATH",
+      "TMPDIR"
+    ],
+    "dirs": {
+      "custody": "/private/tmp/976-final-hosted/custody"
+    }
+  },
+  "facts": {
+    "author": {
+      "did": "did:webvh:QmTW4GucqraSusMNWaZeuXRNwePaNQs3WXa8yjpzp89QV4:acceptance.example:user-sub-acceptance-0",
+      "versionId": "1-QmVTMYiCHh7hJkCiwLqnpeuRdQHhGWTEvsrtymeELd7ygo",
+      "logUrl": "https://acceptance.example/user-sub-acceptance-0/did.jsonl",
+      "didDomain": {
+        "expected": "acceptance.example",
+        "actual": "acceptance.example",
+        "status": "PASS"
+      }
+    }
+  },
+  "checks": [
+    {
+      "id": "author-identity",
+      "title": "the author's did:webvh is built with the landing's builder and published to the account's namespace",
+      "status": "PASS",
+      "detail": {
+        "did": "did:webvh:QmTW4GucqraSusMNWaZeuXRNwePaNQs3WXa8yjpzp89QV4:acceptance.example:user-sub-acceptance-0",
+        "versionId": "1-QmVTMYiCHh7hJkCiwLqnpeuRdQHhGWTEvsrtymeELd7ygo",
+        "logUrl": "https://acceptance.example/user-sub-acceptance-0/did.jsonl"
+      }
+    },
+    {
+      "id": "author-did-domain",
+      "title": "the author's identity DID is on this instance's did:webvh domain",
+      "status": "PASS",
+      "detail": {
+        "expected": "acceptance.example",
+        "actual": "acceptance.example",
+        "status": "PASS"
+      }
+    }
+  ],
+  "status": "PASS",
+  "process": {
+    "command": [
+      "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+      "scripts/acceptance/hosted/l0-identity.ts"
+    ],
+    "exit": 0,
+    "signal": null,
+    "ms": 460
+  }
+}

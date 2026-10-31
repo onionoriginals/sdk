@@ -104,16 +104,12 @@ The account's wallet contains these roles:
 The private keys stay in Turnkey. The browser holds only a non-extractable
 P-256 session key in IndexedDB (12 hours) and the `auth_token` cookie (7 days).
 
-**The account's identity DID must be on the staging domain.** Sign-in finds
-an identity the account already has and never mints a second one
-(`readUserWebVHDid`). So an account that signed in before G1 landed keeps a
-`did:webvh:…:magby.originals.build:user-…` identity. That identity doesn't
-resolve from staging, and B2's author binding fails. Use a **fresh sub-org**
-(a test email that has never signed in to this Turnkey org) whose first
-sign-in happens on the staging build, so its identity is minted on the
-staging `VITE_WEBVH_HOST`. The harness checks this before anything is
-published, and records it in the receipt as `author.didDomain`. A DID on any
-other domain fails B1.
+**The account's identity DID must be on the staging domain.** Identity
+lookup reads only the configured host. If no identity exists there, use the
+identity panel to create one with the account's Turnkey keys. This is a new
+DID, not a rewrite of an identity on another host. The harness checks the
+DID domain before publication and records it as `author.didDomain`; a DID on
+another domain fails B1.
 
 ### Operator
 
@@ -210,7 +206,7 @@ Automated:
 PASS when all of these hold:
 
 - The author DID's domain is the staging `VITE_WEBVH_HOST`
-  (`did:webvh:<SCID>:<VITE_WEBVH_HOST>:user-<sub16>`), not `magby` or any
+  (`did:webvh:<SCID>:<VITE_WEBVH_HOST>:user-<sub16>`), not `development` or any
   other host (see [Account](#account)).
 - The author DID document lists `#key-1` as its only `assertionMethod`. The
   log's `updateKeys` are the identity key's `did:key`, which is `#key-0`.
@@ -453,7 +449,7 @@ one of them.
 
 | # | Gap | Blocks | Proposed fix |
 |---|---|---|---|
-| G1 | The SPA hard-codes the did:webvh domain `magby.originals.build` (`src/auth/webvh.ts`) and never reads `VITE_WEBVH_HOST`. The server 301s every non-`/api` read on a non-canonical host to `VITE_WEBVH_HOST`, so a reader can't fetch what was published | B1, B2 | New identities and aliases use the build's `VITE_WEBVH_HOST`. Unset, they fall back to the legacy domain `magby.originals.build` (`src/auth/webvh-domain.ts`, PROVISIONAL), never to `location.host`. Reads of the hosted layout for a host this instance serves (`VITE_WEBVH_HOST` or the legacy domain) skip the canonical redirect, so existing `magby` identity DIDs stay readable |
+| G1 | Identity and publication must use the deployed host | B1, B2 | New identities and aliases use `VITE_WEBVH_HOST`, defaulting to `originals.build`. Lookup and the server allowlist use only the configured host. Identities on other domains are not reused; users explicitly create a new identity on this host. |
 | G6 | No deployed revision. `/api/health` is `{status:"ok"}` | receipt | `GET /api/version` returns the server's `RAILWAY_GIT_COMMIT_SHA`, and the build bakes the SPA's SHA |
 | G7 | `hostedPublication` is a constant, so no deployed build can publish | B1–B4 | A build-time switch `VITE_ACCEPTANCE_HOSTED_PUBLICATION`, honoured only when `VITE_WEBVH_HOST` isn't the production host and `VITE_BTC_NETWORK` isn't `mainnet`. A test pins production off |
 | G10 | The signed-out copy is stale. It describes a key in localStorage, a key backup file, and anonymous publishing to a "shared demo area" (`src/content.ts`, `src/components/demo-logic.ts`) | B5 | Rewrite the copy to say the guest key is kept in this browser, unencrypted, signable by anyone using it, and that sign-in signs with your own key and publishes (owner decision of 23 October 2026). Add a content-claim test |

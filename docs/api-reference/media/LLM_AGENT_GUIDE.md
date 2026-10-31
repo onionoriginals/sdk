@@ -19,7 +19,7 @@ const sdk = OriginalsSDK.create({ network: 'regtest' });
 const sdk = OriginalsSDK.create({
   network: 'regtest',
   defaultKeyType: 'Ed25519',
-  webvhNetwork: 'magby',
+  webvhNetwork: 'development',
   ordinalsProvider: new OrdMockProvider(),
 });
 ```
@@ -59,9 +59,9 @@ WebVH networks map to Bitcoin networks automatically:
 
 | WebVH Network | Domain | Bitcoin Network | Stability |
 |---------------|--------|-----------------|-----------|
-| `magby` | magby.originals.build | `regtest` | Development (all versions) |
-| `cleffa` | cleffa.originals.build | `signet` | Staging (minor releases) |
-| `pichu` | pichu.originals.build | `mainnet` | Production (major releases) |
+| `development` | originals.build | `regtest` | Development (all versions) |
+| `staging` | originals.build | `signet` | Staging (minor releases) |
+| `production` | originals.build | `mainnet` | Production (major releases) |
 
 ---
 
@@ -88,7 +88,7 @@ interface OriginalsConfig {
   defaultKeyType: 'ES256K' | 'Ed25519' | 'ES256';
   
   // Optional
-  webvhNetwork?: 'magby' | 'cleffa' | 'pichu';  // default: 'pichu'
+  webvhNetwork?: 'development' | 'staging' | 'production';  // default: 'production'
   bitcoinRpcUrl?: string;
   enableLogging?: boolean;
   
@@ -1271,7 +1271,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 const sdk = OriginalsSDK.create({
   network: 'regtest',
   defaultKeyType: 'Ed25519',
-  webvhNetwork: 'magby',
+  webvhNetwork: 'development',
   ordinalsProvider: new OrdMockProvider(),
 });
 
@@ -1461,7 +1461,7 @@ const resourceHash = hashResource(Buffer.from(content));
 type LayerType = 'did:cel' | 'did:webvh' | 'did:btco';
 type KeyType = 'ES256K' | 'Ed25519' | 'ES256';
 type MultikeyType = 'Ed25519' | 'Secp256k1' | 'P256' | 'Bls12381G2';
-type WebVHNetworkName = 'magby' | 'cleffa' | 'pichu';
+type WebVHNetworkName = 'development' | 'staging' | 'production';
 type BitcoinNetworkName = 'mainnet' | 'regtest' | 'signet';
 ```
 

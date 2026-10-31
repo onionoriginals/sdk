@@ -103,31 +103,31 @@ describe('originals routes — auth gating', () => {
         '1.1.1.1'
       );
     };
-    expect((await shadow('magby.originals.build/assets/app-abc123.js')).status).toBe(403);
-    expect((await shadow('magby.originals.build/index.html')).status).toBe(403);
+    expect((await shadow('secondary.example/assets/app-abc123.js')).status).toBe(403);
+    expect((await shadow('secondary.example/index.html')).status).toBe(403);
     // CEL-era shapes and anything outside the hosted layout are refused.
-    expect((await shadow('magby.originals.build/assets/resources/evil.js')).status).toBe(403);
+    expect((await shadow('secondary.example/assets/resources/evil.js')).status).toBe(403);
     expect((await shadow('cel/uEiCGpqek6fgu3Ut-2k4Pj8KTiobAgA6PiAHuJ-Fw0dcGDA.json')).status).toBe(403);
-    expect((await shadow('magby.originals.build/ueibabc/resources/uJZtLeUr')).status).toBe(403);
-    expect((await shadow('magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/cel.json')).status).toBe(403);
-    expect((await shadow('magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/../../index.html')).status).toBe(403);
+    expect((await shadow('secondary.example/ueibabc/resources/uJZtLeUr')).status).toBe(403);
+    expect((await shadow('secondary.example/user-sub-1/o-9xKpQ2mN4vR7tW1z/cel.json')).status).toBe(403);
+    expect((await shadow('secondary.example/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/../../index.html')).status).toBe(403);
     // The hosted layout in the caller's own namespace is allowed.
-    expect((await shadow('magby.originals.build/user-sub-1/did.jsonl')).status).toBe(200);
-    expect((await shadow('magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/did.jsonl')).status).toBe(200);
-    expect((await shadow('magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/originals-evidence.json')).status).toBe(200);
+    expect((await shadow('secondary.example/user-sub-1/did.jsonl')).status).toBe(200);
+    expect((await shadow('secondary.example/user-sub-1/o-9xKpQ2mN4vR7tW1z/did.jsonl')).status).toBe(200);
+    expect((await shadow('secondary.example/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/originals-evidence.json')).status).toBe(200);
     // P14.10 (PROVISIONAL, section 14): signer DID histories are under signers/, and an
     // asset log has no witness file (P9.8), so neither authors/ nor asset/did-witness.json is part of the layout.
     const hex = 'a'.repeat(64);
-    expect((await shadow(`magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/asset/did-witness.json`)).status).toBe(403);
-    expect((await shadow(`magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/authors/${hex}/did.jsonl`)).status).toBe(403);
-    expect((await shadow(`magby.originals.build/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/authors/${hex}/did-witness.json`)).status).toBe(403);
+    expect((await shadow(`secondary.example/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/asset/did-witness.json`)).status).toBe(403);
+    expect((await shadow(`secondary.example/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/authors/${hex}/did.jsonl`)).status).toBe(403);
+    expect((await shadow(`secondary.example/user-sub-1/o-9xKpQ2mN4vR7tW1z/originals/authors/${hex}/did-witness.json`)).status).toBe(403);
   });
 
   // #976 B, G1; P3.6: a did:webvh names the host it is fetched from. An
   // instance serves only its own did:webvh hosts, so a write under any other
   // host would be bytes no reader of that DID can fetch here.
   test('with served hosts configured, refuses a write or a save under any other host (403)', async () => {
-    const routes = createOriginalsRoutes({ authenticate, store: tmpStore(), hosts: ['originals.build', 'magby.originals.build'] });
+    const routes = createOriginalsRoutes({ authenticate, store: tmpStore(), hosts: ['originals.build', 'secondary.example'] });
     const put = (key: string) => {
       const url = new URL(`http://h/api/originals/host/${encodeURIComponent(key)}`);
       return routes.hostPut(new Request(url, { method: 'PUT', headers: { cookie: cookieFor('sub-1') }, body: '{"v":1}' }), url, '1.1.1.1');
@@ -137,7 +137,7 @@ describe('originals routes — auth gating', () => {
     expect(await refused.json()).toEqual({ error: 'forbidden_host' });
     expect((await put('Originals.Build:443/user-sub-1/did.jsonl')).status).toBe(403);
     expect((await put('originals.build/user-sub-1/did.jsonl')).status).toBe(200);
-    expect((await put('magby.originals.build/user-sub-1/did.jsonl')).status).toBe(200);
+    expect((await put('secondary.example/user-sub-1/did.jsonl')).status).toBe(200);
 
     const submitUrl = new URL(`http://h/api/originals/submit/${encodeURIComponent('intruder.example.com/user-sub-1/o-9xKpQ2mN4vR7tW1z')}`);
     const submitted = await routes.submit(new Request(submitUrl, { method: 'POST', headers: { cookie: cookieFor('sub-1') }, body: '{}' }), submitUrl, '1.1.1.1');

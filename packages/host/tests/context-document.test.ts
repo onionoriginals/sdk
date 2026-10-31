@@ -110,10 +110,10 @@ describe('GET /context', () => {
   });
 
   test('answers on the network-scoped hosts too, with the same document', async () => {
-    // The pichu/cleffa/magby context URLs in packages/sdk/src/types/network.ts
+    // The production/staging/development context URLs in packages/sdk/src/types/network.ts
     // are the same path on other origins, and the SDK's loader maps all four to
     // one bundled document — so the route must be host-agnostic.
-    for (const host of ['pichu.originals.build', 'cleffa.originals.build', 'magby.originals.build']) {
+    for (const host of ['secondary.example', 'secondary.example', 'secondary.example']) {
       const res = await fetchIt()(new Request(`http://${host}/context`));
       expect(res.headers.get('content-type')).toBe('application/ld+json; charset=utf-8');
       expect(JSON.parse(await res.text())).toEqual(sdkContext);

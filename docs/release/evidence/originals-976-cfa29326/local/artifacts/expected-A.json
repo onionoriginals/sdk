@@ -1,0 +1,142 @@
+{
+  "original": "did:vh:QmVRPAJTf7yemCApUb6vRzFD5mRENNjgYaZHEe9GywFcvg",
+  "checkpoint": "5-Qmc6QPvXD8K7hCkkKs5ftvCrVox6ZgeZcQkLQx7abfSaCv",
+  "author": "did:webvh:QmRChs6t57Fg4CbcdhUt1RAsehuZKigk3rvzhdd8nK77pz:magby.originals.build:user-acceptance0976",
+  "authorMethod": "did:webvh",
+  "versions": [
+    {
+      "versionId": "1-Qme4TRxmRgUZMC3Ck1aBT8F8zVTZ94R8CT5tUKjFJGCUT4",
+      "name": "Harbor at dawn",
+      "resources": [
+        {
+          "id": "artwork.png",
+          "mediaType": "image/png",
+          "size": 7028,
+          "digest": "zQmNcuAJEpYyjr8S9siRzPqXvssd7ncjQ7imW1XFi9hZZjb"
+        },
+        {
+          "id": "scan.bin",
+          "mediaType": "application/octet-stream",
+          "size": 4096,
+          "digest": "zQmZ2QnLYFtJ2ezKnq76m3Fe8WpHrs3e1sNk3Z4Q27XT8fy"
+        },
+        {
+          "id": "notes.md",
+          "mediaType": "text/markdown",
+          "size": 83,
+          "digest": "zQmSRXrhuY51dHx3bCEtLAiqtZ9bYz9XU8AQqrmJJ7hyqMw"
+        }
+      ]
+    },
+    {
+      "versionId": "2-QmNnxRn4hkopMZ83ro3tBdpR96poW3tCBV6GTq1yZDtrBE",
+      "name": "Harbor at dawn",
+      "resources": [
+        {
+          "id": "artwork.png",
+          "mediaType": "image/png",
+          "size": 7028,
+          "digest": "zQmNcuAJEpYyjr8S9siRzPqXvssd7ncjQ7imW1XFi9hZZjb"
+        },
+        {
+          "id": "scan.bin",
+          "mediaType": "application/octet-stream",
+          "size": 4096,
+          "digest": "zQmZ2QnLYFtJ2ezKnq76m3Fe8WpHrs3e1sNk3Z4Q27XT8fy"
+        },
+        {
+          "id": "notes.md",
+          "mediaType": "text/markdown",
+          "size": 93,
+          "digest": "zQmZdAZv5jSwEgA8j8Z3LxcJoVf4iBEXmzeMGmRCYHmRKbx"
+        }
+      ]
+    },
+    {
+      "versionId": "3-QmcJzUtoagijRxmXKJZPWXxGoiFzHfYWUAof5frSg5QWU6",
+      "name": "Harbor at dawn (final)",
+      "resources": [
+        {
+          "id": "artwork.png",
+          "mediaType": "image/png",
+          "size": 7028,
+          "digest": "zQmVWS99KHMC6MMho3NVCKWPSjSYZYtNAyqxRDiEjrYttyG"
+        },
+        {
+          "id": "scan.bin",
+          "mediaType": "application/octet-stream",
+          "size": 4096,
+          "digest": "zQmZ2QnLYFtJ2ezKnq76m3Fe8WpHrs3e1sNk3Z4Q27XT8fy"
+        },
+        {
+          "id": "notes.md",
+          "mediaType": "text/markdown",
+          "size": 93,
+          "digest": "zQmZdAZv5jSwEgA8j8Z3LxcJoVf4iBEXmzeMGmRCYHmRKbx"
+        }
+      ]
+    },
+    {
+      "versionId": "4-QmPipXMMtPyrLivp5WQmxeMKHh9ZnwTgoLUg7rzfqimqDx",
+      "name": "Harbor at dawn (final)",
+      "resources": [
+        {
+          "id": "artwork.png",
+          "mediaType": "image/png",
+          "size": 7028,
+          "digest": "zQmVWS99KHMC6MMho3NVCKWPSjSYZYtNAyqxRDiEjrYttyG"
+        },
+        {
+          "id": "scan.bin",
+          "mediaType": "application/octet-stream",
+          "size": 4096,
+          "digest": "zQmZ2QnLYFtJ2ezKnq76m3Fe8WpHrs3e1sNk3Z4Q27XT8fy"
+        },
+        {
+          "id": "notes.md",
+          "mediaType": "text/markdown",
+          "size": 93,
+          "digest": "zQmZdAZv5jSwEgA8j8Z3LxcJoVf4iBEXmzeMGmRCYHmRKbx"
+        },
+        {
+          "id": "extra.txt",
+          "mediaType": "text/plain",
+          "size": 54,
+          "digest": "zQmcwU9ewwoa6dcJG44ZT2RJ2ssPwf9kRUWaS14aR8Cykw1"
+        }
+      ]
+    },
+    {
+      "versionId": "5-Qmc6QPvXD8K7hCkkKs5ftvCrVox6ZgeZcQkLQx7abfSaCv",
+      "name": "Harbor at dawn (final)",
+      "resources": [
+        {
+          "id": "artwork.png",
+          "mediaType": "image/png",
+          "size": 7028,
+          "digest": "zQmVWS99KHMC6MMho3NVCKWPSjSYZYtNAyqxRDiEjrYttyG"
+        },
+        {
+          "id": "scan.bin",
+          "mediaType": "application/octet-stream",
+          "size": 4096,
+          "digest": "zQmZ2QnLYFtJ2ezKnq76m3Fe8WpHrs3e1sNk3Z4Q27XT8fy"
+        },
+        {
+          "id": "notes.md",
+          "mediaType": "text/markdown",
+          "size": 93,
+          "digest": "zQmZdAZv5jSwEgA8j8Z3LxcJoVf4iBEXmzeMGmRCYHmRKbx"
+        }
+      ]
+    }
+  ],
+  "sha256": {
+    "artwork.png@1": "0429a22619fa7960a71fdea179e6d365a2f04eb128de797f615f5a816deb7fe6",
+    "artwork.png@2": "6a8367d0f9d80512b69b7fbcb947193970b8b902705eff20201d869b1f59e173",
+    "scan.bin@1": "9ec45ab0c8505527af5931e27722ed5908748e5073169b4571c84e006eb90140",
+    "notes.md@1": "3caee78b66c79b0b8fb3b396b3d0b114b6059dafe714c6d9f2ed377e557a6b3e",
+    "notes.md@2": "a7ab9c4e2d9a3c61bc12a794959cb7bd28db1ba1064c64d0225fe006d70e3233",
+    "extra.txt@1": "d8ef016fb7dd1219570087cf0f8a274576bec6e125f15c3878cb0480ed51b098"
+  }
+}

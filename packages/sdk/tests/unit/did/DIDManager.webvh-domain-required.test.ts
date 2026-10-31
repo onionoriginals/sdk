@@ -54,7 +54,7 @@ describe('#531 — createDIDWebVH refuses to guess a domain', () => {
   // The configured webvhNetwork tier must NOT rescue an omitted domain: its
   // only surviving job is the bitcoin-network mapping (#521), never a default
   // did:webvh host.
-  test.each<WebVHNetworkName>(['pichu', 'cleffa', 'magby'])(
+  test.each<WebVHNetworkName>(['production', 'staging', 'development'])(
     'webvhNetwork=%s does not supply a default domain',
     async (webvhNetwork) => {
       const manager = new DIDManager({ ...baseConfig, webvhNetwork });
@@ -66,7 +66,7 @@ describe('#531 — createDIDWebVH refuses to guess a domain', () => {
   );
 
   test('an explicit domain still mints a did:webvh', async () => {
-    const manager = new DIDManager({ ...baseConfig, webvhNetwork: 'pichu' });
+    const manager = new DIDManager({ ...baseConfig, webvhNetwork: 'production' });
     const result = await manager.createDIDWebVH({ domain: 'example.com', paths: ['user', 'alice'] });
     expect(result.did).toMatch(/^did:webvh:/);
     expect(result.did).toContain('example.com');
@@ -172,7 +172,7 @@ describe('#531 — migrateToDIDWebVH refuses to guess a domain', () => {
     await expectDomainRequired(() => manager.migrateToDIDWebVH(sourceDoc(), '  '));
   });
 
-  test.each<WebVHNetworkName>(['pichu', 'cleffa', 'magby'])(
+  test.each<WebVHNetworkName>(['production', 'staging', 'development'])(
     'webvhNetwork=%s does not supply a default domain',
     async (webvhNetwork) => {
       const manager = new DIDManager({ ...baseConfig, webvhNetwork });
@@ -184,11 +184,11 @@ describe('#531 — migrateToDIDWebVH refuses to guess a domain', () => {
   );
 
   test('an explicit domain still migrates to did:webvh', async () => {
-    const manager = new DIDManager({ ...baseConfig, webvhNetwork: 'pichu' });
+    const manager = new DIDManager({ ...baseConfig, webvhNetwork: 'production' });
     const webDoc = (await manager.migrateToDIDWebVH(sourceDoc(), 'custom.example.com')).didDocument;
     expect(webDoc.id).toMatch(/^did:webvh:/);
     expect(webDoc.id).toContain('custom.example.com');
-    expect(webDoc.id).not.toContain('pichu.originals.build');
+    expect(webDoc.id).not.toContain('originals.build');
   }, 15000);
 
   // #764/#722: migrateToDIDWebVH already trimmed/lowercased its own domain

@@ -23,7 +23,7 @@ import { encoding, base58AddressToEd25519Multikey, createDIDOriginal, prepareDID
 import type { ExternalSigner, ExternalVerifier } from '@originals/sdk';
 import { turnkeySignBytes } from '@originals/auth';
 import { asTurnkeyApiClient, type TurnkeyBitcoinClient } from './turnkey-session';
-import { LEGACY_WEBVH_DOMAIN, webvhDomain } from './webvh-domain';
+import { CANONICAL_WEBVH_DOMAIN, webvhDomain } from './webvh-domain';
 
 /**
  * Identity failures that the panel shows by name. The old `AuthorshipKeyError`
@@ -53,10 +53,8 @@ export function didFromLog(didLog: unknown): string | null {
 // Multicodec prefix for Ed25519 public keys (0xed 0x01), per the Multikey spec.
 const ED25519_MULTICODEC = new Uint8Array([0xed, 0x01]);
 
-// The legacy did:webvh domain. New identities and aliases use the build's
-// domain, `webvhDomain()` (#976 B, G1); this one stays readable for identities
-// already minted on it.
-export const DEFAULT_WEBVH_DOMAIN = LEGACY_WEBVH_DOMAIN;
+// The canonical default; configured deployments use webvhDomain().
+export const DEFAULT_WEBVH_DOMAIN = CANONICAL_WEBVH_DOMAIN;
 
 /** Encode a raw 32-byte Ed25519 public key as a Multikey publicKeyMultibase. */
 export function ed25519PublicKeyMultibase(publicKey: Uint8Array): string {
@@ -310,15 +308,9 @@ export async function readUserWebVHDid(params: {
   return readIdentity(params.hosting, params.domain ?? webvhDomain(), userWebvhSlug(params.subOrgId));
 }
 
-/**
- * The identity published on `domain`, else one minted earlier on the legacy
- * domain. An author keeps the identity they have: a new domain never mints a
- * second one beside it (#976 B, G1).
- */
+/** Read only the configured domain. A different host is a different identity. */
 async function readIdentity(hosting: DidLogHosting, domain: string, slug: string): Promise<WebVHDidResult | null> {
-  const found = await readPublishedDid(hosting, userDidLogKey(domain, slug));
-  if (found || domain === LEGACY_WEBVH_DOMAIN) return found;
-  return readPublishedDid(hosting, userDidLogKey(LEGACY_WEBVH_DOMAIN, slug));
+  return readPublishedDid(hosting, userDidLogKey(domain, slug));
 }
 
 /** didwebvh logs are JSONL — one entry per line, not a JSON array. */

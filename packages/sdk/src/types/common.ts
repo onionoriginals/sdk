@@ -28,7 +28,7 @@ export interface OriginalsConfig {
    */
   signer?: OriginalsSigner;
   enableLogging?: boolean;
-  // WebVH network selection (defaults to 'pichu' - production)
+  // WebVH network selection (defaults to 'production' - production)
   webvhNetwork?: WebVHNetworkName;
   // Optional pluggable adapters
   storageAdapter?: StorageAdapter;

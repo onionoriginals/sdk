@@ -373,7 +373,7 @@ describe('[AUTH-022] createDIDWithTurnkey', () => {
     authKeyPublic: FIXTURE_AUTH_KEY,
     assertionKeyPublic: FIXTURE_ASSERTION_KEY,
     updateKeyPublic: FIXTURE_UPDATE_KEY,
-    domain: 'magby.originals.build',
+    domain: 'originals.build',
     slug: 'test-user',
   };
 

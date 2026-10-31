@@ -254,18 +254,18 @@ The SDK supports three WebVH network deployments with different stability levels
 
 Each WebVH network maps to a corresponding Bitcoin network for consistent environment configuration across the entire stack:
 
-- **`pichu.originals.build`** (Production)
+- **`originals.build`** (Production)
   - **Stability**: Major releases only (X.0.0)
   - **Bitcoin Network**: `mainnet`
   - **Use case**: Production applications requiring maximum stability
   - **Default**: This is the default network
 
-- **`cleffa.originals.build`** (Staging)
+- **`originals.build`** (Staging)
   - **Stability**: Minor releases (X.Y.0)
   - **Bitcoin Network**: `signet`
   - **Use case**: Pre-production testing and staging environments
 
-- **`magby.originals.build`** (Development)
+- **`originals.build`** (Development)
   - **Stability**: All patch versions (X.Y.Z)
   - **Bitcoin Network**: `regtest`
   - **Use case**: Development and experimentation with latest features
@@ -273,9 +273,9 @@ Each WebVH network maps to a corresponding Bitcoin network for consistent enviro
 ### Version Validation
 
 Each network enforces semantic versioning constraints:
-- **pichu**: Only accepts major releases (e.g., 1.0.0, 2.0.0)
-- **cleffa**: Accepts major and minor releases (e.g., 1.1.0, 2.5.0)
-- **magby**: Accepts all versions including patches (e.g., 1.2.3)
+- **production**: Only accepts major releases (e.g., 1.0.0, 2.0.0)
+- **staging**: Accepts major and minor releases (e.g., 1.1.0, 2.5.0)
+- **development**: Accepts all versions including patches (e.g., 1.2.3)
 
 ### Network Selection
 
@@ -284,24 +284,24 @@ You can select a network when configuring the SDK:
 ```typescript
 // Use production network (default)
 const sdk = OriginalsSDK.create({
-  webvhNetwork: 'pichu', // or omit for default
+  webvhNetwork: 'production', // or omit for default
 });
 
 // Use staging network
 const sdk = OriginalsSDK.create({
-  webvhNetwork: 'cleffa',
+  webvhNetwork: 'staging',
 });
 
 // Use development network
 const sdk = OriginalsSDK.create({
-  webvhNetwork: 'magby',
+  webvhNetwork: 'development',
 });
 ```
 
 When creating or migrating to did:webvh, the SDK will automatically use the configured network's domain. You can also explicitly provide a domain to override:
 
 ```typescript
-// Uses configured network domain (e.g., pichu.originals.build)
+// Uses configured network domain (e.g., originals.build)
 await sdk.did.createDIDWebVH({ paths: ['user', 'alice'] });
 
 // Explicitly override domain
@@ -314,9 +314,9 @@ await sdk.did.createDIDWebVH({
 ### Context URLs
 
 Each network has its own context URL:
-- `https://pichu.originals.build/context`
-- `https://cleffa.originals.build/context`
-- `https://magby.originals.build/context`
+- `https://originals.build/context`
+- `https://originals.build/context`
+- `https://originals.build/context`
 
 All three networks use the same context document content, but are served from their respective domains.
 
@@ -326,7 +326,7 @@ When migrating assets from `did:webvh` to `did:btco`, the SDK automatically uses
 
 ```typescript
 const sdk = OriginalsSDK.create({
-  webvhNetwork: 'magby', // Development network
+  webvhNetwork: 'development', // Development network
 });
 
 // When migrating to did:btco, automatically uses Bitcoin regtest
@@ -335,9 +335,9 @@ await sdk.did.migrateToDIDBTCO(didDoc, satoshi);
 ```
 
 The mapping ensures consistent environments:
-- **magby** (dev) → **regtest** (Bitcoin dev network)
-- **cleffa** (staging) → **signet** (Bitcoin test network)
-- **pichu** (production) → **mainnet** (Bitcoin production)
+- **development** (dev) → **regtest** (Bitcoin dev network)
+- **staging** (staging) → **signet** (Bitcoin test network)
+- **production** (production) → **mainnet** (Bitcoin production)
 
 This eliminates configuration errors and ensures that your development environment uses regtest, staging uses signet, and production uses mainnet automatically.
 
@@ -348,7 +348,7 @@ The SDK is configured via `OriginalsConfig`:
 ```typescript
 const sdk = OriginalsSDK.create({
   network: 'mainnet' | 'regtest' | 'signet', // Bitcoin network
-  webvhNetwork: 'pichu' | 'cleffa' | 'magby', // WebVH network (default: 'pichu')
+  webvhNetwork: 'production' | 'staging' | 'development', // WebVH network (default: 'production')
   defaultKeyType: 'ES256K' | 'Ed25519' | 'ES256',
   ordinalsProvider: new OrdMockProvider(), // Required for Bitcoin ops
   feeOracle?: customFeeOracle, // Optional dynamic fees

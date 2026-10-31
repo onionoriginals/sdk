@@ -1,0 +1,101 @@
+{
+  "phase": "L5-client-b",
+  "started": "2026-10-31T06:18:03.793Z",
+  "finished": "2026-10-31T06:18:04.679Z",
+  "isolation": {
+    "pid": 84298,
+    "ppid": 83978,
+    "runtime": "bun 1.2.22",
+    "execPath": "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+    "cwd": "/private/tmp/976-final-hosted/tmp/L5-client-b",
+    "home": "/private/tmp/976-final-hosted/home/L5-client-b",
+    "tmpdir": "/private/tmp/976-final-hosted/tmp/L5-client-b",
+    "envNames": [
+      "ACCEPTANCE_INPUT",
+      "ACCEPTANCE_RESULT",
+      "HOME",
+      "LANG",
+      "PATH",
+      "TMPDIR"
+    ],
+    "dirs": {
+      "custody": "/private/tmp/976-final-hosted/custody",
+      "storeA": "/private/tmp/976-final-hosted/storeA",
+      "storeB": "/private/tmp/976-final-hosted/storeB",
+      "storeC": "/private/tmp/976-final-hosted/storeC"
+    }
+  },
+  "facts": {
+    "work1": {
+      "did": "did:vh:QmY9MrnFf91eQwvLrfTCSkDb1HgERNUdywpEJiqJEb6RZ8",
+      "alias": "did:webvh:QmbrnkoMSjWC8npnB7EjXWoUyScE71sT2Ctca8q16mnm22:acceptance.example:user-sub-acceptance-0:o-QmY9MrnFf91eQwvL",
+      "checkpoint": "5-QmPYPGLmZe6o2C9ScSKRvXXBNPYDhCBr3yFGW6iryQheXB",
+      "entries": 5,
+      "resources": [
+        {
+          "id": "artwork.svg",
+          "mediaType": "image/svg+xml",
+          "sha256": "a8b476a3b181d1ac218bc50ec659a234543f4a007b6a56b304b4ee6805fb00da"
+        },
+        {
+          "id": "metadata.json",
+          "mediaType": "application/json",
+          "sha256": "7d62bc28e83493607112284afeae53746da92ae3b371cb1a323f3521a8e7eeb0"
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "id": "b3-other-client-restore",
+      "title": "another client finds the work in the account library and restores it from the host",
+      "status": "PASS",
+      "detail": {
+        "did": "did:vh:QmY9MrnFf91eQwvLrfTCSkDb1HgERNUdywpEJiqJEb6RZ8",
+        "alias": "did:webvh:QmbrnkoMSjWC8npnB7EjXWoUyScE71sT2Ctca8q16mnm22:acceptance.example:user-sub-acceptance-0:o-QmY9MrnFf91eQwvL",
+        "checkpoint": "5-QmPYPGLmZe6o2C9ScSKRvXXBNPYDhCBr3yFGW6iryQheXB",
+        "entries": 5,
+        "resources": [
+          {
+            "id": "artwork.svg",
+            "mediaType": "image/svg+xml",
+            "sha256": "a8b476a3b181d1ac218bc50ec659a234543f4a007b6a56b304b4ee6805fb00da"
+          },
+          {
+            "id": "metadata.json",
+            "mediaType": "application/json",
+            "sha256": "7d62bc28e83493607112284afeae53746da92ae3b371cb1a323f3521a8e7eeb0"
+          }
+        ]
+      }
+    },
+    {
+      "id": "b3-stale-parent",
+      "title": "client A, a revision behind, can't save on its old parent: refused, not rebased",
+      "status": "PASS",
+      "detail": {
+        "parent": "4-QmWTzpK4H5SaKHiaWAQyPoEbBBDsmhxFX9kTb2DD1AtV7y",
+        "hostHead": "5-QmPYPGLmZe6o2C9ScSKRvXXBNPYDhCBr3yFGW6iryQheXB",
+        "refusedKept": 1
+      }
+    },
+    {
+      "id": "b3-restore-no-authority",
+      "title": "restored with another key, the work can't be continued",
+      "status": "PASS",
+      "detail": {
+        "refused": "OriginalsError: the signed entry does not verify: proof by did:webvh:QmTW4GucqraSusMNWaZeuXRNwePaNQs3WXa8yjpzp89QV4:acceptance.example:user-sub-acceptance-0#key-1 does not verify"
+      }
+    }
+  ],
+  "status": "PASS",
+  "process": {
+    "command": [
+      "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+      "scripts/acceptance/hosted/l5-client-b.ts"
+    ],
+    "exit": 0,
+    "signal": null,
+    "ms": 1090
+  }
+}

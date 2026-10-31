@@ -22,7 +22,7 @@ describe('BrowserWebVHSigner — real Ed25519 did:webvh', () => {
   test('creates a valid did:webvh whose proof self-verifies for real', async () => {
     const { signer } = await makeSigner();
     const { did, didDocument, didLog } = await buildUserWebVHDid(signer, {
-      domain: 'magby.originals.build',
+      domain: 'originals.build',
       slug: 'user-abc0123456789a',
     });
     // Reaching here means createDIDOriginal ran didwebvh-ts's post-sign
@@ -57,7 +57,7 @@ describe('the DID document publishes two distinct keys', () => {
     const authorship = ed25519PublicKeyMultibase(authorshipPub);
 
     const { did, didDocument } = await buildUserWebVHDid(signer, {
-      domain: 'magby.originals.build',
+      domain: 'originals.build',
       slug: 'user-abc0123456789a',
       authorshipPublicKeyMultibase: authorship,
     });
@@ -86,7 +86,7 @@ describe('the DID document publishes two distinct keys', () => {
   test('with no authorship key there is no #key-1 to advertise', async () => {
     const { signer } = await makeSigner();
     const { didDocument } = await buildUserWebVHDid(signer, {
-      domain: 'magby.originals.build',
+      domain: 'originals.build',
       slug: 'user-abc0123456789a',
     });
     const doc = didDocument as {
@@ -194,7 +194,7 @@ describe('a signed-in author DID verifies as Originals identity evidence', () =>
     const authorship = ed.utils.randomSecretKey();
     const signer = new BrowserWebVHSigner(identity, ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(identity)));
     const built = await buildUserWebVHDid(signer, {
-      domain: 'magby.originals.build',
+      domain: 'originals.build',
       slug: 'user-regression0001',
       authorshipPublicKeyMultibase: ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(authorship)),
     });

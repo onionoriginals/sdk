@@ -23,14 +23,14 @@ describe('demoTier', () => {
     const tier = demoTier('mainnet', false);
     expect(tier.real).toBe(false);
     expect(tier.network).toBe('regtest');
-    expect(tier.webvhNetwork).toBe('magby');
+    expect(tier.webvhNetwork).toBe('development');
   });
 
   test('a signed-in visitor on a mainnet build gets the real tier', () => {
     expect(demoTier('mainnet', true)).toEqual({
       real: true,
       network: 'mainnet',
-      webvhNetwork: 'pichu'
+      webvhNetwork: 'production'
     });
   });
 
@@ -38,7 +38,7 @@ describe('demoTier', () => {
     expect(demoTier('testnet4', true)).toEqual({
       real: true,
       network: 'testnet',
-      webvhNetwork: 'cleffa'
+      webvhNetwork: 'staging'
     });
     expect(demoTier('testnet4', false).real).toBe(false);
   });
@@ -48,12 +48,12 @@ describe('demoTier', () => {
     expect(demoTier('off', true)).toEqual({
       real: false,
       network: 'regtest',
-      webvhNetwork: 'magby'
+      webvhNetwork: 'development'
     });
   });
 
   test('the webvh tier always matches the network handed to the SDK', () => {
-    const pairs: Record<string, string> = { mainnet: 'pichu', testnet: 'cleffa', regtest: 'magby' };
+    const pairs: Record<string, string> = { mainnet: 'production', testnet: 'staging', regtest: 'development' };
     for (const flag of ['mainnet', 'testnet4', 'regtest', 'off'] as const) {
       for (const authed of [true, false]) {
         const tier = demoTier(flag, authed);
@@ -90,7 +90,7 @@ describe('smokeAutoRunAllowed', () => {
 });
 
 test('signed-in regtest is a real local provider on the regtest SDK tier', () => {
-  expect(demoTier('regtest', true)).toEqual({ real: true, network: 'regtest', webvhNetwork: 'magby' });
+  expect(demoTier('regtest', true)).toEqual({ real: true, network: 'regtest', webvhNetwork: 'development' });
   expect(demoTier('regtest', false).real).toBe(false);
   expect(smokeAutoRunAllowed('regtest')).toBe(false);
 });

@@ -1,0 +1,1462 @@
+{
+  "receipt": "originals-hosted-acceptance/1",
+  "scope": "onionoriginals/sdk#976 section B (hosted feature enablement). Not Bitcoin.",
+  "target": "local",
+  "createdAt": "2026-10-31T06:18:05.095Z",
+  "status": "DRY-RUN-PASS",
+  "source": {
+    "sha": "cfa29326bcd9c7e2a4ace1d31b6915c1ff229d34",
+    "branch": "t3/issue-976-prove-the-originals-local-web-release",
+    "dirty": false,
+    "dirtyFiles": []
+  },
+  "deployed": null,
+  "packages": {
+    "@originals/sdk": "5.1.0",
+    "@originals/vh": "0.3.0",
+    "@originals/auth": "4.0.2",
+    "@originals/host": "0.2.0",
+    "@originals/landing": "0.4.0"
+  },
+  "runtimes": {
+    "node": "v26.13.0",
+    "bun": "1.2.22",
+    "platform": "darwin-arm64"
+  },
+  "profile": {
+    "protocol": "originals:1.0 (PROVISIONAL method value)",
+    "cryptosuite": "eddsa-jcs-2022",
+    "witnesses": "none (Q14)",
+    "ordering": "claimed (unanchored)",
+    "freshness": "never current unanchored (P7.10)"
+  },
+  "signerMode": "dry run: Ed25519 keys from a custody file standing in for Turnkey, in the app's two roles",
+  "author": {
+    "did": "did:webvh:QmTW4GucqraSusMNWaZeuXRNwePaNQs3WXa8yjpzp89QV4:acceptance.example:user-sub-acceptance-0",
+    "versionId": "1-QmVTMYiCHh7hJkCiwLqnpeuRdQHhGWTEvsrtymeELd7ygo",
+    "logUrl": "https://acceptance.example/user-sub-acceptance-0/did.jsonl",
+    "didDomain": {
+      "expected": "acceptance.example",
+      "actual": "acceptance.example",
+      "status": "PASS"
+    },
+    "roles": {
+      "identity": {
+        "verificationMethod": "#key-0",
+        "didKey": "did:key:z6Mkib9D1N5JWhncQpMte3qM6zKEeULgboERtKL1A6sJM2Wz",
+        "authorUpdateKey": true,
+        "controlsAlias": true
+      },
+      "authorship": {
+        "verificationMethod": "#key-1",
+        "didKey": "did:key:z6Mkg1rSHmtt9numcuiaotCFmWAmmH1J3a7WSAFNZRfSuQ39",
+        "assertionMethod": true,
+        "updateKey": false
+      }
+    }
+  },
+  "originals": [
+    {
+      "case": "B1-B3",
+      "did": "did:vh:QmY9MrnFf91eQwvLrfTCSkDb1HgERNUdywpEJiqJEb6RZ8",
+      "alias": "did:webvh:QmbrnkoMSjWC8npnB7EjXWoUyScE71sT2Ctca8q16mnm22:acceptance.example:user-sub-acceptance-0:o-QmY9MrnFf91eQwvL",
+      "checkpoint": "5-QmPYPGLmZe6o2C9ScSKRvXXBNPYDhCBr3yFGW6iryQheXB",
+      "entries": 5,
+      "resources": [
+        {
+          "id": "artwork.svg",
+          "mediaType": "image/svg+xml",
+          "sha256": "a8b476a3b181d1ac218bc50ec659a234543f4a007b6a56b304b4ee6805fb00da"
+        },
+        {
+          "id": "metadata.json",
+          "mediaType": "application/json",
+          "sha256": "7d62bc28e83493607112284afeae53746da92ae3b371cb1a323f3521a8e7eeb0"
+        }
+      ]
+    },
+    {
+      "case": "B4",
+      "did": "did:vh:Qmbp4PoZcMKGJHTuvTRkY68b9QZYq5GKQVgQqowFVxsw1i",
+      "alias": "did:webvh:QmQTiDJyw7nX7xrnekxMjXJw8oiMfxBVEiGcgnBMYDoGFh:acceptance.example:user-sub-acceptance-0:o-Qmbp4PoZcMKGJHTu",
+      "checkpoint": "2-QmSjQsa4VxsaNTzBJaJ6o3zXHezHohxxMKz1HxrFyq8aoY",
+      "entries": 2,
+      "resources": [
+        {
+          "id": "artwork.svg",
+          "mediaType": "image/svg+xml",
+          "sha256": "a6bef4b94a44eb2c639b0f25514a97afee31af8c94695f14b468e060cf88a94e"
+        },
+        {
+          "id": "metadata.json",
+          "mediaType": "application/json",
+          "sha256": "527fadcd0a82e5fd31cceb752ba00997064502c8236c883e5f0bc65756a4036f"
+        }
+      ]
+    },
+    {
+      "case": "B4",
+      "did": "did:vh:QmVo3VCLMjprc5d7ZYeptpZG69zKF4wfDv2Saiis9XJSyC",
+      "alias": "did:webvh:QmZjMikYmyu28GyP6G5NKkP32eHjtZokZqcnd7HvEA9ME2:acceptance.example:user-sub-acceptance-0:o-QmVo3VCLMjprc5d7",
+      "checkpoint": "2-QmdhcWKqcdR5h8Pz89TypwZjBEJQYZTA68dN9J8gj8ZXDT",
+      "entries": 2,
+      "resources": [
+        {
+          "id": "artwork.svg",
+          "mediaType": "image/svg+xml",
+          "sha256": "c56a7f1fdc1171c18085cb5753a85a16dd9cd27cdf83d09cd1c223f2fdf8770f"
+        },
+        {
+          "id": "metadata.json",
+          "mediaType": "application/json",
+          "sha256": "3500ac1f78909f86d9d4b2cfb57c291f97f291f540a218c1b8e72d7494a5066d"
+        }
+      ]
+    }
+  ],
+  "isolation": {
+    "phases": [
+      {
+        "phase": "L0-identity",
+        "pid": 84129,
+        "runtime": "bun 1.2.22",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR"
+        ],
+        "dirs": {
+          "custody": "/private/tmp/976-final-hosted/custody"
+        }
+      },
+      {
+        "phase": "L1-client-a",
+        "pid": 84143,
+        "runtime": "bun 1.2.22",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR"
+        ],
+        "dirs": {
+          "custody": "/private/tmp/976-final-hosted/custody",
+          "storeA": "/private/tmp/976-final-hosted/storeA"
+        }
+      },
+      {
+        "phase": "L2-reader",
+        "pid": 84202,
+        "runtime": "node v26.13.0",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR",
+          "__CF_USER_TEXT_ENCODING"
+        ]
+      },
+      {
+        "phase": "L3-client-a-restart",
+        "pid": 84261,
+        "runtime": "bun 1.2.22",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR"
+        ],
+        "dirs": {
+          "custody": "/private/tmp/976-final-hosted/custody",
+          "storeA": "/private/tmp/976-final-hosted/storeA"
+        }
+      },
+      {
+        "phase": "L4-reader",
+        "pid": 84296,
+        "runtime": "node v26.13.0",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR",
+          "__CF_USER_TEXT_ENCODING"
+        ]
+      },
+      {
+        "phase": "L5-client-b",
+        "pid": 84298,
+        "runtime": "bun 1.2.22",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR"
+        ],
+        "dirs": {
+          "custody": "/private/tmp/976-final-hosted/custody",
+          "storeA": "/private/tmp/976-final-hosted/storeA",
+          "storeB": "/private/tmp/976-final-hosted/storeB",
+          "storeC": "/private/tmp/976-final-hosted/storeC"
+        }
+      },
+      {
+        "phase": "L6-reader",
+        "pid": 84299,
+        "runtime": "node v26.13.0",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR",
+          "__CF_USER_TEXT_ENCODING"
+        ]
+      },
+      {
+        "phase": "L7-signed-out",
+        "pid": 84300,
+        "runtime": "bun 1.2.22",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR"
+        ],
+        "dirs": {}
+      }
+    ],
+    "runDir": "/private/tmp/976-final-hosted"
+  },
+  "preflight": [
+    {
+      "id": "built",
+      "title": "built package entry points exist (run `bun run build`)",
+      "status": "PASS",
+      "detail": {
+        "missing": []
+      }
+    },
+    {
+      "id": "b6-source-off",
+      "title": "resolveFeatures({}) and resolveFeatures(<production env>) leave hostedPublication off, with or without the switch; production config doesn't set it",
+      "status": "PASS",
+      "detail": {
+        "file": "apps/landing/src/sdk/features.ts",
+        "resolved": {
+          "empty": false,
+          "production": false,
+          "productionWithSwitch": false
+        }
+      }
+    }
+  ],
+  "gates": {
+    "B1-turnkey-create-revise-publish": "NOT-RUN",
+    "B2-signed-out-reader": "NOT-RUN",
+    "B3-restore-continue": "NOT-RUN",
+    "B4-interrupted-publication": "NOT-RUN",
+    "B5-signed-out-guest": "NOT-RUN",
+    "B6-flag-off": "NOT-RUN"
+  },
+  "dryRun": {
+    "B1-turnkey-create-revise-publish": "PASS",
+    "B2-signed-out-reader": "PASS",
+    "B3-restore-continue": "PASS",
+    "B4-interrupted-publication": "PASS",
+    "B5-signed-out-guest": "PASS",
+    "B6-flag-off": "PASS"
+  },
+  "phases": [
+    {
+      "phase": "L0-identity",
+      "started": "2026-10-31T06:18:01.116Z",
+      "finished": "2026-10-31T06:18:01.233Z",
+      "isolation": {
+        "pid": 84129,
+        "ppid": 83978,
+        "runtime": "bun 1.2.22",
+        "execPath": "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+        "cwd": "/private/tmp/976-final-hosted/tmp/L0-identity",
+        "home": "/private/tmp/976-final-hosted/home/L0-identity",
+        "tmpdir": "/private/tmp/976-final-hosted/tmp/L0-identity",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR"
+        ],
+        "dirs": {
+          "custody": "/private/tmp/976-final-hosted/custody"
+        }
+      },
+      "facts": {
+        "author": {
+          "did": "did:webvh:QmTW4GucqraSusMNWaZeuXRNwePaNQs3WXa8yjpzp89QV4:acceptance.example:user-sub-acceptance-0",
+          "versionId": "1-QmVTMYiCHh7hJkCiwLqnpeuRdQHhGWTEvsrtymeELd7ygo",
+          "logUrl": "https://acceptance.example/user-sub-acceptance-0/did.jsonl",
+          "didDomain": {
+            "expected": "acceptance.example",
+            "actual": "acceptance.example",
+            "status": "PASS"
+          }
+        }
+      },
+      "checks": [
+        {
+          "id": "author-identity",
+          "title": "the author's did:webvh is built with the landing's builder and published to the account's namespace",
+          "status": "PASS",
+          "detail": {
+            "did": "did:webvh:QmTW4GucqraSusMNWaZeuXRNwePaNQs3WXa8yjpzp89QV4:acceptance.example:user-sub-acceptance-0",
+            "versionId": "1-QmVTMYiCHh7hJkCiwLqnpeuRdQHhGWTEvsrtymeELd7ygo",
+            "logUrl": "https://acceptance.example/user-sub-acceptance-0/did.jsonl"
+          }
+        },
+        {
+          "id": "author-did-domain",
+          "title": "the author's identity DID is on this instance's did:webvh domain",
+          "status": "PASS",
+          "detail": {
+            "expected": "acceptance.example",
+            "actual": "acceptance.example",
+            "status": "PASS"
+          }
+        }
+      ],
+      "status": "PASS",
+      "process": {
+        "command": [
+          "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+          "scripts/acceptance/hosted/l0-identity.ts"
+        ],
+        "exit": 0,
+        "signal": null,
+        "ms": 460
+      }
+    },
+    {
+      "phase": "L1-client-a",
+      "started": "2026-10-31T06:18:01.466Z",
+      "finished": "2026-10-31T06:18:02.053Z",
+      "isolation": {
+        "pid": 84143,
+        "ppid": 83978,
+        "runtime": "bun 1.2.22",
+        "execPath": "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+        "cwd": "/private/tmp/976-final-hosted/tmp/L1-client-a",
+        "home": "/private/tmp/976-final-hosted/home/L1-client-a",
+        "tmpdir": "/private/tmp/976-final-hosted/tmp/L1-client-a",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR"
+        ],
+        "dirs": {
+          "custody": "/private/tmp/976-final-hosted/custody",
+          "storeA": "/private/tmp/976-final-hosted/storeA"
+        }
+      },
+      "facts": {
+        "work1": {
+          "did": "did:vh:QmY9MrnFf91eQwvLrfTCSkDb1HgERNUdywpEJiqJEb6RZ8",
+          "alias": "did:webvh:QmbrnkoMSjWC8npnB7EjXWoUyScE71sT2Ctca8q16mnm22:acceptance.example:user-sub-acceptance-0:o-QmY9MrnFf91eQwvL",
+          "checkpoint": "3-QmPyudXXRuKAABmbTzhPw5dyEdmpdVtnr8LUJ66Lciodyo",
+          "entries": 3,
+          "resources": [
+            {
+              "id": "artwork.svg",
+              "mediaType": "image/svg+xml",
+              "sha256": "03f5cec4a8606b781aafad35ce38690026655c33f4208b1d3325acd5a48201f9"
+            },
+            {
+              "id": "metadata.json",
+              "mediaType": "application/json",
+              "sha256": "47297db213e7765e5ff6fb448499329f463037aef40562ab382e3440611fb1d7"
+            }
+          ]
+        },
+        "roles": {
+          "identity": {
+            "verificationMethod": "#key-0",
+            "didKey": "did:key:z6Mkib9D1N5JWhncQpMte3qM6zKEeULgboERtKL1A6sJM2Wz",
+            "authorUpdateKey": true,
+            "controlsAlias": true
+          },
+          "authorship": {
+            "verificationMethod": "#key-1",
+            "didKey": "did:key:z6Mkg1rSHmtt9numcuiaotCFmWAmmH1J3a7WSAFNZRfSuQ39",
+            "assertionMethod": true,
+            "updateKey": false
+          }
+        },
+        "work2": {
+          "did": "did:vh:Qmbp4PoZcMKGJHTuvTRkY68b9QZYq5GKQVgQqowFVxsw1i",
+          "alias": "did:webvh:QmQTiDJyw7nX7xrnekxMjXJw8oiMfxBVEiGcgnBMYDoGFh:acceptance.example:user-sub-acceptance-0:o-Qmbp4PoZcMKGJHTu",
+          "checkpoint": "2-QmSjQsa4VxsaNTzBJaJ6o3zXHezHohxxMKz1HxrFyq8aoY",
+          "entries": 2,
+          "resources": [
+            {
+              "id": "artwork.svg",
+              "mediaType": "image/svg+xml",
+              "sha256": "a6bef4b94a44eb2c639b0f25514a97afee31af8c94695f14b468e060cf88a94e"
+            },
+            {
+              "id": "metadata.json",
+              "mediaType": "application/json",
+              "sha256": "527fadcd0a82e5fd31cceb752ba00997064502c8236c883e5f0bc65756a4036f"
+            }
+          ]
+        },
+        "work3": {
+          "did": "did:vh:QmVo3VCLMjprc5d7ZYeptpZG69zKF4wfDv2Saiis9XJSyC",
+          "alias": "did:webvh:QmZjMikYmyu28GyP6G5NKkP32eHjtZokZqcnd7HvEA9ME2:acceptance.example:user-sub-acceptance-0:o-QmVo3VCLMjprc5d7",
+          "checkpoint": "2-QmdhcWKqcdR5h8Pz89TypwZjBEJQYZTA68dN9J8gj8ZXDT",
+          "entries": 2,
+          "resources": [
+            {
+              "id": "artwork.svg",
+              "mediaType": "image/svg+xml",
+              "sha256": "c56a7f1fdc1171c18085cb5753a85a16dd9cd27cdf83d09cd1c223f2fdf8770f"
+            },
+            {
+              "id": "metadata.json",
+              "mediaType": "application/json",
+              "sha256": "3500ac1f78909f86d9d4b2cfb57c291f97f291f540a218c1b8e72d7494a5066d"
+            }
+          ]
+        }
+      },
+      "checks": [
+        {
+          "id": "b1-create-revise",
+          "title": "a work is created and revised by the author's #key-1",
+          "status": "PASS",
+          "detail": {
+            "did": "did:vh:QmY9MrnFf91eQwvLrfTCSkDb1HgERNUdywpEJiqJEb6RZ8",
+            "versions": [
+              "1-QmYfxZEnNUrrQcpCvDTTfzr2w1kR373YihG9MgJXAhwgSL",
+              "2-QmegfRSfdfy4UJdYwx3JTtM5GMwaVzb5TN34gFFFhbdfP5"
+            ]
+          }
+        },
+        {
+          "id": "b1-publish",
+          "title": "publishing completes only once a stranger verifies the snapshot",
+          "status": "PASS",
+          "detail": {
+            "did": "did:vh:QmY9MrnFf91eQwvLrfTCSkDb1HgERNUdywpEJiqJEb6RZ8",
+            "alias": "did:webvh:QmbrnkoMSjWC8npnB7EjXWoUyScE71sT2Ctca8q16mnm22:acceptance.example:user-sub-acceptance-0:o-QmY9MrnFf91eQwvL",
+            "checkpoint": "3-QmPyudXXRuKAABmbTzhPw5dyEdmpdVtnr8LUJ66Lciodyo",
+            "entries": 3,
+            "resources": [
+              {
+                "id": "artwork.svg",
+                "mediaType": "image/svg+xml",
+                "sha256": "03f5cec4a8606b781aafad35ce38690026655c33f4208b1d3325acd5a48201f9"
+              },
+              {
+                "id": "metadata.json",
+                "mediaType": "application/json",
+                "sha256": "47297db213e7765e5ff6fb448499329f463037aef40562ab382e3440611fb1d7"
+              }
+            ]
+          }
+        },
+        {
+          "id": "b1-key-roles",
+          "title": "the hosted logs show separate identity (alias control) and authorship roles",
+          "status": "PASS",
+          "detail": {
+            "identity": {
+              "verificationMethod": "#key-0",
+              "didKey": "did:key:z6Mkib9D1N5JWhncQpMte3qM6zKEeULgboERtKL1A6sJM2Wz",
+              "authorUpdateKey": true,
+              "controlsAlias": true
+            },
+            "authorship": {
+              "verificationMethod": "#key-1",
+              "didKey": "did:key:z6Mkg1rSHmtt9numcuiaotCFmWAmmH1J3a7WSAFNZRfSuQ39",
+              "assertionMethod": true,
+              "updateKey": false
+            }
+          }
+        },
+        {
+          "id": "b4-interrupt-work2",
+          "title": "publication interrupted after the publish entry, before any upload",
+          "status": "PASS",
+          "detail": {
+            "did": "did:vh:Qmbp4PoZcMKGJHTuvTRkY68b9QZYq5GKQVgQqowFVxsw1i",
+            "alias": "did:webvh:QmQTiDJyw7nX7xrnekxMjXJw8oiMfxBVEiGcgnBMYDoGFh:acceptance.example:user-sub-acceptance-0:o-Qmbp4PoZcMKGJHTu",
+            "checkpoint": "2-QmSjQsa4VxsaNTzBJaJ6o3zXHezHohxxMKz1HxrFyq8aoY",
+            "entries": 2,
+            "resources": [
+              {
+                "id": "artwork.svg",
+                "mediaType": "image/svg+xml",
+                "sha256": "a6bef4b94a44eb2c639b0f25514a97afee31af8c94695f14b468e060cf88a94e"
+              },
+              {
+                "id": "metadata.json",
+                "mediaType": "application/json",
+                "sha256": "527fadcd0a82e5fd31cceb752ba00997064502c8236c883e5f0bc65756a4036f"
+              }
+            ]
+          }
+        },
+        {
+          "id": "b4-interrupt-work3",
+          "title": "publication interrupted during the resource uploads",
+          "status": "PASS",
+          "detail": {
+            "did": "did:vh:QmVo3VCLMjprc5d7ZYeptpZG69zKF4wfDv2Saiis9XJSyC",
+            "alias": "did:webvh:QmZjMikYmyu28GyP6G5NKkP32eHjtZokZqcnd7HvEA9ME2:acceptance.example:user-sub-acceptance-0:o-QmVo3VCLMjprc5d7",
+            "checkpoint": "2-QmdhcWKqcdR5h8Pz89TypwZjBEJQYZTA68dN9J8gj8ZXDT",
+            "entries": 2,
+            "resources": [
+              {
+                "id": "artwork.svg",
+                "mediaType": "image/svg+xml",
+                "sha256": "c56a7f1fdc1171c18085cb5753a85a16dd9cd27cdf83d09cd1c223f2fdf8770f"
+              },
+              {
+                "id": "metadata.json",
+                "mediaType": "application/json",
+                "sha256": "3500ac1f78909f86d9d4b2cfb57c291f97f291f540a218c1b8e72d7494a5066d"
+              }
+            ]
+          }
+        }
+      ],
+      "status": "PASS",
+      "process": {
+        "command": [
+          "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+          "scripts/acceptance/hosted/l1-client-a.ts"
+        ],
+        "exit": 0,
+        "signal": null,
+        "ms": 814
+      }
+    },
+    {
+      "phase": "L2-reader",
+      "started": "2026-10-31T06:18:02.142Z",
+      "finished": "2026-10-31T06:18:02.268Z",
+      "isolation": {
+        "pid": 84202,
+        "ppid": 83978,
+        "runtime": "node v26.13.0",
+        "execPath": "/Users/brian/.local/share/vite-plus/js_runtime/node/26.13.0/bin/node",
+        "cwd": "/private/tmp/976-final-hosted/tmp/L2-reader",
+        "home": "/private/tmp/976-final-hosted/home/L2-reader",
+        "tmpdir": "/private/tmp/976-final-hosted/tmp/L2-reader",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR",
+          "__CF_USER_TEXT_ENCODING"
+        ]
+      },
+      "facts": {},
+      "checks": [
+        {
+          "id": "no-authority",
+          "title": "the reader has no key, store, cookie or author directory",
+          "status": "PASS",
+          "detail": {
+            "envNames": [
+              "ACCEPTANCE_INPUT",
+              "ACCEPTANCE_RESULT",
+              "HOME",
+              "LANG",
+              "PATH",
+              "TMPDIR",
+              "__CF_USER_TEXT_ENCODING"
+            ]
+          }
+        },
+        {
+          "id": "work1-complete",
+          "title": "work1: a stranger verifies the complete snapshot",
+          "status": "PASS",
+          "detail": {
+            "verified": true,
+            "checkpoint": "3-QmPyudXXRuKAABmbTzhPw5dyEdmpdVtnr8LUJ66Lciodyo",
+            "head": "3-QmPyudXXRuKAABmbTzhPw5dyEdmpdVtnr8LUJ66Lciodyo",
+            "alias": "confirmed",
+            "resources": "available",
+            "current": false,
+            "reasons": [
+              "not-anchored"
+            ],
+            "freshness": {
+              "asset": "not-established",
+              "identity": "not-established",
+              "validAsOf": {
+                "checkpoint": "3-QmPyudXXRuKAABmbTzhPw5dyEdmpdVtnr8LUJ66Lciodyo",
+                "signers": [
+                  {
+                    "did": "did:webvh:QmTW4GucqraSusMNWaZeuXRNwePaNQs3WXa8yjpzp89QV4:acceptance.example:user-sub-acceptance-0",
+                    "role": "author",
+                    "versionId": "1-QmVTMYiCHh7hJkCiwLqnpeuRdQHhGWTEvsrtymeELd7ygo",
+                    "obtainedAt": "2026-10-31T06:18:02.158Z",
+                    "source": "host",
+                    "location": null
+                  }
+                ]
+              }
+            },
+            "ordering": "claimed",
+            "digests": [
+              {
+                "resource": "artwork.svg",
+                "version": 1,
+                "sha256": "1c7e1c740158039636aa1c8970d273053477901adc1d81771074796794126014"
+              },
+              {
+                "resource": "metadata.json",
+                "version": 1,
+                "sha256": "8658b2fdfb1865fde9ac12041313a483fae414145885ce1db63e3c9b6f9f8ffe"
+              },
+              {
+                "resource": "artwork.svg",
+                "version": 2,
+                "sha256": "03f5cec4a8606b781aafad35ce38690026655c33f4208b1d3325acd5a48201f9"
+              },
+              {
+                "resource": "metadata.json",
+                "version": 2,
+                "sha256": "47297db213e7765e5ff6fb448499329f463037aef40562ab382e3440611fb1d7"
+              }
+            ]
+          }
+        },
+        {
+          "id": "work2-incomplete",
+          "title": "work2: a stranger can't verify a complete snapshot",
+          "status": "PASS",
+          "detail": {
+            "complete": false,
+            "error": "FETCH_STATUS: https://acceptance.example/user-sub-acceptance-0/o-Qmbp4PoZcMKGJHTu/did.jsonl answered 404",
+            "facts": null
+          }
+        },
+        {
+          "id": "work3-incomplete",
+          "title": "work3: a stranger can't verify a complete snapshot",
+          "status": "PASS",
+          "detail": {
+            "complete": false,
+            "error": null,
+            "facts": {
+              "verified": true,
+              "checkpoint": "2-QmdhcWKqcdR5h8Pz89TypwZjBEJQYZTA68dN9J8gj8ZXDT",
+              "head": "2-QmdhcWKqcdR5h8Pz89TypwZjBEJQYZTA68dN9J8gj8ZXDT",
+              "alias": "confirmed",
+              "resources": "partial",
+              "current": false,
+              "reasons": [
+                "not-anchored"
+              ],
+              "freshness": {
+                "asset": "not-established",
+                "identity": "not-established",
+                "validAsOf": {
+                  "checkpoint": "2-QmdhcWKqcdR5h8Pz89TypwZjBEJQYZTA68dN9J8gj8ZXDT",
+                  "signers": [
+                    {
+                      "did": "did:webvh:QmTW4GucqraSusMNWaZeuXRNwePaNQs3WXa8yjpzp89QV4:acceptance.example:user-sub-acceptance-0",
+                      "role": "author",
+                      "versionId": "1-QmVTMYiCHh7hJkCiwLqnpeuRdQHhGWTEvsrtymeELd7ygo",
+                      "obtainedAt": "2026-10-31T06:18:02.236Z",
+                      "source": "host",
+                      "location": null
+                    }
+                  ]
+                }
+              },
+              "ordering": "claimed"
+            }
+          }
+        },
+        {
+          "id": "no-cookies",
+          "title": "the reader sent no cookie and received none",
+          "status": "PASS",
+          "detail": {
+            "cookies": 0,
+            "setCookies": 0
+          }
+        }
+      ],
+      "status": "PASS",
+      "process": {
+        "command": [
+          "/Users/brian/.local/share/vite-plus/js_runtime/node/26.13.0/bin/node",
+          "scripts/acceptance/hosted/reader.mjs"
+        ],
+        "exit": 0,
+        "signal": null,
+        "ms": 237
+      }
+    },
+    {
+      "phase": "L3-client-a-restart",
+      "started": "2026-10-31T06:18:02.598Z",
+      "finished": "2026-10-31T06:18:03.421Z",
+      "isolation": {
+        "pid": 84261,
+        "ppid": 83978,
+        "runtime": "bun 1.2.22",
+        "execPath": "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+        "cwd": "/private/tmp/976-final-hosted/tmp/L3-client-a-restart",
+        "home": "/private/tmp/976-final-hosted/home/L3-client-a-restart",
+        "tmpdir": "/private/tmp/976-final-hosted/tmp/L3-client-a-restart",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR"
+        ],
+        "dirs": {
+          "custody": "/private/tmp/976-final-hosted/custody",
+          "storeA": "/private/tmp/976-final-hosted/storeA"
+        }
+      },
+      "facts": {
+        "work1": {
+          "did": "did:vh:QmY9MrnFf91eQwvLrfTCSkDb1HgERNUdywpEJiqJEb6RZ8",
+          "alias": "did:webvh:QmbrnkoMSjWC8npnB7EjXWoUyScE71sT2Ctca8q16mnm22:acceptance.example:user-sub-acceptance-0:o-QmY9MrnFf91eQwvL",
+          "checkpoint": "4-QmWTzpK4H5SaKHiaWAQyPoEbBBDsmhxFX9kTb2DD1AtV7y",
+          "entries": 4,
+          "resources": [
+            {
+              "id": "artwork.svg",
+              "mediaType": "image/svg+xml",
+              "sha256": "efbab3d13676f43fc33823551abb5ebe5fff8dc6f832f9c26e4c29037bd006a7"
+            },
+            {
+              "id": "metadata.json",
+              "mediaType": "application/json",
+              "sha256": "f99d09558a87605e37568a1ac95098435198789e59de0f914820fae945d381fa"
+            }
+          ]
+        },
+        "work2": {
+          "did": "did:vh:Qmbp4PoZcMKGJHTuvTRkY68b9QZYq5GKQVgQqowFVxsw1i",
+          "alias": "did:webvh:QmQTiDJyw7nX7xrnekxMjXJw8oiMfxBVEiGcgnBMYDoGFh:acceptance.example:user-sub-acceptance-0:o-Qmbp4PoZcMKGJHTu",
+          "checkpoint": "2-QmSjQsa4VxsaNTzBJaJ6o3zXHezHohxxMKz1HxrFyq8aoY",
+          "entries": 2,
+          "resources": [
+            {
+              "id": "artwork.svg",
+              "mediaType": "image/svg+xml",
+              "sha256": "a6bef4b94a44eb2c639b0f25514a97afee31af8c94695f14b468e060cf88a94e"
+            },
+            {
+              "id": "metadata.json",
+              "mediaType": "application/json",
+              "sha256": "527fadcd0a82e5fd31cceb752ba00997064502c8236c883e5f0bc65756a4036f"
+            }
+          ]
+        },
+        "work3": {
+          "did": "did:vh:QmVo3VCLMjprc5d7ZYeptpZG69zKF4wfDv2Saiis9XJSyC",
+          "alias": "did:webvh:QmZjMikYmyu28GyP6G5NKkP32eHjtZokZqcnd7HvEA9ME2:acceptance.example:user-sub-acceptance-0:o-QmVo3VCLMjprc5d7",
+          "checkpoint": "2-QmdhcWKqcdR5h8Pz89TypwZjBEJQYZTA68dN9J8gj8ZXDT",
+          "entries": 2,
+          "resources": [
+            {
+              "id": "artwork.svg",
+              "mediaType": "image/svg+xml",
+              "sha256": "c56a7f1fdc1171c18085cb5753a85a16dd9cd27cdf83d09cd1c223f2fdf8770f"
+            },
+            {
+              "id": "metadata.json",
+              "mediaType": "application/json",
+              "sha256": "3500ac1f78909f86d9d4b2cfb57c291f97f291f540a218c1b8e72d7494a5066d"
+            }
+          ]
+        }
+      },
+      "checks": [
+        {
+          "id": "b3-listed",
+          "title": "after the restart this browser's store holds all three works",
+          "status": "PASS",
+          "detail": [
+            "did:vh:QmVo3VCLMjprc5d7ZYeptpZG69zKF4wfDv2Saiis9XJSyC",
+            "did:vh:QmY9MrnFf91eQwvLrfTCSkDb1HgERNUdywpEJiqJEb6RZ8",
+            "did:vh:Qmbp4PoZcMKGJHTuvTRkY68b9QZYq5GKQVgQqowFVxsw1i"
+          ]
+        },
+        {
+          "id": "b3-reopen-continue",
+          "title": "the published work reopens at its checkpoint and the next revision goes through the host",
+          "status": "PASS",
+          "detail": {
+            "did": "did:vh:QmY9MrnFf91eQwvLrfTCSkDb1HgERNUdywpEJiqJEb6RZ8",
+            "alias": "did:webvh:QmbrnkoMSjWC8npnB7EjXWoUyScE71sT2Ctca8q16mnm22:acceptance.example:user-sub-acceptance-0:o-QmY9MrnFf91eQwvL",
+            "checkpoint": "4-QmWTzpK4H5SaKHiaWAQyPoEbBBDsmhxFX9kTb2DD1AtV7y",
+            "entries": 4,
+            "resources": [
+              {
+                "id": "artwork.svg",
+                "mediaType": "image/svg+xml",
+                "sha256": "efbab3d13676f43fc33823551abb5ebe5fff8dc6f832f9c26e4c29037bd006a7"
+              },
+              {
+                "id": "metadata.json",
+                "mediaType": "application/json",
+                "sha256": "f99d09558a87605e37568a1ac95098435198789e59de0f914820fae945d381fa"
+              }
+            ]
+          }
+        },
+        {
+          "id": "b4-resume-work2",
+          "title": "work2: the interrupted publication resumes with the same alias and checkpoint and one publish entry",
+          "status": "PASS",
+          "detail": {
+            "did": "did:vh:Qmbp4PoZcMKGJHTuvTRkY68b9QZYq5GKQVgQqowFVxsw1i",
+            "alias": "did:webvh:QmQTiDJyw7nX7xrnekxMjXJw8oiMfxBVEiGcgnBMYDoGFh:acceptance.example:user-sub-acceptance-0:o-Qmbp4PoZcMKGJHTu",
+            "checkpoint": "2-QmSjQsa4VxsaNTzBJaJ6o3zXHezHohxxMKz1HxrFyq8aoY",
+            "entries": 2,
+            "resources": [
+              {
+                "id": "artwork.svg",
+                "mediaType": "image/svg+xml",
+                "sha256": "a6bef4b94a44eb2c639b0f25514a97afee31af8c94695f14b468e060cf88a94e"
+              },
+              {
+                "id": "metadata.json",
+                "mediaType": "application/json",
+                "sha256": "527fadcd0a82e5fd31cceb752ba00997064502c8236c883e5f0bc65756a4036f"
+              }
+            ]
+          }
+        },
+        {
+          "id": "b4-resume-work3",
+          "title": "work3: the interrupted publication resumes with the same alias and checkpoint and one publish entry",
+          "status": "PASS",
+          "detail": {
+            "did": "did:vh:QmVo3VCLMjprc5d7ZYeptpZG69zKF4wfDv2Saiis9XJSyC",
+            "alias": "did:webvh:QmZjMikYmyu28GyP6G5NKkP32eHjtZokZqcnd7HvEA9ME2:acceptance.example:user-sub-acceptance-0:o-QmVo3VCLMjprc5d7",
+            "checkpoint": "2-QmdhcWKqcdR5h8Pz89TypwZjBEJQYZTA68dN9J8gj8ZXDT",
+            "entries": 2,
+            "resources": [
+              {
+                "id": "artwork.svg",
+                "mediaType": "image/svg+xml",
+                "sha256": "c56a7f1fdc1171c18085cb5753a85a16dd9cd27cdf83d09cd1c223f2fdf8770f"
+              },
+              {
+                "id": "metadata.json",
+                "mediaType": "application/json",
+                "sha256": "3500ac1f78909f86d9d4b2cfb57c291f97f291f540a218c1b8e72d7494a5066d"
+              }
+            ]
+          }
+        }
+      ],
+      "status": "PASS",
+      "process": {
+        "command": [
+          "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+          "scripts/acceptance/hosted/l3-client-a-restart.ts"
+        ],
+        "exit": 0,
+        "signal": null,
+        "ms": 1130
+      }
+    },
+    {
+      "phase": "L4-reader",
+      "started": "2026-10-31T06:18:03.512Z",
+      "finished": "2026-10-31T06:18:03.588Z",
+      "isolation": {
+        "pid": 84296,
+        "ppid": 83978,
+        "runtime": "node v26.13.0",
+        "execPath": "/Users/brian/.local/share/vite-plus/js_runtime/node/26.13.0/bin/node",
+        "cwd": "/private/tmp/976-final-hosted/tmp/L4-reader",
+        "home": "/private/tmp/976-final-hosted/home/L4-reader",
+        "tmpdir": "/private/tmp/976-final-hosted/tmp/L4-reader",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR",
+          "__CF_USER_TEXT_ENCODING"
+        ]
+      },
+      "facts": {},
+      "checks": [
+        {
+          "id": "no-authority",
+          "title": "the reader has no key, store, cookie or author directory",
+          "status": "PASS",
+          "detail": {
+            "envNames": [
+              "ACCEPTANCE_INPUT",
+              "ACCEPTANCE_RESULT",
+              "HOME",
+              "LANG",
+              "PATH",
+              "TMPDIR",
+              "__CF_USER_TEXT_ENCODING"
+            ]
+          }
+        },
+        {
+          "id": "work1-complete",
+          "title": "work1: a stranger verifies the complete snapshot",
+          "status": "PASS",
+          "detail": {
+            "verified": true,
+            "checkpoint": "4-QmWTzpK4H5SaKHiaWAQyPoEbBBDsmhxFX9kTb2DD1AtV7y",
+            "head": "4-QmWTzpK4H5SaKHiaWAQyPoEbBBDsmhxFX9kTb2DD1AtV7y",
+            "alias": "confirmed",
+            "resources": "available",
+            "current": false,
+            "reasons": [
+              "not-anchored"
+            ],
+            "freshness": {
+              "asset": "not-established",
+              "identity": "not-established",
+              "validAsOf": {
+                "checkpoint": "4-QmWTzpK4H5SaKHiaWAQyPoEbBBDsmhxFX9kTb2DD1AtV7y",
+                "signers": [
+                  {
+                    "did": "did:webvh:QmTW4GucqraSusMNWaZeuXRNwePaNQs3WXa8yjpzp89QV4:acceptance.example:user-sub-acceptance-0",
+                    "role": "author",
+                    "versionId": "1-QmVTMYiCHh7hJkCiwLqnpeuRdQHhGWTEvsrtymeELd7ygo",
+                    "obtainedAt": "2026-10-31T06:18:03.526Z",
+                    "source": "host",
+                    "location": null
+                  }
+                ]
+              }
+            },
+            "ordering": "claimed",
+            "digests": [
+              {
+                "resource": "artwork.svg",
+                "version": 1,
+                "sha256": "1c7e1c740158039636aa1c8970d273053477901adc1d81771074796794126014"
+              },
+              {
+                "resource": "metadata.json",
+                "version": 1,
+                "sha256": "8658b2fdfb1865fde9ac12041313a483fae414145885ce1db63e3c9b6f9f8ffe"
+              },
+              {
+                "resource": "artwork.svg",
+                "version": 2,
+                "sha256": "03f5cec4a8606b781aafad35ce38690026655c33f4208b1d3325acd5a48201f9"
+              },
+              {
+                "resource": "metadata.json",
+                "version": 2,
+                "sha256": "47297db213e7765e5ff6fb448499329f463037aef40562ab382e3440611fb1d7"
+              },
+              {
+                "resource": "artwork.svg",
+                "version": 3,
+                "sha256": "efbab3d13676f43fc33823551abb5ebe5fff8dc6f832f9c26e4c29037bd006a7"
+              },
+              {
+                "resource": "metadata.json",
+                "version": 3,
+                "sha256": "f99d09558a87605e37568a1ac95098435198789e59de0f914820fae945d381fa"
+              }
+            ]
+          }
+        },
+        {
+          "id": "work2-complete",
+          "title": "work2: a stranger verifies the complete snapshot",
+          "status": "PASS",
+          "detail": {
+            "verified": true,
+            "checkpoint": "2-QmSjQsa4VxsaNTzBJaJ6o3zXHezHohxxMKz1HxrFyq8aoY",
+            "head": "2-QmSjQsa4VxsaNTzBJaJ6o3zXHezHohxxMKz1HxrFyq8aoY",
+            "alias": "confirmed",
+            "resources": "available",
+            "current": false,
+            "reasons": [
+              "not-anchored"
+            ],
+            "freshness": {
+              "asset": "not-established",
+              "identity": "not-established",
+              "validAsOf": {
+                "checkpoint": "2-QmSjQsa4VxsaNTzBJaJ6o3zXHezHohxxMKz1HxrFyq8aoY",
+                "signers": [
+                  {
+                    "did": "did:webvh:QmTW4GucqraSusMNWaZeuXRNwePaNQs3WXa8yjpzp89QV4:acceptance.example:user-sub-acceptance-0",
+                    "role": "author",
+                    "versionId": "1-QmVTMYiCHh7hJkCiwLqnpeuRdQHhGWTEvsrtymeELd7ygo",
+                    "obtainedAt": "2026-10-31T06:18:03.569Z",
+                    "source": "host",
+                    "location": null
+                  }
+                ]
+              }
+            },
+            "ordering": "claimed",
+            "digests": [
+              {
+                "resource": "artwork.svg",
+                "version": 1,
+                "sha256": "a6bef4b94a44eb2c639b0f25514a97afee31af8c94695f14b468e060cf88a94e"
+              },
+              {
+                "resource": "metadata.json",
+                "version": 1,
+                "sha256": "527fadcd0a82e5fd31cceb752ba00997064502c8236c883e5f0bc65756a4036f"
+              }
+            ]
+          }
+        },
+        {
+          "id": "work3-complete",
+          "title": "work3: a stranger verifies the complete snapshot",
+          "status": "PASS",
+          "detail": {
+            "verified": true,
+            "checkpoint": "2-QmdhcWKqcdR5h8Pz89TypwZjBEJQYZTA68dN9J8gj8ZXDT",
+            "head": "2-QmdhcWKqcdR5h8Pz89TypwZjBEJQYZTA68dN9J8gj8ZXDT",
+            "alias": "confirmed",
+            "resources": "available",
+            "current": false,
+            "reasons": [
+              "not-anchored"
+            ],
+            "freshness": {
+              "asset": "not-established",
+              "identity": "not-established",
+              "validAsOf": {
+                "checkpoint": "2-QmdhcWKqcdR5h8Pz89TypwZjBEJQYZTA68dN9J8gj8ZXDT",
+                "signers": [
+                  {
+                    "did": "did:webvh:QmTW4GucqraSusMNWaZeuXRNwePaNQs3WXa8yjpzp89QV4:acceptance.example:user-sub-acceptance-0",
+                    "role": "author",
+                    "versionId": "1-QmVTMYiCHh7hJkCiwLqnpeuRdQHhGWTEvsrtymeELd7ygo",
+                    "obtainedAt": "2026-10-31T06:18:03.581Z",
+                    "source": "host",
+                    "location": null
+                  }
+                ]
+              }
+            },
+            "ordering": "claimed",
+            "digests": [
+              {
+                "resource": "artwork.svg",
+                "version": 1,
+                "sha256": "c56a7f1fdc1171c18085cb5753a85a16dd9cd27cdf83d09cd1c223f2fdf8770f"
+              },
+              {
+                "resource": "metadata.json",
+                "version": 1,
+                "sha256": "3500ac1f78909f86d9d4b2cfb57c291f97f291f540a218c1b8e72d7494a5066d"
+              }
+            ]
+          }
+        },
+        {
+          "id": "no-cookies",
+          "title": "the reader sent no cookie and received none",
+          "status": "PASS",
+          "detail": {
+            "cookies": 0,
+            "setCookies": 0
+          }
+        }
+      ],
+      "status": "PASS",
+      "process": {
+        "command": [
+          "/Users/brian/.local/share/vite-plus/js_runtime/node/26.13.0/bin/node",
+          "scripts/acceptance/hosted/reader.mjs"
+        ],
+        "exit": 0,
+        "signal": null,
+        "ms": 164
+      }
+    },
+    {
+      "phase": "L5-client-b",
+      "started": "2026-10-31T06:18:03.793Z",
+      "finished": "2026-10-31T06:18:04.679Z",
+      "isolation": {
+        "pid": 84298,
+        "ppid": 83978,
+        "runtime": "bun 1.2.22",
+        "execPath": "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+        "cwd": "/private/tmp/976-final-hosted/tmp/L5-client-b",
+        "home": "/private/tmp/976-final-hosted/home/L5-client-b",
+        "tmpdir": "/private/tmp/976-final-hosted/tmp/L5-client-b",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR"
+        ],
+        "dirs": {
+          "custody": "/private/tmp/976-final-hosted/custody",
+          "storeA": "/private/tmp/976-final-hosted/storeA",
+          "storeB": "/private/tmp/976-final-hosted/storeB",
+          "storeC": "/private/tmp/976-final-hosted/storeC"
+        }
+      },
+      "facts": {
+        "work1": {
+          "did": "did:vh:QmY9MrnFf91eQwvLrfTCSkDb1HgERNUdywpEJiqJEb6RZ8",
+          "alias": "did:webvh:QmbrnkoMSjWC8npnB7EjXWoUyScE71sT2Ctca8q16mnm22:acceptance.example:user-sub-acceptance-0:o-QmY9MrnFf91eQwvL",
+          "checkpoint": "5-QmPYPGLmZe6o2C9ScSKRvXXBNPYDhCBr3yFGW6iryQheXB",
+          "entries": 5,
+          "resources": [
+            {
+              "id": "artwork.svg",
+              "mediaType": "image/svg+xml",
+              "sha256": "a8b476a3b181d1ac218bc50ec659a234543f4a007b6a56b304b4ee6805fb00da"
+            },
+            {
+              "id": "metadata.json",
+              "mediaType": "application/json",
+              "sha256": "7d62bc28e83493607112284afeae53746da92ae3b371cb1a323f3521a8e7eeb0"
+            }
+          ]
+        }
+      },
+      "checks": [
+        {
+          "id": "b3-other-client-restore",
+          "title": "another client finds the work in the account library and restores it from the host",
+          "status": "PASS",
+          "detail": {
+            "did": "did:vh:QmY9MrnFf91eQwvLrfTCSkDb1HgERNUdywpEJiqJEb6RZ8",
+            "alias": "did:webvh:QmbrnkoMSjWC8npnB7EjXWoUyScE71sT2Ctca8q16mnm22:acceptance.example:user-sub-acceptance-0:o-QmY9MrnFf91eQwvL",
+            "checkpoint": "5-QmPYPGLmZe6o2C9ScSKRvXXBNPYDhCBr3yFGW6iryQheXB",
+            "entries": 5,
+            "resources": [
+              {
+                "id": "artwork.svg",
+                "mediaType": "image/svg+xml",
+                "sha256": "a8b476a3b181d1ac218bc50ec659a234543f4a007b6a56b304b4ee6805fb00da"
+              },
+              {
+                "id": "metadata.json",
+                "mediaType": "application/json",
+                "sha256": "7d62bc28e83493607112284afeae53746da92ae3b371cb1a323f3521a8e7eeb0"
+              }
+            ]
+          }
+        },
+        {
+          "id": "b3-stale-parent",
+          "title": "client A, a revision behind, can't save on its old parent: refused, not rebased",
+          "status": "PASS",
+          "detail": {
+            "parent": "4-QmWTzpK4H5SaKHiaWAQyPoEbBBDsmhxFX9kTb2DD1AtV7y",
+            "hostHead": "5-QmPYPGLmZe6o2C9ScSKRvXXBNPYDhCBr3yFGW6iryQheXB",
+            "refusedKept": 1
+          }
+        },
+        {
+          "id": "b3-restore-no-authority",
+          "title": "restored with another key, the work can't be continued",
+          "status": "PASS",
+          "detail": {
+            "refused": "OriginalsError: the signed entry does not verify: proof by did:webvh:QmTW4GucqraSusMNWaZeuXRNwePaNQs3WXa8yjpzp89QV4:acceptance.example:user-sub-acceptance-0#key-1 does not verify"
+          }
+        }
+      ],
+      "status": "PASS",
+      "process": {
+        "command": [
+          "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+          "scripts/acceptance/hosted/l5-client-b.ts"
+        ],
+        "exit": 0,
+        "signal": null,
+        "ms": 1090
+      }
+    },
+    {
+      "phase": "L6-reader",
+      "started": "2026-10-31T06:18:04.751Z",
+      "finished": "2026-10-31T06:18:04.812Z",
+      "isolation": {
+        "pid": 84299,
+        "ppid": 83978,
+        "runtime": "node v26.13.0",
+        "execPath": "/Users/brian/.local/share/vite-plus/js_runtime/node/26.13.0/bin/node",
+        "cwd": "/private/tmp/976-final-hosted/tmp/L6-reader",
+        "home": "/private/tmp/976-final-hosted/home/L6-reader",
+        "tmpdir": "/private/tmp/976-final-hosted/tmp/L6-reader",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR",
+          "__CF_USER_TEXT_ENCODING"
+        ]
+      },
+      "facts": {},
+      "checks": [
+        {
+          "id": "no-authority",
+          "title": "the reader has no key, store, cookie or author directory",
+          "status": "PASS",
+          "detail": {
+            "envNames": [
+              "ACCEPTANCE_INPUT",
+              "ACCEPTANCE_RESULT",
+              "HOME",
+              "LANG",
+              "PATH",
+              "TMPDIR",
+              "__CF_USER_TEXT_ENCODING"
+            ]
+          }
+        },
+        {
+          "id": "work1-complete",
+          "title": "work1: a stranger verifies the complete snapshot",
+          "status": "PASS",
+          "detail": {
+            "verified": true,
+            "checkpoint": "5-QmPYPGLmZe6o2C9ScSKRvXXBNPYDhCBr3yFGW6iryQheXB",
+            "head": "5-QmPYPGLmZe6o2C9ScSKRvXXBNPYDhCBr3yFGW6iryQheXB",
+            "alias": "confirmed",
+            "resources": "available",
+            "current": false,
+            "reasons": [
+              "not-anchored"
+            ],
+            "freshness": {
+              "asset": "not-established",
+              "identity": "not-established",
+              "validAsOf": {
+                "checkpoint": "5-QmPYPGLmZe6o2C9ScSKRvXXBNPYDhCBr3yFGW6iryQheXB",
+                "signers": [
+                  {
+                    "did": "did:webvh:QmTW4GucqraSusMNWaZeuXRNwePaNQs3WXa8yjpzp89QV4:acceptance.example:user-sub-acceptance-0",
+                    "role": "author",
+                    "versionId": "1-QmVTMYiCHh7hJkCiwLqnpeuRdQHhGWTEvsrtymeELd7ygo",
+                    "obtainedAt": "2026-10-31T06:18:04.767Z",
+                    "source": "host",
+                    "location": null
+                  }
+                ]
+              }
+            },
+            "ordering": "claimed",
+            "digests": [
+              {
+                "resource": "artwork.svg",
+                "version": 1,
+                "sha256": "1c7e1c740158039636aa1c8970d273053477901adc1d81771074796794126014"
+              },
+              {
+                "resource": "metadata.json",
+                "version": 1,
+                "sha256": "8658b2fdfb1865fde9ac12041313a483fae414145885ce1db63e3c9b6f9f8ffe"
+              },
+              {
+                "resource": "artwork.svg",
+                "version": 2,
+                "sha256": "03f5cec4a8606b781aafad35ce38690026655c33f4208b1d3325acd5a48201f9"
+              },
+              {
+                "resource": "metadata.json",
+                "version": 2,
+                "sha256": "47297db213e7765e5ff6fb448499329f463037aef40562ab382e3440611fb1d7"
+              },
+              {
+                "resource": "artwork.svg",
+                "version": 3,
+                "sha256": "efbab3d13676f43fc33823551abb5ebe5fff8dc6f832f9c26e4c29037bd006a7"
+              },
+              {
+                "resource": "metadata.json",
+                "version": 3,
+                "sha256": "f99d09558a87605e37568a1ac95098435198789e59de0f914820fae945d381fa"
+              },
+              {
+                "resource": "artwork.svg",
+                "version": 4,
+                "sha256": "a8b476a3b181d1ac218bc50ec659a234543f4a007b6a56b304b4ee6805fb00da"
+              },
+              {
+                "resource": "metadata.json",
+                "version": 4,
+                "sha256": "7d62bc28e83493607112284afeae53746da92ae3b371cb1a323f3521a8e7eeb0"
+              }
+            ]
+          }
+        },
+        {
+          "id": "no-cookies",
+          "title": "the reader sent no cookie and received none",
+          "status": "PASS",
+          "detail": {
+            "cookies": 0,
+            "setCookies": 0
+          }
+        }
+      ],
+      "status": "PASS",
+      "process": {
+        "command": [
+          "/Users/brian/.local/share/vite-plus/js_runtime/node/26.13.0/bin/node",
+          "scripts/acceptance/hosted/reader.mjs"
+        ],
+        "exit": 0,
+        "signal": null,
+        "ms": 137
+      }
+    },
+    {
+      "phase": "L7-signed-out",
+      "started": "2026-10-31T06:18:04.925Z",
+      "finished": "2026-10-31T06:18:05.083Z",
+      "isolation": {
+        "pid": 84300,
+        "ppid": 83978,
+        "runtime": "bun 1.2.22",
+        "execPath": "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+        "cwd": "/private/tmp/976-final-hosted/tmp/L7-signed-out",
+        "home": "/private/tmp/976-final-hosted/home/L7-signed-out",
+        "tmpdir": "/private/tmp/976-final-hosted/tmp/L7-signed-out",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR"
+        ],
+        "dirs": {}
+      },
+      "facts": {},
+      "checks": [
+        {
+          "id": "b5-guest",
+          "title": "signed out: publishing is unavailable, guest work survives a reload in the guest database only, and nothing reaches an account database or the server",
+          "status": "PASS",
+          "detail": {
+            "did": "did:vh:QmXEiPaaYztsFEjzE6PzYLZ6UqL2xoMQ2aJbVBajosKFBm",
+            "refused": "Sign in to publish: an Original's web address lives in your account.",
+            "databases": [
+              "originals-library-v1:guest"
+            ]
+          }
+        },
+        {
+          "id": "b5-package-public-only",
+          "title": "the signed-out evidence package holds no private key",
+          "status": "PASS",
+          "detail": {
+            "bytes": 7106,
+            "files": 2
+          }
+        }
+      ],
+      "status": "PASS",
+      "process": {
+        "command": [
+          "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+          "scripts/acceptance/hosted/l6-signed-out.ts"
+        ],
+        "exit": 0,
+        "signal": null,
+        "ms": 268
+      }
+    }
+  ],
+  "manual": [],
+  "artifacts": [
+    {
+      "path": "results/L0-identity.json",
+      "sha256": "ce9b2a3f46b58d7d104921ca43bf0e715ad4f7d363aa716ce159cfb37bcf5eb7"
+    },
+    {
+      "path": "results/L1-client-a.json",
+      "sha256": "d3df1b954f77b6712701778860ad84b4040ac11d4cddb08247a1426a71a3f34a"
+    },
+    {
+      "path": "results/L2-reader.json",
+      "sha256": "63729e8d190b475403594b47f95da7fe9c3781087cfb11a7cf817de11afcbcbc"
+    },
+    {
+      "path": "results/L3-client-a-restart.json",
+      "sha256": "2655e482c0de6dd36c9b1b9aece1f2e7ff8baa1540cf2ab60732d9d87bd3959e"
+    },
+    {
+      "path": "results/L4-reader.json",
+      "sha256": "a5eaed27c2a7e24e77525d68b16d1ff104f8af5cac82e60ddb7b831e3039e085"
+    },
+    {
+      "path": "results/L5-client-b.json",
+      "sha256": "84fab5047d6fcbc72c810eb76315ae7a1d7bdd7ec90a4f2a93639ca3a3fb9dfd"
+    },
+    {
+      "path": "results/L6-reader.json",
+      "sha256": "e90a9deb711c3dfba8f817568fc44208b4e24826a06070390bb436674c6d0c8a"
+    },
+    {
+      "path": "results/L7-signed-out.json",
+      "sha256": "11c4ec3a11190c95eb71d6587a6b56c48a349435ced7784d833940331a2963b8"
+    }
+  ],
+  "unavailable": [
+    "Unpublished work does not sync between clients; it moves by evidence package import (section A)."
+  ],
+  "notIncluded": [
+    "Bitcoin anchoring, signing and commit/reveal restart.",
+    "Turnkey and a public host: a dry run is never a section B receipt."
+  ],
+  "secretScan": {
+    "status": "PASS"
+  }
+}

@@ -220,7 +220,7 @@ const provider = new SignetProvider({
 
 const sdk = OriginalsSDK.create({
   network: 'signet',
-  webvhNetwork: 'cleffa',
+  webvhNetwork: 'staging',
   ordinalsProvider: provider,
 });
 ```

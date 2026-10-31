@@ -1,13 +1,15 @@
 /**
  * WebVH Network Configuration
  *
- * Defines the three deployment networks for the Originals Protocol:
- * - magby: Development network (patch versions) → Bitcoin regtest
- * - cleffa: Staging network (minor versions) → Bitcoin signet
- * - pichu: Production network (major versions) → Bitcoin mainnet
+ * Defines named compatibility profiles for version stability and Bitcoin selection.
+ * All profiles use the canonical Originals context; they do not select a
+ * deployment hostname. DID creation still requires an explicit domain.
+ * - development: Development network (patch versions) → Bitcoin regtest
+ * - staging: Staging network (minor versions) → Bitcoin signet
+ * - production: Production network (major versions) → Bitcoin mainnet
  */
 
-export type WebVHNetworkName = 'magby' | 'cleffa' | 'pichu';
+export type WebVHNetworkName = 'development' | 'staging' | 'production';
 
 export type BitcoinNetworkName = 'mainnet' | 'testnet' | 'regtest' | 'signet';
 
@@ -26,36 +28,36 @@ export interface WebVHNetworkConfig {
  * Network configurations for the Originals Protocol WebVH deployments
  */
 export const WEBVH_NETWORKS: Record<WebVHNetworkName, WebVHNetworkConfig> = {
-  magby: {
-    name: 'magby',
-    domain: 'magby.originals.build',
+  development: {
+    name: 'development',
+    domain: 'originals.build',
     stability: 'patch',
     description: 'Development network - accepts all patch versions (most unstable)',
-    contextUrl: 'https://magby.originals.build/context',
+    contextUrl: 'https://originals.build/context',
     bitcoinNetwork: 'regtest', // Development → regtest
   },
-  cleffa: {
-    name: 'cleffa',
-    domain: 'cleffa.originals.build',
+  staging: {
+    name: 'staging',
+    domain: 'originals.build',
     stability: 'minor',
     description: 'Staging network - accepts minor releases',
-    contextUrl: 'https://cleffa.originals.build/context',
+    contextUrl: 'https://originals.build/context',
     bitcoinNetwork: 'signet', // Staging → signet
   },
-  pichu: {
-    name: 'pichu',
-    domain: 'pichu.originals.build',
+  production: {
+    name: 'production',
+    domain: 'originals.build',
     stability: 'major',
     description: 'Production network - accepts major releases only (most stable)',
-    contextUrl: 'https://pichu.originals.build/context',
+    contextUrl: 'https://originals.build/context',
     bitcoinNetwork: 'mainnet', // Production → mainnet
   },
 };
 
 /**
- * Default network for backward compatibility
+ * Default production profile
  */
-export const DEFAULT_WEBVH_NETWORK: WebVHNetworkName = 'pichu';
+export const DEFAULT_WEBVH_NETWORK: WebVHNetworkName = 'production';
 
 /**
  * Get network configuration by name
@@ -65,7 +67,7 @@ export const DEFAULT_WEBVH_NETWORK: WebVHNetworkName = 'pichu';
 export function getNetworkConfig(network: WebVHNetworkName): WebVHNetworkConfig {
   const config = WEBVH_NETWORKS[network];
   if (!config) {
-    throw new Error(`Invalid WebVH network: ${network}. Valid networks: magby, cleffa, pichu`);
+    throw new Error(`Invalid WebVH network: ${network}. Valid networks: development, staging, production`);
   }
   return config;
 }
@@ -106,8 +108,8 @@ export function validateVersionForNetwork(version: string, network: WebVHNetwork
   const [, , minor, patch, prerelease] = match;
 
   // A prerelease (e.g. 2.0.0-rc.1) is NOT a release: it must not pass the
-  // pichu "major releases only" or cleffa "minor releases" gates just because
-  // its numeric part matches (issue #352). Only magby (all versions) accepts
+  // production "major releases only" or staging "minor releases" gates just because
+  // its numeric part matches (issue #352). Only development (all versions) accepts
   // prereleases.
   if (prerelease && config.stability !== 'patch') {
     return false;
@@ -115,15 +117,15 @@ export function validateVersionForNetwork(version: string, network: WebVHNetwork
 
   switch (config.stability) {
     case 'major':
-      // Pichu: Only allow major releases (X.0.0)
+      // Production: Only allow major releases (X.0.0)
       return minor === '0' && patch === '0';
 
     case 'minor':
-      // Cleffa: Allow minor releases (X.Y.0)
+      // Staging: Allow minor releases (X.Y.0)
       return patch === '0';
 
     case 'patch':
-      // Magby: Allow all versions including patches
+      // Development: Allow all versions including patches
       return true;
 
     default: {
@@ -142,21 +144,21 @@ export function validateVersionForNetwork(version: string, network: WebVHNetwork
  */
 export function getRecommendedNetworkForVersion(version: string): WebVHNetworkName {
   // Try networks from most restrictive to least restrictive
-  if (validateVersionForNetwork(version, 'pichu')) {
-    return 'pichu';
+  if (validateVersionForNetwork(version, 'production')) {
+    return 'production';
   }
-  if (validateVersionForNetwork(version, 'cleffa')) {
-    return 'cleffa';
+  if (validateVersionForNetwork(version, 'staging')) {
+    return 'staging';
   }
-  return 'magby';
+  return 'development';
 }
 
 /**
  * Get the corresponding Bitcoin network for a WebVH network
  * This ensures consistent environment mapping across the stack:
- * - magby (dev) → regtest (dev)
- * - cleffa (staging) → signet (staging)
- * - pichu (production) → mainnet (production)
+ * - development (dev) → regtest (dev)
+ * - staging (staging) → signet (staging)
+ * - production (production) → mainnet (production)
  *
  * @param webvhNetwork - WebVH network name
  * @returns Corresponding Bitcoin network name
@@ -175,11 +177,11 @@ export function getBitcoinNetworkForWebVH(webvhNetwork: WebVHNetworkName): Bitco
 export function getWebVHNetworkForBitcoin(bitcoinNetwork: BitcoinNetworkName): WebVHNetworkName | undefined {
   switch (bitcoinNetwork) {
     case 'mainnet':
-      return 'pichu';
+      return 'production';
     case 'signet':
-      return 'cleffa';
+      return 'staging';
     case 'regtest':
-      return 'magby';
+      return 'development';
     default:
       return undefined;
   }

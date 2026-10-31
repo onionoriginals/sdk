@@ -1,0 +1,1124 @@
+{
+  "receipt": "originals-local-release-acceptance/1",
+  "scope": "onionoriginals/sdk#976 section A (local release). Not hosted publication, Turnkey, a public host or Bitcoin.",
+  "createdAt": "2026-10-31T06:18:03.489Z",
+  "status": "PASS",
+  "source": {
+    "sha": "cfa29326bcd9c7e2a4ace1d31b6915c1ff229d34",
+    "branch": "t3/issue-976-prove-the-originals-local-web-release",
+    "dirty": false,
+    "dirtyFiles": []
+  },
+  "packages": {
+    "@originals/sdk": "5.1.0",
+    "@originals/vh": "0.3.0",
+    "@originals/auth": "4.0.2",
+    "@originals/landing": "0.4.0",
+    "didwebvh-ts": "2.8.0"
+  },
+  "runtimes": {
+    "node": "v26.13.0",
+    "bun": "1.2.22",
+    "platform": "darwin-arm64"
+  },
+  "profile": {
+    "protocol": "originals:1.0 (PROVISIONAL method value)",
+    "cryptosuite": "eddsa-jcs-2022",
+    "witnesses": "none (Q14)",
+    "ordering": "claimed (unanchored)",
+    "freshness": "no freshness policy: an unanchored Original is never current, only valid as of its checkpoint (P7.10, originals-spec #46)"
+  },
+  "author": {
+    "method": "did:webvh",
+    "builder": "apps/landing/src/auth/webvh.ts buildUserWebVHDid + BrowserWebVHSigner (the #964 regression path)",
+    "signerMode": "local Ed25519 keySigner over the authorship key (#key-1) from a custody file; the identity key (#key-0) is the DID's update key only",
+    "did": "did:webvh:QmRChs6t57Fg4CbcdhUt1RAsehuZKigk3rvzhdd8nK77pz:magby.originals.build:user-acceptance0976"
+  },
+  "original": {
+    "did": "did:vh:QmVRPAJTf7yemCApUb6vRzFD5mRENNjgYaZHEe9GywFcvg",
+    "checkpoint": "5-Qmc6QPvXD8K7hCkkKs5ftvCrVox6ZgeZcQkLQx7abfSaCv",
+    "versionIds": [
+      "1-Qme4TRxmRgUZMC3Ck1aBT8F8zVTZ94R8CT5tUKjFJGCUT4",
+      "2-QmNnxRn4hkopMZ83ro3tBdpR96poW3tCBV6GTq1yZDtrBE",
+      "3-QmcJzUtoagijRxmXKJZPWXxGoiFzHfYWUAof5frSg5QWU6",
+      "4-QmPipXMMtPyrLivp5WQmxeMKHh9ZnwTgoLUg7rzfqimqDx",
+      "5-Qmc6QPvXD8K7hCkkKs5ftvCrVox6ZgeZcQkLQx7abfSaCv"
+    ]
+  },
+  "isolation": {
+    "orchestratorPid": 83831,
+    "osNetworkBlock": "sandbox-exec",
+    "inProcessGuard": "scripts/acceptance/lib/guard.mjs (fetch, net, tls, http(s), dns)",
+    "distinctProcesses": true,
+    "pids": [
+      83923,
+      83975,
+      84056,
+      84139,
+      84189
+    ],
+    "runDir": "/private/tmp/976-final-local"
+  },
+  "preflight": [
+    {
+      "id": "964-integrated",
+      "title": "the #964 did:key proof repair is in this revision's source",
+      "status": "PASS",
+      "detail": {
+        "didKeyMultikeyOptionalFragment": true,
+        "entryProofsUseOptionalFragment": true,
+        "commit": "47bc12494f46a21348f22d9e1bc78210a28ed8b2",
+        "commitFact": "equivalent patch present"
+      }
+    },
+    {
+      "id": "964-regression",
+      "title": "the landing's real DID-builder regression (#964) is present and passes",
+      "status": "PASS",
+      "detail": {
+        "file": "apps/landing/src/auth/webvh.test.ts",
+        "test": "the DID log the landing builds, and an Original signed with its #key-1, verify as current",
+        "pass": 1,
+        "exit": 0
+      }
+    },
+    {
+      "id": "built",
+      "title": "built package entry points exist (run `bun run build`)",
+      "status": "PASS",
+      "detail": {
+        "missing": [],
+        "sha256": {
+          "packages/sdk/dist/originals/index.js": "5949f6354fabc3dbfa31c687d1bef6185c2150309ba71ec4668e96cb1c6cb108",
+          "packages/sdk/dist/originals/fs-store.js": "fa3ba004974ca88c791ac29cfaacfe21c0c17c195ea55c8ecc8c1ebb1d9717b8",
+          "packages/sdk/dist/originals/cli.js": "c2f2c466b292d48d4bf6ce1de26203d47edefaf0999883db8ce977cc93821fdd",
+          "packages/vh/dist/originals/index.js": "7c5f6b70c6f983f0e3a567e9e9610da6974adcbb4c7ed89af4360112aff3043e",
+          "packages/sdk/dist/index.js": "223bf2e6217b070c8f49521a1ff2c61fec9115b9d65316b58d82b5b7fb50e30f"
+        }
+      }
+    },
+    {
+      "id": "os-sandbox",
+      "title": "an OS-level network denial is available",
+      "status": "PASS",
+      "detail": {
+        "osNetworkBlock": "sandbox-exec"
+      }
+    }
+  ],
+  "gates": {
+    "A1-964-integrated": "PASS",
+    "A2-create-revise-export": "PASS",
+    "A3-offline-fresh-reader": "PASS",
+    "A4-import-authority-continue": "PASS",
+    "A5-negatives": "PASS",
+    "process-isolation": "PASS"
+  },
+  "phases": [
+    {
+      "phase": "0-author-identity",
+      "started": "2026-10-31T06:17:59.468Z",
+      "finished": "2026-10-31T06:17:59.574Z",
+      "isolation": {
+        "pid": 83923,
+        "ppid": 83831,
+        "runtime": "bun 1.2.22",
+        "execPath": "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+        "cwd": "/private/tmp/976-final-local/tmp/0-author-identity",
+        "home": "/private/tmp/976-final-local/home/0-author-identity",
+        "tmpdir": "/private/tmp/976-final-local/tmp/0-author-identity",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR"
+        ],
+        "dirs": {
+          "custody": "/private/tmp/976-final-local/custody",
+          "public": "/private/tmp/976-final-local/public"
+        }
+      },
+      "facts": {
+        "network": {
+          "inProcess": {
+            "fetch": "ACCEPTANCE_NETWORK_BLOCKED",
+            "netConnect": "ACCEPTANCE_NETWORK_BLOCKED",
+            "dnsLookup": "ACCEPTANCE_NETWORK_BLOCKED"
+          },
+          "osLayer": "sandbox-exec",
+          "osProbe": "EPERM",
+          "guardAttempts": 3
+        },
+        "author": {
+          "did": "did:webvh:QmRChs6t57Fg4CbcdhUt1RAsehuZKigk3rvzhdd8nK77pz:magby.originals.build:user-acceptance0976",
+          "method": "did:webvh",
+          "versionId": "1-QmP2uzfY6vdeokh8nA9Lf84M45KisNc4Ysdo7ykrwKnKdH",
+          "assertionMethod": "did:webvh:QmRChs6t57Fg4CbcdhUt1RAsehuZKigk3rvzhdd8nK77pz:magby.originals.build:user-acceptance0976#key-1",
+          "updateKeys": [
+            "z6Mkoim98HSGpDh9jANwsEbm8yTAX2ozxx9inH5ifmvtQP8k"
+          ]
+        }
+      },
+      "checks": [
+        {
+          "id": "network-blocked",
+          "title": "network is disabled in this process (in-process guard and OS layer)",
+          "status": "PASS",
+          "detail": {
+            "inProcess": {
+              "fetch": "ACCEPTANCE_NETWORK_BLOCKED",
+              "netConnect": "ACCEPTANCE_NETWORK_BLOCKED",
+              "dnsLookup": "ACCEPTANCE_NETWORK_BLOCKED"
+            },
+            "osLayer": "sandbox-exec",
+            "osProbe": "EPERM",
+            "guardAttempts": 3
+          }
+        },
+        {
+          "id": "author-did-built",
+          "title": "the landing's did:webvh builder mints the author DID offline",
+          "status": "PASS",
+          "detail": {
+            "did": "did:webvh:QmRChs6t57Fg4CbcdhUt1RAsehuZKigk3rvzhdd8nK77pz:magby.originals.build:user-acceptance0976",
+            "method": "did:webvh",
+            "versionId": "1-QmP2uzfY6vdeokh8nA9Lf84M45KisNc4Ysdo7ykrwKnKdH",
+            "assertionMethod": "did:webvh:QmRChs6t57Fg4CbcdhUt1RAsehuZKigk3rvzhdd8nK77pz:magby.originals.build:user-acceptance0976#key-1",
+            "updateKeys": [
+              "z6Mkoim98HSGpDh9jANwsEbm8yTAX2ozxx9inH5ifmvtQP8k"
+            ]
+          }
+        }
+      ],
+      "status": "PASS",
+      "process": {
+        "command": [
+          "sandbox-exec",
+          "-p",
+          "<sandbox profile>",
+          "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+          "--preload",
+          "scripts/acceptance/lib/guard.mjs",
+          "scripts/acceptance/phase0-author-identity.ts"
+        ],
+        "sandboxProfile": "(version 1)(allow default)(deny network*)",
+        "exit": 0,
+        "signal": null,
+        "ms": 192
+      }
+    },
+    {
+      "phase": "1-author-a",
+      "started": "2026-10-31T06:17:59.651Z",
+      "finished": "2026-10-31T06:18:00.352Z",
+      "isolation": {
+        "pid": 83975,
+        "ppid": 83831,
+        "runtime": "node v26.13.0",
+        "execPath": "/Users/brian/.local/share/vite-plus/js_runtime/node/26.13.0/bin/node",
+        "cwd": "/private/tmp/976-final-local/tmp/1-author-a",
+        "home": "/private/tmp/976-final-local/home/1-author-a",
+        "tmpdir": "/private/tmp/976-final-local/tmp/1-author-a",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR",
+          "__CF_USER_TEXT_ENCODING"
+        ],
+        "dirs": {
+          "custody": "/private/tmp/976-final-local/custody",
+          "public": "/private/tmp/976-final-local/public",
+          "artifacts": "/private/tmp/976-final-local/artifacts",
+          "storeA": "/private/tmp/976-final-local/storeA"
+        }
+      },
+      "facts": {
+        "network": {
+          "inProcess": {
+            "fetch": "ACCEPTANCE_NETWORK_BLOCKED",
+            "netConnect": "ACCEPTANCE_NETWORK_BLOCKED",
+            "dnsLookup": "ACCEPTANCE_NETWORK_BLOCKED"
+          },
+          "osLayer": "sandbox-exec",
+          "osProbe": "EPERM",
+          "guardAttempts": 3
+        },
+        "original": {
+          "did": "did:vh:QmVRPAJTf7yemCApUb6vRzFD5mRENNjgYaZHEe9GywFcvg",
+          "checkpoint": "5-Qmc6QPvXD8K7hCkkKs5ftvCrVox6ZgeZcQkLQx7abfSaCv",
+          "versionIds": [
+            "1-Qme4TRxmRgUZMC3Ck1aBT8F8zVTZ94R8CT5tUKjFJGCUT4",
+            "2-QmNnxRn4hkopMZ83ro3tBdpR96poW3tCBV6GTq1yZDtrBE",
+            "3-QmcJzUtoagijRxmXKJZPWXxGoiFzHfYWUAof5frSg5QWU6",
+            "4-QmPipXMMtPyrLivp5WQmxeMKHh9ZnwTgoLUg7rzfqimqDx",
+            "5-Qmc6QPvXD8K7hCkkKs5ftvCrVox6ZgeZcQkLQx7abfSaCv"
+          ]
+        }
+      },
+      "checks": [
+        {
+          "id": "network-blocked",
+          "title": "network is disabled in this process (in-process guard and OS layer)",
+          "status": "PASS",
+          "detail": {
+            "inProcess": {
+              "fetch": "ACCEPTANCE_NETWORK_BLOCKED",
+              "netConnect": "ACCEPTANCE_NETWORK_BLOCKED",
+              "dnsLookup": "ACCEPTANCE_NETWORK_BLOCKED"
+            },
+            "osLayer": "sandbox-exec",
+            "osProbe": "EPERM",
+            "guardAttempts": 3
+          }
+        },
+        {
+          "id": "create",
+          "title": "create an Original with binary (image/png, octet-stream) and text resources",
+          "status": "PASS",
+          "detail": {
+            "did": "did:vh:QmVRPAJTf7yemCApUb6vRzFD5mRENNjgYaZHEe9GywFcvg",
+            "checkpoint": "1-Qme4TRxmRgUZMC3Ck1aBT8F8zVTZ94R8CT5tUKjFJGCUT4",
+            "author": "did:webvh:QmRChs6t57Fg4CbcdhUt1RAsehuZKigk3rvzhdd8nK77pz:magby.originals.build:user-acceptance0976"
+          }
+        },
+        {
+          "id": "revise-text",
+          "title": "revise: change the text resource's bytes from an explicit parent",
+          "status": "PASS",
+          "detail": {
+            "checkpoint": "2-QmNnxRn4hkopMZ83ro3tBdpR96poW3tCBV6GTq1yZDtrBE"
+          }
+        },
+        {
+          "id": "revise-binary",
+          "title": "revise: change the image bytes, the name and the metadata",
+          "status": "PASS",
+          "detail": {
+            "checkpoint": "3-QmcJzUtoagijRxmXKJZPWXxGoiFzHfYWUAof5frSg5QWU6"
+          }
+        },
+        {
+          "id": "resource-add",
+          "title": "the author adds a resource after genesis: appended, at version 1 (P4.1, P4.4; originals-spec #49)",
+          "status": "PASS",
+          "detail": {
+            "checkpoint": "4-QmPipXMMtPyrLivp5WQmxeMKHh9ZnwTgoLUg7rzfqimqDx",
+            "resources": [
+              "artwork.png",
+              "scan.bin",
+              "notes.md",
+              "extra.txt"
+            ]
+          }
+        },
+        {
+          "id": "resource-remove",
+          "title": "the author removes it again; its version stays in history and verified (P4.1, P8.3)",
+          "status": "PASS",
+          "detail": {
+            "checkpoint": "5-Qmc6QPvXD8K7hCkkKs5ftvCrVox6ZgeZcQkLQx7abfSaCv",
+            "removed": "extra.txt",
+            "history": [
+              "extra.txt@1"
+            ]
+          }
+        },
+        {
+          "id": "resource-set-refusals",
+          "title": "refused before signing: an editor adding or removing a resource (P5.16), a reused resourceID (P4.1) and removing the last resource (P4.1); the head does not move",
+          "status": "PASS",
+          "detail": {
+            "editorAdd": {
+              "name": "OriginalsError",
+              "category": "outside-grant",
+              "code": "EDITOR_AUTHOR_ONLY",
+              "message": "an editor cannot add a resource (editor.txt); only the author may (P4.1, P5.16)"
+            },
+            "editorRemove": {
+              "name": "OriginalsError",
+              "category": "outside-grant",
+              "code": "EDITOR_AUTHOR_ONLY",
+              "message": "an editor cannot remove a resource; only the author may (P4.1, P5.16)"
+            },
+            "reused": {
+              "name": "OriginalsError",
+              "category": "invalid-evidence",
+              "code": "STATE_RESOURCE_REUSED",
+              "message": "resourceID extra.txt was used before in this Original and cannot be used again (P4.1)"
+            },
+            "lastResource": {
+              "name": "OriginalsError",
+              "category": "invalid-evidence",
+              "code": "STATE_RESOURCE_SET",
+              "message": "an entry cannot remove the last resource (P4.1)"
+            }
+          }
+        },
+        {
+          "id": "export-package",
+          "title": "export the complete evidence package; no private key in it or in store A",
+          "status": "PASS",
+          "detail": {
+            "path": "/private/tmp/976-final-local/artifacts/original-A.zip",
+            "bytes": 29653,
+            "sha256": "5ac7ec898c5518086f9669de74385baf00f4811ea1fb06d1cef866f06ef1b5c2",
+            "filesScanned": 10
+          }
+        }
+      ],
+      "status": "PASS",
+      "process": {
+        "command": [
+          "sandbox-exec",
+          "-p",
+          "<sandbox profile>",
+          "/Users/brian/.local/share/vite-plus/js_runtime/node/26.13.0/bin/node",
+          "--import",
+          "file:///Users/brian/.b3/worktrees/sdk/t3-issue-976-prove-the-originals-local-web-release/scripts/acceptance/lib/guard.mjs",
+          "scripts/acceptance/phase1-author-a.mjs"
+        ],
+        "sandboxProfile": "(version 1)(allow default)(deny network*)",
+        "exit": 0,
+        "signal": null,
+        "ms": 780
+      }
+    },
+    {
+      "phase": "2-offline-reader",
+      "started": "2026-10-31T06:18:00.480Z",
+      "finished": "2026-10-31T06:18:00.987Z",
+      "isolation": {
+        "pid": 84056,
+        "ppid": 83831,
+        "runtime": "node v26.13.0",
+        "execPath": "/Users/brian/.local/share/vite-plus/js_runtime/node/26.13.0/bin/node",
+        "cwd": "/private/tmp/976-final-local/tmp/2-offline-reader",
+        "home": "/private/tmp/976-final-local/home/2-offline-reader",
+        "tmpdir": "/private/tmp/976-final-local/tmp/2-offline-reader",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR",
+          "__CF_USER_TEXT_ENCODING"
+        ],
+        "dirs": {
+          "artifacts": "/private/tmp/976-final-local/artifacts"
+        }
+      },
+      "facts": {
+        "network": {
+          "inProcess": {
+            "fetch": "ACCEPTANCE_NETWORK_BLOCKED",
+            "netConnect": "ACCEPTANCE_NETWORK_BLOCKED",
+            "dnsLookup": "ACCEPTANCE_NETWORK_BLOCKED"
+          },
+          "osLayer": "sandbox-exec",
+          "osProbe": "EPERM",
+          "guardAttempts": 3
+        },
+        "package": {
+          "sha256": "5ac7ec898c5518086f9669de74385baf00f4811ea1fb06d1cef866f06ef1b5c2",
+          "bytes": 29653
+        },
+        "result": {
+          "verified": true,
+          "current": false,
+          "validAsOf": {
+            "checkpoint": "5-Qmc6QPvXD8K7hCkkKs5ftvCrVox6ZgeZcQkLQx7abfSaCv",
+            "signers": [
+              {
+                "did": "did:webvh:QmRChs6t57Fg4CbcdhUt1RAsehuZKigk3rvzhdd8nK77pz:magby.originals.build:user-acceptance0976",
+                "role": "author",
+                "versionId": "1-QmP2uzfY6vdeokh8nA9Lf84M45KisNc4Ysdo7ykrwKnKdH",
+                "obtainedAt": "2026-10-31T06:18:00.533Z",
+                "source": "package",
+                "location": null
+              }
+            ]
+          },
+          "assetFreshness": "not-established",
+          "identityFreshness": "not-established",
+          "ordering": "claimed",
+          "fork": null,
+          "reasons": [
+            "not-anchored"
+          ]
+        }
+      },
+      "checks": [
+        {
+          "id": "network-blocked",
+          "title": "network is disabled in this process (in-process guard and OS layer)",
+          "status": "PASS",
+          "detail": {
+            "inProcess": {
+              "fetch": "ACCEPTANCE_NETWORK_BLOCKED",
+              "netConnect": "ACCEPTANCE_NETWORK_BLOCKED",
+              "dnsLookup": "ACCEPTANCE_NETWORK_BLOCKED"
+            },
+            "osLayer": "sandbox-exec",
+            "osProbe": "EPERM",
+            "guardAttempts": 3
+          }
+        },
+        {
+          "id": "no-authority",
+          "title": "the reader has no key, store or author session",
+          "status": "PASS",
+          "detail": {
+            "/private/tmp/976-final-local/custody": "EPERM",
+            "/private/tmp/976-final-local/custody/author-keys.json": "EACCES",
+            "/private/tmp/976-final-local/storeA": "EPERM",
+            "/private/tmp/976-final-local/storeB": "EPERM"
+          }
+        },
+        {
+          "id": "same-original",
+          "title": "the package names and proves the same Original",
+          "status": "PASS",
+          "detail": {
+            "original": "did:vh:QmVRPAJTf7yemCApUb6vRzFD5mRENNjgYaZHEe9GywFcvg"
+          }
+        },
+        {
+          "id": "checkpoint",
+          "title": "the verified checkpoint is the author's head",
+          "status": "PASS",
+          "detail": {
+            "checkpoint": "5-Qmc6QPvXD8K7hCkkKs5ftvCrVox6ZgeZcQkLQx7abfSaCv"
+          }
+        },
+        {
+          "id": "history",
+          "title": "history: valid through every entry",
+          "status": "PASS",
+          "detail": {
+            "status": "valid",
+            "entries": 5
+          }
+        },
+        {
+          "id": "author-binding",
+          "title": "author binding: every entry signed by an assertionMethod key of the did:webvh author (P5.3)",
+          "status": "PASS",
+          "detail": {
+            "authorBinding": "valid",
+            "identityEvidence": {
+              "status": "complete",
+              "author": "did:webvh:QmRChs6t57Fg4CbcdhUt1RAsehuZKigk3rvzhdd8nK77pz:magby.originals.build:user-acceptance0976",
+              "latestVersionId": "1-QmP2uzfY6vdeokh8nA9Lf84M45KisNc4Ysdo7ykrwKnKdH",
+              "freshness": "not-established",
+              "obtained": {
+                "location": null,
+                "obtainedAt": "2026-10-31T06:18:00.533Z",
+                "source": "package",
+                "latestVersionId": "1-QmP2uzfY6vdeokh8nA9Lf84M45KisNc4Ysdo7ykrwKnKdH",
+                "witnessed": false
+              },
+              "retainedVersionId": "1-QmP2uzfY6vdeokh8nA9Lf84M45KisNc4Ysdo7ykrwKnKdH",
+              "deactivated": false,
+              "editors": []
+            }
+          }
+        },
+        {
+          "id": "resources",
+          "title": "every resource version's bytes are present and verified",
+          "status": "PASS",
+          "detail": [
+            "artwork.png@1:verified",
+            "scan.bin@1:verified",
+            "notes.md@1:verified",
+            "notes.md@2:verified",
+            "artwork.png@2:verified",
+            "extra.txt@1:verified"
+          ]
+        },
+        {
+          "id": "byte-digests",
+          "title": "independently: each packaged byte string hashes to its SHA-256 multihash digest and the author's claim",
+          "status": "PASS",
+          "detail": {
+            "artwork.png@1": "0429a22619fa7960a71fdea179e6d365a2f04eb128de797f615f5a816deb7fe6",
+            "scan.bin@1": "9ec45ab0c8505527af5931e27722ed5908748e5073169b4571c84e006eb90140",
+            "notes.md@1": "3caee78b66c79b0b8fb3b396b3d0b114b6059dafe714c6d9f2ed377e557a6b3e",
+            "notes.md@2": "a7ab9c4e2d9a3c61bc12a794959cb7bd28db1ba1064c64d0225fe006d70e3233",
+            "artwork.png@2": "6a8367d0f9d80512b69b7fbcb947193970b8b902705eff20201d869b1f59e173",
+            "extra.txt@1": "d8ef016fb7dd1219570087cf0f8a274576bec6e125f15c3878cb0480ed51b098"
+          }
+        },
+        {
+          "id": "historical-versions",
+          "title": "every historical checkpoint verifies from the package alone, with its own state",
+          "status": "PASS",
+          "detail": [
+            {
+              "versionId": "1-Qme4TRxmRgUZMC3Ck1aBT8F8zVTZ94R8CT5tUKjFJGCUT4",
+              "name": "Harbor at dawn",
+              "resources": 3
+            },
+            {
+              "versionId": "2-QmNnxRn4hkopMZ83ro3tBdpR96poW3tCBV6GTq1yZDtrBE",
+              "name": "Harbor at dawn",
+              "resources": 3
+            },
+            {
+              "versionId": "3-QmcJzUtoagijRxmXKJZPWXxGoiFzHfYWUAof5frSg5QWU6",
+              "name": "Harbor at dawn (final)",
+              "resources": 3
+            },
+            {
+              "versionId": "4-QmPipXMMtPyrLivp5WQmxeMKHh9ZnwTgoLUg7rzfqimqDx",
+              "name": "Harbor at dawn (final)",
+              "resources": 4
+            },
+            {
+              "versionId": "5-Qmc6QPvXD8K7hCkkKs5ftvCrVox6ZgeZcQkLQx7abfSaCv",
+              "name": "Harbor at dawn (final)",
+              "resources": 3
+            }
+          ]
+        },
+        {
+          "id": "verified-vs-current",
+          "title": "verified is true; an unanchored Original is valid as of its checkpoint, never current (P7.6, P7.10)",
+          "status": "PASS",
+          "detail": {
+            "verified": true,
+            "current": false,
+            "validAsOf": {
+              "checkpoint": "5-Qmc6QPvXD8K7hCkkKs5ftvCrVox6ZgeZcQkLQx7abfSaCv",
+              "signers": [
+                {
+                  "did": "did:webvh:QmRChs6t57Fg4CbcdhUt1RAsehuZKigk3rvzhdd8nK77pz:magby.originals.build:user-acceptance0976",
+                  "role": "author",
+                  "versionId": "1-QmP2uzfY6vdeokh8nA9Lf84M45KisNc4Ysdo7ykrwKnKdH",
+                  "obtainedAt": "2026-10-31T06:18:00.533Z",
+                  "source": "package",
+                  "location": null
+                }
+              ]
+            },
+            "assetFreshness": "not-established",
+            "identityFreshness": "not-established",
+            "ordering": "claimed",
+            "fork": null,
+            "reasons": [
+              "not-anchored"
+            ]
+          }
+        },
+        {
+          "id": "no-freshness-policy",
+          "title": "no freshness policy makes an unanchored Original current: the option and the CLI flag are gone (P7.10)",
+          "status": "PASS",
+          "detail": {
+            "current": false,
+            "cliExit": 2
+          }
+        },
+        {
+          "id": "cli",
+          "title": "the `originals verify --json` CLI agrees, offline",
+          "status": "PASS",
+          "detail": {
+            "exit": 0,
+            "verified": true,
+            "current": false
+          }
+        }
+      ],
+      "status": "PASS",
+      "process": {
+        "command": [
+          "sandbox-exec",
+          "-p",
+          "<sandbox profile>",
+          "/Users/brian/.local/share/vite-plus/js_runtime/node/26.13.0/bin/node",
+          "--import",
+          "file:///Users/brian/.b3/worktrees/sdk/t3-issue-976-prove-the-originals-local-web-release/scripts/acceptance/lib/guard.mjs",
+          "scripts/acceptance/phase2-offline-reader.mjs"
+        ],
+        "sandboxProfile": "(version 1)(allow default)(deny network*)(deny file-read* (subpath \"/private/tmp/976-final-local/custody\") (subpath \"/private/tmp/976-final-local/storeA\") (subpath \"/private/tmp/976-final-local/storeB\"))",
+        "exit": 0,
+        "signal": null,
+        "ms": 640
+      }
+    },
+    {
+      "phase": "3-author-b",
+      "started": "2026-10-31T06:18:01.125Z",
+      "finished": "2026-10-31T06:18:01.691Z",
+      "isolation": {
+        "pid": 84139,
+        "ppid": 83831,
+        "runtime": "node v26.13.0",
+        "execPath": "/Users/brian/.local/share/vite-plus/js_runtime/node/26.13.0/bin/node",
+        "cwd": "/private/tmp/976-final-local/tmp/3-author-b",
+        "home": "/private/tmp/976-final-local/home/3-author-b",
+        "tmpdir": "/private/tmp/976-final-local/tmp/3-author-b",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR",
+          "__CF_USER_TEXT_ENCODING"
+        ],
+        "dirs": {
+          "custody": "/private/tmp/976-final-local/custody",
+          "artifacts": "/private/tmp/976-final-local/artifacts",
+          "storeB": "/private/tmp/976-final-local/storeB"
+        }
+      },
+      "facts": {
+        "network": {
+          "inProcess": {
+            "fetch": "ACCEPTANCE_NETWORK_BLOCKED",
+            "netConnect": "ACCEPTANCE_NETWORK_BLOCKED",
+            "dnsLookup": "ACCEPTANCE_NETWORK_BLOCKED"
+          },
+          "osLayer": "sandbox-exec",
+          "osProbe": "EPERM",
+          "guardAttempts": 3
+        },
+        "original": {
+          "did": "did:vh:QmVRPAJTf7yemCApUb6vRzFD5mRENNjgYaZHEe9GywFcvg",
+          "checkpoint": "6-QmaGJmqT6UxdETCqaarf1o9DKzs5zde7iMjEJSVtV62f7g"
+        }
+      },
+      "checks": [
+        {
+          "id": "network-blocked",
+          "title": "network is disabled in this process (in-process guard and OS layer)",
+          "status": "PASS",
+          "detail": {
+            "inProcess": {
+              "fetch": "ACCEPTANCE_NETWORK_BLOCKED",
+              "netConnect": "ACCEPTANCE_NETWORK_BLOCKED",
+              "dnsLookup": "ACCEPTANCE_NETWORK_BLOCKED"
+            },
+            "osLayer": "sandbox-exec",
+            "osProbe": "EPERM",
+            "guardAttempts": 3
+          }
+        },
+        {
+          "id": "empty-store",
+          "title": "store B starts empty",
+          "status": "PASS"
+        },
+        {
+          "id": "import",
+          "title": "import the package into store B: same did:vh, checkpoint and history",
+          "status": "PASS",
+          "detail": {
+            "status": "imported",
+            "checkpoint": "5-Qmc6QPvXD8K7hCkkKs5ftvCrVox6ZgeZcQkLQx7abfSaCv",
+            "authorVersionId": "1-QmP2uzfY6vdeokh8nA9Lf84M45KisNc4Ysdo7ykrwKnKdH"
+          }
+        },
+        {
+          "id": "import-confers-no-authority",
+          "title": "importing alone gives no signing authority (P8.4, C12-20)",
+          "status": "PASS",
+          "detail": {
+            "noSigner": {
+              "name": "OriginalsError",
+              "category": "unauthorized-key",
+              "code": "SIGNER_REQUIRED",
+              "message": "committing to did:vh:QmVRPAJTf7yemCApUb6vRzFD5mRENNjgYaZHEe9GywFcvg needs a signer for an author or editor key"
+            },
+            "intruder": {
+              "name": "OriginalsError",
+              "category": "invalid-evidence",
+              "code": "COMMIT_VERIFICATION_FAILED",
+              "message": "the signed entry does not verify: proof by did:webvh:QmRChs6t57Fg4CbcdhUt1RAsehuZKigk3rvzhdd8nK77pz:magby.originals.build:user-acceptance0976#key-1 does not verify"
+            },
+            "draft": {
+              "kind": "draft",
+              "signed": false
+            }
+          }
+        },
+        {
+          "id": "no-key-exported",
+          "title": "no encoding of either author secret is in the package or anywhere in store B",
+          "status": "PASS",
+          "detail": {
+            "packageSha256": "5ac7ec898c5518086f9669de74385baf00f4811ea1fb06d1cef866f06ef1b5c2",
+            "storeFiles": 11,
+            "encodingsChecked": 9
+          }
+        },
+        {
+          "id": "update-key-cannot-author",
+          "title": "the DID's update (identity) key cannot sign an Original entry (P5.11)",
+          "status": "PASS",
+          "detail": {
+            "name": "OriginalsError",
+            "category": "invalid-evidence",
+            "code": "COMMIT_VERIFICATION_FAILED",
+            "message": "the signed entry does not verify: the verification method is not listed under assertionMethod"
+          }
+        },
+        {
+          "id": "continue-editing",
+          "title": "with the author key supplied separately, edit from the explicit imported parent",
+          "status": "PASS",
+          "detail": {
+            "checkpoint": "6-QmaGJmqT6UxdETCqaarf1o9DKzs5zde7iMjEJSVtV62f7g",
+            "versionIds": [
+              "1-Qme4TRxmRgUZMC3Ck1aBT8F8zVTZ94R8CT5tUKjFJGCUT4",
+              "2-QmNnxRn4hkopMZ83ro3tBdpR96poW3tCBV6GTq1yZDtrBE",
+              "3-QmcJzUtoagijRxmXKJZPWXxGoiFzHfYWUAof5frSg5QWU6",
+              "4-QmPipXMMtPyrLivp5WQmxeMKHh9ZnwTgoLUg7rzfqimqDx",
+              "5-Qmc6QPvXD8K7hCkkKs5ftvCrVox6ZgeZcQkLQx7abfSaCv",
+              "6-QmaGJmqT6UxdETCqaarf1o9DKzs5zde7iMjEJSVtV62f7g"
+            ],
+            "resourceVersionIds": 5
+          }
+        },
+        {
+          "id": "stale-parent",
+          "title": "an edit against the old parent is a conflict, never a rebase (P4.5, C12-12)",
+          "status": "PASS",
+          "detail": {
+            "name": "OriginalsError",
+            "category": "stale-parent",
+            "code": "STALE_PARENT",
+            "message": "did:vh:QmVRPAJTf7yemCApUb6vRzFD5mRENNjgYaZHEe9GywFcvg is at 6-QmaGJmqT6UxdETCqaarf1o9DKzs5zde7iMjEJSVtV62f7g, not 5-Qmc6QPvXD8K7hCkkKs5ftvCrVox6ZgeZcQkLQx7abfSaCv"
+          }
+        },
+        {
+          "id": "stale-digest",
+          "title": "an edit naming a resource digest that has moved is a conflict (P4.5)",
+          "status": "PASS",
+          "detail": {
+            "name": "OriginalsError",
+            "category": "stale-parent",
+            "code": "STALE_DIGEST",
+            "message": "resource notes.md is at zQmQpCoLnYHcVX5wdP1BswPq4joGHMR7q39tdXLt3Rp5HnT, not zQmZdAZv5jSwEgA8j8Z3LxcJoVf4iBEXmzeMGmRCYHmRKbx"
+          }
+        },
+        {
+          "id": "export-B",
+          "title": "export client B's package (complete, at its new head)",
+          "status": "PASS",
+          "detail": {
+            "sha256": "2fb56098bc9befc7945d006c58732071f5245a56d93cdd92e08dc83bb4c804d3",
+            "bytes": 31430
+          }
+        }
+      ],
+      "status": "PASS",
+      "process": {
+        "command": [
+          "sandbox-exec",
+          "-p",
+          "<sandbox profile>",
+          "/Users/brian/.local/share/vite-plus/js_runtime/node/26.13.0/bin/node",
+          "--import",
+          "file:///Users/brian/.b3/worktrees/sdk/t3-issue-976-prove-the-originals-local-web-release/scripts/acceptance/lib/guard.mjs",
+          "scripts/acceptance/phase3-author-b.mjs"
+        ],
+        "sandboxProfile": "(version 1)(allow default)(deny network*)",
+        "exit": 0,
+        "signal": null,
+        "ms": 696
+      }
+    },
+    {
+      "phase": "4-negatives",
+      "started": "2026-10-31T06:18:01.762Z",
+      "finished": "2026-10-31T06:18:03.482Z",
+      "isolation": {
+        "pid": 84189,
+        "ppid": 83831,
+        "runtime": "node v26.13.0",
+        "execPath": "/Users/brian/.local/share/vite-plus/js_runtime/node/26.13.0/bin/node",
+        "cwd": "/private/tmp/976-final-local/tmp/4-negatives",
+        "home": "/private/tmp/976-final-local/home/4-negatives",
+        "tmpdir": "/private/tmp/976-final-local/tmp/4-negatives",
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR",
+          "__CF_USER_TEXT_ENCODING"
+        ],
+        "dirs": {
+          "custody": "/private/tmp/976-final-local/custody",
+          "artifacts": "/private/tmp/976-final-local/artifacts",
+          "storeC": "/private/tmp/976-final-local/storeC"
+        }
+      },
+      "facts": {
+        "network": {
+          "inProcess": {
+            "fetch": "ACCEPTANCE_NETWORK_BLOCKED",
+            "netConnect": "ACCEPTANCE_NETWORK_BLOCKED",
+            "dnsLookup": "ACCEPTANCE_NETWORK_BLOCKED"
+          },
+          "osLayer": "sandbox-exec",
+          "osProbe": "EPERM",
+          "guardAttempts": 3
+        },
+        "cases": [
+          "network-blocked:PASS",
+          "missing-bytes-store:PASS",
+          "missing-bytes-archive:PASS",
+          "stale-prefix:PASS",
+          "divergent-local:PASS",
+          "divergent-reader:PASS",
+          "artifact-digests:PASS"
+        ]
+      },
+      "checks": [
+        {
+          "id": "network-blocked",
+          "title": "network is disabled in this process (in-process guard and OS layer)",
+          "status": "PASS",
+          "detail": {
+            "inProcess": {
+              "fetch": "ACCEPTANCE_NETWORK_BLOCKED",
+              "netConnect": "ACCEPTANCE_NETWORK_BLOCKED",
+              "dnsLookup": "ACCEPTANCE_NETWORK_BLOCKED"
+            },
+            "osLayer": "sandbox-exec",
+            "osProbe": "EPERM",
+            "guardAttempts": 3
+          }
+        },
+        {
+          "id": "missing-bytes-store",
+          "title": "a store that lost a historical resource packages it as explicitly partial; history stays valid (C12-10)",
+          "status": "PASS",
+          "detail": {
+            "store": {
+              "history": "valid",
+              "authorBinding": "valid",
+              "identity": "complete",
+              "resources": "partial",
+              "assetFreshness": "not-established",
+              "fork": null,
+              "validAsOf": "5-Qmc6QPvXD8K7hCkkKs5ftvCrVox6ZgeZcQkLQx7abfSaCv",
+              "current": false
+            },
+            "reader": {
+              "history": "valid",
+              "authorBinding": "valid",
+              "identity": "complete",
+              "resources": "partial",
+              "assetFreshness": "not-established",
+              "fork": null,
+              "validAsOf": "5-Qmc6QPvXD8K7hCkkKs5ftvCrVox6ZgeZcQkLQx7abfSaCv",
+              "current": false
+            },
+            "reasons": [
+              "not-anchored"
+            ]
+          }
+        },
+        {
+          "id": "missing-bytes-archive",
+          "title": "a package stripped of a resource but still claiming complete is partial and flagged",
+          "status": "PASS",
+          "detail": {
+            "reader": {
+              "history": "valid",
+              "authorBinding": "valid",
+              "identity": "complete",
+              "resources": "partial",
+              "assetFreshness": "not-established",
+              "fork": null,
+              "validAsOf": "5-Qmc6QPvXD8K7hCkkKs5ftvCrVox6ZgeZcQkLQx7abfSaCv",
+              "current": false
+            },
+            "reasons": [
+              "not-anchored",
+              "manifest-completeness-mismatch"
+            ]
+          }
+        },
+        {
+          "id": "stale-prefix",
+          "title": "an older, valid package is stale for a reader that has seen the newer head (C12-22)",
+          "status": "PASS",
+          "detail": {
+            "reader": {
+              "history": "valid",
+              "authorBinding": "valid",
+              "identity": "complete",
+              "resources": "available",
+              "assetFreshness": "stale",
+              "fork": null,
+              "validAsOf": "5-Qmc6QPvXD8K7hCkkKs5ftvCrVox6ZgeZcQkLQx7abfSaCv",
+              "current": false
+            },
+            "reasons": [
+              "not-anchored",
+              "asset-log-older-than-retained"
+            ]
+          }
+        },
+        {
+          "id": "divergent-local",
+          "title": "client C, signing from an earlier checkpoint, then imports client B's history: an unresolved fork (C12-23)",
+          "status": "PASS",
+          "detail": {
+            "store": {
+              "history": "valid",
+              "authorBinding": "valid",
+              "identity": "complete",
+              "resources": "available",
+              "assetFreshness": "not-established",
+              "fork": {
+                "version": 6,
+                "branches": [
+                  "6-QmZuimXw9UWTymUB5MWvXx4vW4QBc8V9vhPag6V7Vu6Hrg",
+                  "6-QmaGJmqT6UxdETCqaarf1o9DKzs5zde7iMjEJSVtV62f7g"
+                ]
+              },
+              "validAsOf": null,
+              "current": false
+            },
+            "reasons": [
+              "not-anchored",
+              "fork-unresolved"
+            ],
+            "afterEdit": {
+              "current": false
+            }
+          }
+        },
+        {
+          "id": "divergent-reader",
+          "title": "a reader importing both branches, in the other order, also reports the fork with no winner",
+          "status": "PASS",
+          "detail": {
+            "store": {
+              "history": "valid",
+              "authorBinding": "valid",
+              "identity": "complete",
+              "resources": "available",
+              "assetFreshness": "not-established",
+              "fork": {
+                "version": 6,
+                "branches": [
+                  "6-QmaGJmqT6UxdETCqaarf1o9DKzs5zde7iMjEJSVtV62f7g",
+                  "6-QmZuimXw9UWTymUB5MWvXx4vW4QBc8V9vhPag6V7Vu6Hrg"
+                ]
+              },
+              "validAsOf": null,
+              "current": false
+            },
+            "loadB": {
+              "history": "valid",
+              "authorBinding": "valid",
+              "identity": "complete",
+              "resources": "available",
+              "assetFreshness": "not-established",
+              "fork": {
+                "version": 6,
+                "branches": [
+                  "6-QmaGJmqT6UxdETCqaarf1o9DKzs5zde7iMjEJSVtV62f7g",
+                  "6-QmZuimXw9UWTymUB5MWvXx4vW4QBc8V9vhPag6V7Vu6Hrg"
+                ]
+              },
+              "validAsOf": null,
+              "current": false
+            },
+            "loadX": {
+              "history": "valid",
+              "authorBinding": "valid",
+              "identity": "complete",
+              "resources": "available",
+              "assetFreshness": "not-established",
+              "fork": {
+                "version": 6,
+                "branches": [
+                  "6-QmZuimXw9UWTymUB5MWvXx4vW4QBc8V9vhPag6V7Vu6Hrg",
+                  "6-QmaGJmqT6UxdETCqaarf1o9DKzs5zde7iMjEJSVtV62f7g"
+                ]
+              },
+              "validAsOf": null,
+              "current": false
+            }
+          }
+        },
+        {
+          "id": "artifact-digests",
+          "title": "record the negative-case artifacts",
+          "status": "PASS",
+          "detail": {
+            "original-A-partial.zip": "2508a16a840727dc2c14fd9f2eddd31efb33e1371422a9af84f0d6fedf2e3856",
+            "original-X.zip": "a40685be9677e90253d37045c1987c11e1a2d7a24ce9c17906e5d27faf46b1b5"
+          }
+        }
+      ],
+      "status": "PASS",
+      "process": {
+        "command": [
+          "sandbox-exec",
+          "-p",
+          "<sandbox profile>",
+          "/Users/brian/.local/share/vite-plus/js_runtime/node/26.13.0/bin/node",
+          "--import",
+          "file:///Users/brian/.b3/worktrees/sdk/t3-issue-976-prove-the-originals-local-web-release/scripts/acceptance/lib/guard.mjs",
+          "scripts/acceptance/phase4-negatives.mjs"
+        ],
+        "sandboxProfile": "(version 1)(allow default)(deny network*)",
+        "exit": 0,
+        "signal": null,
+        "ms": 1793
+      }
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "artifacts/expected-A.json",
+      "bytes": 4556,
+      "sha256": "5025d09405d0da3c71e4599032ddfbf4033e94a2fde213edfe405287cfc2db8e"
+    },
+    {
+      "path": "artifacts/original-A-partial.zip",
+      "bytes": 22665,
+      "sha256": "2508a16a840727dc2c14fd9f2eddd31efb33e1371422a9af84f0d6fedf2e3856"
+    },
+    {
+      "path": "artifacts/original-A.zip",
+      "bytes": 29653,
+      "sha256": "5ac7ec898c5518086f9669de74385baf00f4811ea1fb06d1cef866f06ef1b5c2"
+    },
+    {
+      "path": "artifacts/original-B.zip",
+      "bytes": 31430,
+      "sha256": "2fb56098bc9befc7945d006c58732071f5245a56d93cdd92e08dc83bb4c804d3"
+    },
+    {
+      "path": "artifacts/original-X.zip",
+      "bytes": 32741,
+      "sha256": "a40685be9677e90253d37045c1987c11e1a2d7a24ce9c17906e5d27faf46b1b5"
+    },
+    {
+      "path": "public/author-did.json",
+      "bytes": 2187,
+      "sha256": "aaa74532d01a7ec99eb3a4d5432bdc2dccb81a818c2c5dab17ac7eb79c2ffbbb"
+    }
+  ],
+  "notIncluded": [
+    "Section B: real Turnkey session, public host, deployed routes, browser restart and interrupted publication."
+  ]
+}

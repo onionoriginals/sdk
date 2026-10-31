@@ -105,7 +105,7 @@ async function buildMockExternalSigner(keyManager: KeyManager): Promise<{
 // throw. The configured webvhNetwork tier never supplies a default domain.
 
 describe('DID-002 — migrateToDIDWebVH requires an explicit domain', () => {
-  test.each(['magby', 'cleffa', 'pichu'] as const)(
+  test.each(['development', 'staging', 'production'] as const)(
     'webvhNetwork=%s → omitting domain throws WEBVH_DOMAIN_REQUIRED (no default host)',
     async (webvhNetwork) => {
       const manager = new DIDManager({ ...baseConfig, webvhNetwork });
@@ -125,14 +125,14 @@ describe('DID-002 — migrateToDIDWebVH requires an explicit domain', () => {
   test('explicit domain overrides network config', async () => {
     const manager = new DIDManager({
       ...baseConfig,
-      webvhNetwork: 'magby',
+      webvhNetwork: 'development',
     });
 
     const sourceDoc = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:vh:did002-override' };
     const webDoc = (await manager.migrateToDIDWebVH(sourceDoc, 'custom.example.com')).didDocument;
 
     expect(webDoc.id).toContain('custom.example.com');
-    expect(webDoc.id).not.toContain('magby.originals.build');
+    expect(webDoc.id).not.toContain('originals.build');
   }, 15000);
 });
 
@@ -141,10 +141,10 @@ describe('DID-002 — migrateToDIDWebVH requires an explicit domain', () => {
 // ---------------------------------------------------------------------------
 
 describe('DID-003 — migrateToDIDBTCO on regtest produces did:btco:reg prefix', () => {
-  test('webvhNetwork=magby → did:btco:reg:<sat>', async () => {
+  test('webvhNetwork=development → did:btco:reg:<sat>', async () => {
     const manager = new DIDManager({
       ...baseConfig,
-      webvhNetwork: 'magby', // magby → regtest
+      webvhNetwork: 'development', // development → regtest
     });
 
     const km = new KeyManager();
@@ -186,14 +186,14 @@ describe('DID-003 — migrateToDIDBTCO on regtest produces did:btco:reg prefix',
     expect(btcoDoc.id).toMatch(/^did:btco:reg:/);
   });
 
-  test('webvhNetwork=cleffa (signet) → did:btco:sig:<sat>', async () => {
+  test('webvhNetwork=staging (signet) → did:btco:sig:<sat>', async () => {
     // No explicit `network`: an explicitly configured Bitcoin network takes
     // precedence over the webvhNetwork mapping (issue #247), so the mapping
     // only applies when `network` is absent.
     const manager = new DIDManager({
       defaultKeyType: 'Ed25519',
       enableLogging: false,
-      webvhNetwork: 'cleffa',
+      webvhNetwork: 'staging',
     } as OriginalsConfig);
 
     const peerDoc = {

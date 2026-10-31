@@ -1,0 +1,57 @@
+{
+  "phase": "L7-signed-out",
+  "started": "2026-10-31T06:18:04.925Z",
+  "finished": "2026-10-31T06:18:05.083Z",
+  "isolation": {
+    "pid": 84300,
+    "ppid": 83978,
+    "runtime": "bun 1.2.22",
+    "execPath": "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+    "cwd": "/private/tmp/976-final-hosted/tmp/L7-signed-out",
+    "home": "/private/tmp/976-final-hosted/home/L7-signed-out",
+    "tmpdir": "/private/tmp/976-final-hosted/tmp/L7-signed-out",
+    "envNames": [
+      "ACCEPTANCE_INPUT",
+      "ACCEPTANCE_RESULT",
+      "HOME",
+      "LANG",
+      "PATH",
+      "TMPDIR"
+    ],
+    "dirs": {}
+  },
+  "facts": {},
+  "checks": [
+    {
+      "id": "b5-guest",
+      "title": "signed out: publishing is unavailable, guest work survives a reload in the guest database only, and nothing reaches an account database or the server",
+      "status": "PASS",
+      "detail": {
+        "did": "did:vh:QmXEiPaaYztsFEjzE6PzYLZ6UqL2xoMQ2aJbVBajosKFBm",
+        "refused": "Sign in to publish: an Original's web address lives in your account.",
+        "databases": [
+          "originals-library-v1:guest"
+        ]
+      }
+    },
+    {
+      "id": "b5-package-public-only",
+      "title": "the signed-out evidence package holds no private key",
+      "status": "PASS",
+      "detail": {
+        "bytes": 7106,
+        "files": 2
+      }
+    }
+  ],
+  "status": "PASS",
+  "process": {
+    "command": [
+      "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+      "scripts/acceptance/hosted/l6-signed-out.ts"
+    ],
+    "exit": 0,
+    "signal": null,
+    "ms": 268
+  }
+}

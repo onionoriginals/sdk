@@ -8,7 +8,7 @@ const testConfig: OriginalsConfig = {
   network: 'regtest',
   defaultKeyType: 'Ed25519',
   enableLogging: false,
-  webvhNetwork: 'magby',
+  webvhNetwork: 'development',
 };
 
 describe('Metrics Integration', () => {

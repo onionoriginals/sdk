@@ -1,0 +1,11 @@
+{
+  "method": "did:webvh",
+  "builder": "apps/landing/src/auth/webvh.ts buildUserWebVHDid",
+  "did": "did:webvh:QmRChs6t57Fg4CbcdhUt1RAsehuZKigk3rvzhdd8nK77pz:magby.originals.build:user-acceptance0976",
+  "log": "{\"versionId\":\"1-QmP2uzfY6vdeokh8nA9Lf84M45KisNc4Ysdo7ykrwKnKdH\",\"versionTime\":\"2026-10-31T06:17:59Z\",\"parameters\":{\"method\":\"did:webvh:1.0\",\"scid\":\"QmRChs6t57Fg4CbcdhUt1RAsehuZKigk3rvzhdd8nK77pz\",\"updateKeys\":[\"z6Mkoim98HSGpDh9jANwsEbm8yTAX2ozxx9inH5ifmvtQP8k\"],\"portable\":false,\"nextKeyHashes\":[],\"watchers\":[],\"witness\":{},\"deactivated\":false},\"state\":{\"@context\":[\"https://www.w3.org/ns/did/v1\",\"https://w3id.org/security/multikey/v1\"],\"id\":\"did:webvh:QmRChs6t57Fg4CbcdhUt1RAsehuZKigk3rvzhdd8nK77pz:magby.originals.build:user-acceptance0976\",\"controller\":\"did:webvh:QmRChs6t57Fg4CbcdhUt1RAsehuZKigk3rvzhdd8nK77pz:magby.originals.build:user-acceptance0976\",\"verificationMethod\":[{\"id\":\"#key-0\",\"type\":\"Multikey\",\"publicKeyMultibase\":\"z6Mkoim98HSGpDh9jANwsEbm8yTAX2ozxx9inH5ifmvtQP8k\",\"controller\":\"did:webvh:QmRChs6t57Fg4CbcdhUt1RAsehuZKigk3rvzhdd8nK77pz:magby.originals.build:user-acceptance0976\"},{\"id\":\"#key-1\",\"type\":\"Multikey\",\"publicKeyMultibase\":\"z6Mksvn1aETetc4UQwqLHbopmcyYrHbhd2LLHGez26PPfxty\",\"controller\":\"did:webvh:QmRChs6t57Fg4CbcdhUt1RAsehuZKigk3rvzhdd8nK77pz:magby.originals.build:user-acceptance0976\"}],\"authentication\":[\"#key-0\"],\"assertionMethod\":[\"#key-1\"],\"keyAgreement\":[],\"capabilityDelegation\":[],\"capabilityInvocation\":[]},\"proof\":[{\"type\":\"DataIntegrityProof\",\"cryptosuite\":\"eddsa-jcs-2022\",\"verificationMethod\":\"did:key:z6Mkoim98HSGpDh9jANwsEbm8yTAX2ozxx9inH5ifmvtQP8k\",\"created\":\"2026-10-31T06:17:59Z\",\"proofPurpose\":\"assertionMethod\",\"proofValue\":\"z39FojAtHpfApfEN7Bq9TccAHoBwPu7ycf7HtSTRjk3HTG9CH5hHkrnokVjvD5Np3ZtfCPVSPiX2eyseceTWBM7QZ\"}]}\n",
+  "versionId": "1-QmP2uzfY6vdeokh8nA9Lf84M45KisNc4Ysdo7ykrwKnKdH",
+  "assertionMethod": "did:webvh:QmRChs6t57Fg4CbcdhUt1RAsehuZKigk3rvzhdd8nK77pz:magby.originals.build:user-acceptance0976#key-1",
+  "updateKeys": [
+    "z6Mkoim98HSGpDh9jANwsEbm8yTAX2ozxx9inH5ifmvtQP8k"
+  ]
+}

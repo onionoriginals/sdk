@@ -55,8 +55,8 @@ export function btcoExplorerUrl(txid: string): string | undefined {
 
 /** The Bitcoin network handed to `OriginalsSDK.create`. */
 export type SdkNetwork = 'mainnet' | 'testnet' | 'regtest';
-/** The webvh deployment tier matching that network (magby↔regtest, cleffa↔signet/testnet, pichu↔mainnet). */
-export type WebvhTier = 'magby' | 'cleffa' | 'pichu';
+/** The webvh deployment tier matching that network (development↔regtest, staging↔signet/testnet, production↔mainnet). */
+export type WebvhTier = 'development' | 'staging' | 'production';
 
 export interface DemoTier {
   /** True when THIS visitor gets real Bitcoin: the deploy enables it AND they are signed in. */
@@ -83,7 +83,7 @@ export function demoTier(flag: BtcNetworkFlag, authed: boolean): DemoTier {
   const real = flag !== 'off' && authed;
   const network: SdkNetwork = !real || flag === 'regtest' ? 'regtest' : flag === 'mainnet' ? 'mainnet' : 'testnet';
   const webvhNetwork: WebvhTier =
-    network === 'mainnet' ? 'pichu' : network === 'testnet' ? 'cleffa' : 'magby';
+    network === 'mainnet' ? 'production' : network === 'testnet' ? 'staging' : 'development';
   return { real, network, webvhNetwork };
 }
 

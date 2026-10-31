@@ -1,0 +1,137 @@
+{
+  "phase": "L6-reader",
+  "started": "2026-10-31T06:18:04.751Z",
+  "finished": "2026-10-31T06:18:04.812Z",
+  "isolation": {
+    "pid": 84299,
+    "ppid": 83978,
+    "runtime": "node v26.13.0",
+    "execPath": "/Users/brian/.local/share/vite-plus/js_runtime/node/26.13.0/bin/node",
+    "cwd": "/private/tmp/976-final-hosted/tmp/L6-reader",
+    "home": "/private/tmp/976-final-hosted/home/L6-reader",
+    "tmpdir": "/private/tmp/976-final-hosted/tmp/L6-reader",
+    "envNames": [
+      "ACCEPTANCE_INPUT",
+      "ACCEPTANCE_RESULT",
+      "HOME",
+      "LANG",
+      "PATH",
+      "TMPDIR",
+      "__CF_USER_TEXT_ENCODING"
+    ]
+  },
+  "facts": {},
+  "checks": [
+    {
+      "id": "no-authority",
+      "title": "the reader has no key, store, cookie or author directory",
+      "status": "PASS",
+      "detail": {
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR",
+          "__CF_USER_TEXT_ENCODING"
+        ]
+      }
+    },
+    {
+      "id": "work1-complete",
+      "title": "work1: a stranger verifies the complete snapshot",
+      "status": "PASS",
+      "detail": {
+        "verified": true,
+        "checkpoint": "5-QmPYPGLmZe6o2C9ScSKRvXXBNPYDhCBr3yFGW6iryQheXB",
+        "head": "5-QmPYPGLmZe6o2C9ScSKRvXXBNPYDhCBr3yFGW6iryQheXB",
+        "alias": "confirmed",
+        "resources": "available",
+        "current": false,
+        "reasons": [
+          "not-anchored"
+        ],
+        "freshness": {
+          "asset": "not-established",
+          "identity": "not-established",
+          "validAsOf": {
+            "checkpoint": "5-QmPYPGLmZe6o2C9ScSKRvXXBNPYDhCBr3yFGW6iryQheXB",
+            "signers": [
+              {
+                "did": "did:webvh:QmTW4GucqraSusMNWaZeuXRNwePaNQs3WXa8yjpzp89QV4:acceptance.example:user-sub-acceptance-0",
+                "role": "author",
+                "versionId": "1-QmVTMYiCHh7hJkCiwLqnpeuRdQHhGWTEvsrtymeELd7ygo",
+                "obtainedAt": "2026-10-31T06:18:04.767Z",
+                "source": "host",
+                "location": null
+              }
+            ]
+          }
+        },
+        "ordering": "claimed",
+        "digests": [
+          {
+            "resource": "artwork.svg",
+            "version": 1,
+            "sha256": "1c7e1c740158039636aa1c8970d273053477901adc1d81771074796794126014"
+          },
+          {
+            "resource": "metadata.json",
+            "version": 1,
+            "sha256": "8658b2fdfb1865fde9ac12041313a483fae414145885ce1db63e3c9b6f9f8ffe"
+          },
+          {
+            "resource": "artwork.svg",
+            "version": 2,
+            "sha256": "03f5cec4a8606b781aafad35ce38690026655c33f4208b1d3325acd5a48201f9"
+          },
+          {
+            "resource": "metadata.json",
+            "version": 2,
+            "sha256": "47297db213e7765e5ff6fb448499329f463037aef40562ab382e3440611fb1d7"
+          },
+          {
+            "resource": "artwork.svg",
+            "version": 3,
+            "sha256": "efbab3d13676f43fc33823551abb5ebe5fff8dc6f832f9c26e4c29037bd006a7"
+          },
+          {
+            "resource": "metadata.json",
+            "version": 3,
+            "sha256": "f99d09558a87605e37568a1ac95098435198789e59de0f914820fae945d381fa"
+          },
+          {
+            "resource": "artwork.svg",
+            "version": 4,
+            "sha256": "a8b476a3b181d1ac218bc50ec659a234543f4a007b6a56b304b4ee6805fb00da"
+          },
+          {
+            "resource": "metadata.json",
+            "version": 4,
+            "sha256": "7d62bc28e83493607112284afeae53746da92ae3b371cb1a323f3521a8e7eeb0"
+          }
+        ]
+      }
+    },
+    {
+      "id": "no-cookies",
+      "title": "the reader sent no cookie and received none",
+      "status": "PASS",
+      "detail": {
+        "cookies": 0,
+        "setCookies": 0
+      }
+    }
+  ],
+  "status": "PASS",
+  "process": {
+    "command": [
+      "/Users/brian/.local/share/vite-plus/js_runtime/node/26.13.0/bin/node",
+      "scripts/acceptance/hosted/reader.mjs"
+    ],
+    "exit": 0,
+    "signal": null,
+    "ms": 137
+  }
+}

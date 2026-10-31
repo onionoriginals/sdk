@@ -450,7 +450,7 @@ const sdk = OriginalsSDK.create({
     backend: { type: 'pinata', apiKey: PINATA_KEY, secretApiKey: PINATA_SECRET },
     gatewayUrls: ['https://gateway.pinata.cloud', 'https://ipfs.io'],
   }),
-  webvhNetwork: 'magby',
+  webvhNetwork: 'development',
 });
 
 // Create an asset with a resource
@@ -466,7 +466,7 @@ const asset = await sdk.lifecycle.createAsset({
 
 // Publish to web — resource is stored on IPFS via the adapter
 const published = await sdk.lifecycle.publishToWeb(asset, {
-  domain: 'magby.originals.build',
+  domain: 'originals.build',
   paths: ['art', 'my-artwork'],
 });
 
@@ -481,7 +481,7 @@ console.log(published.resources[0].url);
 const adapter = sdk.config.storageAdapter as IPFSStorageAdapter;
 
 // Get the CID for a stored resource
-const cid = adapter.getCid('magby.originals.build', 'resources/uLCA...');
+const cid = adapter.getCid('originals.build', 'resources/uLCA...');
 
 // Verify CID matches the SDK resource hash
 const resource = asset.resources[0];
