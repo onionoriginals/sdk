@@ -34,7 +34,7 @@
 | #   | Feature                                                                | SDK Location                        | Notes                                                                                                                                                                                                                      |
 | --- | ---------------------------------------------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | **Network-prefixed DIDs** (`did:btco:reg:<sat>`, `did:btco:sig:<sat>`) | `BtcoDidResolver.ts:55-60`          | The SDK supports `reg` and `sig` network prefixes for regtest and signet. The DIF spec only defines `did:btco:<sat-number>` with no network prefix mechanism. The spec should define how non-mainnet DIDs are represented. |
-| 2   | **WebVH-to-Bitcoin network mapping**                                   | `types/network.ts`, `DIDManager.ts` | The SDK maps WebVH networks (pichu/cleffa/magby) to Bitcoin networks (mainnet/signet/regtest) automatically. This deployment topology is SDK-specific but could be referenced in the spec's deployment guidance.           |
+| 2   | **WebVH-to-Bitcoin network mapping**                                   | `types/network.ts`, `DIDManager.ts` | The SDK maps WebVH networks (production/staging/development) to Bitcoin networks (mainnet/signet/regtest) automatically. This deployment topology is SDK-specific but could be referenced in the spec's deployment guidance.           |
 | 3   | **Circuit breaker for provider calls**                                 | `BitcoinManager.ts:42-54`           | The SDK wraps the OrdinalsProvider with a configurable circuit breaker. This is a resilience pattern the spec could recommend.                                                                                             |
 | 4   | **Fee oracle abstraction**                                             | `BitcoinManager.ts:58-105`          | The SDK supports pluggable fee estimation (external oracle -> provider fallback -> caller-provided). The spec has no fee estimation guidance.                                                                              |
 
@@ -153,7 +153,7 @@ The DIF specs use `did:btco:<sat>/[index]` for resource addressing with structur
 
 ### 4.3 Context URL: `ordinals.plus/v1`
 
-The DIF specs reference `https://ordinals.plus/v1` as a shared JSON-LD context. The SDK uses its own network-specific contexts (`https://pichu.originals.build/context`, etc.). These need to be reconciled — either the SDK should support both, or the specs should acknowledge the network-specific contexts.
+The DIF specs reference `https://ordinals.plus/v1` as a shared JSON-LD context. The SDK uses its own network-specific contexts (`https://originals.build/context`, etc.). These need to be reconciled — either the SDK should support both, or the specs should acknowledge the network-specific contexts.
 
 ### 4.4 Credential type taxonomy
 

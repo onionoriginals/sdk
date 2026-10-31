@@ -181,7 +181,7 @@ describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair',
         authKeyPublic: auth.publicKeyMultibase,
         assertionKeyPublic: assertion.publicKeyMultibase,
         updateKeyPublic: update.publicKeyMultibase,
-        domain: 'magby.originals.build',
+        domain: 'originals.build',
         slug: 'integration-test-user',
       });
 
@@ -236,7 +236,7 @@ describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair',
         authKeyPublic: auth.publicKeyMultibase,
         assertionKeyPublic: assertion.publicKeyMultibase,
         updateKeyPublic: update.publicKeyMultibase,
-        domain: 'magby.originals.build',
+        domain: 'originals.build',
         slug: 'spy-test-user',
       });
 
@@ -259,7 +259,7 @@ describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair',
       );
 
       const result = await signer.sign({
-        document: { id: 'did:webvh:magby.originals.build:test-signer' },
+        document: { id: 'did:webvh:originals.build:test-signer' },
         proof: {
           type: 'DataIntegrityProof',
           cryptosuite: 'eddsa-jcs-2022',
@@ -334,7 +334,7 @@ describe('[AUTH-029-INTEGRATION] createDIDWithTurnkey — real Ed25519 keypair',
           authKeyPublic: 'z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp',
           assertionKeyPublic: 'z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK',
           updateKeyPublic: 'z6MknGc3omQfErKtumfzKgaEsXYP4amJiosdMXaGK9PFqaHh',
-          domain: 'magby.originals.build',
+          domain: 'originals.build',
           slug: 'expired-session-test',
           onExpired: () => { onExpiredCalled = true; },
         })

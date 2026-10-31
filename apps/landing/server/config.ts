@@ -25,7 +25,7 @@ import { mkdirSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import { isLikelyDeployed } from './deploy-env';
 import { PRODUCTION_WEBVH_HOST } from '../src/sdk/features';
-import { LEGACY_WEBVH_DOMAIN } from '../src/auth/webvh-domain';
+import { CANONICAL_WEBVH_DOMAIN } from '../src/auth/webvh-domain';
 import { isBitcoinConfigured, serverBtcNetwork, isLoopbackServiceUrl, serverAnchoringEnabled } from './bitcoin';
 
 /** Block notifications are hints; QuickNode still verifies commit confirmation. */
@@ -345,18 +345,13 @@ export function validateConfig(input: ConfigInput): ConfigIssue[] {
     });
   }
 
-  // The did:webvh host (#529; #976 B, G1). The SPA mints every did:webvh on
-  // the domain it was built for, VITE_WEBVH_HOST (`webvhDomain()` in
-  // src/auth/webvh-domain.ts). Unset, it falls back to the legacy domain
-  // magby.originals.build, which a deployed instance other than production may
-  // not serve, and a did:webvh domain cannot be changed after publication
-  // (P3.6). So it is required on every deployed instance, whatever the network.
+  // Every deployed instance must explicitly name the domain it serves.
   const webvhHost = env.VITE_WEBVH_HOST;
   if (!webvhHost) {
     if (deployed) {
       report(
         'VITE_WEBVH_HOST',
-        `VITE_WEBVH_HOST is unset on a deployed instance — every new did:webvh is minted on the legacy domain ${LEGACY_WEBVH_DOMAIN}, permanently, whether or not this instance serves it. Set it to this instance's bare hostname and REBUILD the SPA (Vite bakes it at build time).`
+        `VITE_WEBVH_HOST is unset on a deployed instance — every new did:webvh is minted on the canonical domain ${CANONICAL_WEBVH_DOMAIN}, permanently, whether or not this instance serves it. Set it to this instance's bare hostname and REBUILD the SPA (Vite bakes it at build time).`
       );
     }
   } else if (!isBareHost(webvhHost)) {

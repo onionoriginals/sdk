@@ -1,0 +1,173 @@
+{
+  "phase": "L3-client-a-restart",
+  "started": "2026-10-31T06:18:02.598Z",
+  "finished": "2026-10-31T06:18:03.421Z",
+  "isolation": {
+    "pid": 84261,
+    "ppid": 83978,
+    "runtime": "bun 1.2.22",
+    "execPath": "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+    "cwd": "/private/tmp/976-final-hosted/tmp/L3-client-a-restart",
+    "home": "/private/tmp/976-final-hosted/home/L3-client-a-restart",
+    "tmpdir": "/private/tmp/976-final-hosted/tmp/L3-client-a-restart",
+    "envNames": [
+      "ACCEPTANCE_INPUT",
+      "ACCEPTANCE_RESULT",
+      "HOME",
+      "LANG",
+      "PATH",
+      "TMPDIR"
+    ],
+    "dirs": {
+      "custody": "/private/tmp/976-final-hosted/custody",
+      "storeA": "/private/tmp/976-final-hosted/storeA"
+    }
+  },
+  "facts": {
+    "work1": {
+      "did": "did:vh:QmY9MrnFf91eQwvLrfTCSkDb1HgERNUdywpEJiqJEb6RZ8",
+      "alias": "did:webvh:QmbrnkoMSjWC8npnB7EjXWoUyScE71sT2Ctca8q16mnm22:acceptance.example:user-sub-acceptance-0:o-QmY9MrnFf91eQwvL",
+      "checkpoint": "4-QmWTzpK4H5SaKHiaWAQyPoEbBBDsmhxFX9kTb2DD1AtV7y",
+      "entries": 4,
+      "resources": [
+        {
+          "id": "artwork.svg",
+          "mediaType": "image/svg+xml",
+          "sha256": "efbab3d13676f43fc33823551abb5ebe5fff8dc6f832f9c26e4c29037bd006a7"
+        },
+        {
+          "id": "metadata.json",
+          "mediaType": "application/json",
+          "sha256": "f99d09558a87605e37568a1ac95098435198789e59de0f914820fae945d381fa"
+        }
+      ]
+    },
+    "work2": {
+      "did": "did:vh:Qmbp4PoZcMKGJHTuvTRkY68b9QZYq5GKQVgQqowFVxsw1i",
+      "alias": "did:webvh:QmQTiDJyw7nX7xrnekxMjXJw8oiMfxBVEiGcgnBMYDoGFh:acceptance.example:user-sub-acceptance-0:o-Qmbp4PoZcMKGJHTu",
+      "checkpoint": "2-QmSjQsa4VxsaNTzBJaJ6o3zXHezHohxxMKz1HxrFyq8aoY",
+      "entries": 2,
+      "resources": [
+        {
+          "id": "artwork.svg",
+          "mediaType": "image/svg+xml",
+          "sha256": "a6bef4b94a44eb2c639b0f25514a97afee31af8c94695f14b468e060cf88a94e"
+        },
+        {
+          "id": "metadata.json",
+          "mediaType": "application/json",
+          "sha256": "527fadcd0a82e5fd31cceb752ba00997064502c8236c883e5f0bc65756a4036f"
+        }
+      ]
+    },
+    "work3": {
+      "did": "did:vh:QmVo3VCLMjprc5d7ZYeptpZG69zKF4wfDv2Saiis9XJSyC",
+      "alias": "did:webvh:QmZjMikYmyu28GyP6G5NKkP32eHjtZokZqcnd7HvEA9ME2:acceptance.example:user-sub-acceptance-0:o-QmVo3VCLMjprc5d7",
+      "checkpoint": "2-QmdhcWKqcdR5h8Pz89TypwZjBEJQYZTA68dN9J8gj8ZXDT",
+      "entries": 2,
+      "resources": [
+        {
+          "id": "artwork.svg",
+          "mediaType": "image/svg+xml",
+          "sha256": "c56a7f1fdc1171c18085cb5753a85a16dd9cd27cdf83d09cd1c223f2fdf8770f"
+        },
+        {
+          "id": "metadata.json",
+          "mediaType": "application/json",
+          "sha256": "3500ac1f78909f86d9d4b2cfb57c291f97f291f540a218c1b8e72d7494a5066d"
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "id": "b3-listed",
+      "title": "after the restart this browser's store holds all three works",
+      "status": "PASS",
+      "detail": [
+        "did:vh:QmVo3VCLMjprc5d7ZYeptpZG69zKF4wfDv2Saiis9XJSyC",
+        "did:vh:QmY9MrnFf91eQwvLrfTCSkDb1HgERNUdywpEJiqJEb6RZ8",
+        "did:vh:Qmbp4PoZcMKGJHTuvTRkY68b9QZYq5GKQVgQqowFVxsw1i"
+      ]
+    },
+    {
+      "id": "b3-reopen-continue",
+      "title": "the published work reopens at its checkpoint and the next revision goes through the host",
+      "status": "PASS",
+      "detail": {
+        "did": "did:vh:QmY9MrnFf91eQwvLrfTCSkDb1HgERNUdywpEJiqJEb6RZ8",
+        "alias": "did:webvh:QmbrnkoMSjWC8npnB7EjXWoUyScE71sT2Ctca8q16mnm22:acceptance.example:user-sub-acceptance-0:o-QmY9MrnFf91eQwvL",
+        "checkpoint": "4-QmWTzpK4H5SaKHiaWAQyPoEbBBDsmhxFX9kTb2DD1AtV7y",
+        "entries": 4,
+        "resources": [
+          {
+            "id": "artwork.svg",
+            "mediaType": "image/svg+xml",
+            "sha256": "efbab3d13676f43fc33823551abb5ebe5fff8dc6f832f9c26e4c29037bd006a7"
+          },
+          {
+            "id": "metadata.json",
+            "mediaType": "application/json",
+            "sha256": "f99d09558a87605e37568a1ac95098435198789e59de0f914820fae945d381fa"
+          }
+        ]
+      }
+    },
+    {
+      "id": "b4-resume-work2",
+      "title": "work2: the interrupted publication resumes with the same alias and checkpoint and one publish entry",
+      "status": "PASS",
+      "detail": {
+        "did": "did:vh:Qmbp4PoZcMKGJHTuvTRkY68b9QZYq5GKQVgQqowFVxsw1i",
+        "alias": "did:webvh:QmQTiDJyw7nX7xrnekxMjXJw8oiMfxBVEiGcgnBMYDoGFh:acceptance.example:user-sub-acceptance-0:o-Qmbp4PoZcMKGJHTu",
+        "checkpoint": "2-QmSjQsa4VxsaNTzBJaJ6o3zXHezHohxxMKz1HxrFyq8aoY",
+        "entries": 2,
+        "resources": [
+          {
+            "id": "artwork.svg",
+            "mediaType": "image/svg+xml",
+            "sha256": "a6bef4b94a44eb2c639b0f25514a97afee31af8c94695f14b468e060cf88a94e"
+          },
+          {
+            "id": "metadata.json",
+            "mediaType": "application/json",
+            "sha256": "527fadcd0a82e5fd31cceb752ba00997064502c8236c883e5f0bc65756a4036f"
+          }
+        ]
+      }
+    },
+    {
+      "id": "b4-resume-work3",
+      "title": "work3: the interrupted publication resumes with the same alias and checkpoint and one publish entry",
+      "status": "PASS",
+      "detail": {
+        "did": "did:vh:QmVo3VCLMjprc5d7ZYeptpZG69zKF4wfDv2Saiis9XJSyC",
+        "alias": "did:webvh:QmZjMikYmyu28GyP6G5NKkP32eHjtZokZqcnd7HvEA9ME2:acceptance.example:user-sub-acceptance-0:o-QmVo3VCLMjprc5d7",
+        "checkpoint": "2-QmdhcWKqcdR5h8Pz89TypwZjBEJQYZTA68dN9J8gj8ZXDT",
+        "entries": 2,
+        "resources": [
+          {
+            "id": "artwork.svg",
+            "mediaType": "image/svg+xml",
+            "sha256": "c56a7f1fdc1171c18085cb5753a85a16dd9cd27cdf83d09cd1c223f2fdf8770f"
+          },
+          {
+            "id": "metadata.json",
+            "mediaType": "application/json",
+            "sha256": "3500ac1f78909f86d9d4b2cfb57c291f97f291f540a218c1b8e72d7494a5066d"
+          }
+        ]
+      }
+    }
+  ],
+  "status": "PASS",
+  "process": {
+    "command": [
+      "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+      "scripts/acceptance/hosted/l3-client-a-restart.ts"
+    ],
+    "exit": 0,
+    "signal": null,
+    "ms": 1130
+  }
+}

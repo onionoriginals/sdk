@@ -14,7 +14,7 @@ describe('DIDManager - Key Rotation', () => {
     didManager = new DIDManager({
       network: 'regtest',
       defaultKeyType: 'Ed25519',
-      webvhNetwork: 'magby',
+      webvhNetwork: 'development',
     });
     keyManager = new KeyManager();
     tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'didmgr-rotation-'));
@@ -138,7 +138,7 @@ describe('DIDManager - Key Recovery', () => {
     didManager = new DIDManager({
       network: 'regtest',
       defaultKeyType: 'Ed25519',
-      webvhNetwork: 'magby',
+      webvhNetwork: 'development',
     });
     keyManager = new KeyManager();
     tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'didmgr-recovery-'));

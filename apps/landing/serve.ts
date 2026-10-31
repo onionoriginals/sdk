@@ -17,7 +17,6 @@ import { QuickNodeProvider, RegtestProvider } from '@originals/sdk';
 import { regtestOrdinalLookup } from './server/regtest';
 import { buildFetch, createWebvhHostStore, startBlockCompletion, coreBlockHeaderBatches, coreBlockHeaders, createOriginalsAnchoring, createMoneyLogger, createOriginalsStore, createInscriptionsStore, createAnchoringLibrary, createOriginalsRoutes, servedWebvhHosts, acquireInstanceLock, releaseOnExit, type OriginalsAnchoring, type Handler, type OriginalsRoutes } from '@originals/host';
 import { jwtAuthenticate } from './server/originals-auth';
-import { LEGACY_WEBVH_DOMAIN } from './src/auth/webvh-domain';
 import { buildRoutes } from './server/index';
 import { getTurnkey } from './server/turnkey';
 import {
@@ -223,7 +222,7 @@ function buildApiRoutes(): {
     );
   }
   // Writes only under this instance's own did:webvh hosts (#976 B, G1; P3.6).
-  const originals = createOriginalsRoutes({ authenticate: jwtAuthenticate(jwtSecret), store: originalsStore, library: createAnchoringLibrary(originalsDataDir, originalsStore, anchoring ? { bitcoin: anchoring.bitcoinEvidence } : {}), hosts: servedWebvhHosts(canonicalWebvhHost(), [LEGACY_WEBVH_DOMAIN]) });
+  const originals = createOriginalsRoutes({ authenticate: jwtAuthenticate(jwtSecret), store: originalsStore, library: createAnchoringLibrary(originalsDataDir, originalsStore, anchoring ? { bitcoin: anchoring.bitcoinEvidence } : {}), hosts: servedWebvhHosts(canonicalWebvhHost()) });
   return {
     routes: buildRoutes({ turnkey, sessions: createInMemorySessionStorage(), jwtSecret, bitcoin, originals }),
     originals,
@@ -261,7 +260,6 @@ const server = Bun.serve({
     // value is already a named violation in the boot config report.
     canonicalHost: canonicalWebvhHost(),
     // Identities minted before VITE_WEBVH_HOST stay readable on their domain (#976 B, G1).
-    extraWebvhHosts: [LEGACY_WEBVH_DOMAIN],
     // Railway sets this for the deployed commit; /api/version reports it (#976 B, G6).
     revision: process.env.RAILWAY_GIT_COMMIT_SHA || null,
   }),

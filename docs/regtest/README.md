@@ -109,7 +109,7 @@ const provider = new RegtestProvider({
   rpcAuth: cookieContents,
 });
 const sdk = OriginalsSDK.create({
-  network: 'regtest', webvhNetwork: 'magby', ordinalsProvider: provider,
+  network: 'regtest', webvhNetwork: 'development', ordinalsProvider: provider,
 });
 ```
 

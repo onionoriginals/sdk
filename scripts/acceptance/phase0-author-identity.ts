@@ -31,7 +31,7 @@ await phase.check("author-did-built", "the landing's did:webvh builder mints the
   const identityMultikey = ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(identity));
   const authorshipMultikey = ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(authorship));
   const built = await buildUserWebVHDid(new BrowserWebVHSigner(identity, identityMultikey), {
-    domain: "magby.originals.build",
+    domain: "originals.build",
     slug: "user-acceptance0976",
     authorshipPublicKeyMultibase: authorshipMultikey,
   });

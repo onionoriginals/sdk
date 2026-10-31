@@ -30,7 +30,7 @@ What actually happened. Include error messages and stack traces.
 - **Runtime**: (e.g., Bun 1.3.5, Node.js 22.x)
 - **OS**: (e.g., macOS 15.3, Ubuntu 24.04)
 - **Bitcoin network**: (mainnet / signet / regtest)
-- **WebVH network**: (pichu / cleffa / magby)
+- **WebVH network**: (production / staging / development)
 
 ## Code Sample
 

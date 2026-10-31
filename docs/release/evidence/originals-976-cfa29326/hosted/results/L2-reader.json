@@ -1,0 +1,165 @@
+{
+  "phase": "L2-reader",
+  "started": "2026-10-31T06:18:02.142Z",
+  "finished": "2026-10-31T06:18:02.268Z",
+  "isolation": {
+    "pid": 84202,
+    "ppid": 83978,
+    "runtime": "node v26.13.0",
+    "execPath": "/Users/brian/.local/share/vite-plus/js_runtime/node/26.13.0/bin/node",
+    "cwd": "/private/tmp/976-final-hosted/tmp/L2-reader",
+    "home": "/private/tmp/976-final-hosted/home/L2-reader",
+    "tmpdir": "/private/tmp/976-final-hosted/tmp/L2-reader",
+    "envNames": [
+      "ACCEPTANCE_INPUT",
+      "ACCEPTANCE_RESULT",
+      "HOME",
+      "LANG",
+      "PATH",
+      "TMPDIR",
+      "__CF_USER_TEXT_ENCODING"
+    ]
+  },
+  "facts": {},
+  "checks": [
+    {
+      "id": "no-authority",
+      "title": "the reader has no key, store, cookie or author directory",
+      "status": "PASS",
+      "detail": {
+        "envNames": [
+          "ACCEPTANCE_INPUT",
+          "ACCEPTANCE_RESULT",
+          "HOME",
+          "LANG",
+          "PATH",
+          "TMPDIR",
+          "__CF_USER_TEXT_ENCODING"
+        ]
+      }
+    },
+    {
+      "id": "work1-complete",
+      "title": "work1: a stranger verifies the complete snapshot",
+      "status": "PASS",
+      "detail": {
+        "verified": true,
+        "checkpoint": "3-QmPyudXXRuKAABmbTzhPw5dyEdmpdVtnr8LUJ66Lciodyo",
+        "head": "3-QmPyudXXRuKAABmbTzhPw5dyEdmpdVtnr8LUJ66Lciodyo",
+        "alias": "confirmed",
+        "resources": "available",
+        "current": false,
+        "reasons": [
+          "not-anchored"
+        ],
+        "freshness": {
+          "asset": "not-established",
+          "identity": "not-established",
+          "validAsOf": {
+            "checkpoint": "3-QmPyudXXRuKAABmbTzhPw5dyEdmpdVtnr8LUJ66Lciodyo",
+            "signers": [
+              {
+                "did": "did:webvh:QmTW4GucqraSusMNWaZeuXRNwePaNQs3WXa8yjpzp89QV4:acceptance.example:user-sub-acceptance-0",
+                "role": "author",
+                "versionId": "1-QmVTMYiCHh7hJkCiwLqnpeuRdQHhGWTEvsrtymeELd7ygo",
+                "obtainedAt": "2026-10-31T06:18:02.158Z",
+                "source": "host",
+                "location": null
+              }
+            ]
+          }
+        },
+        "ordering": "claimed",
+        "digests": [
+          {
+            "resource": "artwork.svg",
+            "version": 1,
+            "sha256": "1c7e1c740158039636aa1c8970d273053477901adc1d81771074796794126014"
+          },
+          {
+            "resource": "metadata.json",
+            "version": 1,
+            "sha256": "8658b2fdfb1865fde9ac12041313a483fae414145885ce1db63e3c9b6f9f8ffe"
+          },
+          {
+            "resource": "artwork.svg",
+            "version": 2,
+            "sha256": "03f5cec4a8606b781aafad35ce38690026655c33f4208b1d3325acd5a48201f9"
+          },
+          {
+            "resource": "metadata.json",
+            "version": 2,
+            "sha256": "47297db213e7765e5ff6fb448499329f463037aef40562ab382e3440611fb1d7"
+          }
+        ]
+      }
+    },
+    {
+      "id": "work2-incomplete",
+      "title": "work2: a stranger can't verify a complete snapshot",
+      "status": "PASS",
+      "detail": {
+        "complete": false,
+        "error": "FETCH_STATUS: https://acceptance.example/user-sub-acceptance-0/o-Qmbp4PoZcMKGJHTu/did.jsonl answered 404",
+        "facts": null
+      }
+    },
+    {
+      "id": "work3-incomplete",
+      "title": "work3: a stranger can't verify a complete snapshot",
+      "status": "PASS",
+      "detail": {
+        "complete": false,
+        "error": null,
+        "facts": {
+          "verified": true,
+          "checkpoint": "2-QmdhcWKqcdR5h8Pz89TypwZjBEJQYZTA68dN9J8gj8ZXDT",
+          "head": "2-QmdhcWKqcdR5h8Pz89TypwZjBEJQYZTA68dN9J8gj8ZXDT",
+          "alias": "confirmed",
+          "resources": "partial",
+          "current": false,
+          "reasons": [
+            "not-anchored"
+          ],
+          "freshness": {
+            "asset": "not-established",
+            "identity": "not-established",
+            "validAsOf": {
+              "checkpoint": "2-QmdhcWKqcdR5h8Pz89TypwZjBEJQYZTA68dN9J8gj8ZXDT",
+              "signers": [
+                {
+                  "did": "did:webvh:QmTW4GucqraSusMNWaZeuXRNwePaNQs3WXa8yjpzp89QV4:acceptance.example:user-sub-acceptance-0",
+                  "role": "author",
+                  "versionId": "1-QmVTMYiCHh7hJkCiwLqnpeuRdQHhGWTEvsrtymeELd7ygo",
+                  "obtainedAt": "2026-10-31T06:18:02.236Z",
+                  "source": "host",
+                  "location": null
+                }
+              ]
+            }
+          },
+          "ordering": "claimed"
+        }
+      }
+    },
+    {
+      "id": "no-cookies",
+      "title": "the reader sent no cookie and received none",
+      "status": "PASS",
+      "detail": {
+        "cookies": 0,
+        "setCookies": 0
+      }
+    }
+  ],
+  "status": "PASS",
+  "process": {
+    "command": [
+      "/Users/brian/.local/share/vite-plus/js_runtime/node/26.13.0/bin/node",
+      "scripts/acceptance/hosted/reader.mjs"
+    ],
+    "exit": 0,
+    "signal": null,
+    "ms": 237
+  }
+}

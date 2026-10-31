@@ -6,6 +6,12 @@ import { demo } from '../content';
 // message. `HttpHostingStorageAdapter.put failed: 507` on screen is also a
 // breach of GRADING.md's mechanical floor.
 describe('demoFailureMessage', () => {
+  test('a missing identity on this host explains the required action', () => {
+    const error = Object.assign(new Error('internal diagnostic'), { name: 'AuthorIdentityRequiredError' });
+    expect(demoFailureMessage(error)).toBe(demo.identityRequired);
+    expect(demoFailureMessage(error)).not.toBe(demo.failure);
+  });
+
   test('a full/failed host write renders copy, not the adapter string', () => {
     const raw = 'HttpHostingStorageAdapter.put failed: 507 for demo.test/u/a/did.jsonl';
     const msg = demoFailureMessage(new Error(raw));

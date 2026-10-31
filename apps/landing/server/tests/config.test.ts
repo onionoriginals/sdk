@@ -448,7 +448,7 @@ describe('validateConfig — the deposit indexer seam', () => {
 /**
  * The did:webvh host (#529; #976 B, G1). The SPA mints every did:webvh on the
  * domain it was built for, `VITE_WEBVH_HOST` (`webvhDomain()`). Unset, it falls
- * back to the legacy domain `magby.originals.build`, so a deployed instance
+ * back to the canonical domain `originals.build`, so a deployed instance
  * without it mints DIDs on a domain it may not serve, permanently, because a
  * did:webvh domain cannot be changed after publication (P3.6; an alias that
  * moves host is an alias change, C12-139). Required on every deployed
@@ -468,10 +468,10 @@ describe('validateConfig — the did:webvh host is pinned on every deployed inst
     expect(keys(issues)).toContain('VITE_WEBVH_HOST');
   });
 
-  test('a testnet deploy without VITE_WEBVH_HOST is reported too, naming the legacy fallback', () => {
+  test('a testnet deploy without VITE_WEBVH_HOST is reported too, naming the canonical fallback', () => {
     const issues = errors(validateConfig({ env: without(GOOD, 'VITE_WEBVH_HOST'), dataDir: mounted }));
     expect(keys(issues)).toEqual(['VITE_WEBVH_HOST']);
-    expect(issues[0].message).toContain('magby.originals.build');
+    expect(issues[0].message).toContain('originals.build');
     expect(issues[0].message).not.toMatch(/whatever hostname|arrived on/);
   });
 

@@ -576,6 +576,7 @@ export class DemoCopyError extends Error {
  */
 export function demoFailureMessage(err: unknown): string {
   if (err instanceof DemoCopyError) return err.message;
+  if (err instanceof Error && err.name === 'AuthorIdentityRequiredError') return demo.identityRequired;
   const anchoring = anchoringFailureMessage(err);
   if (anchoring) return anchoring;
   const raw = err instanceof Error ? err.message : '';

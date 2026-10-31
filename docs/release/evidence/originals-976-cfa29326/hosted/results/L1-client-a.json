@@ -1,0 +1,208 @@
+{
+  "phase": "L1-client-a",
+  "started": "2026-10-31T06:18:01.466Z",
+  "finished": "2026-10-31T06:18:02.053Z",
+  "isolation": {
+    "pid": 84143,
+    "ppid": 83978,
+    "runtime": "bun 1.2.22",
+    "execPath": "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+    "cwd": "/private/tmp/976-final-hosted/tmp/L1-client-a",
+    "home": "/private/tmp/976-final-hosted/home/L1-client-a",
+    "tmpdir": "/private/tmp/976-final-hosted/tmp/L1-client-a",
+    "envNames": [
+      "ACCEPTANCE_INPUT",
+      "ACCEPTANCE_RESULT",
+      "HOME",
+      "LANG",
+      "PATH",
+      "TMPDIR"
+    ],
+    "dirs": {
+      "custody": "/private/tmp/976-final-hosted/custody",
+      "storeA": "/private/tmp/976-final-hosted/storeA"
+    }
+  },
+  "facts": {
+    "work1": {
+      "did": "did:vh:QmY9MrnFf91eQwvLrfTCSkDb1HgERNUdywpEJiqJEb6RZ8",
+      "alias": "did:webvh:QmbrnkoMSjWC8npnB7EjXWoUyScE71sT2Ctca8q16mnm22:acceptance.example:user-sub-acceptance-0:o-QmY9MrnFf91eQwvL",
+      "checkpoint": "3-QmPyudXXRuKAABmbTzhPw5dyEdmpdVtnr8LUJ66Lciodyo",
+      "entries": 3,
+      "resources": [
+        {
+          "id": "artwork.svg",
+          "mediaType": "image/svg+xml",
+          "sha256": "03f5cec4a8606b781aafad35ce38690026655c33f4208b1d3325acd5a48201f9"
+        },
+        {
+          "id": "metadata.json",
+          "mediaType": "application/json",
+          "sha256": "47297db213e7765e5ff6fb448499329f463037aef40562ab382e3440611fb1d7"
+        }
+      ]
+    },
+    "roles": {
+      "identity": {
+        "verificationMethod": "#key-0",
+        "didKey": "did:key:z6Mkib9D1N5JWhncQpMte3qM6zKEeULgboERtKL1A6sJM2Wz",
+        "authorUpdateKey": true,
+        "controlsAlias": true
+      },
+      "authorship": {
+        "verificationMethod": "#key-1",
+        "didKey": "did:key:z6Mkg1rSHmtt9numcuiaotCFmWAmmH1J3a7WSAFNZRfSuQ39",
+        "assertionMethod": true,
+        "updateKey": false
+      }
+    },
+    "work2": {
+      "did": "did:vh:Qmbp4PoZcMKGJHTuvTRkY68b9QZYq5GKQVgQqowFVxsw1i",
+      "alias": "did:webvh:QmQTiDJyw7nX7xrnekxMjXJw8oiMfxBVEiGcgnBMYDoGFh:acceptance.example:user-sub-acceptance-0:o-Qmbp4PoZcMKGJHTu",
+      "checkpoint": "2-QmSjQsa4VxsaNTzBJaJ6o3zXHezHohxxMKz1HxrFyq8aoY",
+      "entries": 2,
+      "resources": [
+        {
+          "id": "artwork.svg",
+          "mediaType": "image/svg+xml",
+          "sha256": "a6bef4b94a44eb2c639b0f25514a97afee31af8c94695f14b468e060cf88a94e"
+        },
+        {
+          "id": "metadata.json",
+          "mediaType": "application/json",
+          "sha256": "527fadcd0a82e5fd31cceb752ba00997064502c8236c883e5f0bc65756a4036f"
+        }
+      ]
+    },
+    "work3": {
+      "did": "did:vh:QmVo3VCLMjprc5d7ZYeptpZG69zKF4wfDv2Saiis9XJSyC",
+      "alias": "did:webvh:QmZjMikYmyu28GyP6G5NKkP32eHjtZokZqcnd7HvEA9ME2:acceptance.example:user-sub-acceptance-0:o-QmVo3VCLMjprc5d7",
+      "checkpoint": "2-QmdhcWKqcdR5h8Pz89TypwZjBEJQYZTA68dN9J8gj8ZXDT",
+      "entries": 2,
+      "resources": [
+        {
+          "id": "artwork.svg",
+          "mediaType": "image/svg+xml",
+          "sha256": "c56a7f1fdc1171c18085cb5753a85a16dd9cd27cdf83d09cd1c223f2fdf8770f"
+        },
+        {
+          "id": "metadata.json",
+          "mediaType": "application/json",
+          "sha256": "3500ac1f78909f86d9d4b2cfb57c291f97f291f540a218c1b8e72d7494a5066d"
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "id": "b1-create-revise",
+      "title": "a work is created and revised by the author's #key-1",
+      "status": "PASS",
+      "detail": {
+        "did": "did:vh:QmY9MrnFf91eQwvLrfTCSkDb1HgERNUdywpEJiqJEb6RZ8",
+        "versions": [
+          "1-QmYfxZEnNUrrQcpCvDTTfzr2w1kR373YihG9MgJXAhwgSL",
+          "2-QmegfRSfdfy4UJdYwx3JTtM5GMwaVzb5TN34gFFFhbdfP5"
+        ]
+      }
+    },
+    {
+      "id": "b1-publish",
+      "title": "publishing completes only once a stranger verifies the snapshot",
+      "status": "PASS",
+      "detail": {
+        "did": "did:vh:QmY9MrnFf91eQwvLrfTCSkDb1HgERNUdywpEJiqJEb6RZ8",
+        "alias": "did:webvh:QmbrnkoMSjWC8npnB7EjXWoUyScE71sT2Ctca8q16mnm22:acceptance.example:user-sub-acceptance-0:o-QmY9MrnFf91eQwvL",
+        "checkpoint": "3-QmPyudXXRuKAABmbTzhPw5dyEdmpdVtnr8LUJ66Lciodyo",
+        "entries": 3,
+        "resources": [
+          {
+            "id": "artwork.svg",
+            "mediaType": "image/svg+xml",
+            "sha256": "03f5cec4a8606b781aafad35ce38690026655c33f4208b1d3325acd5a48201f9"
+          },
+          {
+            "id": "metadata.json",
+            "mediaType": "application/json",
+            "sha256": "47297db213e7765e5ff6fb448499329f463037aef40562ab382e3440611fb1d7"
+          }
+        ]
+      }
+    },
+    {
+      "id": "b1-key-roles",
+      "title": "the hosted logs show separate identity (alias control) and authorship roles",
+      "status": "PASS",
+      "detail": {
+        "identity": {
+          "verificationMethod": "#key-0",
+          "didKey": "did:key:z6Mkib9D1N5JWhncQpMte3qM6zKEeULgboERtKL1A6sJM2Wz",
+          "authorUpdateKey": true,
+          "controlsAlias": true
+        },
+        "authorship": {
+          "verificationMethod": "#key-1",
+          "didKey": "did:key:z6Mkg1rSHmtt9numcuiaotCFmWAmmH1J3a7WSAFNZRfSuQ39",
+          "assertionMethod": true,
+          "updateKey": false
+        }
+      }
+    },
+    {
+      "id": "b4-interrupt-work2",
+      "title": "publication interrupted after the publish entry, before any upload",
+      "status": "PASS",
+      "detail": {
+        "did": "did:vh:Qmbp4PoZcMKGJHTuvTRkY68b9QZYq5GKQVgQqowFVxsw1i",
+        "alias": "did:webvh:QmQTiDJyw7nX7xrnekxMjXJw8oiMfxBVEiGcgnBMYDoGFh:acceptance.example:user-sub-acceptance-0:o-Qmbp4PoZcMKGJHTu",
+        "checkpoint": "2-QmSjQsa4VxsaNTzBJaJ6o3zXHezHohxxMKz1HxrFyq8aoY",
+        "entries": 2,
+        "resources": [
+          {
+            "id": "artwork.svg",
+            "mediaType": "image/svg+xml",
+            "sha256": "a6bef4b94a44eb2c639b0f25514a97afee31af8c94695f14b468e060cf88a94e"
+          },
+          {
+            "id": "metadata.json",
+            "mediaType": "application/json",
+            "sha256": "527fadcd0a82e5fd31cceb752ba00997064502c8236c883e5f0bc65756a4036f"
+          }
+        ]
+      }
+    },
+    {
+      "id": "b4-interrupt-work3",
+      "title": "publication interrupted during the resource uploads",
+      "status": "PASS",
+      "detail": {
+        "did": "did:vh:QmVo3VCLMjprc5d7ZYeptpZG69zKF4wfDv2Saiis9XJSyC",
+        "alias": "did:webvh:QmZjMikYmyu28GyP6G5NKkP32eHjtZokZqcnd7HvEA9ME2:acceptance.example:user-sub-acceptance-0:o-QmVo3VCLMjprc5d7",
+        "checkpoint": "2-QmdhcWKqcdR5h8Pz89TypwZjBEJQYZTA68dN9J8gj8ZXDT",
+        "entries": 2,
+        "resources": [
+          {
+            "id": "artwork.svg",
+            "mediaType": "image/svg+xml",
+            "sha256": "c56a7f1fdc1171c18085cb5753a85a16dd9cd27cdf83d09cd1c223f2fdf8770f"
+          },
+          {
+            "id": "metadata.json",
+            "mediaType": "application/json",
+            "sha256": "3500ac1f78909f86d9d4b2cfb57c291f97f291f540a218c1b8e72d7494a5066d"
+          }
+        ]
+      }
+    }
+  ],
+  "status": "PASS",
+  "process": {
+    "command": [
+      "/Users/brian/.local/share/vite-plus/package_manager/bun/1.2.22/bun/bin/bun.native",
+      "scripts/acceptance/hosted/l1-client-a.ts"
+    ],
+    "exit": 0,
+    "signal": null,
+    "ms": 814
+  }
+}

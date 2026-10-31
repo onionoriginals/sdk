@@ -1,7 +1,7 @@
 /**
  * Test fixture: the DID, credential, Bitcoin and status-list managers built
  * from one OriginalsConfig, with the defaults the managers' tests rely on
- * (mainnet / ES256K / pichu, and the webvhNetwork <-> network mapping).
+ * (mainnet / ES256K / production, and the webvhNetwork <-> network mapping).
  */
 import { DIDManager } from '../../src/did/DIDManager';
 import { CredentialManager } from '../../src/vc/CredentialManager';

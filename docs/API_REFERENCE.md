@@ -30,7 +30,7 @@ const sdk = OriginalsSDK.create();
 // Full configuration
 const sdk = OriginalsSDK.create({
   network: 'mainnet',              // 'mainnet' | 'regtest' | 'signet'
-  webvhNetwork: 'pichu',           // 'pichu' | 'cleffa' | 'magby'
+  webvhNetwork: 'production',           // 'production' | 'staging' | 'development'
   defaultKeyType: 'ES256K',        // 'ES256K' | 'Ed25519' | 'ES256'
   ordinalsProvider: new OrdMockProvider(),  // Required for Bitcoin ops
   enableLogging: true,
@@ -465,7 +465,7 @@ const result = await sdk.bitcoin.transferInscription(
 ```typescript
 interface OriginalsConfig {
   network: 'mainnet' | 'regtest' | 'signet';
-  webvhNetwork?: 'pichu' | 'cleffa' | 'magby';
+  webvhNetwork?: 'production' | 'staging' | 'development';
   defaultKeyType: 'ES256K' | 'Ed25519' | 'ES256';
   ordinalsProvider?: OrdinalsProvider;
   feeOracle?: FeeOracleAdapter;
@@ -559,9 +559,9 @@ try {
 
 | Network | Bitcoin | Stability | Use Case |
 |---------|---------|-----------|----------|
-| `pichu` | mainnet | Major releases only | Production |
-| `cleffa` | signet | Minor releases | Staging |
-| `magby` | regtest | All versions | Development |
+| `production` | mainnet | Major releases only | Production |
+| `staging` | signet | Minor releases | Staging |
+| `development` | regtest | All versions | Development |
 
 ### Cost Estimates
 

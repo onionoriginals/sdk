@@ -712,6 +712,7 @@ export const demo = {
   /** Last resort: something we did not anticipate, said without a stack trace. */
   failure:
     'Something went wrong on our side. Nothing you’ve made is lost — your Original is still in this tab. Try that step again.',
+  identityRequired: 'Create your identity on this site first, then try creating your Original again.',
   reset: 'Start a new Original'
 };
 

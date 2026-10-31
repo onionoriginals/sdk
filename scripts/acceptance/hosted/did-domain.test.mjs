@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import { didWebvhDomain } from "./did-domain.mjs";
 
 // #976 B1, B2: the acceptance account's identity DID must be on the staging
-// did:webvh domain. A pre-G1 account keeps a magby identity: that is a FAIL.
+// did:webvh domain. An identity on another domain fails this gate.
 test("a staging identity is on the staging domain", () => {
   assert.equal(didWebvhDomain("did:webvh:QmScid:staging.originals.build:user-0123456789abcdef"), "staging.originals.build");
 });
 
-test("a pre-G1 magby identity is not on the staging domain", () => {
-  assert.notEqual(didWebvhDomain("did:webvh:QmScid:magby.originals.build:user-0123456789abcdef"), "staging.originals.build");
+test("a production identity is not on the staging domain", () => {
+  assert.notEqual(didWebvhDomain("did:webvh:QmScid:originals.build:user-0123456789abcdef"), "staging.originals.build");
 });
 
 test("a percent-encoded port is decoded, as a host header names it", () => {

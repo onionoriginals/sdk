@@ -18,7 +18,7 @@
  *
  * Host-agnostic on purpose: `/context` answers on whatever origin this process
  * serves, which is how the four URLs in the wild — originals.build plus the
- * pichu/cleffa/magby network domains in `packages/sdk/src/types/network.ts` —
+ * production/staging/development network domains in `packages/sdk/src/types/network.ts` —
  * are all satisfied by one route. They resolve to identical documents by
  * design; see the network table for why the domains differ at all.
  */

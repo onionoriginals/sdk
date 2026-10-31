@@ -99,10 +99,10 @@ describe('mutable DID cache cannot supply current authority (issue #602)', () =>
       // rotates its keys, simulating a rotation performed by another
       // process/host that this test's "verifier" instance never observes
       // directly (DIDManager.invalidateCachedDID is private and per-instance).
-      const publisher = new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519', webvhNetwork: 'magby' } as any);
+      const publisher = new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519', webvhNetwork: 'development' } as any);
       const created = await publisher.createDIDWebVH({ domain: 'example.com', outputDir: tempDir });
 
-      const rotator = new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519', webvhNetwork: 'magby' } as any);
+      const rotator = new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519', webvhNetwork: 'development' } as any);
       const rotated = await rotator.rotateDIDWebVHKeys({
         did: created.did,
         currentLog: created.log,
@@ -116,7 +116,7 @@ describe('mutable DID cache cannot supply current authority (issue #602)', () =>
       const rotatedLogText = rotated.log.map((entry) => JSON.stringify(entry)).join('\n');
       globalThis.fetch = (async () => new Response(rotatedLogText, { status: 200 })) as unknown as typeof fetch;
 
-      const verifier = new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519', webvhNetwork: 'magby' } as any);
+      const verifier = new DIDManager({ network: 'regtest', defaultKeyType: 'Ed25519', webvhNetwork: 'development' } as any);
 
       // A live resolution with an empty cache already reflects the rotation.
       const live = await verifier.resolveDID(created.did);

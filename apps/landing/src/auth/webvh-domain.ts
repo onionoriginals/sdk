@@ -5,11 +5,10 @@
  * `VITE_WEBVH_HOST`, baked by Vite. Readers fetch what was published there
  * (P3.6), and the server serves the hosted layout under that host.
  *
- * Unset, the legacy domain is kept so a dev build mints what it always did
- * (PROVISIONAL). Identities already minted on the legacy domain stay their
- * author's identity (see `readUserWebVHDid`).
+ * Unset, use the canonical Originals host. Other deployments must set their
+ * own VITE_WEBVH_HOST explicitly.
  */
-export const LEGACY_WEBVH_DOMAIN = 'magby.originals.build';
+export const CANONICAL_WEBVH_DOMAIN = 'originals.build';
 
 // The same rule as server/config.ts `isBareHost`: no scheme, port or path; lowercase; dotted.
 const BARE_HOST = /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
@@ -23,7 +22,7 @@ function buildEnv(): Env {
 /** The build's did:webvh domain. A malformed `VITE_WEBVH_HOST` throws rather than mint a DID on it. */
 export function webvhDomain(env: Env = buildEnv()): string {
   const host = env.VITE_WEBVH_HOST;
-  if (!host) return LEGACY_WEBVH_DOMAIN;
+  if (!host) return CANONICAL_WEBVH_DOMAIN;
   if (!BARE_HOST.test(host)) {
     throw new Error(`VITE_WEBVH_HOST="${host}" is not a bare lowercase hostname; no did:webvh is minted on it.`);
   }

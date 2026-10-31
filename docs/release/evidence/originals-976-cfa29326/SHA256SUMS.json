@@ -1,0 +1,18 @@
+{
+  "hosted/receipt.json": "8db777d5ec9986275638fdbef0cdead16ee42bd49367d4e4bacbc8d28e5d18a7",
+  "hosted/results/L0-identity.json": "ce9b2a3f46b58d7d104921ca43bf0e715ad4f7d363aa716ce159cfb37bcf5eb7",
+  "hosted/results/L1-client-a.json": "d3df1b954f77b6712701778860ad84b4040ac11d4cddb08247a1426a71a3f34a",
+  "hosted/results/L2-reader.json": "63729e8d190b475403594b47f95da7fe9c3781087cfb11a7cf817de11afcbcbc",
+  "hosted/results/L3-client-a-restart.json": "2655e482c0de6dd36c9b1b9aece1f2e7ff8baa1540cf2ab60732d9d87bd3959e",
+  "hosted/results/L4-reader.json": "a5eaed27c2a7e24e77525d68b16d1ff104f8af5cac82e60ddb7b831e3039e085",
+  "hosted/results/L5-client-b.json": "84fab5047d6fcbc72c810eb76315ae7a1d7bdd7ec90a4f2a93639ca3a3fb9dfd",
+  "hosted/results/L6-reader.json": "e90a9deb711c3dfba8f817568fc44208b4e24826a06070390bb436674c6d0c8a",
+  "hosted/results/L7-signed-out.json": "11c4ec3a11190c95eb71d6587a6b56c48a349435ced7784d833940331a2963b8",
+  "local/artifacts/expected-A.json": "5025d09405d0da3c71e4599032ddfbf4033e94a2fde213edfe405287cfc2db8e",
+  "local/artifacts/original-A-partial.zip": "2508a16a840727dc2c14fd9f2eddd31efb33e1371422a9af84f0d6fedf2e3856",
+  "local/artifacts/original-A.zip": "5ac7ec898c5518086f9669de74385baf00f4811ea1fb06d1cef866f06ef1b5c2",
+  "local/artifacts/original-B.zip": "2fb56098bc9befc7945d006c58732071f5245a56d93cdd92e08dc83bb4c804d3",
+  "local/artifacts/original-X.zip": "a40685be9677e90253d37045c1987c11e1a2d7a24ce9c17906e5d27faf46b1b5",
+  "local/public/author-did.json": "aaa74532d01a7ec99eb3a4d5432bdc2dccb81a818c2c5dab17ac7eb79c2ffbbb",
+  "local/receipt.json": "b90bd0a45ba6920a80932e0a09e1c0c0dbe3f22fb1650e285b28b9476d357e75"
+}

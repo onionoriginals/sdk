@@ -8,7 +8,7 @@ import { OriginalsSDK, OrdMockProvider } from '@originals/sdk';
 const sdk = OriginalsSDK.create({
   network: 'regtest',           // 'mainnet' | 'regtest' | 'signet'
   defaultKeyType: 'Ed25519',    // 'ES256K' | 'Ed25519' | 'ES256'
-  webvhNetwork: 'magby',        // 'magby' | 'cleffa' | 'pichu'
+  webvhNetwork: 'development',        // 'development' | 'staging' | 'production'
   ordinalsProvider: new OrdMockProvider(),  // Required for Bitcoin ops
 });
 ```
@@ -216,9 +216,9 @@ const { valid, error } = validateSatoshiNumber('123');
 
 | WebVH | Domain | Bitcoin |
 |-------|--------|---------|
-| magby | magby.originals.build | regtest |
-| cleffa | cleffa.originals.build | signet |
-| pichu | pichu.originals.build | mainnet |
+| development | originals.build | regtest |
+| staging | originals.build | signet |
+| production | originals.build | mainnet |
 
 ## External Signer Interface
 
