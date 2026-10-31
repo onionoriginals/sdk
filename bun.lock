@@ -13,7 +13,7 @@
     },
     "apps/landing": {
       "name": "@originals/landing",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@fontsource-variable/archivo": "^5.3.0",
         "@fontsource/jetbrains-mono": "^5.2.8",
@@ -51,11 +51,11 @@
     },
     "packages/auth": {
       "name": "@originals/auth",
-      "version": "4.0.2",
+      "version": "4.0.3",
       "dependencies": {
         "@noble/ed25519": "^3.1.0",
         "@noble/hashes": "^2.0.1",
-        "@originals/sdk": "^5.1.0",
+        "@originals/sdk": "^6.0.0",
         "@turnkey/crypto": "^2.10.0",
         "@turnkey/sdk-server": "^8.3.0",
         "jsonwebtoken": "^9.0.2"
@@ -81,10 +81,10 @@
     },
     "packages/host": {
       "name": "@originals/host",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@noble/hashes": "^2.0.1",
-        "@originals/sdk": "^5.1.0",
+        "@originals/sdk": "^6.0.0",
         "@originals/vh": "^0.3.0",
         "@scure/base": "^2.2.0"
       },
@@ -103,7 +103,7 @@
     },
     "packages/sdk": {
       "name": "@originals/sdk",
-      "version": "5.1.0",
+      "version": "6.0.0",
       "bin": {
         "originals": "./dist/originals/cli.js"
       },
