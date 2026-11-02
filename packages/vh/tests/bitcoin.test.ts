@@ -25,7 +25,7 @@ import {
 } from "../src/originals/index.js";
 import { versionNumberOf } from "../src/originals/author.js";
 import { canonicalize, type JsonValue } from "../src/json/index.js";
-import { VhAuthor, bytes, carrying, photo, seeded } from "./helpers/originals.js";
+import { VhAuthor, bytes, carrying, genesisWithMetadata, photo, seeded } from "./helpers/originals.js";
 
 const B0 = "harbor at dawn, uncropped";
 const B1 = "harbor at dawn";
@@ -808,6 +808,18 @@ describe("the anchoring inscription carries the whole log (P9.17)", () => {
       .rejects.toMatchObject({ category: "incomplete-evidence", code: "SAT_READ_INCOMPLETE" });
   });
 
+  test("C12-89: a body not read is no missing evidence when the metadata read shows it is no Originals inscription, or malformed (P14.12, P9.12)", async () => {
+    const { alice, anchor, ref, sign, anchoring } = await anchored();
+    const next = await updateOriginal(anchor, { versionTime: time(20), name: "Unread", author: ref, sign });
+    const unread = (metadata: Uint8Array) => inscribe([], 20, { mediaType: "image/png", content: new Uint8Array(), unsupported: "not-read", contentLength: 300_000, metadata });
+    const r = await verify(undefined, alice, [sat([anchoring(10), unread(new Uint8Array([0xa0])), unread(new Uint8Array([0xff]))])]);
+    expect(r.anchoring?.status).toBe("anchored");
+    expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["not-an-originals-inscription", "undecodable"]);
+    // Metadata that is entries still needs its body: missing evidence (P9.17).
+    await expect(verify(undefined, alice, [sat([anchoring(10), inscribe(next, 20, { content: new Uint8Array(), unsupported: "not-read", metadata: carrying(next).metadata })])]))
+      .rejects.toMatchObject({ code: "SAT_READ_INCOMPLETE" });
+  });
+
   test("C12-90: an unconfirmed anchoring inscription is observed, not an anchor", async () => {
     const { alice, copy, anchoring } = await anchored();
     const r = await verify(copy, alice, [sat([anchoring(10, { confirmations: 0 })])]);
@@ -1130,7 +1142,7 @@ describe("C12-150 on Bitcoin: an inscribed entry's size is its stored line (P14.
     const nums = Array.from({ length: 200 }, () => 1.5e-6);
     let pad = 0;
     for (let i = 0; i < 40; i++) {
-      const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", metadata: { nums, pad: "a".repeat(pad) }, resource: photo(B1), author: ref, sign });
+      const genesis = await genesisWithMetadata({ versionTime: time(1), name: "Harbor", metadata: { nums, pad: "a".repeat(pad) }, resource: photo(B1), author: ref, sign });
       const line = serializeLog([genesis]).slice(0, -1).replaceAll("0.0000015", "1.5e-6");
       const size = bytes(line).length;
       if (size !== 65_536) {
@@ -1339,12 +1351,21 @@ describe("an inscription's body is the resource version its last entry names (P9
       "duplicate key": [0xa2, 0x61, 0x61, 0x01, 0x61, 0x61, 0x02],
       "2^53": [0x1b, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
       "-2^53": [0x3b, 0x00, 0x1f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+      // Not well-formed: a text string whose bytes are not UTF-8. The holder cannot make every read throw (P9.12).
+      "invalid UTF-8": [0x62, 0xff, 0xfe],
     };
     for (const [what, item] of Object.entries(bad)) {
       const r = await verify(undefined, alice, [sat([anchoring(10, { metadata: at(item) })])]);
       expect(r.anchoring?.status, what).toBe("not-anchored");
       expect(r.anchoring?.ignored.map((i) => i.reason), what).toEqual(["undecodable"]);
     }
+    // The same bytes on their own, and disputed between indexes, are ignored too, never a thrown error.
+    const alone = await verify(undefined, alice, [sat([anchoring(10), inscribe([], 20, { metadata: new Uint8Array([0x62, 0xff, 0xfe]) })])]);
+    expect(alone.anchoring?.status).toBe("anchored");
+    expect(alone.anchoring?.ignored.map((i) => i.reason)).toEqual(["undecodable"]);
+    const disputedBad = inscribe([], 20, { metadata: new Uint8Array([0x62, 0xff, 0xfe]) });
+    const disputed = await verify(undefined, alice, [sat([anchoring(10), disputedBad]), sat([anchoring(10), { ...disputedBad, sat: "1" }], SAT, undefined, "ord-b")]);
+    expect(disputed.history.status).not.toBe("invalid");
     // The control: a well-formed text there decodes, and the entry then fails its own checks.
     const control = await verify(undefined, alice, [sat([anchoring(10, { metadata: at([...encodeCbor("x")]) })])]);
     expect(control.anchoring?.ignored.map((i) => i.reason)).not.toContain("undecodable");

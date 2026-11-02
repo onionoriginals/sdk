@@ -64,7 +64,14 @@ export function decodeCbor(bytes: Uint8Array, options: DecodeCborOptions = {}): 
       case 3: {
         const n = argument(info);
         need(n);
-        const text = decoder.decode(bytes.subarray(at, at + n));
+        let text: string;
+        try {
+          text = decoder.decode(bytes.subarray(at, at + n));
+        } catch {
+          // Not well-formed (P14.12): rejected as invalid CBOR, never a thrown TypeError, so a sat
+          // holder cannot make every read of an Original fail (P9.12).
+          return invalid("a text string is not valid UTF-8");
+        }
         at += n;
         return text;
       }

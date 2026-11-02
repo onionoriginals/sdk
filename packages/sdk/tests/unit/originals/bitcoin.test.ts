@@ -402,7 +402,8 @@ describe("inscriptions observed but not read (M1; P9.12, P9.14, P9.17)", () => {
       { id: id("c"), height: 4, content: "", body: { status: "unavailable", reason: "over-budget", mediaType: "image/png", contentLength: 9 } },
     ]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
     expect(e.inscriptions.map((i) => [i.mediaType, i.unsupported, i.content.length, i.metadata])).toEqual([
-      ["application/octet-stream", "delegated", 0, undefined],
+      // No content-type tag: no media type, never application/octet-stream (P14.12).
+      ["", "delegated", 0, undefined],
       ["image/jpeg", "content-encoding", 0, undefined],
       ["image/png", "not-read", 0, undefined],
     ]);

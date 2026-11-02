@@ -803,7 +803,11 @@ received.report.ownership?.output;                           // compare with the
   blocks later publications. A large resource leaves little room for the
   log: anchor early. The writer needs the bytes it inscribes; if this SDK
   does not hold the version the entry names, the pair is refused
-  (`incomplete-evidence`, `RESOURCE_BYTES_MISSING`).
+  (`incomplete-evidence`, `RESOURCE_BYTES_MISSING`). Inscription metadata
+  carries integers only (P14.12), so `create` and `edit` refuse metadata with
+  a non-integer number, and the writer refuses a stored entry holding one
+  (`unsupported-profile`, `METADATA_NOT_INSCRIBABLE`; PROVISIONAL pending a
+  spec fix, plan 011 S13). The verifier accepts such entries, as the spec does.
 - **Told before inscribing (P9.18).** `pair.notice` is what the caller shows
   the author before sending: the resource version the inscription carries,
   and the log with its name and metadata, become public and permanent on
@@ -875,6 +879,8 @@ received.report.ownership?.output;                           // compare with the
   the sat: entries committed locally but not inscribed are not the
   recipient's Original (P9.12). `{ through: "committed" }` includes them, for
   a recipient who will inscribe them; `{ checkpoint }` names an exact entry.
+  Neither reads the sat, so `offChain` then lists every version as off
+  chain; only through the accepted head are the inscribed versions left out.
   Before the anchor is on Bitcoin there is no accepted head
   (`NOT_ANCHORED_ON_BITCOIN`). Called without options it refuses
   (`SAT_READ_REQUIRED`) rather than guess which head to hand over. The recipient's SDK should verify it rather
@@ -970,10 +976,14 @@ received.report.ownership?.output;                           // compare with the
   P9.14, P9.17). An Originals inscription the reader did not read fails the
   read (`SAT_READ_INCOMPLETE`, missing evidence, P9.17), unless what the
   index reports already decides it: a body over 350,000 bytes (`too-large`)
-  or metadata read and found absent (`not-an-originals-inscription`). For an
+  or metadata read that is absent or not an array of entries
+  (`not-an-originals-inscription`) or malformed (`undecodable`). Metadata
+  that is not well-formed CBOR, invalid UTF-8 included, is `undecodable`,
+  never a thrown error. An inscription with no content-type tag has no media
+  type, so it never matches a resource's. For an
   Original's asset read, pass `getSatSnapshot(sat, { bodies: 'originals' })`:
   the metadata of every inscription whose body is at most 350,000 bytes is
-  fetched, and the body only when there is metadata, from the
+  fetched, and the body only when that metadata is an array of entries, from the
   `maxOriginalsBytes` budget; every other inscription is reported
   `not-requested`, so the holder's other inscriptions cost no body reads (the
   Bitcoin writer's sat reads do this; PROVISIONAL). The reader receives the

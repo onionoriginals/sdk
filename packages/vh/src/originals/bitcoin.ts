@@ -505,8 +505,10 @@ export async function assembleFromBitcoin(
   // A disputed inscription no index reports as an Originals inscription cannot be an entry, so it
   // holds back nothing after it; a disputed Originals inscription does, as does one whose metadata
   // was not read (P9.10; L3; P14.12).
+  // A not-read inscription whose metadata was read is judged by it, as one read in full (P14.12).
   const couldCount = (reports: SatInscription[]) => reports.some((r) =>
-    r.unsupported === "not-read" ? r.metadataPresent !== false : r.metadata === undefined || readInscribedEntries(r.metadata).kind !== "not-originals");
+    r.metadata instanceof Uint8Array ? readInscribedEntries(r.metadata).kind !== "not-originals"
+      : r.unsupported === "not-read" ? r.metadataPresent !== false : r.metadata === undefined);
   const reads = [...byAlias].map(([did, list]) => readSat(did, list, { couldCount }));
   // The report lists what was ignored in chain order.
   const position = new Map<string, SatInscription>();
@@ -521,6 +523,14 @@ export async function assembleFromBitcoin(
     if (i.unsupported === "not-read") {
       // What the index reports already decides it, read or not (P9.17, P14.12). PROVISIONAL.
       if (i.metadataPresent === false) return void ignore(sat, i, "not-an-originals-inscription");
+      // Its metadata, when the reader kept it, decides without the body: metadata that is not an array
+      // of entries is no Originals inscription, and malformed metadata is rejected (P14.12). So a body
+      // the holder made the reader skip never stalls the read.
+      if (i.metadata instanceof Uint8Array) {
+        const kind = readInscribedEntries(i.metadata).kind;
+        if (kind === "not-originals") return void ignore(sat, i, "not-an-originals-inscription");
+        if (kind === "invalid") return void ignore(sat, i, "undecodable");
+      }
       if ((i.contentLength ?? 0) > ORIGINALS_INSCRIPTION_MAX_BYTES) return void ignore(sat, i, "too-large");
       throw new OriginalsError("incomplete-evidence", "SAT_READ_INCOMPLETE", `inscription ${i.id} on ${sat} was not read in full (P9.17)`);
     }

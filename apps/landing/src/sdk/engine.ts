@@ -14,6 +14,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { MemoryStore, OriginalsSDK, satEvidence, btcoAlias, type EditInput, type HostedFetch, type OriginalView, type OriginalsSigner, type SharedHost, type SubmitResult, type OriginalsStore } from "@originals/sdk/originals";
 import type { OffChainEvidence } from "@originals/sdk/originals/bitcoin";
+import type { InscriptionNotice } from "@originals/sdk/originals";
 import type { BitcoinSigner, Utxo } from "@originals/sdk";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
@@ -129,6 +130,8 @@ export interface DemoAssetState {
     status: AnchoringStatus | null;
     lastSent?: SubmitAnswer;
     offChain?: OffChainEvidence;
+    /** The SDK's statement for the last inscription prepared: what it made public and permanent (P9.18; C12-193). */
+    notice?: InscriptionNotice;
     /**
      * Entries committed in this browser after the head Bitcoin accepts, oldest
      * first: still to inscribe, one per block (P9.13). The server's status
@@ -948,7 +951,7 @@ export class DemoEngine {
 
   private async afterSend(transport: AnchoringTransport, result: PublishNextResult): Promise<DemoAssetState> {
     this.lastSubmission = { broadcast: result.sent.broadcast };
-    this.anchoring = { status: await this.readStatus(transport), lastSent: result.sent, offChain: result.offChain };
+    this.anchoring = { status: await this.readStatus(transport), lastSent: result.sent, offChain: result.offChain, ...(result.pair.notice ? { notice: result.pair.notice } : {}) };
     this.view = await this.sdk!.get(this.did!);
     await this.refresh();
     this.emit("asset:inscribed", `${result.resent ? "Resent" : "Sent"} ${short(result.sent.versionId)} for inscription (${result.sent.broadcast})`, {

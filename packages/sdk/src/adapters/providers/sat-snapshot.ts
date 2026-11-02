@@ -1,8 +1,14 @@
 import type { BitcoinNetwork, SatSnapshot } from '../../bitcoin/sat-snapshot-types.js';
 import { MAX_SATOSHI_SUPPLY } from '../../utils/satoshi-validation.js';
 import { OriginalsError } from '@originals/vh';
-import { ORIGINALS_INSCRIPTION_MAX_BYTES } from '@originals/vh/originals';
+import { ORIGINALS_INSCRIPTION_MAX_BYTES, readInscribedEntries } from '@originals/vh/originals';
 import { ResponseTooLargeError } from '../response-body-limit.js';
+
+/**
+ * The content type reported for an inscription with no content-type tag: the empty string, which is
+ * no media type, so it never matches a resource's `mediaType` (P14.12, ord tag 1 is that mediaType).
+ */
+const NO_CONTENT_TYPE = '';
 
 /** Transport seam for ord's complete /sat, /inscription and raw /r/metadata views. */
 export interface SatSnapshotReader {
@@ -397,6 +403,12 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
     }
     const decoded = decodeHex(got.metadataHex);
     if (!decoded) throw incomplete('SAT_SNAPSHOT_METADATA_UNAVAILABLE', 'Raw metadata bytes unavailable');
+    // Metadata that is not an array of entries, or is malformed, decides without the body (P14.12): an
+    // inscription with a collection's metadata is not read, so junk cannot spend the Originals budget (P9.12).
+    if (readInscribedEntries(decoded).kind !== 'entries') {
+      plan[k] = { publication: { ...observation, body: { status: 'unavailable', reason: 'not-requested', mediaType, contentLength: length, metadata: decoded } } };
+      return;
+    }
     if (reads >= limits.maxInscriptions || used.originals + decoded.length + length > cap.originals) {
       plan[k] = over();
       return;
@@ -449,7 +461,7 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
       ({ ...observation, body: { status: 'unavailable', reason: 'over-budget', mediaType, contentLength: length, ...(metadataPresent ? { metadataPresent: true as const } : {}) } });
     if ('bodyTooLarge' in got) return over(pool === 'originals');
     if ('metadataTooLarge' in got) return over(true);
-    if ('metadataBytes' in got) return { ...observation, body: { status: 'complete', mediaType: mediaType ?? 'application/octet-stream', bytes: got.content ?? new Uint8Array(), metadata: got.metadataBytes } };
+    if ('metadataBytes' in got) return { ...observation, body: { status: 'complete', mediaType: mediaType ?? NO_CONTENT_TYPE, bytes: got.content ?? new Uint8Array(), metadata: got.metadataBytes } };
     let metadata: Uint8Array | null = null;
     if (got.metadataHex !== null) {
       if (used[pool] + got.metadataHex.length / 2 > cap[pool]) return over(true);
@@ -458,7 +470,7 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
       used[pool] += decoded.length;
       metadata = decoded;
     }
-    return { ...observation, body: { status: 'complete', mediaType: mediaType ?? 'application/octet-stream', bytes: got.content ?? new Uint8Array(), metadata } };
+    return { ...observation, body: { status: 'complete', mediaType: mediaType ?? NO_CONTENT_TYPE, bytes: got.content ?? new Uint8Array(), metadata } };
   });
   await readIndex();
   const after = await readTip();

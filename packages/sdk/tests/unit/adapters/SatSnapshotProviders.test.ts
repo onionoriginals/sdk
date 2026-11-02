@@ -276,8 +276,11 @@ test("providers pass bodies: 'originals' to the reader: metadata first, a body o
     server?.stop(true);
     const withMetadata = fixture(kind);
     const read = await withMetadata.provider.getSatSnapshot('123', { bodies: 'originals' });
-    expect(read.publications[0].body).toMatchObject({ status: 'complete', mediaType: 'image/png' });
-    expect(withMetadata.calls.some((c) => /content/i.test(c.method))).toBe(true);
+    // The fixture's metadata is an indefinite-length map: malformed under P14.12, so it is no Originals
+    // inscription and its body is not asked for; the metadata is kept for the verifier to say so.
+    expect(read.publications[0].body).toMatchObject({ status: 'unavailable', reason: 'not-requested', mediaType: 'image/png' });
+    expect((read.publications[0].body as { metadata?: Uint8Array }).metadata?.[0]).toBe(0xbf);
+    expect(withMetadata.calls.some((c) => /content/i.test(c.method))).toBe(false);
     server?.stop(true);
   }
 });
@@ -463,6 +466,24 @@ describe("the sat's holder cannot exhaust a read (P9.12, P9.17)", () => {
     const all = await readSatSnapshot(floodReader(5, { metadata: () => 'a0' }).reader, '123', 'regtest');
     expect(all.bodies).toBe('all');
     expect(all.publications.every((p) => p.body.status === 'complete' && p.body.metadata?.length === 1)).toBe(true);
+  });
+
+  test("an Originals read does not fetch the body of an inscription whose metadata is not an array of entries, or is malformed (P14.12, P9.12)", async () => {
+    // A collection's map metadata, a holder's malformed metadata, and one Originals inscription.
+    const metadata = (k: number) => (k === 0 ? 'a0' : k === 1 ? 'ff' : k === 2 ? ENTRIES : null);
+    const { reader, calls } = floodReader(3, { info: () => ({ content_type: 'image/jpeg', content_length: 300_000 }), metadata });
+    const snapshot = await readSatSnapshot(reader, '123', 'regtest', {}, { bodies: 'originals' });
+    // Only the Originals one's 300,000-byte body is fetched, so junk spends no Originals budget.
+    expect(calls.filter((c) => c === 'content')).toHaveLength(1);
+    expect(snapshot.publications[0].body).toEqual({ status: 'unavailable', reason: 'not-requested', mediaType: 'image/jpeg', contentLength: 300_000, metadata: new Uint8Array([0xa0]) });
+    expect(snapshot.publications[1].body).toMatchObject({ status: 'unavailable', reason: 'not-requested', metadata: new Uint8Array([0xff]) });
+    expect(snapshot.publications[2].body.status).toBe('complete');
+  });
+
+  test('an inscription with no content-type tag is reported with no media type, never application/octet-stream (P14.12)', async () => {
+    const { reader } = floodReader(1, { info: () => ({ content_type: null, content_length: 1 }), metadata: () => ENTRIES });
+    const snapshot = await readSatSnapshot(reader, '123', 'regtest', {}, { bodies: 'originals' });
+    expect(snapshot.publications[0].body).toMatchObject({ status: 'complete', mediaType: '' });
   });
 
   test('a stalled request fails at its own timeout, not at the whole-read deadline', async () => {

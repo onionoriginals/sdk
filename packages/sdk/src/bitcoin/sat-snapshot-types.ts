@@ -53,12 +53,14 @@ export interface PublicationObservation {
     | { status: 'unavailable'; reason: 'over-budget'; mediaType: string | null; contentLength: number; metadataPresent?: true }
     /**
      * Observed, but its body was not asked for: an Originals read (`bodies:
-     * 'originals'`) reads a body only when the inscription carries metadata,
-     * as an Originals inscription does (P14.12; originals-spec #53), and never
+     * 'originals'`) reads a body only when the inscription's metadata is an
+     * array of entries, as an Originals inscription's is (P14.12; originals-spec #53), and never
      * one over 350,000 bytes (P9.17). `metadata: null`: its metadata was read
-     * and it carries none, so it is not an Originals inscription. PROVISIONAL.
+     * and it carries none, so it is not an Originals inscription. Bytes: its
+     * metadata was read and is not an array of entries, or is malformed, so it
+     * is not one either and its body is not needed (P14.12). PROVISIONAL.
      */
-    | { status: 'unavailable'; reason: 'not-requested'; mediaType: string | null; contentLength: number; metadata?: null }
+    | { status: 'unavailable'; reason: 'not-requested'; mediaType: string | null; contentLength: number; metadata?: Uint8Array | null }
     | {
         status: 'complete';
         mediaType: string;

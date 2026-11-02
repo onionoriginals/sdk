@@ -54,6 +54,8 @@ export function AnchoringPanel(props: {
   const copy = demo.anchoring;
   if (!view) return null;
   const offChain = asset.anchoring?.offChain;
+  // The SDK's own words for the inscription just prepared (P9.18; C12-193), beside the preview shown before signing.
+  const notice = asset.anchoring?.notice;
   return (
     <div className="demo-anchoring" data-tone={view.tone} data-testid="anchoring-panel">
       <div className="demo-deposit-head">
@@ -81,6 +83,11 @@ export function AnchoringPanel(props: {
       )}
       {view.holderElsewhere && <p className="demo-error" role="alert">{copy.holderElsewhere}</p>}
       {view.indexNote && <p className="demo-inscribe-note" data-testid="anchoring-index">{view.indexNote}</p>}
+      {notice && (
+        <p className={notice.activeContent ? 'demo-error' : 'demo-inscribe-note'} {...(notice.activeContent ? { role: 'alert' } : {})} data-testid="inscription-notice-sdk">
+          {notice.text}
+        </p>
+      )}
       {offChain && (
         <>
           <p className="demo-inscribe-note">{copy.offChainLead}</p>

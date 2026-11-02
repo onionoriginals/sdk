@@ -6,7 +6,8 @@
  * entry (P5.11 asks the signer to show it to the author first).
  */
 import { fail } from "../errors.js";
-import type { JsonObject } from "../json/index.js";
+import type { JsonObject, JsonValue } from "../json/index.js";
+import { encodeCbor } from "./cbor.js";
 import { prepareGenesis, prepareNext, signEntry, SCID_PLACEHOLDER, type EntrySigner, type LogEntry, type UnsignedEntry } from "../log/index.js";
 import {
   ORIGINALS_METHOD,
@@ -72,6 +73,22 @@ function invalidInput(code: string, message: string): never {
   return fail("invalid-evidence", code, message);
 }
 
+/**
+ * PROVISIONAL (P14.12; pending a spec fix, plan 011 finding S13): the metadata must be
+ * encodable as inscription metadata, whose JSON-to-CBOR mapping names integers only. P14.5 does not
+ * restrict `metadata` numbers, but an entry with a non-integer one could never be inscribed, so it
+ * would block anchoring and every publication after it. The builders refuse it before signing;
+ * the verifier does not, since the spec does not.
+ */
+function checkInscribable(metadata: JsonObject | null | undefined): void {
+  if (metadata === undefined || metadata === null) return;
+  try {
+    encodeCbor(metadata as JsonValue);
+  } catch {
+    fail("unsupported-profile", "METADATA_NOT_INSCRIBABLE", "metadata numbers must be integers of magnitude at most 2^53 - 1, so the entry can be inscribed (P14.12, P14.3; PROVISIONAL)");
+  }
+}
+
 function stateOf(entry: UnsignedEntry): EntryState {
   return entry.state as unknown as EntryState;
 }
@@ -81,6 +98,7 @@ export function prepareCreateOriginal(input: PrepareCreateInput): UnsignedEntry 
   if ((input as { editor?: unknown }).editor !== undefined) fail("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor entry cannot be the genesis entry; only an author entry may (P5.16)");
   if ((input as { resources?: unknown }).resources !== undefined) invalidInput("STATE_RESOURCE", "an Original has exactly one resource: give `resource`, not `resources` (P4.1)");
   const resource = checkDescriptor(input.resource, "resource");
+  checkInscribable(input.metadata);
   const asset: AssetState = {
     name: input.name,
     ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
@@ -113,6 +131,7 @@ function nextAsset(previous: AssetState, input: Omit<PrepareUpdateInput, "versio
     invalidInput("STATE_RESOURCE", "an Original has exactly one resource, never added or removed: give its next version as `resource` (P4.1)");
   }
   const resource = input.resource === undefined ? previous.resource : checkDescriptor(input.resource, "resource");
+  checkInscribable(input.metadata);
   const { metadata: _old, editors: _editors, ...rest } = previous;
   const metadata = input.metadata === undefined ? previous.metadata : input.metadata;
   const editors = input.editors === undefined ? previous.editors : input.editors;

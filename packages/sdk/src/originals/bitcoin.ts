@@ -469,7 +469,8 @@ export async function satEvidence(snapshot: SatSnapshot, options: SatEvidenceOpt
     // Observed but not read: a delegated or encoded body, one the read did not ask for, or one past the
     // read's byte budget (M1). Any inscription can carry metadata, so whether an unread one could be an
     // Originals inscription is the verifier's to decide, from what the index reports: a body over
-    // 350,000 bytes (P9.17), or metadata read and absent (P14.12; originals-spec #53), rules it out;
+    // 350,000 bytes (P9.17), or metadata read and absent or not an array of entries (P14.12;
+    // originals-spec #53), rules it out;
     // otherwise an anchoring sat's read is missing evidence there (P9.17), and a did:btco signer's
     // history stops before it (P5.13). So the sat's holder cannot fail every read (P9.12).
     const unread = body.status === "unavailable" && "reason" in body;
@@ -483,11 +484,14 @@ export async function satEvidence(snapshot: SatSnapshot, options: SatEvidenceOpt
       body.status === "complete"
         ? { mediaType: body.mediaType, content: body.bytes, metadata: body.metadata }
         : {
-            mediaType: ("mediaType" in body ? body.mediaType : null) ?? "application/octet-stream",
+            // No content-type tag: no media type, never a resource's (P14.12).
+            mediaType: ("mediaType" in body ? body.mediaType : null) ?? "",
             content: new Uint8Array(),
             // A delegated or encoded inscription's own metadata, when read (null: it carries none).
             // Absent, it was not read: a did:btco history fails closed there (P5.13; originals-spec #51, merged).
             ...(!unread && "metadata" in body && body.metadata !== undefined ? { metadata: body.metadata } : {}),
+            // Not requested because its metadata, read, shows it is no Originals inscription (P14.12).
+            ...(unread && body.reason === "not-requested" && body.metadata instanceof Uint8Array ? { metadata: body.metadata } : {}),
             unsupported: unread ? ("not-read" as const) : (body as { reason: "delegated" | "content-encoding" }).reason,
             ...(unread ? { contentLength: body.contentLength } : {}),
             ...(noMetadata ? { metadataPresent: false } : unread && body.reason === "over-budget" && body.metadataPresent ? { metadataPresent: true } : {}),

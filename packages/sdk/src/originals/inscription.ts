@@ -12,12 +12,22 @@
  *   with no content encoding.
  * Metadata and body together are at most 350,000 bytes.
  */
+import { OriginalsError } from "@originals/vh";
 import { parseJson } from "@originals/vh/json";
 import { encodeCbor, type ResourceDescriptor } from "@originals/vh/originals";
 
 /** The CBOR metadata of an inscription carrying these stored lines, in order (P14.12). */
 export function inscriptionMetadata(lines: readonly string[]): Uint8Array {
-  return encodeCbor(lines.map((line) => parseJson(line)));
+  try {
+    return encodeCbor(lines.map((line) => parseJson(line)));
+  } catch (error) {
+    // A valid entry with a non-integer number (P14.5 allows one) has no CBOR form under the mapping
+    // P14.12 gives, so it can never be inscribed. PROVISIONAL, pending a spec fix (plan 011 finding S13).
+    if (error instanceof OriginalsError && error.code === "CBOR_INVALID") {
+      throw new OriginalsError("unsupported-profile", "METADATA_NOT_INSCRIBABLE", "an entry holds a number that is not an integer of magnitude at most 2^53 - 1, which inscription metadata cannot carry (P14.12)");
+    }
+    throw error;
+  }
 }
 
 /** The resource descriptor the entry on `line` names (P9.17). */
@@ -75,9 +85,12 @@ export interface InscriptionNotice {
 
 export function inscriptionNotice(entries: readonly string[], d: ResourceDescriptor): InscriptionNotice {
   const activeContent = isActiveContent(d.mediaType);
+  const carried = entries.length === 1
+    ? `the entry ${entries[0]}`
+    : `the log from ${entries[0]} through ${entries[entries.length - 1]}`;
   const text =
-    `This inscription puts the resource version ${d.digest} (${d.mediaType}, ${d.size} bytes) and the log ` +
-    `through ${entries[entries.length - 1]}, with the Original's name and metadata, on Bitcoin. They become public and permanent, ` +
+    `This inscription puts the resource version ${d.digest} (${d.mediaType}, ${d.size} bytes) and ${carried}, ` +
+    `with the Original's name and metadata, on Bitcoin. They become public and permanent, ` +
     "and no later entry can remove them." +
     (activeContent ? ` ${d.mediaType} is active content: Bitcoin explorers may render it outside the Originals isolation rules.` : "");
   return { version: { digest: d.digest, mediaType: d.mediaType, size: d.size }, entries: [...entries], permanent: true, activeContent, text };

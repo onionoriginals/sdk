@@ -14,7 +14,7 @@ import { parseWitness } from "micro-ordinals";
 import { ORIGINALS_INSCRIPTION_MAX_BYTES, decodeCbor, encodeCbor, resourceDigest, type EditorGrant } from "@originals/vh/originals";
 import { rawMetadataPerEnvelope } from "../../../src/bitcoin/ordinals-tags.js";
 import { prepareInscriptionOnSat } from "../../../src/bitcoin/inscribe-on-sat.js";
-import { inscriptionMetadata } from "../../../src/originals/inscription.js";
+import { inscriptionMetadata, inscriptionNotice } from "../../../src/originals/inscription.js";
 import type { InscriptionRecoveryRecord, InscriptionRecoveryStore, PreparedInscriptionOnSat } from "../../../src/bitcoin/inscription-recovery.js";
 import type { OrdinalsProvider } from "../../../src/adapters/types.js";
 import type { BitcoinNetwork, SatSnapshot } from "../../../src/bitcoin/sat-snapshot-types.js";
@@ -615,6 +615,46 @@ describe("C12-112: the anchoring inscription is the log through the anchoring en
     expect(chain.sent).toEqual([]);
     // The exact pair is sent.
     expect((await submitEntryInscription({ sdk, did, pair: { ...good, prepared: await forged(right) }, provider: chain.provider, clock: blocks(), index: INDEX, recoveryStore: r.store, recoveryIds: r.ids() })).broadcast).toBe("reveal_broadcast");
+  });
+});
+
+describe("the review of #1026 (P9.6, P9.17, P9.18)", () => {
+  test("a recorded pair with the right entries but another body is not this entry's pair, so it cannot wedge recovery (P9.6, P9.17)", async () => {
+    const { sdk, did } = await original(btcoAlias("regtest", SAT));
+    const all = (await sdk.committedLog(did)).trimEnd().split("\n");
+    const chain = node(snapshot([]));
+    const forged = (content: Uint8Array) =>
+      prepareInscriptionOnSat({ fundingUtxos: [holder, fee], satSigner: realSigner, changeAddress: wallet.address!, feeRate: 2, network: "regtest", provider: chain.provider, buildContent: () => Promise.resolve({ content, contentType: "image/jpeg", metadata: inscriptionMetadata(all) }) });
+    const wrong = recovery();
+    wrong.put(await forged(bytes("two")), "commit_broadcast");
+    const pair = await pairFor(sdk, did, chain.provider, undefined, { recoveryStore: wrong.store, recoveryIds: wrong.ids() });
+    expect(pair.versionId).toBe(idOf(all[all.length - 1]));
+    // The control: the same record with the right body is this entry's pair in flight.
+    const right = recovery();
+    right.put(await forged(bytes("one")), "commit_broadcast");
+    await expect(pairFor(sdk, did, chain.provider, undefined, { recoveryStore: right.store, recoveryIds: right.ids() })).rejects.toMatchObject({ code: "PAIR_IN_FLIGHT" });
+  });
+
+  test("a handoff through the committed head lists a version Bitcoin does not show as off chain (P9.18)", async () => {
+    const { sdk, did, asAlice, anchored, lines } = await edited();
+    const all = await lines();
+    const local = await sdk.edit(did, { parent: anchored, resource: { bytes: bytes("three") }, ...asAlice });
+    const three = resourceDigest(bytes("three"));
+    const committed = await transferHandoff(sdk, did, { through: "committed" });
+    expect(committed.package.manifest.checkpoint).toBe(local.original.checkpoint);
+    // No sat was read, so nothing is assumed inscribed: every version is handed over.
+    expect(committed.offChain.resources.map((r) => r.version)).toEqual([1, 2, 3]);
+    expect(committed.offChain.resources.find((r) => r.digest === three)?.held).toBe(true);
+    // Through the accepted head, version 2 is the anchor's body; only version 1 stays off chain.
+    const accepted = await transferHandoff(sdk, did, { provider: provider(SAT, snapshot([anchorBody(all, 2)])), clock: blocks(), index: INDEX });
+    expect(accepted.offChain.resources.map((r) => r.version)).toEqual([1]);
+  });
+
+  test("the notice names the whole log for an anchoring inscription and the one entry for a later one (P9.18)", () => {
+    const d = { mediaType: "image/jpeg", size: 3, digest: resourceDigest(bytes("one")) };
+    expect(inscriptionNotice(["1-a", "2-b"], d).text).toContain("the log from 1-a through 2-b");
+    expect(inscriptionNotice(["3-c"], d).text).toContain("the entry 3-c");
+    expect(inscriptionNotice(["3-c"], d).text).not.toContain("the log");
   });
 });
 

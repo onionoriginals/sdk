@@ -90,6 +90,7 @@ import { parseInscriptions } from "micro-ordinals";
 import { OriginalsError } from "@originals/vh";
 import {
   ORIGINALS_INSCRIPTION_MAX_BYTES,
+  resourceDigest,
   anchoringIndex,
   parseBtcoAlias,
   type OriginalsReport,
@@ -685,7 +686,11 @@ const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.e
 
 /** Whether a reveal inscribes exactly these entries and the version they name (P9.6, P9.17). */
 function sameInscription(i: Inscribed, expected: { metadata: Uint8Array; resource: ResourceDescriptor; body?: Uint8Array }): boolean {
-  return sameBytes(i.metadata, expected.metadata) && i.contentType === expected.resource.mediaType && (expected.body === undefined || sameBytes(i.body, expected.body));
+  if (!sameBytes(i.metadata, expected.metadata) || i.contentType !== expected.resource.mediaType) return false;
+  // Without the bytes at hand, the body is checked against the descriptor it must be (P9.17, P4.3).
+  return expected.body !== undefined
+    ? sameBytes(i.body, expected.body)
+    : i.body.length === expected.resource.size && resourceDigest(i.body) === expected.resource.digest;
 }
 
 /** Where the provider sees a transaction: `unknown` when it cannot say (no mempool view, or an error). */
@@ -786,7 +791,7 @@ async function recorded(log: StoredLog, view: OriginalView, holding: string | un
     const record = loaded;
     const { prepared } = record;
     if (prepared.satoshi !== log.sat.sat || prepared.network !== NETWORK[log.sat.network]) continue;
-    // The same entries under the same content type: a pair for this entry (P9.6). Its body is checked at submit.
+    // The same entries, content type and body: a pair for this entry (P9.6). One with another body is not.
     const inscribed = inscribedOf(prepared);
     if (!inscribed || !sameInscription(inscribed, planned)) continue;
     const reveal = await seen(provider, prepared.revealTxId);
@@ -1051,6 +1056,8 @@ export async function transferHandoff(sdk: OriginalsSDK, did: string, options?: 
   // Called without options (from JavaScript, or with none at all): a structured refusal, not a TypeError.
   if (options === undefined || options === null || typeof options !== "object") refuse("incomplete-evidence", "SAT_READ_REQUIRED", SAT_READ_REQUIRED);
   let checkpoint: string | undefined;
+  // The head Bitcoin accepts, when the sat was read: only versions through it are on Bitcoin (P9.18).
+  let accepted: string | null = null;
   if ("checkpoint" in options) checkpoint = options.checkpoint;
   else if (options.through !== "committed") {
     if (!("provider" in options) || !options.provider) {
@@ -1061,11 +1068,16 @@ export async function transferHandoff(sdk: OriginalsSDK, did: string, options?: 
       refuse("incomplete-evidence", "NOT_ANCHORED_ON_BITCOIN", `Bitcoin does not show ${did}'s anchor on ${pending.sat} (${pending.view.report.anchoring?.status ?? "unverified"}): there is no accepted head to hand over`);
     }
     checkpoint = pending.accepted;
+    accepted = pending.accepted;
   }
   const pkg = await sdk.package(did, checkpoint === undefined ? {} : { checkpoint });
   const loaded = await sdk.load(pkg.bytes);
   const log = await storedLog(sdk, did);
-  return { package: pkg, offChain: offChainOf(did, pkg.manifest.checkpoint, loaded.report, inscribedDigests(log, log.ids.indexOf(pkg.manifest.checkpoint))) };
+  // P9.18: a version counts as on Bitcoin only when an accepted inscription carries it. Through the
+  // committed head or an exact checkpoint no sat is read, so nothing is assumed inscribed and every
+  // version is listed as off chain: a locally committed version Bitcoin does not show is handed over.
+  const onBitcoin = accepted === null ? new Set<string>() : inscribedDigests(log, Math.min(log.ids.indexOf(accepted), log.ids.indexOf(pkg.manifest.checkpoint)));
+  return { package: pkg, offChain: offChainOf(did, pkg.manifest.checkpoint, loaded.report, onBitcoin) };
 }
 
 /**

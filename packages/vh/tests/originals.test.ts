@@ -17,7 +17,7 @@ import {
   type AuthorRef,
   type OriginalsReport,
 } from "../src/originals/index.js";
-import { NOW, VhAuthor, bytes, clock, photo, seeded } from "./helpers/originals.js";
+import { NOW, VhAuthor, bytes, clock, genesisWithMetadata, photo, seeded } from "./helpers/originals.js";
 
 const B1 = "harbor at dawn, first crop";
 const B2 = "harbor at dawn, tighter crop";
@@ -689,7 +689,7 @@ describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7;
     const nums = Array.from({ length: 200 }, () => 1.5e-6);
     let pad = 0;
     for (let i = 0; i < 40; i++) {
-      const entry = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", metadata: { nums, pad: "a".repeat(pad) }, resource: photo(B1), author: alice.ref("orig"), sign: alice.signer(key, "orig") });
+      const entry = await genesisWithMetadata({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", metadata: { nums, pad: "a".repeat(pad) }, resource: photo(B1), author: alice.ref("orig"), sign: alice.signer(key, "orig") });
       const line = serializeLog([entry]).slice(0, -1).replaceAll("0.0000015", "1.5e-6");
       const size = new TextEncoder().encode(line).length;
       if (size !== 65_536) {

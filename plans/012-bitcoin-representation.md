@@ -164,8 +164,8 @@ checks ord against Bitcoin Core and is bounded (PROVISIONAL defaults,
   at most 10 minutes). Requests: 7 plus 5 per listed inscription unless
   `maxRequests` is set.
 - `bodies: 'all' | 'originals'`: `'originals'` fetches the metadata of every
-  inscription of at most 350,000 bytes, and the body only of one that has
-  metadata, and reports every other inscription `not-requested` (PROVISIONAL;
+  inscription of at most 350,000 bytes, and the body only of one whose
+  metadata is an array of entries, and reports every other inscription `not-requested` (PROVISIONAL;
   originals-spec #53); `'all'` (the default) reads every body, as a did:btco
   read needs (P5.13). `satEvidence` passes unread inscriptions on, flagged
   with what it knows (`contentLength`, `metadataPresent`), and the verifier
