@@ -19,7 +19,7 @@ async function setup() {
 
 async function harbor() {
   const env = await setup();
-  const created = await env.sdk.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: env.author, signer: env.signer });
+  const created = await env.sdk.create({ name: "Harbor at dawn", resource: { mediaType: "image/jpeg", bytes: B1 }, author: env.author, signer: env.signer });
   if (created.kind !== "original") throw new Error("expected an Original");
   return { ...env, original: created.original };
 }
@@ -40,7 +40,7 @@ describe("create, edit and deactivate", () => {
   test("the photo example through the SDK: versions derived from history (P4.4)", async () => {
     const { sdk, signer, author, original } = await harbor();
     expect(original.report.reasons).toEqual(["not-anchored"]);
-    const cropped = await sdk.edit(original.did, { parent: original.checkpoint, resources: [{ id: "photo", bytes: B2 }], author, signer });
+    const cropped = await sdk.edit(original.did, { parent: original.checkpoint, resource: { bytes: B2 }, author, signer });
     const corrected = await sdk.edit(original.did, { parent: cropped.original.checkpoint, metadata: { caption: "Corrected" }, author, signer });
     expect(corrected.status).toBe("committed");
     expect(corrected.original.resources.map((r) => [r.version, r.digest])).toEqual([[1, resourceDigest(B1)], [2, resourceDigest(B2)]]);
@@ -52,7 +52,7 @@ describe("create, edit and deactivate", () => {
 
   test("a create without a signer is an explicit unsigned draft, never history (P6.3)", async () => {
     const { sdk, signer, author } = await setup();
-    const result = await sdk.create({ name: "Draft", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author });
+    const result = await sdk.create({ name: "Draft", resource: { mediaType: "image/jpeg", bytes: B1 }, author });
     expect(result.kind).toBe("draft");
     if (result.kind !== "draft") return;
     expect(result.draft.signed).toBe(false);
@@ -74,17 +74,16 @@ describe("create, edit and deactivate", () => {
 
   test("C12-11: a caller's version counter is rejected; versions come from history", async () => {
     const { sdk, signer, author, original } = await harbor();
-    const input = { id: "photo", bytes: B2, version: 9 } as never;
-    await rejects(sdk.edit(original.did, { parent: original.checkpoint, resources: [input], author, signer }), "invalid-evidence", "INPUT_INVALID");
+    const input = { bytes: B2, version: 9 } as never;
+    await rejects(sdk.edit(original.did, { parent: original.checkpoint, resource: input, author, signer }), "invalid-evidence", "INPUT_INVALID");
   });
 
-  test("C12-19 and C12-16 through the API: same bytes do not advance; a new id is an addition at version 1 (P4.1, P4.4)", async () => {
+  test("C12-19 through the API: the same bytes do not advance the version, and the entry lists no transition (P4.4, P14.4)", async () => {
     const { sdk, signer, author, original } = await harbor();
-    const same = await sdk.edit(original.did, { parent: original.checkpoint, resources: [{ id: "photo", bytes: B1 }], author, signer });
-    expect(same.original.resources.length).toBe(1);
-    const added = await sdk.edit(original.did, { parent: same.original.checkpoint, resources: [{ id: "sidecar", bytes: B2, mediaType: "text/plain" }], author, signer });
-    expect(added.original.state.resources.map((r) => r.id)).toEqual(["photo", "sidecar"]);
-    expect(added.original.resources.map((r) => [r.resource, r.version])).toEqual([["photo", 1], ["sidecar", 1]]);
+    const same = await sdk.edit(original.did, { parent: original.checkpoint, resource: { bytes: B1 }, author, signer });
+    expect(same.original.resources.map((r) => [r.version, r.digest])).toEqual([[1, resourceDigest(B1)]]);
+    const head = JSON.parse((await sdk.committedLog(original.did)).trimEnd().split("\n").at(-1)!) as { state: { transitions: unknown[] } };
+    expect(head.state.transitions).toEqual([]);
   });
 
   test("C12-21 through the API: deactivation is terminal", async () => {
@@ -105,7 +104,7 @@ describe("conflicts and retries (P4.5, P6.1, P6.4)", () => {
     await rejects(sdk.commit(b, signer), "stale-parent", "STALE_PARENT");
     await rejects(sdk.edit(original.did, { parent: original.checkpoint, name: "C", author, signer }), "stale-parent", "STALE_PARENT");
     const head = (await sdk.get(original.did)).checkpoint;
-    await rejects(sdk.edit(original.did, { parent: head, resources: [{ id: "photo", bytes: B2, expectedDigest: resourceDigest(B2) }], author, signer }), "stale-parent", "STALE_DIGEST");
+    await rejects(sdk.edit(original.did, { parent: head, resource: { bytes: B2, expectedDigest: resourceDigest(B2) }, author, signer }), "stale-parent", "STALE_DIGEST");
     expect((await sdk.get(original.did)).state.name).toBe("A");
   });
 
@@ -133,7 +132,7 @@ describe("conflicts and retries (P4.5, P6.1, P6.4)", () => {
   test("timestamps strictly increase, in milliseconds, even when the clock stalls", async () => {
     const env = await setup();
     const stalled = OriginalsSDK.create({ store: env.store, authors: [env.alice.evidence()], clock: () => Date.parse("2026-10-18T12:00:00Z") });
-    const c = await stalled.create({ name: "x", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: env.author, signer: env.signer });
+    const c = await stalled.create({ name: "x", resource: { mediaType: "image/jpeg", bytes: B1 }, author: env.author, signer: env.signer });
     if (c.kind !== "original") throw new Error("expected an Original");
     const e = await stalled.edit(c.original.did, { parent: c.original.checkpoint, name: "y", author: env.author, signer: env.signer });
     expect(e.original.report.history.status).toBe("valid");
@@ -145,10 +144,10 @@ describe("signing (P5.11)", () => {
     const { sdk, signer, author, original } = await harbor();
     const seen: SigningRequest[] = [];
     const watching: OriginalsSigner = { ...signer, sign: (request) => (seen.push(request), signer.sign(request)) };
-    await sdk.edit(original.did, { parent: original.checkpoint, resources: [{ id: "photo", bytes: B2 }], author, signer: watching });
+    await sdk.edit(original.did, { parent: original.checkpoint, resource: { bytes: B2 }, author, signer: watching });
     expect(seen[0].summary).toMatchObject({
       original: original.did, operation: "update", name: "Harbor at dawn",
-      changes: [{ resource: "photo", from: resourceDigest(B1), to: resourceDigest(B2) }],
+      changes: [{ from: resourceDigest(B1), to: resourceDigest(B2) }],
     });
   });
 
@@ -198,7 +197,7 @@ describe("C12-150: the SDK never commits an entry over 65,536 UTF-8 bytes (P7.7;
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
     const store = new MemoryStore();
     const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: clock() });
-    const created = sdk.create({ name: "Harbor", metadata: { wide: "é".repeat(33_000) }, resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: alice.ref("orig"), signer: alice.signer("orig", KEY) });
+    const created = sdk.create({ name: "Harbor", metadata: { wide: "é".repeat(33_000) }, resource: { mediaType: "image/jpeg", bytes: B1 }, author: alice.ref("orig"), signer: alice.signer("orig", KEY) });
     await expect(created).rejects.toMatchObject({ category: "limit-exceeded" });
   });
 });

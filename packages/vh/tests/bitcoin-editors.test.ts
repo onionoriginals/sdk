@@ -14,7 +14,6 @@ import type { ProofSigner } from "../src/crypto/index.js";
 import type { JsonObject } from "../src/json/index.js";
 import { appendEntry, serializeLog, signWith, type LogEntry } from "../src/log/index.js";
 import {
-  ORIGINALS_INSCRIPTION_TYPE,
   createOriginal,
   encodeCbor,
   parseBtcoAlias,
@@ -28,7 +27,7 @@ import {
   type SatEvidence,
   type SatInscription,
 } from "../src/originals/index.js";
-import { VhAuthor, bytes, photo, seeded } from "./helpers/originals.js";
+import { VhAuthor, bytes, carrying, photo, seeded } from "./helpers/originals.js";
 
 const B1 = "harbor at dawn";
 const B2 = "harbor at dawn, Bob's crop";
@@ -49,11 +48,14 @@ const at = (height: number) => new Date(T0 + height * 600_000).toISOString();
 type Inscribed = Omit<SatInscription, "sat" | "network"> & Partial<Pick<SatInscription, "sat" | "network">>;
 let counter = 0;
 const nextId = () => `${(counter++).toString(16).padStart(64, "e")}i0`;
-/** An inscription as the adapter reports it: entries as JSON Lines, or a did:btco DID document as CBOR metadata. */
+/**
+ * An inscription as the adapter reports it: entries as CBOR metadata over the bytes of the last
+ * entry's resource version (P9.17, P14.12), or a did:btco DID document as CBOR metadata.
+ */
 function inscribe(entries: LogEntry | LogEntry[], height: number, extra: Partial<SatInscription> = {}): Inscribed {
   return {
     id: nextId(), height, transactionIndex: 1, inscriptionIndex: 0, confirmations: 120 - height, inscriptionTime: T0 + height * 600_000,
-    mediaType: ORIGINALS_INSCRIPTION_TYPE, content: bytes(serializeLog(Array.isArray(entries) ? entries : [entries])), ...extra,
+    ...carrying(entries), ...extra,
   };
 }
 const didVersion = (height: number, doc: JsonObject, extra: Partial<SatInscription> = {}): Inscribed =>
@@ -73,7 +75,7 @@ function btcoDocument(did: string, keys: Array<{ fragment: string; signer: Proof
   };
 }
 
-const grant = (did: string, g: Partial<Omit<EditorGrant, "did">> = {}): EditorGrant => ({ did, name: true, metadata: false, resources: ["photo"], ...g });
+const grant = (did: string, g: Partial<Omit<EditorGrant, "did">> = {}): EditorGrant => ({ did, name: true, metadata: false, resource: true, ...g });
 
 /** Alice grants Bob the name and the photo, then anchors; genesis and the anchoring entry are inscribed together at height 10. */
 async function harbor(editor?: { did: string; ref: () => AuthorRef; sign: ReturnType<typeof signWith> }) {
@@ -82,7 +84,7 @@ async function harbor(editor?: { did: string; ref: () => AuthorRef; sign: Return
   const ref = alice.ref("orig");
   const sign = alice.signer(KA, "orig");
   const editorDid = editor?.did ?? bob.did;
-  const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resources: [photo(B1)], author: ref, sign, editors: [grant(editorDid)] });
+  const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resource: photo(B1), author: ref, sign, editors: [grant(editorDid)] });
   const anchor = await updateOriginal(genesis, { versionTime: time(9), aliases: [SAT], author: ref, sign });
   const asBob = (versionId = bob.versionId) => ({ editor: bob.ref("edit", versionId), sign: bob.signer(KB, "edit") });
   return { alice, bob, ref, sign, genesis, anchor, copy: [genesis, anchor], anchoring: () => inscribe([genesis, anchor], 10), asBob };
@@ -103,7 +105,7 @@ describe("C12-189: an impossible signer versionId is rejected without the signer
     const { alice, anchor, anchoring, asBob } = await harbor();
     const anchorAt = anchoring();
     for (const versionId of ["not-a-version", "1001-QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DzA3a1Y"]) {
-      const odd = await updateOriginal(anchor, { versionTime: time(20), resources: [photo(B2)], ...asBob(versionId) });
+      const odd = await updateOriginal(anchor, { versionTime: time(20), resource: photo(B2), ...asBob(versionId) });
       const r = await verify([alice], [sat([anchorAt, inscribe(odd, 20)])]);
       expect(r.anchoring?.ignored, versionId).toEqual([expect.objectContaining({ versionId: odd.versionId, reason: "invalid-entry", code: "AUTHOR_VERSION_IMPOSSIBLE" })]);
       expect(r.anchoring?.unverifiable, versionId).toEqual([]);
@@ -114,7 +116,7 @@ describe("C12-189: an impossible signer versionId is rejected without the signer
 describe("C12-123: an editor entry inscribed on the anchoring sat by the owner (P9.12)", () => {
   test("is accepted: the editor's signature authorizes it, the owner's inscription places it, and holding the sat grants nothing", async () => {
     const { alice, bob, anchor, anchoring, asBob } = await harbor();
-    const byBob = await updateOriginal(anchor, { versionTime: time(20), resources: [photo(B2)], ...asBob() });
+    const byBob = await updateOriginal(anchor, { versionTime: time(20), resource: photo(B2), ...asBob() });
     const r = await verify([alice, bob], [sat([anchoring(), inscribe(byBob, 20)])]);
     expect(r.head).toBe(byBob.versionId);
     expect(r.anchoring?.accepted.map((p) => p.versionId)).toEqual([byBob.versionId]);
@@ -127,7 +129,7 @@ describe("C12-123: an editor entry inscribed on the anchoring sat by the owner (
 
   test("an editor entry the sat does not carry is not current; the head stays (P9.12)", async () => {
     const { alice, bob, anchor, copy, anchoring, asBob } = await harbor();
-    const byBob = await updateOriginal(anchor, { versionTime: time(20), resources: [photo(B2)], ...asBob() });
+    const byBob = await updateOriginal(anchor, { versionTime: time(20), resource: photo(B2), ...asBob() });
     const r = await verify([alice, bob], [sat([anchoring()])], [...copy, byBob]);
     expect(r.head).toBe(anchor.versionId);
     expect(r.anchoring?.superseded).toBe(1);
@@ -201,8 +203,8 @@ describe("C12-121 (anchored): an editor entry signed with a key removed from the
     const bob = await VhAuthor.create([{ fragment: "edit", signer: KB }]);
     const ref = alice.ref("orig");
     const sign = alice.signer(KA, "orig");
-    const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resources: [photo(B1)], author: ref, sign, editors: [grant(bob.did)] });
-    const byBob = await updateOriginal(genesis, { versionTime: time(2), resources: [photo(B2)], editor: bob.ref("edit"), sign: bob.signer(KB, "edit") });
+    const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resource: photo(B1), author: ref, sign, editors: [grant(bob.did)] });
+    const byBob = await updateOriginal(genesis, { versionTime: time(2), resource: photo(B2), editor: bob.ref("edit"), sign: bob.signer(KB, "edit") });
     const anchor = await updateOriginal(byBob, { versionTime: time(9), aliases: [SAT], author: ref, sign });
     bob.timeOverride = at(5);
     await bob.rotate([{ fragment: "edit2", signer: KB2 }]);
@@ -224,7 +226,7 @@ describe("C12-121 (anchored): an editor entry signed with a key removed from the
       const alice = await VhAuthor.create([{ fragment: "orig", signer: KA }]);
       const ref = alice.ref("orig");
       const sign = alice.signer(KA, "orig");
-      const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resources: [photo(B1)], author: ref, sign, editors: [grant(EDITOR_SAT)] });
+      const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resource: photo(B1), author: ref, sign, editors: [grant(EDITOR_SAT)] });
       const anchor = await updateOriginal(genesis, { versionTime: time(9), aliases: [SAT], author: ref, sign });
       return { alice, genesis, anchor, anchoring: inscribe([genesis, anchor], 10) };
     }
@@ -295,7 +297,7 @@ describe("C12-122 (anchored): an editor entry after the author DID is deactivate
     const v1 = didVersion(5, btcoDocument(AUTHOR_SAT, [{ fragment: "orig", signer: KAB }]));
     const refA: AuthorRef = { did: AUTHOR_SAT, verificationMethod: `${AUTHOR_SAT}#orig`, versionId: v1.id };
     const bob = await VhAuthor.create([{ fragment: "edit", signer: KB }]);
-    const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resources: [photo(B1)], author: refA, sign: signA, editors: [grant(bob.did)] });
+    const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resource: photo(B1), author: refA, sign: signA, editors: [grant(bob.did)] });
     const anchor = await updateOriginal(genesis, { versionTime: time(9), aliases: [SAT], author: refA, sign: signA });
     const edit = await updateOriginal(anchor, { versionTime: time(20), name: "After the author's deactivation", editor: bob.ref("edit"), sign: bob.signer(KB, "edit") });
     // Deactivated in the same block, earlier in chain order than the editor's inscription.
@@ -315,7 +317,7 @@ describe("C12-122 (anchored): an editor entry after the author DID is deactivate
 describe("C12-118 (anchored): an editor entry and the revocation of its grant with the same parent (P5.17, P9.13)", () => {
   async function siblings() {
     const h = await harbor();
-    const edit = await updateOriginal(h.anchor, { versionTime: time(19), resources: [photo(B2)], ...h.asBob() });
+    const edit = await updateOriginal(h.anchor, { versionTime: time(19), resource: photo(B2), ...h.asBob() });
     const revoke = await updateOriginal(h.anchor, { versionTime: time(19), editors: null, author: h.ref, sign: h.sign });
     return { ...h, edit, revoke };
   }

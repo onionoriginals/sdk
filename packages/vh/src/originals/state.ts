@@ -15,14 +15,14 @@ export const ORIGINALS_METHOD = "originals:1.0";
 
 /**
  * The profile's limits (P7.7, P14.13), decided by the owner on 21 October 2026
- * (D6; originals-spec #50, merged, which raises resources from 64 to 256). `nameLength`
- * counts UTF-16 code units (P14.5, decided in originals-spec #51).
+ * (D4, D6; originals-spec #50). There is no resource limit: an Original is
+ * exactly one resource (P4.1; owner decision, 1 November 2026,
+ * originals-spec #53). `nameLength` counts UTF-16 code units (P14.5,
+ * decided in originals-spec #51).
  */
 export const ORIGINALS_LIMITS = Object.freeze({
   entries: 10_000,
   entryBytes: 65_536,
-  /** Resources at any one time (P14.13; originals-spec #50, merged): removing one makes room for another. */
-  resources: 256,
   nameLength: 1_024,
   authorVersions: 1_000,
   /** Editor grants in one asset state (P5.15, P7.7). */
@@ -36,8 +36,11 @@ export type Operation = "create" | "update" | "deactivate";
  * and anchoring is an update that lists the sat's did:btco alias.
  */
 
+/**
+ * The descriptor of the Original's one resource at a version (P4.1, P4.2,
+ * P14.6; originals-spec #53): exactly `{mediaType, size, digest}`.
+ */
 export interface ResourceDescriptor {
-  id: string;
   mediaType: string;
   size: number;
   /** A sha2-256 multihash (P14.7, decided), multibase base58btc (the encoding is PROVISIONAL, D4). */
@@ -46,21 +49,22 @@ export interface ResourceDescriptor {
 
 /**
  * An editor grant (P5.15). PROVISIONAL member names (D4): one editor DID and
- * exactly which content it may change: the name, the metadata, and the
- * resources listed by resourceID.
+ * exactly which content it may change: the name, the metadata, and new
+ * versions of the Original's one resource (originals-spec #53).
  */
 export interface EditorGrant {
   did: string;
   name: boolean;
   metadata: boolean;
-  resources: string[];
+  resource: boolean;
 }
 
 export interface AssetState {
   name: string;
   metadata?: JsonObject;
   status: "active" | "deactivated";
-  resources: ResourceDescriptor[];
+  /** The Original's one resource, at its version in this entry (P4.1, P14.5). */
+  resource: ResourceDescriptor;
   aliases: string[];
   /** The editor grants (P5.15). Absent means no editors; PROVISIONAL: an empty list is not used. */
   editors?: EditorGrant[];
@@ -77,14 +81,13 @@ export interface AuthorRef {
 export type EditorRef = AuthorRef;
 
 /**
- * A resource transition (P14.4): `from` is the previous digest, or null for a
- * resource this entry adds; `to` is the new digest, or null for a resource
- * this entry removes (P4.1; originals-spec #49).
+ * A resource transition (P14.4; originals-spec #53): `from` is the previous
+ * digest, or null in the genesis entry; `to` is the new digest. An entry lists
+ * at most one.
  */
 export interface Transition {
-  resource: string;
   from: string | null;
-  to: string | null;
+  to: string;
 }
 
 export interface EntryState {
@@ -140,13 +143,17 @@ export function checkDigest(digest: unknown, where = "digest"): string {
   return digest;
 }
 
-const RESOURCE_ID = /^[A-Za-z0-9._-]{1,64}$/;
 // RFC 6838 type/subtype, without parameters (PROVISIONAL).
 const MEDIA_TYPE = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$/;
 
 export function checkDescriptor(value: unknown, where: string): ResourceDescriptor {
-  const d = members(value, ["id", "mediaType", "size", "digest"], [], where);
-  if (typeof d.id !== "string" || !RESOURCE_ID.test(d.id)) invalid("STATE_RESOURCE", `${where}.id must be 1-64 of A-Z a-z 0-9 . _ -`);
+  let d: JsonObject;
+  try {
+    d = members(value, ["mediaType", "size", "digest"], [], where);
+  } catch (error) {
+    if (error instanceof OriginalsError) invalid("STATE_RESOURCE", `${error.message}: a resource descriptor is exactly {mediaType, size, digest} (P14.6)`);
+    throw error;
+  }
   if (typeof d.mediaType !== "string" || !MEDIA_TYPE.test(d.mediaType)) invalid("STATE_RESOURCE", `${where}.mediaType is not a media type`);
   if (typeof d.size !== "number" || !Number.isSafeInteger(d.size) || d.size < 0) invalid("STATE_RESOURCE", `${where}.size must be a non-negative integer`);
   checkDigest(d.digest, `${where}.digest`);
@@ -207,23 +214,22 @@ function wellFormedSigner(did: string): boolean {
  * P5.15: the editor grants. Each editor DID is unique, uses a listed method,
  * and is neither the author DID nor a DID of the author's identity: for a
  * did:webvh author, any did:webvh with its SCID, which is the author's DID at
- * another location after a move (P5.14). Resources are resourceIDs of the
- * Original's current resource set, so an author entry that removes a resource
- * removes it from every grant (P4.1, P5.15). The number of grants is limited
- * (P7.7).
+ * another location after a move (P5.14). Each grant says, as booleans,
+ * whether the editor may change the name, the metadata and the resource:
+ * `resource` allows new versions of the Original's one resource (P5.15;
+ * originals-spec #53). The number of grants is limited (P7.7).
  */
-function checkEditors(value: unknown, resources: ResourceDescriptor[], authorDid: string | undefined): EditorGrant[] {
+function checkEditors(value: unknown, authorDid: string | undefined): EditorGrant[] {
   const bad: (message: string) => never = (message) => invalid("STATE_EDITORS", message);
   if (!Array.isArray(value)) bad("state.asset.editors must be an array of grants");
   if (value.length === 0) bad("state.asset.editors is omitted when there are no editors (PROVISIONAL)");
   if (value.length > ORIGINALS_LIMITS.editors) fail("limit-exceeded", "STATE_TOO_MANY_EDITORS", `at most ${ORIGINALS_LIMITS.editors} editor grants (P7.7)`);
-  const ids = new Set(resources.map((r) => r.id));
   const seen = new Set<string>();
   const authorScid = authorDid?.startsWith("did:webvh:") ? scidOfWebvh(authorDid) : undefined;
   return value.map((item, i) => {
     let g: JsonObject;
     try {
-      g = members(item, ["did", "name", "metadata", "resources"], [], `state.asset.editors[${i}]`);
+      g = members(item, ["did", "name", "metadata", "resource"], [], `state.asset.editors[${i}]`);
     } catch (error) {
       if (error instanceof OriginalsError) bad(`state.asset.editors[${i}]: ${error.message}`);
       throw error;
@@ -239,33 +245,24 @@ function checkEditors(value: unknown, resources: ResourceDescriptor[], authorDid
     const identity = did.startsWith("did:webvh:") ? `did:webvh:${scidOfWebvh(did)}` : did;
     if (seen.has(identity)) bad(`editor DID ${did} is granted twice (one grant per identity, P5.14)`);
     seen.add(identity);
-    if (typeof g.name !== "boolean" || typeof g.metadata !== "boolean") bad(`state.asset.editors[${i}].name and .metadata are booleans`);
-    if (!Array.isArray(g.resources) || !g.resources.every((r) => typeof r === "string")) bad(`state.asset.editors[${i}].resources is a list of resourceIDs`);
-    const granted = g.resources;
-    if (new Set(granted).size !== granted.length) bad(`state.asset.editors[${i}].resources lists a resource twice`);
-    // P5.15 (originals-spec #51, merged): the author entry that adds a resource may also grant it; the grant
-    // takes effect from the next entry (P5.17), so no editor can change it in the entry that adds it.
-    for (const r of granted) if (!ids.has(r)) bad(`state.asset.editors[${i}] grants ${r}, which is not in the resource set; removing a resource removes it from every grant (P4.1, P5.15)`);
+    if (typeof g.name !== "boolean" || typeof g.metadata !== "boolean" || typeof g.resource !== "boolean") {
+      bad(`state.asset.editors[${i}].name, .metadata and .resource are booleans (P14.5)`);
+    }
     return g as unknown as EditorGrant;
   });
 }
 
 /** Check an asset state. `authorDid` enables the grant rules that depend on it (P5.15). */
 export function checkAsset(value: unknown, authorDid?: string): AssetState {
-  const a = members(value, ["name", "status", "resources", "aliases"], ["metadata", "editors"], "state.asset");
+  const a = members(value, ["name", "status", "resource", "aliases"], ["metadata", "editors"], "state.asset");
   if (typeof a.name !== "string" || a.name.length === 0 || a.name.length > ORIGINALS_LIMITS.nameLength) {
     invalid("STATE_NAME", `the name must be a string of 1 to ${ORIGINALS_LIMITS.nameLength} UTF-16 code units (P14.5)`);
   }
   if (a.metadata !== undefined && !isJsonObject(a.metadata)) invalid("STATE_METADATA", "metadata must be an object when present");
   if (a.status !== "active" && a.status !== "deactivated") invalid("STATE_STATUS", "status must be active or deactivated");
-  if (!Array.isArray(a.resources)) invalid("STATE_MEMBERS", "state.asset.resources must be an array");
-  if (a.resources.length > ORIGINALS_LIMITS.resources) fail("limit-exceeded", "STATE_TOO_MANY_RESOURCES", `at most ${ORIGINALS_LIMITS.resources} resources at one time (P14.13)`);
-  const ids = new Set<string>();
-  a.resources.forEach((r, i) => {
-    const d = checkDescriptor(r, `state.asset.resources[${i}]`);
-    if (ids.has(d.id)) invalid("STATE_RESOURCE", `resource ${d.id} is listed twice`);
-    ids.add(d.id);
-  });
+  // P4.1, P14.5 (originals-spec #53): exactly one resource, a descriptor, never none and never a list.
+  if (!isJsonObject(a.resource)) invalid("STATE_RESOURCE", "state.asset.resource is the descriptor of the Original's one resource: an Original has exactly one (P4.1)");
+  checkDescriptor(a.resource, "state.asset.resource");
   if (!Array.isArray(a.aliases) || !a.aliases.every((x) => typeof x === "string")) invalid("STATE_ALIASES", "aliases must be an array of DIDs");
   // PROVISIONAL (plan 011 PR 7b, plan 012 §3.1): at most one did:webvh alias and one did:btco alias.
   let webvh = 0;
@@ -285,7 +282,7 @@ export function checkAsset(value: unknown, authorDid?: string): AssetState {
     webvh++;
   }
   if (webvh > 1 || btco > 1) invalid("STATE_ALIASES", "an Original lists at most one did:webvh and one did:btco alias");
-  if (a.editors !== undefined) checkEditors(a.editors, a.resources as unknown as ResourceDescriptor[], authorDid);
+  if (a.editors !== undefined) checkEditors(a.editors, authorDid);
   return a as unknown as AssetState;
 }
 
@@ -294,9 +291,8 @@ const same = (a: JsonValue | undefined, b: JsonValue | undefined) => canonicaliz
 /**
  * P5.16, P5.17: an editor entry, checked against its parent. The grant is
  * the parent's; the author reference is the parent's; the operation is
- * update; and only the name, metadata and resource descriptors the grant
- * allows change. Grants, aliases, lifecycle and the resource set are the
- * author's: an editor entry never adds or removes a resource (P4.1, P5.16).
+ * update; and only the name, metadata and resource descriptor the grant
+ * allows change. Grants, aliases and lifecycle are the author's.
  */
 export function checkEditorEntry(editor: EditorRef, operation: string, author: AuthorRef, asset: AssetState, previous: EntryState | undefined): void {
   const authorOnly: (message: string) => never = (message) => fail("outside-grant", "EDITOR_AUTHOR_ONLY", `${message}; only an author entry may (P5.16)`);
@@ -314,37 +310,18 @@ export function checkEditorEntry(editor: EditorRef, operation: string, author: A
   const outside: (what: string) => never = (what) => fail("outside-grant", "EDITOR_OUTSIDE_GRANT", `${editor.did} is not granted ${what} (P5.16)`);
   if (asset.name !== before.name && !grant.name) outside("the name");
   if (!same(asset.metadata, before.metadata) && !grant.metadata) outside("the metadata");
-  const kept = new Set(asset.resources.map((r) => r.id));
-  for (const r of asset.resources) {
-    const was = before.resources.find((p) => p.id === r.id);
-    if (!was) authorOnly(`an editor entry cannot add a resource (${r.id})`);
-    if (!same(r as unknown as JsonValue, was as unknown as JsonValue) && !grant.resources.includes(r.id)) outside(`resource ${r.id}`);
-  }
-  for (const p of before.resources) if (!kept.has(p.id)) authorOnly(`an editor entry cannot remove a resource (${p.id})`);
+  if (!same(asset.resource as unknown as JsonValue, before.resource as unknown as JsonValue) && !grant.resource) outside("the resource");
 }
 
 /**
- * The transitions an entry must list (P4.2, P4.4, P14.4): every resource added,
- * removed or whose digest changed. First those in the resulting `resources`,
- * in that order, with `from: null` for an added one; then the removed ones, in
- * their previous order, with `to: null` (originals-spec #49).
+ * The transitions an entry must list (P4.2, P4.4, P14.4; originals-spec #53):
+ * `[{from: null, to}]` in the genesis entry, `[{from, to}]` in a later entry
+ * that changes the resource's digest, and `[]` in any other entry, a
+ * deactivation included.
  */
 export function expectedTransitions(previous: AssetState | undefined, next: AssetState): Transition[] {
-  const changed = next.resources.flatMap((r) => {
-    const before = previous?.resources.find((p) => p.id === r.id);
-    if (before && before.digest === r.digest) return [];
-    return [{ resource: r.id, from: before?.digest ?? null, to: r.digest }];
-  });
-  const kept = new Set(next.resources.map((r) => r.id));
-  const removed = (previous?.resources ?? []).filter((p) => !kept.has(p.id)).map((p) => ({ resource: p.id, from: p.digest, to: null }));
-  return [...changed, ...removed];
-}
-
-/** Every resourceID used through `state`, given those used before it (P4.1). */
-export function resourceIdsThrough(state: AssetState, before: Iterable<string> = []): Set<string> {
-  const used = new Set(before);
-  for (const r of state.resources) used.add(r.id);
-  return used;
+  if (previous && previous.resource.digest === next.resource.digest) return [];
+  return [{ from: previous?.resource.digest ?? null, to: next.resource.digest }];
 }
 
 export interface EntryStateContext {
@@ -352,12 +329,6 @@ export interface EntryStateContext {
   index: number;
   previous?: EntryState;
   deactivatedParameter: boolean;
-  /**
-   * Every resourceID the Original used before this entry, in any earlier
-   * entry, including removed ones (P4.1). When absent, only the previous
-   * state's resources are known; the verifier always supplies it.
-   */
-  usedResourceIds?: Iterable<string>;
   /**
    * Whether to apply the editor-entry rules here (default true). The VH-Log
    * engine applies them first, through the specialisation's editor hook
@@ -443,42 +414,26 @@ export function checkEntryState(state: JsonObject, ctx: EntryStateContext): Entr
     invalid("STATE_DEACTIVATION", "operation deactivate, status deactivated and VH deactivated: true must agree");
   }
 
-  // P4.1, P14.5 (originals-spec #49): at least one resource, always. Existing resources keep
-  // their order; an author entry appends the resources it adds and may remove others (an editor
-  // entry may do neither, P5.16, checked with its grant). A resourceID once used is never used
-  // again, even after its resource is removed; there is no rename.
+  // P4.1 (originals-spec #53): the one resource is checked with the asset (`checkAsset`); a change
+  // to its bytes is its next version. mediaType and size change only with the digest (P14.6).
   const previous = ctx.previous?.asset;
-  if (asset.resources.length === 0) {
-    invalid("STATE_RESOURCE_SET", previous ? "an entry cannot remove the last resource (P4.1)" : "genesis must name at least one resource (P4.1)");
-  }
   if (previous) {
-    const was = new Set(previous.resources.map((r) => r.id));
-    const kept = asset.resources.filter((r) => was.has(r.id));
-    const order = previous.resources.filter((p) => kept.some((r) => r.id === p.id)).map((p) => p.id).join("\n");
-    if (kept.map((r) => r.id).join("\n") !== order || asset.resources.slice(0, kept.length).some((r) => !was.has(r.id))) {
-      invalid("STATE_RESOURCE_SET", "existing resources keep their order, and added resources are appended after them (P4.1, P14.5)");
-    }
-    const used = new Set([...(ctx.usedResourceIds ?? []), ...was]);
-    for (const r of asset.resources.slice(kept.length)) {
-      if (used.has(r.id)) invalid("STATE_RESOURCE_REUSED", `resourceID ${r.id} was used before in this Original and cannot be used again (P4.1)`);
-    }
-    for (const r of kept) {
-      const before = previous.resources.find((p) => p.id === r.id)!;
-      if (before.digest === r.digest && (before.mediaType !== r.mediaType || before.size !== r.size)) {
-        invalid("STATE_RESOURCE", `resource ${r.id} changed its descriptor without changing its bytes`);
-      }
+    const was = previous.resource;
+    const now = asset.resource;
+    if (was.digest === now.digest && (was.mediaType !== now.mediaType || was.size !== now.size)) {
+      invalid("STATE_RESOURCE", "the resource's mediaType and size change only with its digest (P14.6)");
     }
   }
 
   if (!Array.isArray(s.transitions)) invalid("STATE_MEMBERS", "state.transitions must be an array");
   s.transitions.forEach((t, i) => {
-    const m = members(t, ["resource", "from", "to"], [], `state.transitions[${i}]`);
+    const m = members(t, ["from", "to"], [], `state.transitions[${i}]`);
     if (m.from !== null) checkDigest(m.from, `state.transitions[${i}].from`);
-    if (m.to !== null) checkDigest(m.to, `state.transitions[${i}].to`);
+    checkDigest(m.to, `state.transitions[${i}].to`);
   });
   if (deactivating && s.transitions.length > 0) invalid("STATE_TRANSITIONS", "a deactivation changes no resource");
   if (canonicalize(s.transitions) !== canonicalize(expectedTransitions(previous, asset) as unknown as JsonValue)) {
-    invalid("STATE_TRANSITIONS", "transitions must list exactly the resources added, removed or whose digest changed: the resulting resources in order, then the removed ones in their previous order (P14.4)");
+    invalid("STATE_TRANSITIONS", "transitions are [{from: null, to}] at genesis, [{from, to}] when the resource's digest changes, and [] otherwise (P14.4)");
   }
   return s as unknown as EntryState;
 }

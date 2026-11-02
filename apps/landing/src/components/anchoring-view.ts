@@ -6,6 +6,7 @@
  * stands in for another.
  */
 import { demo, library } from '../content';
+import { isActiveContent } from '@originals/sdk/originals';
 import type { DemoAssetState } from '../sdk/engine';
 
 export interface AnchoringView {
@@ -80,13 +81,34 @@ export function anchoringInMotion(anchoring: DemoAssetState['anchoring']): boole
   return status.publication !== 'anchored' || IN_FLIGHT.has(status.action);
 }
 
-/** The off-chain notice before signing (P9.18): what Bitcoin will not hold. */
-export function offChainPreview(asset: Pick<DemoAssetState, 'resource' | 'metadata' | 'author'>): string[] {
+/**
+ * The off-chain notice before signing (P9.18): what Bitcoin will not hold. The
+ * inscription carries the current version as its body, so only earlier
+ * versions stay off chain, with the author DID's history (originals-spec #53).
+ */
+export function offChainPreview(asset: Pick<DemoAssetState, 'resource' | 'author'>): string[] {
   return [
-    asset.resource.id,
-    ...(asset.metadata ? [asset.metadata.id] : []),
+    ...(asset.resource.version > 1 ? [demo.anchoring.offChainEarlier(asset.resource.id, asset.resource.version - 1)] : []),
     ...(asset.author ? [demo.anchoring.offChainIdentity(asset.author)] : []),
   ];
+}
+
+/**
+ * Media types a Bitcoin explorer may render as active content (P9.7, P9.18):
+ * the SDK writer's list, PROVISIONAL there.
+ */
+export { isActiveContent };
+
+/**
+ * What the author is told before an inscription is signed (P9.18; C12-193):
+ * the version it carries and the log, with the name and metadata, become
+ * public and permanent; and, for active content, that explorers may render it.
+ */
+export function inscriptionNoticePreview(asset: Pick<DemoAssetState, 'resource'>): { permanent: string; activeContent: string | null } {
+  return {
+    permanent: demo.anchoring.permanent(asset.resource.id, asset.resource.version),
+    activeContent: isActiveContent(asset.resource.contentType) ? demo.anchoring.activeContent(asset.resource.contentType) : null,
+  };
 }
 
 /** Copy for an anchoring failure, or null when it is not one. */

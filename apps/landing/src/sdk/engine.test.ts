@@ -23,7 +23,8 @@ describe('DemoEngine on the Originals Protocol', () => {
     expect(state.author).toMatch(/^did:vh:/);
     expect(state.author).not.toBe(state.did);
     expect(state.resource).toMatchObject({ id: 'artwork.svg', contentType: 'image/svg+xml', version: 1 });
-    expect(state.metadata?.id).toBe('metadata.json');
+    // One resource; the title and style are the asset state's metadata (P4.1; originals-spec #53).
+    expect(JSON.parse(state.metadata!.content)).toMatchObject({ title: expect.any(String), style: expect.any(String), artwork: { file: 'artwork.svg' } });
     expect(state.history.map((h) => h.operation)).toEqual(['create']);
     expect(state.history[0].authorKey).toBe(`${state.author}#author`);
     // A local Original is never current; it is valid as of its checkpoint (P7.10).
@@ -40,7 +41,7 @@ describe('DemoEngine on the Originals Protocol', () => {
     expect(revised.did).toBe(state.did);
     expect(revised.resource.version).toBe(2);
     expect(revised.history.map((h) => h.operation)).toEqual(['create', 'update']);
-    expect(revised.history[1].changes.map((c) => c.resource).sort()).toEqual(['artwork.svg', 'metadata.json']);
+    expect(revised.history[1].changes).toEqual([{ from: expect.stringMatching(/^z/), to: expect.stringMatching(/^z/) }]);
     // A rename alone leaves the artwork at its version.
     const renamed = await engine.update('Harbor, dusk', 'Orbits', art.svg);
     expect(renamed.resource.version).toBe(2);

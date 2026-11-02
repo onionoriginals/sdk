@@ -208,7 +208,7 @@ describe('a signed-in author DID verifies as Originals identity evidence', () =>
     const author = { did: built.did, verificationMethod: `${built.did}#key-1`, versionId: history.versions[0].versionId };
     const c = await sdk.create({
       name: 'Signed in',
-      resources: [{ id: 'artwork.svg', mediaType: 'image/svg+xml', bytes: new TextEncoder().encode('<svg/>') }],
+      resource: { mediaType: 'image/svg+xml', bytes: new TextEncoder().encode('<svg/>') },
       author,
       signer: keySigner({ keyType: 'Ed25519', secretKey: authorship, verificationMethod: author.verificationMethod }),
     });

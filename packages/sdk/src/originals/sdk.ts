@@ -70,6 +70,7 @@ import {
   type VerifyOriginalOptions,
 } from "@originals/vh/originals";
 import { didWebvhFilesUrl, didWebvhLogUrl, parseDidWebvh } from "@originals/vh/webvh";
+import { inscriptionMetadata } from "./inscription.js";
 import { MANIFEST, signerPath, readEvidence, readEvidenceFiles, readManifest, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
 import { HOSTED_PREFIX, assertHostable, type HostedFetch, type RetrievalLimits } from "./hosting.js";
 import { Retrieval, retrievalPlan } from "./retrieval.js";
@@ -121,32 +122,34 @@ export interface OriginalsSDKOptions {
   identityFetch?: HostedFetch;
 }
 
+/**
+ * The Original's one resource at genesis, its version 1 (P4.1, P4.4; owner
+ * decision of 1 November 2026, originals-spec #53).
+ */
 export interface ResourceInput {
-  id: string;
   mediaType: string;
   bytes: Uint8Array;
 }
 
 /**
- * New bytes for a resource. An id in the parent's resource set changes that
- * resource; a new id adds a resource, appended after the existing ones in the
- * order given, at version 1 (P4.1, P4.4). Only the author adds (P5.16), and a
- * resourceID the Original has used before, even for a removed resource, is
- * refused (P4.1).
+ * The resource's next version (P4.1, P4.4; originals-spec #53). An Original
+ * has exactly one resource, never added, removed or replaced by another; new
+ * bytes are its next version, and the same bytes leave the version unchanged.
+ * An editor needs a grant with `resource: true` (P5.16).
  */
 export interface ResourceChange {
-  id: string;
   bytes: Uint8Array;
-  /** Defaults to the current media type; required for an added resource. */
+  /** Defaults to the current media type. */
   mediaType?: string;
-  /** The digest the caller edited from; a different current digest is a conflict (P4.5). Not for an added resource. */
+  /** The digest the caller edited from; a different current digest is a conflict (P4.5). */
   expectedDigest?: string;
 }
 
 export interface CreateInput {
   name: string;
   metadata?: JsonObject;
-  resources: ResourceInput[];
+  /** The Original's one resource (P4.1). */
+  resource: ResourceInput;
   author: AuthorRef;
   /** Editor grants (P5.15; PROVISIONAL member names, D4). */
   editors?: EditorGrant[];
@@ -157,14 +160,8 @@ export interface EditInput {
   parent: string;
   name?: string;
   metadata?: JsonObject | null;
-  resources?: ResourceChange[];
-  /**
-   * ResourceIDs to remove (P4.1). Author only (P5.16). At least one resource
-   * must remain, and a removed resource must also leave every grant: pass
-   * `editors` without it. Its earlier versions stay in history, packages and
-   * hosted retrieval (P8.3).
-   */
-  remove?: string[];
+  /** The resource's next version; omitted keeps the current one (P4.1). Earlier versions stay in history (P8.3). */
+  resource?: ResourceChange;
   /** The author reference: required for an author's edit; an editor's edit carries its parent's (P5.16). */
   author?: AuthorRef;
   /**
@@ -243,7 +240,7 @@ export type SubmitResult =
   | { status: "stale-parent"; hostHead: string; refused: RefusedCandidate };
 
 /** The content a reconciled candidate changes; its parent is always the host's new head. */
-export type ReconciledChange = Pick<EditInput, "name" | "metadata" | "resources" | "remove">;
+export type ReconciledChange = Pick<EditInput, "name" | "metadata" | "resource">;
 
 export interface ReconcileInput {
   host: SharedHost;
@@ -556,8 +553,9 @@ function digestsOf(log: string): string[] {
   const digests = new Set<string>();
   for (const line of lines(log)) {
     try {
-      const entry = JSON.parse(line) as { state?: { asset?: { resources?: Array<{ digest?: unknown }> } } };
-      for (const r of entry.state?.asset?.resources ?? []) if (typeof r.digest === "string") digests.add(r.digest);
+      const entry = JSON.parse(line) as { state?: { asset?: { resource?: { digest?: unknown } } } };
+      const digest = entry.state?.asset?.resource?.digest;
+      if (typeof digest === "string") digests.add(digest);
     } catch {
       // As above.
     }
@@ -915,6 +913,17 @@ export class OriginalsSDK {
   }
 
   /**
+   * The stored bytes of a resource version, by digest, only when they match it
+   * (P4.3); otherwise undefined. The Bitcoin writer inscribes them as the body
+   * of the inscription whose last entry names that version (P9.17;
+   * originals-spec #53).
+   */
+  async resourceBytes(digest: string): Promise<Uint8Array | undefined> {
+    const data = await this.store.getResource(digest);
+    return data && resourceDigest(data) === digest ? data : undefined;
+  }
+
+  /**
    * The verified state of a stored Original, at its head or an exact
    * checkpoint (P3.2). For an anchored Original, pass what an adapter read
    * from the anchoring sat (`satEvidence`): Bitcoin then decides the log from
@@ -938,17 +947,17 @@ export class OriginalsSDK {
   }
 
   async prepareCreate(input: CreateInput): Promise<Draft> {
-    exactKeys(input, ["name", "metadata", "resources", "author", "signer", "editors"], "create input");
+    exactKeys(input, ["name", "metadata", "resource", "author", "signer", "editors"], "create input");
     const bytes = new Map<string, Uint8Array>();
-    const resources: ResourceDescriptor[] = input.resources.map((r, i) => {
-      exactKeys(r, ["id", "mediaType", "bytes"], `resources[${i}]`);
-      if (!(r.bytes instanceof Uint8Array)) sdkError("invalid-evidence", "INPUT_INVALID", `resources[${i}].bytes must be a Uint8Array`);
-      const digest = resourceDigest(r.bytes);
-      bytes.set(digest, r.bytes.slice());
-      return { id: r.id, mediaType: r.mediaType, size: r.bytes.length, digest };
-    });
+    const r = input.resource;
+    if (typeof r !== "object" || r === null) sdkError("invalid-evidence", "INPUT_INVALID", "an Original has exactly one resource: give `resource` (P4.1)");
+    exactKeys(r, ["mediaType", "bytes"], "resource");
+    if (!(r.bytes instanceof Uint8Array)) sdkError("invalid-evidence", "INPUT_INVALID", "resource.bytes must be a Uint8Array");
+    const digest = resourceDigest(r.bytes);
+    bytes.set(digest, r.bytes.slice());
+    const resource: ResourceDescriptor = { mediaType: r.mediaType, size: r.bytes.length, digest };
     const entry = prepareCreateOriginal({
-      versionTime: this.versionTime(), name: input.name, ...(input.metadata !== undefined ? { metadata: input.metadata } : {}), resources, author: input.author,
+      versionTime: this.versionTime(), name: input.name, ...(input.metadata !== undefined ? { metadata: input.metadata } : {}), resource, author: input.author,
       ...(input.editors !== undefined ? { editors: input.editors } : {}),
     });
     const summary = summarize(entry);
@@ -975,45 +984,33 @@ export class OriginalsSDK {
   }
 
   async prepareEdit(did: string, input: EditInput): Promise<Draft> {
-    exactKeys(input, ["parent", "name", "metadata", "resources", "remove", "author", "editor", "editors", "signer"], "edit input");
+    exactKeys(input, ["parent", "name", "metadata", "resource", "author", "editor", "editors", "signer"], "edit input");
     return this.prepareUpdate(did, input);
   }
 
   private async prepareUpdate(did: string, input: EditInput, aliases?: string[]): Promise<Draft> {
     const { head, view } = await this.parentOf(did, input.parent);
     const bytes = new Map<string, Uint8Array>();
-    // P4.1: every resourceID the Original has used through its verified history, removed ones included.
-    const used = new Set([...view.state.resources.map((r) => r.id), ...view.resources.map((v) => v.resource)]);
-    if (input.remove !== undefined && (!Array.isArray(input.remove) || !input.remove.every((id) => typeof id === "string"))) {
-      sdkError("invalid-evidence", "INPUT_INVALID", "remove must be a list of resourceIDs");
-    }
-    const resources = (input.resources ?? []).map((r, i) => {
-      exactKeys(r, ["id", "bytes", "mediaType", "expectedDigest"], `resources[${i}]`);
-      if (!(r.bytes instanceof Uint8Array)) sdkError("invalid-evidence", "INPUT_INVALID", `resources[${i}].bytes must be a Uint8Array`);
-      const current = view.state.resources.find((c) => c.id === r.id);
-      if (r.expectedDigest !== undefined && current?.digest !== r.expectedDigest) {
-        sdkError("stale-parent", "STALE_DIGEST", `resource ${r.id} is at ${current?.digest ?? "nothing"}, not ${r.expectedDigest}`);
-      }
-      if (!current) {
-        // An addition (P4.1): the author's only, a fresh id, and a media type of its own.
-        if (input.editor !== undefined) sdkError("outside-grant", "EDITOR_AUTHOR_ONLY", `an editor cannot add a resource (${r.id}); only the author may (P4.1, P5.16)`);
-        if (used.has(r.id)) sdkError("invalid-evidence", "STATE_RESOURCE_REUSED", `resourceID ${r.id} was used before in this Original and cannot be used again (P4.1)`);
-        if (r.mediaType === undefined) sdkError("invalid-evidence", "INPUT_INVALID", `resources[${i}] adds ${r.id}, so it needs a mediaType`);
+    let resource: ResourceDescriptor | undefined;
+    if (input.resource !== undefined) {
+      const r = input.resource;
+      if (typeof r !== "object" || r === null) sdkError("invalid-evidence", "INPUT_INVALID", "resource is the resource's next version: {bytes, mediaType?, expectedDigest?} (P4.1)");
+      exactKeys(r, ["bytes", "mediaType", "expectedDigest"], "resource");
+      if (!(r.bytes instanceof Uint8Array)) sdkError("invalid-evidence", "INPUT_INVALID", "resource.bytes must be a Uint8Array");
+      const current = view.state.resource;
+      // P4.5: an edit made from other bytes than the current version's is a conflict, never a rebase.
+      if (r.expectedDigest !== undefined && current.digest !== r.expectedDigest) {
+        sdkError("stale-parent", "STALE_DIGEST", `the resource is at ${current.digest}, not ${r.expectedDigest}`);
       }
       const digest = resourceDigest(r.bytes);
       bytes.set(digest, r.bytes.slice());
-      return { id: r.id, mediaType: r.mediaType ?? current?.mediaType ?? "", size: r.bytes.length, digest };
-    });
-    if (input.editor !== undefined && (input.remove ?? []).length > 0) {
-      sdkError("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor cannot remove a resource; only the author may (P4.1, P5.16)");
+      resource = { mediaType: r.mediaType ?? current.mediaType, size: r.bytes.length, digest };
     }
     const entry = prepareUpdateOriginal(head, {
       versionTime: this.versionTime(head.versionTime),
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
-      resources,
-      ...(input.remove !== undefined ? { remove: input.remove } : {}),
-      usedResourceIds: used,
+      ...(resource !== undefined ? { resource } : {}),
       ...(input.author !== undefined ? { author: input.author } : {}),
       ...(input.editor !== undefined ? { editor: input.editor } : {}),
       ...(input.editors !== undefined ? { editors: input.editors } : {}),
@@ -1062,9 +1059,10 @@ export class OriginalsSDK {
    * the sat's did:btco alias. It counts only once inscribed on that sat; until
    * then reads report the Original as unverified on Bitcoin. Inscribing it is
    * the Bitcoin writer's job (plan 011, PR 10). The anchoring inscription
-   * carries the whole log through this entry, so an Original whose log would
-   * then exceed 350,000 bytes is refused before anything is committed
-   * (ANCHORING_LOG_TOO_LARGE, P9.17).
+   * carries the whole log through this entry as its metadata and the current
+   * resource version as its body, so an Original whose log and current
+   * version together would exceed 350,000 bytes is refused before anything
+   * is committed (ANCHORING_LOG_TOO_LARGE, P9.17; originals-spec #53).
    */
   async anchor(did: string, input: { parent: string; author: AuthorRef; signer: OriginalsSigner; sat: string }): Promise<CommitResult> {
     exactKeys(input, ["parent", "author", "signer", "sat"], "anchor input");
@@ -1072,12 +1070,13 @@ export class OriginalsSDK {
     const aliases = (await this.get(did)).state.aliases;
     if (aliases.some((a) => a.startsWith("did:btco:"))) sdkError("invalid-evidence", "ALREADY_ANCHORED", `${did} is already anchored (P9.10)`);
     const draft = await this.prepareUpdate(did, { parent: input.parent, author: input.author }, [...aliases, input.sat]);
-    // The anchoring inscription carries the whole log through the anchoring entry, so a log
-    // over the inscription limit cannot be anchored: refuse before committing it (P9.17).
+    // The anchoring inscription carries the whole log through the anchoring entry as metadata and
+    // the current version as its body, so together they must fit: refuse before committing (P9.17).
     const candidate = await this.sign(draft, input.signer);
-    const size = new TextEncoder().encode((await this.stored(did)) + serializeLog([candidate.entry])).length;
+    const carried = [...lines(await this.stored(did)), candidate.line];
+    const size = inscriptionMetadata(carried).length + (candidate.entry.state as unknown as EntryState).asset.resource.size;
     if (size > ORIGINALS_INSCRIPTION_MAX_BYTES) {
-      sdkError("limit-exceeded", "ANCHORING_LOG_TOO_LARGE", `the log of ${did} through the anchoring entry would be ${size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, { size, limit: ORIGINALS_INSCRIPTION_MAX_BYTES });
+      sdkError("limit-exceeded", "ANCHORING_LOG_TOO_LARGE", `the log of ${did} through the anchoring entry and its current version would be ${size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, { size, limit: ORIGINALS_INSCRIPTION_MAX_BYTES });
     }
     return this.commitCandidate(candidate);
   }
@@ -1123,6 +1122,16 @@ export class OriginalsSDK {
     });
     const entry: LogEntry = { ...draft.entry, proof: [{ ...proofOptions, proofValue: multibaseEncode(signature) }] };
     const candidate = stored + serializeLog([entry]);
+    // P9.17 (originals-spec #53): after the anchoring entry each entry is published in an inscription
+    // of its own, its metadata and the resource version it names together at most 350,000 bytes.
+    // One that could never be inscribed would block every later publication, so it is not signed into history.
+    const parentAliases = (parentEntry?.state as unknown as EntryState | undefined)?.asset?.aliases ?? [];
+    if (parentAliases.some((a) => a.startsWith("did:btco:"))) {
+      const size = inscriptionMetadata([JSON.stringify(entry)]).length + (entry.state as unknown as EntryState).asset.resource.size;
+      if (size > ORIGINALS_INSCRIPTION_MAX_BYTES) {
+        sdkError("limit-exceeded", "INSCRIPTION_TOO_LARGE", `entry ${entry.versionId} and the resource version it names would be ${size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, { size, limit: ORIGINALS_INSCRIPTION_MAX_BYTES });
+      }
+    }
 
     const report = await this.verify(candidate, undefined, draft.bytes);
     const added = report.resources.versions.filter((v) => v.versionId === entry.versionId);
@@ -1224,7 +1233,6 @@ export class OriginalsSDK {
     const previous = parentLine ? ((parseJson(parentLine) as unknown as LogEntry).state as unknown as EntryState) : undefined;
     const bytes = new Map<string, Uint8Array>();
     for (const t of (unsigned.state as unknown as EntryState).transitions) {
-      if (t.to === null) continue; // a removal brings no new bytes (P4.1)
       const data = await this.store.getResource(t.to);
       if (data && resourceDigest(data) === t.to) bytes.set(t.to, data);
     }
@@ -1245,7 +1253,6 @@ export class OriginalsSDK {
     const previous = parentLine ? ((parseJson(parentLine) as unknown as LogEntry).state as unknown as EntryState) : undefined;
     const bytes = new Map<string, Uint8Array>();
     for (const t of (unsigned.state as unknown as EntryState).transitions) {
-      if (t.to === null) continue; // a removal brings no new bytes (P4.1)
       const data = await this.store.getResource(t.to);
       if (data && resourceDigest(data) === t.to) bytes.set(t.to, data);
     }
@@ -1285,7 +1292,7 @@ export class OriginalsSDK {
     const head = synced.original;
     const change = typeof input.change === "function" ? await input.change({ head, ...(kept ? { refused: kept } : {}) }) : input.change;
     if (typeof change !== "object" || change === null) sdkError("invalid-evidence", "RECONCILE_CHANGE_REQUIRED", "reconcile needs the reconciled change; the SDK never merges (P6.8)");
-    exactKeys(change, ["name", "metadata", "resources", "remove"], "reconciled change");
+    exactKeys(change, ["name", "metadata", "resource"], "reconciled change");
     const draft = await this.prepareEdit(did, { ...change, parent: head.checkpoint, author: input.author });
     const result = await this.submit(await this.sign(draft, input.signer), input.host);
     // The refused candidate stays, labelled with what carried its change (P6.8).
@@ -1315,7 +1322,7 @@ export class OriginalsSDK {
     for (const v of view.report.resources.versions) {
       const data = await this.store.getResource(v.digest);
       if (data && resourceDigest(data) === v.digest) bytes[v.digest] = data;
-      else missing.push({ kind: "resource", resource: v.resource, version: v.version, digest: v.digest, versionId: v.versionId });
+      else missing.push({ kind: "resource", version: v.version, digest: v.digest, versionId: v.versionId });
     }
     const manifest: EvidenceManifest = {
       format: "originals-evidence/0.1",

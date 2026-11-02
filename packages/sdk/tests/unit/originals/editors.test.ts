@@ -29,7 +29,7 @@ const KA = seed(21);
 const KB = seed(31);
 const KC = seed(32);
 
-const grant = (did: string, g: Partial<Omit<EditorGrant, "did">> = {}): EditorGrant => ({ did, name: false, metadata: false, resources: [], ...g });
+const grant = (did: string, g: Partial<Omit<EditorGrant, "did">> = {}): EditorGrant => ({ did, name: false, metadata: false, resource: false, ...g });
 
 async function rejects(promise: Promise<unknown>, category: string, code?: string) {
   const caught = await promise.then(() => undefined, (e: unknown) => e);
@@ -38,7 +38,7 @@ async function rejects(promise: Promise<unknown>, category: string, code?: strin
   if (code) expect((caught as OriginalsError).code).toBe(code);
 }
 
-/** Alice grants Bob `resources: ["photo"]` and Carol `metadata: true` at genesis. */
+/** Alice grants Bob `resource: true` and Carol `metadata: true` at genesis. */
 async function harbor() {
   const alice = await Author.create([{ fragment: "orig", secret: KA }]);
   const bob = await Author.create([{ fragment: "edit", secret: KB }]);
@@ -47,9 +47,9 @@ async function harbor() {
   const store = new MemoryStore();
   const sdk = OriginalsSDK.create({ store, authors: async (did) => dids.find((d) => d.did === did)?.evidence(), clock: clock() });
   const created = await sdk.create({
-    name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }],
+    name: "Harbor at dawn", resource: { mediaType: "image/jpeg", bytes: B1 },
     author: alice.ref("orig"), signer: alice.signer("orig", KA),
-    editors: [grant(bob.did, { resources: ["photo"] }), grant(carol.did, { metadata: true })],
+    editors: [grant(bob.did, { resource: true }), grant(carol.did, { metadata: true })],
   });
   if (created.kind !== "original") throw new Error("expected an Original");
   const asBob = { editor: bob.ref("edit"), signer: bob.signer("edit", KB) };
@@ -61,7 +61,7 @@ async function harbor() {
 describe("C12-113: editors sign through the normal edit API", () => {
   test("Bob replaces the photo, Carol corrects the caption; neither is countersigned and the author is unchanged", async () => {
     const { alice, bob, carol, sdk, did, v1, asBob, asCarol } = await harbor();
-    const byBob = await sdk.edit(did, { parent: v1, resources: [{ id: "photo", bytes: B2 }], ...asBob });
+    const byBob = await sdk.edit(did, { parent: v1, resource: { bytes: B2 }, ...asBob });
     const byCarol = await sdk.edit(did, { parent: byBob.original.checkpoint, metadata: { caption: "Corrected caption" }, ...asCarol });
     const view = byCarol.original;
     expect(view.report.reasons).toEqual(["not-anchored"]);
@@ -73,20 +73,23 @@ describe("C12-113: editors sign through the normal edit API", () => {
 
   test("the store retains the highest versionId it verified for each signer (P7.8)", async () => {
     const { alice, bob, store, sdk, did, v1, asBob } = await harbor();
-    await sdk.edit(did, { parent: v1, resources: [{ id: "photo", bytes: B2 }], ...asBob });
+    await sdk.edit(did, { parent: v1, resource: { bytes: B2 }, ...asBob });
     expect(await store.getRetained(bob.did)).toBe(bob.versionId);
     expect(await store.getRetained(alice.did)).toBe(alice.versionId);
   });
 });
 
 describe("C12-114, C12-115: an editor's change outside its grant is refused before anything is signed", () => {
-  test("outside the grant, changing grants or deactivating is refused, and the signer is never asked", async () => {
-    const { bob, sdk, did, v1, asBob } = await harbor();
+  test("outside the grant (the name, the metadata or the resource), changing grants or deactivating is refused, and the signer is never asked", async () => {
+    const { bob, sdk, did, v1, asBob, asCarol } = await harbor();
     let asked = 0;
     const watching: OriginalsSigner = { ...asBob.signer, sign: (r) => (asked++, asBob.signer.sign(r)) };
     await rejects(sdk.edit(did, { parent: v1, name: "Bob's harbor", editor: asBob.editor, signer: watching }), "outside-grant", "EDITOR_OUTSIDE_GRANT");
     await rejects(sdk.edit(did, { parent: v1, metadata: { caption: "x" }, editor: asBob.editor, signer: watching }), "outside-grant", "EDITOR_OUTSIDE_GRANT");
-    await rejects(sdk.edit(did, { parent: v1, editors: [grant(bob.did, { name: true, resources: ["photo"] })], editor: asBob.editor, signer: watching }), "outside-grant", "EDITOR_AUTHOR_ONLY");
+    // Carol may change the metadata only: a new version of the resource is outside her grant (P5.16).
+    const carolWatching: OriginalsSigner = { ...asCarol.signer, sign: (r) => (asked++, asCarol.signer.sign(r)) };
+    await rejects(sdk.edit(did, { parent: v1, resource: { bytes: B2 }, editor: asCarol.editor, signer: carolWatching }), "outside-grant", "EDITOR_OUTSIDE_GRANT");
+    await rejects(sdk.edit(did, { parent: v1, editors: [grant(bob.did, { name: true, resource: true })], editor: asBob.editor, signer: watching }), "outside-grant", "EDITOR_AUTHOR_ONLY");
     await rejects(sdk.deactivate(did, { parent: v1, editor: asBob.editor, signer: watching } as never), "invalid-evidence", "INPUT_INVALID");
     expect(asked).toBe(0);
     expect((await sdk.get(did)).checkpoint).toBe(v1);
@@ -96,10 +99,10 @@ describe("C12-114, C12-115: an editor's change outside its grant is refused befo
 describe("C12-117, C12-119: the author grants, narrows and revokes", () => {
   test("a revoked editor's next change is refused; its earlier entries stay valid", async () => {
     const { carol, sdk, did, v1, asBob, asAlice } = await harbor();
-    const byBob = await sdk.edit(did, { parent: v1, resources: [{ id: "photo", bytes: B2 }], ...asBob });
+    const byBob = await sdk.edit(did, { parent: v1, resource: { bytes: B2 }, ...asBob });
     const revoked = await sdk.edit(did, { parent: byBob.original.checkpoint, editors: [grant(carol.did, { metadata: true })], ...asAlice });
     expect(revoked.original.state.editors).toEqual([grant(carol.did, { metadata: true })]);
-    await rejects(sdk.edit(did, { parent: revoked.original.checkpoint, resources: [{ id: "photo", bytes: B3 }], ...asBob }), "unauthorized-key", "EDITOR_NOT_GRANTED");
+    await rejects(sdk.edit(did, { parent: revoked.original.checkpoint, resource: { bytes: B3 }, ...asBob }), "unauthorized-key", "EDITOR_NOT_GRANTED");
     const view = await sdk.get(did);
     expect(view.report.reasons).toEqual(["not-anchored"]);
     expect(view.resources.at(-1)?.versionId).toBe(byBob.original.checkpoint);
@@ -111,7 +114,7 @@ describe("C12-117, C12-119: the author grants, narrows and revokes", () => {
 describe("C12-124 and P7.1: evidence packages carry every signer's DID history", () => {
   test("a complete package includes the editors' histories; a fresh reader verifies with no source of its own", async () => {
     const { bob, carol, sdk, did, v1, asBob } = await harbor();
-    await sdk.edit(did, { parent: v1, resources: [{ id: "photo", bytes: B2 }], ...asBob });
+    await sdk.edit(did, { parent: v1, resource: { bytes: B2 }, ...asBob });
     const pkg = await sdk.package(did);
     expect(pkg.manifest).toMatchObject({ completeness: "complete", missing: [] });
     const files = readZip(pkg.bytes);
@@ -127,7 +130,7 @@ describe("C12-124 and P7.1: evidence packages carry every signer's DID history",
 
   test("without the editor's history the result is incomplete identity evidence and not current", async () => {
     const { bob, sdk, did, v1, asBob } = await harbor();
-    await sdk.edit(did, { parent: v1, resources: [{ id: "photo", bytes: B2 }], ...asBob });
+    await sdk.edit(did, { parent: v1, resource: { bytes: B2 }, ...asBob });
     const files = new Map([...readZip((await sdk.package(did)).bytes)].filter(([path]) => !path.startsWith(`${signerPath(bob.did)}/`)));
     const manifest = JSON.parse(new TextDecoder().decode(files.get("originals-evidence.json"))) as Record<string, unknown>;
     files.set("originals-evidence.json", new TextEncoder().encode(JSON.stringify({ ...manifest, completeness: "partial", missing: [{ kind: "identity", did: bob.did, role: "editor" }] })));
@@ -146,13 +149,13 @@ describe("signing (P5.11): the signer is shown who signs", () => {
     const { alice, bob, sdk, did, v1, asBob } = await harbor();
     const seen: SigningRequest[] = [];
     const watching: OriginalsSigner = { ...asBob.signer, sign: (r) => (seen.push(r), asBob.signer.sign(r)) };
-    await sdk.edit(did, { parent: v1, resources: [{ id: "photo", bytes: B2 }], editor: asBob.editor, signer: watching });
+    await sdk.edit(did, { parent: v1, resource: { bytes: B2 }, editor: asBob.editor, signer: watching });
     expect(seen[0].summary.signer).toEqual({ role: "editor", ...bob.ref("edit") });
     expect(seen[0].summary.author).toEqual(alice.ref("orig"));
     expect(seen[0].display).toBe(describeEntry(seen[0].summary));
     expect(seen[0].display).toContain(`Signing as editor ${bob.did}`);
     expect(seen[0].display).toContain(`Author: ${alice.did}`);
-    expect(seen[0].display).toContain(`photo: ${resourceDigest(B1)} -> ${resourceDigest(B2)}`);
+    expect(seen[0].display).toContain(`Resource: new version ${resourceDigest(B1)} -> ${resourceDigest(B2)}`);
     const authorText = describeEntry({ ...seen[0].summary, signer: { role: "author", ...alice.ref("orig") } });
     expect(authorText).toContain(`Signing as author ${alice.did}`);
   });
@@ -161,10 +164,10 @@ describe("signing (P5.11): the signer is shown who signs", () => {
     const { bob, sdk, did, v1, asBob } = await harbor();
     const shown: string[] = [];
     const declining = keySigner({ keyType: "Ed25519", secretKey: KB, verificationMethod: asBob.editor.verificationMethod, confirm: (text) => (shown.push(text), false) });
-    await rejects(sdk.edit(did, { parent: v1, resources: [{ id: "photo", bytes: B2 }], editor: asBob.editor, signer: declining }), "invalid-evidence", "SIGNER_REFUSED");
+    await rejects(sdk.edit(did, { parent: v1, resource: { bytes: B2 }, editor: asBob.editor, signer: declining }), "invalid-evidence", "SIGNER_REFUSED");
     expect(shown[0]).toContain(`Signing as editor ${bob.did}`);
     // A request whose summary names someone else as signer is refused.
-    const draft = await sdk.prepareEdit(did, { parent: v1, resources: [{ id: "photo", bytes: B2 }], editor: asBob.editor });
+    const draft = await sdk.prepareEdit(did, { parent: v1, resource: { bytes: B2 }, editor: asBob.editor });
     const proofOptions = { type: "DataIntegrityProof" as const, cryptosuite: "eddsa-jcs-2022" as const, verificationMethod: asBob.editor.verificationMethod, proofPurpose: "assertionMethod" };
     const lying = { ...draft.summary, signer: { ...draft.summary.signer, role: "author" as const } };
     await rejects(asBob.signer.sign({ entry: draft.entry, proofOptions, summary: lying, display: describeEntry(lying) }), "invalid-evidence", "SIGNER_REFUSED");
@@ -181,7 +184,7 @@ describe("signing (P5.11): keySigner shows what the entry itself says (editors P
     const { sdk, did, v1, asAlice, store } = await harbor();
     const parent = { entry: JSON.parse((await store.get(did))!.log.trimEnd().split("\n")[0]) as never };
     const mallory = await Author.create([{ fragment: "edit", secret: seed(66) }]);
-    const draft = await sdk.prepareEdit(did, { parent: v1, author: asAlice.author, name: "Harbor (fixed typo)", metadata: { note: "x" }, editors: [grant(mallory.did, { name: true, metadata: true, resources: ["photo"] })] });
+    const draft = await sdk.prepareEdit(did, { parent: v1, author: asAlice.author, name: "Harbor (fixed typo)", metadata: { note: "x" }, editors: [grant(mallory.did, { name: true, metadata: true, resource: true })] });
     let shown = "";
     const signer = keySigner({ keyType: "Ed25519", secretKey: KA, verificationMethod: asAlice.author.verificationMethod, confirm: (text) => ((shown = text), true) });
     for (const lie of [{ editorsChanged: false }, { nameChanged: false, name: "Harbor at dawn" }, { metadataChanged: false }]) {
@@ -199,18 +202,18 @@ describe("signing (P5.11): keySigner shows what the entry itself says (editors P
     const mallory = await Author.create([{ fragment: "edit", secret: seed(66) }]);
     let shown = "";
     const signer = keySigner({ keyType: "Ed25519", secretKey: KA, verificationMethod: asAlice.author.verificationMethod, confirm: (text) => ((shown = text), true) });
-    await sdk.edit(did, { parent: v1, author: asAlice.author, editors: [grant(mallory.did, { name: true, metadata: true, resources: ["photo"] })], signer });
+    await sdk.edit(did, { parent: v1, author: asAlice.author, editors: [grant(mallory.did, { name: true, metadata: true, resource: true })], signer });
     expect(shown).toContain("Editor grants: changed");
-    expect(shown).toContain(`${mallory.did}: name yes, metadata yes, resources photo`);
+    expect(shown).toContain(`${mallory.did}: name yes, metadata yes, resource yes`);
     expect(shown).not.toContain("Name: changed");
   });
 
   test("a parent that does not chain to the entry is refused; without one, every change is shown", async () => {
     const { sdk, did, v1, asAlice, store } = await harbor();
     const mallory = await Author.create([{ fragment: "edit", secret: seed(66) }]);
-    const draft = await sdk.prepareEdit(did, { parent: v1, author: asAlice.author, editors: [grant(mallory.did, { resources: ["photo"] })] });
+    const draft = await sdk.prepareEdit(did, { parent: v1, author: asAlice.author, editors: [grant(mallory.did, { resource: true })] });
     const genesis = JSON.parse((await store.get(did))!.log.trimEnd().split("\n")[0]) as Record<string, any>;
-    const forgedParent = { ...genesis, state: { ...genesis.state, asset: { ...genesis.state.asset, editors: [grant(mallory.did, { resources: ["photo"] })] } } };
+    const forgedParent = { ...genesis, state: { ...genesis.state, asset: { ...genesis.state.asset, editors: [grant(mallory.did, { resource: true })] } } };
     let shown = "";
     const signer = keySigner({ keyType: "Ed25519", secretKey: KA, verificationMethod: asAlice.author.verificationMethod, confirm: (text) => ((shown = text), true) });
     const request = { entry: draft.entry, proofOptions: proofFor(asAlice.author.verificationMethod), summary: { ...draft.summary, editorsChanged: false }, display: "" };
@@ -218,7 +221,7 @@ describe("signing (P5.11): keySigner shows what the entry itself says (editors P
     // With no parent the signer cannot tell what changed, so it shows the name, metadata and every grant.
     await signer.sign({ ...request, summary: draft.summary });
     expect(shown).toContain("Editor grants:");
-    expect(shown).toContain(`${mallory.did}: name no, metadata no, resources photo`);
+    expect(shown).toContain(`${mallory.did}: name no, metadata no, resource yes`);
   });
 });
 
@@ -229,7 +232,7 @@ describe("C12-118: an editor entry and a revoking author entry on the same paren
     // Bob works from a copy of v1 on his own machine.
     const bobs = OriginalsSDK.create({ store: new MemoryStore(), authors: async (d) => dids.find((x) => x.did === d)?.evidence(), clock: clock() });
     await bobs.import((await sdk.package(did)).bytes);
-    const byBob = await bobs.edit(did, { parent: v1, resources: [{ id: "photo", bytes: B2 }], ...asBob });
+    const byBob = await bobs.edit(did, { parent: v1, resource: { bytes: B2 }, ...asBob });
     // Meanwhile Alice revokes Bob on the same parent.
     const revoke = await sdk.edit(did, { parent: v1, editors: [grant(carol.did, { metadata: true })], ...asAlice });
     const result = await sdk.import((await bobs.package(did)).bytes);
@@ -246,11 +249,11 @@ describe("C12-134: a moved author whose latest asset entry is an editor entry, r
     const bob = await Author.create([{ fragment: "edit", secret: KB }]);
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async (d) => (d === alice.did ? alice.evidence() : d === bob.did ? bob.evidence() : undefined), clock: clock() });
     const ref = alice.ref("orig-1");
-    const created = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: ref, signer: alice.signer(ref, KA), editors: [grant(bob.did, { resources: ["photo"] })] });
+    const created = await sdk.create({ name: "Harbor", resource: { mediaType: "image/jpeg", bytes: B1 }, author: ref, signer: alice.signer(ref, KA), editors: [grant(bob.did, { resource: true })] });
     if (created.kind !== "original") throw new Error("expected an Original");
     await alice.move("new.example.org");
     await alice.rotate([{ fragment: "orig-2", secret: seed(22) }]);
-    await sdk.edit(created.original.did, { parent: created.original.checkpoint, resources: [{ id: "photo", bytes: B2 }], editor: bob.ref("edit"), signer: bob.signer("edit", KB) });
+    await sdk.edit(created.original.did, { parent: created.original.checkpoint, resource: { bytes: B2 }, editor: bob.ref("edit"), signer: bob.signer("edit", KB) });
     const pkg = await sdk.package(created.original.did);
     // Alice's log is served where she now is; the asset log only says where she was.
     const served: Record<string, string> = { [didWebvhLogUrl(alice.location)]: alice.evidence().log as string };

@@ -334,7 +334,7 @@ describe('hosted Original layout (plan 011, PR 8)', () => {
   const base = `demo.example.com/user-sub-1/${NAME}/originals`;
   const bytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
   const digest = resourceDigest(bytes);
-  const log = `${JSON.stringify({ versionId: '1-x', state: { asset: { resources: [{ id: 'artwork.svg', mediaType: 'image/svg+xml', size: bytes.length, digest }] } } })}\n`;
+  const log = `${JSON.stringify({ versionId: '1-x', state: { asset: { resource: { mediaType: 'image/svg+xml', size: bytes.length, digest } } } })}\n`;
 
   function setup() {
     const store = tmpStore();
@@ -382,7 +382,7 @@ describe('hosted Original layout (plan 011, PR 8)', () => {
     for (const mediaType of ['text/html\r\nx-evil: 1', 'image/svg+xml; charset=utf-8', 'svg', '']) {
       // A fresh host each time: an asset log can only be extended, never replaced.
       const { put } = setup();
-      const bad = `${JSON.stringify({ versionId: '1-x', state: { asset: { resources: [{ id: 'a', mediaType, size: bytes.length, digest }] } } })}\n`;
+      const bad = `${JSON.stringify({ versionId: '1-x', state: { asset: { resource: { mediaType, size: bytes.length, digest } } } })}\n`;
       expect((await put(`${base}/asset/did.jsonl`, bad)).status).toBe(200);
       expect((await put(`${base}/resources/${digest}`, bytes)).status, JSON.stringify(mediaType)).toBe(409);
     }

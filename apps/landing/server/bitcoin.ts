@@ -1015,7 +1015,8 @@ export function createBitcoinRoutes(deps: {
     if (!/^(0|[1-9]\d*)$/.test(satoshi) || !validateSatoshiNumber(satoshi).valid) return json({ error: 'bad_request' }, 400);
     if (typeof provider.getSatSnapshot !== 'function') return json({ error: 'sat_snapshot_unsupported' }, 501);
     try {
-      // The anchoring writer asks for Originals bodies only (P9.12): the holder's other inscriptions cost no body reads.
+      // The anchoring writer asks for Originals reads only (P9.12): each inscription's metadata, and a body only where
+      // there is metadata, since an Originals inscription is the one whose metadata is an array of entries (P14.12).
       const snapshot = await provider.getSatSnapshot(satoshi, url.searchParams.get('bodies') === 'originals' ? { bodies: 'originals' } : undefined);
       return json(encodeSatSnapshot(snapshot));
     } catch {

@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import { OriginalsError } from "@originals/vh";
 import { localSigner } from "@originals/vh/crypto";
-import { ORIGINALS_INSCRIPTION_TYPE, encodeCbor } from "@originals/vh/originals";
+import { encodeCbor, verifyOriginal } from "@originals/vh/originals";
 import type { SatSnapshot } from "../../../src/bitcoin/sat-snapshot-types.js";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,7 +29,21 @@ const hashAt = (h: number, chain = "a") => `${chain}${h.toString(16).padStart(63
 const clockOver = (times: number[]) =>
   new InscriptionClock(async (h) => ({ time: times[h] ?? times[times.length - 1] + (h - times.length + 1) * 600, hash: hashAt(h) }));
 
-function snapshot(publications: Array<{ id: string; height: number; content: string; mediaType?: string; complete?: boolean; blockHash?: string; metadata?: Uint8Array; body?: SatSnapshot["publications"][number]["body"] }>, tip = 10, sat = SAT): SatSnapshot {
+/** The stored lines of a log, oldest first. */
+const linesOf = (log: string) => log.trimEnd().split("\n");
+
+/**
+ * An Originals inscription carrying these stored lines (P9.17, P14.12; originals-spec #53):
+ * metadata, the CBOR of the entries as a JSON array; body, the resource version the last
+ * entry names (`resource`, by default the bytes "one" every Original here is created with);
+ * content type, that version's media type.
+ */
+function carrying(lines: string[], resource = "one"): { content: string; mediaType: string; metadata: Uint8Array } {
+  const entries = lines.map((l) => JSON.parse(l) as { state: { asset: { resource: { mediaType: string } } } });
+  return { content: resource, mediaType: entries[entries.length - 1].state.asset.resource.mediaType, metadata: encodeCbor(entries) };
+}
+
+function snapshot(publications: Array<{ id: string; height: number; content?: string; entries?: string[]; mediaType?: string; complete?: boolean; blockHash?: string; metadata?: Uint8Array; body?: SatSnapshot["publications"][number]["body"] }>, tip = 10, sat = SAT): SatSnapshot {
   return {
     network: "regtest",
     sat,
@@ -39,14 +53,14 @@ function snapshot(publications: Array<{ id: string; height: number; content: str
     indexHealthy: true,
     enumerationComplete: true,
     blocks: [],
-    publications: publications.map((p) => ({
+    publications: publications.map((q) => ({ ...q, ...(q.entries ? carrying(q.entries) : {}) })).map((p) => ({
       id: p.id,
       revealTxid: p.id.slice(0, 64),
       network: "regtest",
       sat,
       confirmed: true,
       creation: { height: p.height, blockHash: p.blockHash ?? hashAt(p.height), transactionIndex: 1, inscriptionIndex: 0 },
-      body: p.body ?? (p.complete === false ? { status: "unavailable" } : { status: "complete", mediaType: p.mediaType ?? ORIGINALS_INSCRIPTION_TYPE, bytes: bytes(p.content), metadata: p.metadata ?? null }),
+      body: p.body ?? (p.complete === false ? { status: "unavailable" } : { status: "complete", mediaType: p.mediaType ?? "text/plain", bytes: bytes(p.content ?? ""), metadata: p.metadata ?? null }),
     })),
     ownership: { owner: "bcrt1qowner", satpoint: `${"cc".repeat(32)}:0:0` },
   };
@@ -384,12 +398,12 @@ describe("inscriptions observed but not read (M1; P9.12, P9.14, P9.17)", () => {
   test("a delegated or encoded inscription is evidence flagged unsupported, not a failed read", async () => {
     const e = await satEvidence(snapshot([
       { id: id("a"), height: 2, content: "", body: { status: "unsupported", reason: "delegated", mediaType: null } },
-      { id: id("b"), height: 3, content: "", body: { status: "unsupported", reason: "content-encoding", mediaType: ORIGINALS_INSCRIPTION_TYPE } },
+      { id: id("b"), height: 3, content: "", body: { status: "unsupported", reason: "content-encoding", mediaType: "image/jpeg" } },
       { id: id("c"), height: 4, content: "", body: { status: "unavailable", reason: "over-budget", mediaType: "image/png", contentLength: 9 } },
     ]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
     expect(e.inscriptions.map((i) => [i.mediaType, i.unsupported, i.content.length, i.metadata])).toEqual([
       ["application/octet-stream", "delegated", 0, undefined],
-      [ORIGINALS_INSCRIPTION_TYPE, "content-encoding", 0, undefined],
+      ["image/jpeg", "content-encoding", 0, undefined],
       ["image/png", "not-read", 0, undefined],
     ]);
   });
@@ -404,9 +418,12 @@ describe("inscriptions observed but not read (M1; P9.12, P9.14, P9.17)", () => {
     expect(e.inscriptions.map((i) => "metadata" in i)).toEqual([true, true, false]);
   });
 
-  test("C12-89: an Originals inscription past the read's byte budget is missing evidence: the read fails", async () => {
-    const s = snapshot([{ id: id("d"), height: 4, content: "", body: { status: "unavailable", reason: "over-budget", mediaType: ORIGINALS_INSCRIPTION_TYPE, contentLength: 9 } }]);
-    await expect(satEvidence(s, { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" })).rejects.toMatchObject({ category: "unavailable-bytes", code: "SAT_READ_INCOMPLETE" });
+  test("C12-89: an inscription past the read's byte budget, whose metadata could make it an Originals one, is missing evidence: verification fails (P9.17, P14.12)", async () => {
+    const s = snapshot([{ id: id("d"), height: 4, content: "", body: { status: "unavailable", reason: "over-budget", mediaType: "image/jpeg", contentLength: 9 } }]);
+    // Passed on flagged, with what the index reported: the verifier decides (on a did:btco signer's sat the history stops there, P5.13).
+    const e = await satEvidence(s, { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
+    expect(e.inscriptions[0]).toMatchObject({ unsupported: "not-read", contentLength: 9 });
+    await expect(verifyOriginal({ authors: [], bitcoin: [e] })).rejects.toMatchObject({ category: "incomplete-evidence", code: "SAT_READ_INCOMPLETE" });
   });
 
   test("C12-74: the holder's delegated and encoded inscriptions around the anchor do not stop an anchored Original verifying", async () => {
@@ -414,14 +431,17 @@ describe("inscriptions observed but not read (M1; P9.12, P9.14, P9.17)", () => {
     let t = Date.parse("2026-10-18T11:00:00Z");
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => (t += 1000) });
     const signer = alice.signer("orig", KEY);
-    const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: alice.ref("orig"), signer });
+    const c = await sdk.create({ name: "Harbor", resource: { mediaType: "image/jpeg", bytes: bytes("one") }, author: alice.ref("orig"), signer });
     if (c.kind !== "original") throw new Error("expected an Original");
     await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) });
     const log = new TextDecoder().decode(readZip((await sdk.package(c.original.did)).bytes).get("asset/did.jsonl")!);
+    const originals = carrying(linesOf(log));
     const evidence = await satEvidence(snapshot([
-      { id: id("a"), height: 2, content: "", body: { status: "unsupported", reason: "delegated", mediaType: null } },
-      { id: id("e"), height: 4, content: log },
-      { id: id("b"), height: 5, content: "", body: { status: "unsupported", reason: "content-encoding", mediaType: ORIGINALS_INSCRIPTION_TYPE } },
+      // Delegated, carrying no metadata of its own: not an Originals inscription (P14.12).
+      { id: id("a"), height: 2, content: "", body: { status: "unsupported", reason: "delegated", mediaType: null, metadata: null } },
+      { id: id("e"), height: 4, entries: linesOf(log) },
+      // Originals metadata over an encoded body: never the resource's exact bytes (P9.17, C12-192).
+      { id: id("b"), height: 5, content: "", body: { status: "unsupported", reason: "content-encoding", mediaType: originals.mediaType, metadata: originals.metadata } },
     ]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
     const view = await sdk.get(c.original.did, { bitcoin: [evidence] });
     expect(view.report.anchoring?.status).toBe("anchored");
@@ -429,38 +449,39 @@ describe("inscriptions observed but not read (M1; P9.12, P9.14, P9.17)", () => {
     expect(view.current, JSON.stringify(view.report.reasons)).toBe(true);
   });
 
-  test("C12-112, C12-87: the holder's unread oversized Originals-typed body, Originals-typed metadata and skipped bodies hold nothing back", async () => {
+  test("C12-112, C12-87: the holder's unread oversized bodies and bodies without metadata hold nothing back (P9.17, P14.12)", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
     let t = Date.parse("2026-10-18T11:00:00Z");
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => (t += 1000) });
     const signer = alice.signer("orig", KEY);
-    const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: alice.ref("orig"), signer });
+    const c = await sdk.create({ name: "Harbor", resource: { mediaType: "image/jpeg", bytes: bytes("one") }, author: alice.ref("orig"), signer });
     if (c.kind !== "original") throw new Error("expected an Original");
     await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) });
     const log = new TextDecoder().decode(readZip((await sdk.package(c.original.did)).bytes).get("asset/did.jsonl")!);
     const evidence = await satEvidence(snapshot([
       // Too large for an Originals inscription (P9.17), so not read: rejected by its reported length.
-      { id: id("a"), height: 2, content: "", body: { status: "unavailable", reason: "over-budget", mediaType: ORIGINALS_INSCRIPTION_TYPE, contentLength: 400_000 } },
-      { id: id("e"), height: 4, content: log },
-      // Metadata past the read's budget: an Originals inscription carries none (P9.17).
-      { id: id("b"), height: 5, content: "", body: { status: "unavailable", reason: "over-budget", mediaType: ORIGINALS_INSCRIPTION_TYPE, contentLength: 9, metadataPresent: true } },
-      // An Originals asset read does not fetch other media types' bodies.
+      { id: id("a"), height: 2, content: "", body: { status: "unavailable", reason: "over-budget", mediaType: "image/jpeg", contentLength: 400_000 } },
+      { id: id("e"), height: 4, entries: linesOf(log) },
+      // Its metadata was read and it carries none: not an Originals inscription, so its body is not asked for (P14.12).
+      { id: id("b"), height: 5, content: "", body: { status: "unavailable", reason: "not-requested", mediaType: "image/jpeg", contentLength: 9, metadata: null } },
+      // Over 350,000 bytes, an Originals asset read does not fetch it at all.
       { id: id("c"), height: 6, content: "", body: { status: "unavailable", reason: "not-requested", mediaType: "image/png", contentLength: 3_900_000 } },
     ]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
     expect(evidence.inscriptions.map((i) => [i.unsupported, i.contentLength, i.metadataPresent])).toEqual([
-      ["not-read", 400_000, undefined], [undefined, undefined, undefined], ["not-read", 9, true], ["not-read", 3_900_000, undefined],
+      ["not-read", 400_000, undefined], [undefined, undefined, undefined], ["not-read", 9, false], ["not-read", 3_900_000, undefined],
     ]);
     const view = await sdk.get(c.original.did, { bitcoin: [evidence] });
     expect(view.report.anchoring?.status).toBe("anchored");
     expect(view.report.anchoring?.ignored.map((i) => [i.inscription, i.reason])).toEqual([
-      [id("a"), "too-large"], [id("b"), "carries-metadata"], [id("c"), "not-an-originals-inscription"],
+      [id("a"), "too-large"], [id("b"), "not-an-originals-inscription"], [id("c"), "too-large"],
     ]);
     expect(view.current, JSON.stringify(view.report.reasons)).toBe(true);
   });
 
-  test("C12-89: an Originals-typed body a reader skipped is missing evidence", async () => {
-    const s = snapshot([{ id: id("d"), height: 4, content: "", body: { status: "unavailable", reason: "not-requested", mediaType: ORIGINALS_INSCRIPTION_TYPE, contentLength: 9 } }]);
-    await expect(satEvidence(s, { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" })).rejects.toMatchObject({ code: "SAT_READ_INCOMPLETE" });
+  test("C12-89: a body a reader skipped without reading its metadata is missing evidence (P14.12)", async () => {
+    const s = snapshot([{ id: id("d"), height: 4, content: "", body: { status: "unavailable", reason: "not-requested", mediaType: "image/jpeg", contentLength: 9 } }]);
+    const e = await satEvidence(s, { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
+    await expect(verifyOriginal({ authors: [], bitcoin: [e] })).rejects.toMatchObject({ code: "SAT_READ_INCOMPLETE" });
   });
 
   test("one evidence read probes the clock once per block, however many inscriptions it holds", async () => {
@@ -468,7 +489,7 @@ describe("inscriptions observed but not read (M1; P9.12, P9.14, P9.17)", () => {
     const clock = new InscriptionClock(async (h) => (reads++, { time: T + h * 600, hash: hashAt(h) }));
     await clock.at(4);
     reads = 0;
-    const many = Array.from({ length: 50 }, (_, k) => ({ id: `${(k + 1).toString(16).padStart(64, "f")}i0`, height: 4, content: "", body: { status: "unavailable" as const, reason: "not-requested" as const, mediaType: "text/plain", contentLength: 1 } }));
+    const many = Array.from({ length: 50 }, (_, k) => ({ id: `${(k + 1).toString(16).padStart(64, "f")}i0`, height: 4, content: "", body: { status: "unavailable" as const, reason: "not-requested" as const, mediaType: "text/plain", contentLength: 1, metadata: null } }));
     const e = await satEvidence(snapshot(many), { clock, ownerConfirmations: 1, index: "ord-a" });
     expect(e.inscriptions).toHaveLength(50);
     expect(reads).toBe(1);
@@ -481,7 +502,7 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     let t = Date.parse("2026-10-18T11:00:00Z");
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => (t += 1000) });
     const signer = alice.signer("orig", KEY);
-    const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: alice.ref("orig"), signer });
+    const c = await sdk.create({ name: "Harbor", resource: { mediaType: "image/jpeg", bytes: bytes("one") }, author: alice.ref("orig"), signer });
     if (c.kind !== "original") throw new Error("expected an Original");
     const sat = btcoAlias("regtest", SAT);
     const anchored = await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat });
@@ -492,7 +513,7 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
 
     // The adapter reads the sat: the anchoring inscription, the whole log through the anchoring entry, at height 4 (P9.17).
     const log = new TextDecoder().decode(readZip((await sdk.package(c.original.did)).bytes).get("asset/did.jsonl")!);
-    const evidence = await satEvidence(snapshot([{ id: `${"e".repeat(64)}i0`, height: 4, content: log }]), { clock: clockOver(HEADERS), ownerConfirmations: 3, index: "ord-a" });
+    const evidence = await satEvidence(snapshot([{ id: `${"e".repeat(64)}i0`, height: 4, entries: linesOf(log) }]), { clock: clockOver(HEADERS), ownerConfirmations: 3, index: "ord-a" });
     const view = await sdk.get(c.original.did, { bitcoin: [evidence] });
     expect(view.report.anchoring).toMatchObject({ status: "anchored", sat, anchor: { height: 4, confirmations: 7 } });
     expect(view.report.ordering).toBe("anchored");
@@ -502,8 +523,8 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     // C12-99 (P9.16): the store keeps the anchor reported, so learning of an earlier anchoring
     // inscription is reported as a change of anchor, once, never silently.
     const earlier = await satEvidence(snapshot([
-      { id: `${"d".repeat(64)}i0`, height: 3, content: log },
-      { id: `${"e".repeat(64)}i0`, height: 4, content: log },
+      { id: `${"d".repeat(64)}i0`, height: 3, entries: linesOf(log) },
+      { id: `${"e".repeat(64)}i0`, height: 4, entries: linesOf(log) },
     ]), { clock: clockOver(HEADERS), ownerConfirmations: 3, index: "ord-a" });
     const changed = await sdk.get(c.original.did, { bitcoin: [earlier] });
     expect(changed.report.anchoring?.anchor?.inscription).toBe(`${"d".repeat(64)}i0`);
@@ -521,12 +542,12 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     let t = Date.parse("2026-10-18T11:00:00Z");
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => (t += 1000) });
     const signer = alice.signer("orig", KEY);
-    const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: alice.ref("orig"), signer });
+    const c = await sdk.create({ name: "Harbor", resource: { mediaType: "image/jpeg", bytes: bytes("one") }, author: alice.ref("orig"), signer });
     if (c.kind !== "original") throw new Error("expected an Original");
     const anchored = await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) });
     const pkg = await sdk.package(c.original.did);
     const log = new TextDecoder().decode(readZip(pkg.bytes).get("asset/did.jsonl")!);
-    const evidence = await satEvidence(snapshot([{ id: `${"e".repeat(64)}i0`, height: 4, content: log }]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
+    const evidence = await satEvidence(snapshot([{ id: `${"e".repeat(64)}i0`, height: 4, entries: linesOf(log) }]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
     const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => t });
     const loaded = await reader.load(pkg.bytes, { bitcoin: [evidence] });
     expect(loaded.report.head).toBe(anchored.original.checkpoint);
@@ -539,13 +560,13 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     let t = Date.parse("2026-10-18T11:00:00Z");
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => (t += 1000) });
     const signer = alice.signer("orig", KEY);
-    const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: alice.ref("orig"), signer });
+    const c = await sdk.create({ name: "Harbor", resource: { mediaType: "image/jpeg", bytes: bytes("one") }, author: alice.ref("orig"), signer });
     if (c.kind !== "original") throw new Error("expected an Original");
     const anchored = await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) });
     const pkg = await sdk.package(c.original.did); // carries the author DID log as it was
     const packaged = alice.versionId;
     const log = new TextDecoder().decode(readZip(pkg.bytes).get("asset/did.jsonl")!);
-    const evidence = await satEvidence(snapshot([{ id: `${"e".repeat(64)}i0`, height: 4, content: log }]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
+    const evidence = await satEvidence(snapshot([{ id: `${"e".repeat(64)}i0`, height: 4, entries: linesOf(log) }]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
     // Later the author adds a key: a newer version than the package holds.
     await alice.rotate([{ fragment: "orig", secret: KEY }, { fragment: "spare", secret: seed(23) }], "2026-10-18T13:00:00Z");
     expect(alice.versionId).not.toBe(packaged);
@@ -574,7 +595,7 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
       const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => (t += 1000) });
       const signer = alice.signer("orig", KEY);
       const ref = alice.ref("orig");
-      const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: ref, signer });
+      const c = await sdk.create({ name: "Harbor", resource: { mediaType: "image/jpeg", bytes: bytes("one") }, author: ref, signer });
       if (c.kind !== "original") throw new Error("expected an Original");
       const anchored = await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: ref, signer, sat: btcoAlias("regtest", SAT) });
       // Signed with the key while it was listed; inscribed only after the author removed it.
@@ -589,8 +610,8 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
       files.set(`${signerPath(alice.did)}/did.jsonl`, bytes(change(older)));
       const B = Date.parse("2026-10-18T10:10:00Z") / 1000;
       const evidence = await satEvidence(snapshot([
-        { id: `${"e".repeat(64)}i0`, height: 1, content: lines.slice(0, -1).map((l) => `${l}\n`).join("") },
-        { id: `${"f".repeat(64)}i0`, height: 2, content: `${lines[lines.length - 1]}\n` }, // 11:30
+        { id: `${"e".repeat(64)}i0`, height: 1, entries: lines.slice(0, -1) },
+        { id: `${"f".repeat(64)}i0`, height: 2, entries: lines.slice(-1) }, // 11:30
       ]), { clock: clockOver([B, B + 60, B + 4800]), ownerConfirmations: 1, index: "ord-a" });
       const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: () => Date.parse("2026-10-18T12:00:00Z") });
       const loaded = await reader.load(writeZip(files), { bitcoin: [evidence] });
@@ -606,14 +627,14 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => (t += 1000) });
     const signer = alice.signer("orig", KEY);
     const ref = alice.ref("orig");
-    const c = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: ref, signer });
+    const c = await sdk.create({ name: "Harbor", resource: { mediaType: "image/jpeg", bytes: bytes("one") }, author: ref, signer });
     if (c.kind !== "original") throw new Error("expected an Original");
     const sat = btcoAlias("regtest", SAT);
     const anchored = await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: ref, signer, sat });
     const edited = await sdk.edit(c.original.did, { parent: anchored.original.checkpoint, name: "Harbor at dawn", author: ref, signer });
     const lines = new TextDecoder().decode(readZip((await sdk.package(c.original.did)).bytes).get("asset/did.jsonl")!).trimEnd().split("\n");
-    const anchorLog = lines.slice(0, -1).map((l) => `${l}\n`).join("");
-    const editLine = `${lines[lines.length - 1]}\n`;
+    const anchorLog = lines.slice(0, -1);
+    const editLine = lines.slice(-1);
 
     const B = Date.parse("2026-10-18T10:10:00Z") / 1000;
     // Chain A: the edit is inscribed at height 2, whose header claims a time 50 minutes on.
@@ -624,8 +645,8 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     ];
     const clock = new InscriptionClock(async (h) => chain[h]);
     const first = await satEvidence(snapshot([
-      { id: `${"e".repeat(64)}i0`, height: 1, content: anchorLog },
-      { id: `${"f".repeat(64)}i0`, height: 2, content: editLine },
+      { id: `${"e".repeat(64)}i0`, height: 1, entries: anchorLog },
+      { id: `${"f".repeat(64)}i0`, height: 2, entries: editLine },
     ]), { clock, ownerConfirmations: 1, index: "ord-a" });
     expect(first.inscriptions[1].inscriptionTime).toBe((B + 3000) * 1000);
 
@@ -635,8 +656,8 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     await alice.rotate([{ fragment: "orig2", secret: seed(22) }], "2026-10-18T10:30:00Z");
     t = Date.parse("2026-10-18T12:00:00Z");
     const evidence = await satEvidence(snapshot([
-      { id: `${"e".repeat(64)}i0`, height: 1, content: anchorLog },
-      { id: `${"f".repeat(64)}i0`, height: 3, content: editLine, blockHash: hashAt(3, "b") },
+      { id: `${"e".repeat(64)}i0`, height: 1, entries: anchorLog },
+      { id: `${"f".repeat(64)}i0`, height: 3, entries: editLine, blockHash: hashAt(3, "b") },
     ]), { clock, ownerConfirmations: 1, index: "ord-a" });
     const view = await sdk.get(c.original.did, { bitcoin: [evidence] });
     expect(view.report.anchoring?.ignored, JSON.stringify(view.report.anchoring?.ignored)).toEqual([]);
@@ -663,7 +684,7 @@ describe("did:btco author DIDs through the SDK (P5.13; plan 011 PR 9b)", () => {
     let t = Date.parse("2026-10-18T13:00:00Z");
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async (did) => (did === author ? { did, bitcoin: read } : undefined), clock: () => (t += 1000) });
     const ref = { did: author, verificationMethod: `${author}#orig`, versionId: docId };
-    const c = await sdk.create({ name: "By a did:btco author", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author: ref, signer: keySigner({ keyType: "Ed25519", secretKey: KEY, verificationMethod: ref.verificationMethod }) });
+    const c = await sdk.create({ name: "By a did:btco author", resource: { mediaType: "image/jpeg", bytes: bytes("one") }, author: ref, signer: keySigner({ keyType: "Ed25519", secretKey: KEY, verificationMethod: ref.verificationMethod }) });
     if (c.kind !== "original") throw new Error("expected an Original");
     expect(c.original.report.reasons).toEqual(["not-anchored"]);
     expect(c.original.validAsOf?.checkpoint).toBe(c.original.checkpoint);

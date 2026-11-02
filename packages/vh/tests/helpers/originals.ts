@@ -2,7 +2,8 @@
 import { localSigner, type CryptosuiteName, type KeyType, type ProofSigner } from "../../src/crypto/index.js";
 import type { JsonObject } from "../../src/json/index.js";
 import { appendEntry, createLog, serializeLog, signWith, type EntrySigner, type LogEntry } from "../../src/log/index.js";
-import { resourceDigest, type AuthorDidEvidence, type AuthorRef } from "../../src/originals/index.js";
+import { encodeCbor, resourceDigest, type AuthorDidEvidence, type AuthorRef, type ResourceDescriptor, type SatInscription } from "../../src/originals/index.js";
+import type { JsonValue } from "../../src/json/index.js";
 
 export const NOW = Date.parse("2026-10-19T00:00:00Z");
 export const bytes = (text: string) => new TextEncoder().encode(text);
@@ -87,7 +88,35 @@ export class VhAuthor {
   }
 }
 
-export const photo = (text: string, id = "photo") => ({ id, mediaType: "image/jpeg", size: bytes(text).length, digest: resourceDigest(bytes(text)) });
+/** Every resource version a test described, by digest, so an inscription can carry its bytes (P9.17). */
+const described = new Map<string, Uint8Array>();
+
+/** The descriptor of a resource version whose bytes are `text` (P4.2, P14.6); its bytes are remembered. */
+export const photo = (text: string, mediaType = "image/jpeg"): ResourceDescriptor => {
+  const b = bytes(text);
+  const digest = resourceDigest(b);
+  described.set(digest, b);
+  return { mediaType, size: b.length, digest };
+};
+
+/** The bytes of a version a test described with `photo`. */
+export function describedBytes(digest: string): Uint8Array | undefined {
+  return described.get(digest);
+}
+
+/**
+ * The fields of an Originals inscription carrying `entries` (P9.17, P14.12;
+ * originals-spec #53): metadata, the CBOR of the entries as a JSON array;
+ * body, the bytes of the resource version the last entry names; content type,
+ * that version's media type.
+ */
+export function carrying(entries: LogEntry | LogEntry[]): Pick<SatInscription, "mediaType" | "content" | "metadata"> {
+  const list = Array.isArray(entries) ? entries : [entries];
+  const last = list[list.length - 1] as unknown as { state?: { asset?: { resource?: ResourceDescriptor } } } | undefined;
+  const d = last?.state?.asset?.resource;
+  const body = d ? described.get(d.digest) : undefined;
+  return { mediaType: d?.mediaType ?? "application/octet-stream", content: body ?? new Uint8Array(), metadata: encodeCbor(list as unknown as JsonValue) };
+}
 
 /** Original entry timestamps, with milliseconds (Q8), counting up from noon. */
 export function clock(start = 0) {

@@ -23,7 +23,7 @@ const bytes = (text: string) => new TextEncoder().encode(text);
 async function divergent() {
   const author = await createLocalAuthor(new Date('2026-10-22T11:00:00Z'));
   const a = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => author.evidence });
-  const created = await a.create({ name: 'Harbor', resources: [{ id: 'photo.txt', mediaType: 'text/plain', bytes: bytes('one') }], author: author.ref, signer: author.signer });
+  const created = await a.create({ name: 'Harbor', resource: { mediaType: 'text/plain', bytes: bytes('one') }, author: author.ref, signer: author.signer });
   if (created.kind !== 'original') throw new Error('expected an Original');
   const did = created.original.did;
   const genesis = (await a.package(did)).bytes;

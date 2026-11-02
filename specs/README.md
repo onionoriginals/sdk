@@ -14,7 +14,7 @@ The CEL 3 code and documents were deleted in its PR 5.
 
 | Document | Pin | Governs |
 | --- | --- | --- |
-| [Originals Protocol](https://github.com/aviarytech/originals-spec/tree/b599fd14b/spec) ([rendered](https://aviarytech.github.io/originals-spec/)) | `aviarytech/originals-spec@b599fd14b` (`master`), Editor's Draft 0.1 | Asset state, author binding, editors, identity continuity, operations, evidence packages, hosting, anchoring and ownership. Rules are cited by ID (for example P5.3). `master` includes #34–#36 (with #42 and #43), #45 (editors, shared-host saves and identity continuity recorded as owner decisions), #46 (an unanchored Original is never current; key custody is out of scope), #47 (for an anchored Original a did:vh or did:webvh signer is checked against the newest version of its DID the verifier knows of; anchoring does not require did:btco), #48 (section 14, the provisional wire format P14.1–P14.13) and #49 (the author can add and remove resources; editors cannot; a resourceID is never reused; P4.1, P4.4, P5.15, P5.16, P14.4, P14.5), #50 (the Bitcoin values and the section 14 limits are decided, with up to 256 resources; P9.5, P9.10, P9.17, P14.13) and #51 (the SDK's open questions of 23 October 2026, as owner decisions: after the anchor chain order decides, so a publication waits while an earlier inscription extending the same head is unverifiable, and every head change is reported; an identity gap affects only the entries that depend on it; freshness is established only by the signer DID's own witnesses or watchers, reported plainly; submitted, not observed, is never pending; the section 14 wire rules P14.2, P14.3, P14.5 and P14.8 and the ZIP writer binding of P14.10 are decided; P5.13, P5.14, P5.15, P7.8, P9.15, P9.18) and #52 (section 14's intro says exactly which of its values are decided; no rule or row changes). |
+| [Originals Protocol](https://github.com/aviarytech/originals-spec/tree/a9ecdbb/spec) ([rendered](https://aviarytech.github.io/originals-spec/)) | `aviarytech/originals-spec@a9ecdbb` (`master`), Editor's Draft 0.1 | Asset state, author binding, editors, identity continuity, operations, evidence packages, hosting, anchoring and ownership. Rules are cited by ID (for example P5.3). `master` includes #34–#36 (with #42 and #43), #45 (editors, shared-host saves and identity continuity recorded as owner decisions), #46 (an unanchored Original is never current; key custody is out of scope), #47 (for an anchored Original a did:vh or did:webvh signer is checked against the newest version of its DID the verifier knows of; anchoring does not require did:btco), #48 (section 14, the provisional wire format P14.1–P14.13) and #49 (the author can add and remove resources; editors cannot; a resourceID is never reused; P4.1, P4.4, P5.15, P5.16, P14.4, P14.5), #50 (the Bitcoin values and the section 14 limits are decided, with up to 256 resources; P9.5, P9.10, P9.17, P14.13) and #51 (the SDK's open questions of 23 October 2026, as owner decisions: after the anchor chain order decides, so a publication waits while an earlier inscription extending the same head is unverifiable, and every head change is reported; an identity gap affects only the entries that depend on it; freshness is established only by the signer DID's own witnesses or watchers, reported plainly; submitted, not observed, is never pending; the section 14 wire rules P14.2, P14.3, P14.5 and P14.8 and the ZIP writer binding of P14.10 are decided; P5.13, P5.14, P5.15, P7.8, P9.15, P9.18), #52 (section 14's intro says exactly which of its values are decided; no rule or row changes) and #53 (owner decision, 1 November 2026: an Original is exactly one resource, which can have many versions, replacing #49's resource sets; grants are `{did, name, metadata, resource}` and an entry has at most one transition; each inscription's body is the resource version its last entry names, under that version's media type, and its metadata carries the entries as a CBOR array, with metadata and body together at most 350,000 bytes; the SDK tells the author before inscribing what becomes public and permanent; no resource limit; P4.1, P4.4, P5.15, P9.17, P9.18, P14.4–P14.6, P14.9, P14.10, P14.12, P14.13). Originals written under the earlier encoding, including the mainnet acceptance Original of 1 November 2026, are not converted and no longer verify (D1, D7). |
 | [VH-Log](https://github.com/swcurran/VH-Log/tree/f2f9fda2d8dae26b717ab54163169350c7182233/spec) | `swcurran/VH-Log@f2f9fda2d8dae26b717ab54163169350c7182233` | Log entries, SCID, entry hashes, parameters, proofs, witnesses, watchers, resolution and retrieval. |
 | VH-Log pull requests, treated as merged | [#1](https://github.com/swcurran/VH-Log/pull/1) `a3e3627e` witness verification of candidates · [#2](https://github.com/swcurran/VH-Log/pull/2) `0d5eb134` authoritative source · [#3](https://github.com/swcurran/VH-Log/pull/3) `3bcd0acb` additional cryptosuites · [#8](https://github.com/swcurran/VH-Log/pull/8) `3770b574` versionTime precision · [#9](https://github.com/swcurran/VH-Log/pull/9) `5552a668` non-HTTPS locations · [#10](https://github.com/swcurran/VH-Log/pull/10) `1867a2b1` alternative encodings · [#11](https://github.com/swcurran/VH-Log/pull/11) `2fe380dbf` keys, and editors, from a controller [S25] | The specialisation hooks the Originals extension uses, and (#1) how witnesses verify a candidate entry. #11's "Editors from a Controller" is the engine's editor hook (`ControllerKeys.editors`), which the Originals profile implements with its grants (P5.15–P5.18). |
 | [did:vh](https://github.com/swcurran/didvh/tree/e0b7cbad27d7b2274057251f85687e133329b5a9/spec) | `swcurran/didvh@e0b7cbad27d7b2274057251f85687e133329b5a9` | The `did:vh:<SCID>` identifier, `src`, DID URLs, resolution options and errors. |
@@ -34,14 +34,16 @@ for them as provisional wire-format values (P14.1–P14.11). Where section 14
 asked the SDK to change (the `signers/` package directory, no asset witness
 file, entry size in UTF-8 bytes, a 64 MiB resource fetch limit), the SDK
 follows it. The Bitcoin values (P14.12) and the limits (P14.13) are decided by
-the owner (#50), as are the parts of P14.2, P14.3, P14.5 and P14.8 that D4
+the owner (#50), and so is the inscription's shape: entries in CBOR metadata,
+the resource version as its body under its own media type (#53), as are the parts of P14.2, P14.3, P14.5 and P14.8 that D4
 records (the line format, the 2^53 − 1 bound, `name` in UTF-16 code units, the
 five proof members) and the ZIP writer binding of P14.10 (#51), and so are JCS, SHA-256 multihash digests
 (P14.7), the two cryptosuites and the absence of an asset witness file (D3,
 D4, as #52 states), so they carry no `PROVISIONAL` marker. The entry state
 fields, the package format and its `signers/` layout, the digest encoding,
-the absence of a content encoding and the did:btco regex and CBOR details stay
-provisional. Section 2 of
+the JSON-to-CBOR mapping of inscription metadata (ord's for `--json-metadata`,
+P14.12), the active-content media types the SDK warns about (P9.18) and the
+did:btco regex and CBOR details stay provisional. Section 2 of
 the plan records the provisional choices this repository makes. Code that
 depends on one is marked `PROVISIONAL` and cites the decision. A provisional
 choice is not a published test vector, and nothing built on one supports an
@@ -100,6 +102,22 @@ were mapped to the pinned table by their text:
   100, 119 and 125 (C12-09, C12-62, C12-100, C12-118, C12-124). Row 161 is
   #50's (C12-160, 256 resources accepted, 257 rejected). Rows 162–189 are
   #51's: C12-161 to C12-189. No row was removed, so none is retired.
+- At `master` `a9ecdbb` (#53 merged) the table has 190 rows. #53 rewords ten
+  rows, which keep their IDs: C12-16 (an entry with no resource or more than
+  one is rejected, P4.1), C12-19 (an unchanged digest leaves `transitions`
+  empty), C12-37 (did:btco DID-document metadata is not an Originals
+  inscription), C12-97 (uninscribed versions unavailable), C12-111 and C12-112
+  (metadata and body together at 350,000 bytes), C12-114 (the resource as
+  granted content), C12-142 (the grant limit only), C12-159 (the transitions
+  of the genesis entry, a changing entry and any other entry) and C12-173 (the
+  asset log only). It adds eight rows: C12-190 (row 98, the current version
+  read from Bitcoin alone) and C12-191 to C12-197 (rows 115–121: body digest
+  and size, content type and encoding, the author's notice before inscribing,
+  a name-only inscription carrying the current version again, CBOR items that
+  are rejected, metadata split over pushes, entries checked over their JCS
+  form). Seven rows about resource sets are gone, and their IDs are retired
+  under `retired` in the registry, never reused: C12-154, C12-155, C12-156,
+  C12-157, C12-158, C12-160 and C12-171.
 
 Positive checkpoints come with positive and negative fixtures, pinned
 decisions and a dependency inventory. Fixtures, dry runs and disposable regtest

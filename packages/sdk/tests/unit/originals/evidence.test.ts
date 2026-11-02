@@ -14,9 +14,9 @@ async function harbor(store = new MemoryStore()) {
   const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: clock() });
   const signer = alice.signer("orig", KEY);
   const author = alice.ref("orig");
-  const c = await sdk.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author, signer });
+  const c = await sdk.create({ name: "Harbor at dawn", resource: { mediaType: "image/jpeg", bytes: B1 }, author, signer });
   if (c.kind !== "original") throw new Error("expected an Original");
-  const e = await sdk.edit(c.original.did, { parent: c.original.checkpoint, resources: [{ id: "photo", bytes: B2 }], author, signer });
+  const e = await sdk.edit(c.original.did, { parent: c.original.checkpoint, resource: { bytes: B2 }, author, signer });
   return { alice, store, sdk, signer, author, did: c.original.did, v1: c.original.checkpoint, v2: e.original.checkpoint };
 }
 
@@ -44,7 +44,7 @@ describe("evidence packages (section 7)", () => {
     store.deleteResource(resourceDigest(B1));
     const pkg = await sdk.package(did);
     expect(pkg.manifest.completeness).toBe("partial");
-    expect(pkg.manifest.missing).toEqual([{ kind: "resource", resource: "photo", version: 1, digest: resourceDigest(B1), versionId: v1 }]);
+    expect(pkg.manifest.missing).toEqual([{ kind: "resource", version: 1, digest: resourceDigest(B1), versionId: v1 }]);
     const loaded = await reader(alice).load(pkg.bytes);
     expect(loaded.report.resources.status).toBe("partial");
     expect(loaded.report.resources.versions[1].bytes).toBe("verified");
@@ -210,7 +210,7 @@ describe("C12-83: untrusted archives are bounded and checked before extraction (
   test("P14.10: missing items have exact shapes; an identity item names its role", () => {
     const manifest = (missing: unknown[]) =>
       bytes(JSON.stringify({ format: "originals-evidence/0.1", profile: "originals:1.0", original: "did:vh:Qm", checkpoint: "1-Qm", head: "1-Qm", completeness: "partial", missing }));
-    const resource = { kind: "resource", resource: "photo", version: 1, digest: resourceDigest(B1), versionId: "1-Qm" };
+    const resource = { kind: "resource", version: 1, digest: resourceDigest(B1), versionId: "1-Qm" };
     const identity = { kind: "identity", did: "did:vh:QmAlice", role: "author" };
     expect(readManifest(manifest([resource, identity, { ...identity, role: "editor" }])).missing).toHaveLength(3);
     const bad: unknown[] = [
@@ -218,8 +218,9 @@ describe("C12-83: untrusted archives are bounded and checked before extraction (
       { ...identity, role: "owner" },
       { ...identity, extra: true },
       { ...resource, size: 3 },
-      { kind: "resource", resource: "photo", version: 1, digest: resourceDigest(B1) },
+      { kind: "resource", version: 1, digest: resourceDigest(B1) },
       { ...resource, version: "1" },
+      { ...resource, resource: "photo" }, // no resourceID: an Original has one resource (P14.10; originals-spec #53)
       { kind: "file", path: "x" },
       "identity",
     ];

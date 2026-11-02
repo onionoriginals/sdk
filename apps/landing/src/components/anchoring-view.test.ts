@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { demo, library } from '../content';
 import type { AnchoringStatus } from '../sdk/anchoring';
 import { AnchoringCancelledError, AnchoringSubmitError, SigningSessionExpiredError } from '../sdk/anchoring';
-import { anchoringFailureMessage, anchoringInMotion, anchoringView, offChainPreview } from './anchoring-view';
+import { anchoringFailureMessage, anchoringInMotion, anchoringView, inscriptionNoticePreview, isActiveContent, offChainPreview } from './anchoring-view';
 
 const status = (over: Partial<AnchoringStatus>): AnchoringStatus => ({
   did: 'did:vh:x', sat: 'did:btco:reg:5000000000', publication: 'not-anchored', action: 'prepare',
@@ -69,9 +69,20 @@ describe('the anchoring panel (P9.18)', () => {
     expect(anchoringInMotion({ status: null, unpublished: [] })).toBe(false);
   });
 
-  test('what Bitcoin will not hold is listed before signing: the files and the author\'s DID history', () => {
-    expect(offChainPreview({ resource: { id: 'artwork.svg' } as never, metadata: { id: 'metadata.json' } as never, author: 'did:webvh:x:host:u' }))
-      .toEqual(['artwork.svg', 'metadata.json', demo.anchoring.offChainIdentity('did:webvh:x:host:u')]);
+  test('what Bitcoin will not hold is listed before signing: earlier versions and the author\'s DID history (P9.18; originals-spec #53)', () => {
+    // The anchoring inscription's body is the current version, so a first version leaves only the DID history off chain.
+    expect(offChainPreview({ resource: { id: 'artwork.svg', version: 1 } as never, author: 'did:webvh:x:host:u' }))
+      .toEqual([demo.anchoring.offChainIdentity('did:webvh:x:host:u')]);
+    expect(offChainPreview({ resource: { id: 'artwork.svg', version: 3 } as never, author: 'did:webvh:x:host:u' }))
+      .toEqual([demo.anchoring.offChainEarlier('artwork.svg', 2), demo.anchoring.offChainIdentity('did:webvh:x:host:u')]);
+  });
+
+  test('before inscribing, the author is told what becomes public and permanent, and warned about active content (P9.18)', () => {
+    const svg = inscriptionNoticePreview({ resource: { id: 'artwork.svg', version: 2, contentType: 'image/svg+xml' } as never });
+    expect(svg.permanent).toBe(demo.anchoring.permanent('artwork.svg', 2));
+    expect(svg.activeContent).toBe(demo.anchoring.activeContent('image/svg+xml'));
+    expect(isActiveContent('text/html')).toBe(true);
+    expect(inscriptionNoticePreview({ resource: { id: 'photo.jpg', version: 1, contentType: 'image/jpeg' } as never }).activeContent).toBeNull();
   });
 
   test('cancel, expiry and a server refusal each have their own words', () => {

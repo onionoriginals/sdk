@@ -63,7 +63,8 @@ export function retrievalPlan(log: string): { authors: string[]; digests: string
         if (!DID.test(editor.did)) unplannable("invalid-evidence", i, "STATE_EDITOR", "state.editor.did is not a DID");
         authors.add(editor.did);
       }
-      for (const r of checkAsset(entry.state.asset, author.did).resources) digests.add(r.digest);
+      // One resource per Original: each entry names one version of it (P4.1; originals-spec #53).
+      digests.add(checkAsset(entry.state.asset, author.did).resource.digest);
     } catch (error) {
       if (error instanceof OriginalsError && error.code !== "SNAPSHOT_LOG_INVALID") unplannable(error.category, i, error.code, error.message);
       throw error;

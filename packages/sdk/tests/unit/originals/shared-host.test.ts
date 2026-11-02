@@ -70,7 +70,7 @@ async function twoDevices() {
   const a = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: clock() });
   const storeB = new MemoryStore();
   const b = OriginalsSDK.create({ store: storeB, authors: [alice.evidence()], clock: clock(Date.parse("2026-10-18T12:00:00.100Z")) });
-  const created = await a.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author, signer });
+  const created = await a.create({ name: "Harbor at dawn", resource: { mediaType: "image/jpeg", bytes: B1 }, author, signer });
   if (created.kind !== "original") throw new Error("expected an Original");
   await b.import((await a.package(created.original.did)).bytes);
   const did = created.original.did;
@@ -84,8 +84,8 @@ async function twoDevices() {
 async function refusedOnB() {
   const env = await twoDevices();
   const { a, b, did, parent, author, signer, host } = env;
-  const theirs = await a.submit(await a.sign(await a.prepareEdit(did, { parent, resources: [{ id: "photo", bytes: THEIRS }], author }), signer), host);
-  const mine = await b.sign(await b.prepareEdit(did, { parent, resources: [{ id: "photo", bytes: MINE }], author }), signer);
+  const theirs = await a.submit(await a.sign(await a.prepareEdit(did, { parent, resource: { bytes: THEIRS }, author }), signer), host);
+  const mine = await b.sign(await b.prepareEdit(did, { parent, resource: { bytes: MINE }, author }), signer);
   const refused = await b.submit(mine, host);
   return { ...env, theirs, mine, refused };
 }
@@ -93,7 +93,7 @@ async function refusedOnB() {
 describe("shared-host saves (P6.7, P6.8)", () => {
   test("a signed candidate is verified against the exact parent and is not history until the host accepts it (P6.1, P6.4)", async () => {
     const { a, did, parent, author, signer, host } = await twoDevices();
-    const candidate = await a.sign(await a.prepareEdit(did, { parent, resources: [{ id: "photo", bytes: THEIRS }], author }), signer);
+    const candidate = await a.sign(await a.prepareEdit(did, { parent, resource: { bytes: THEIRS }, author }), signer);
     expect(candidate.kind).toBe("candidate");
     expect(candidate.parent).toBe(parent);
     expect(candidate.line).toBe(JSON.stringify(candidate.entry));
@@ -155,14 +155,14 @@ describe("shared-host saves (P6.7, P6.8)", () => {
       signer: watching,
       change: ({ head, refused: kept }) => {
         expect(head.checkpoint).toBe(theirs.checkpoint);
-        return { resources: [{ id: "photo", bytes: kept!.draft.bytes.get(resourceDigest(MINE))! }] };
+        return { resource: { bytes: kept!.draft.bytes.get(resourceDigest(MINE))! } };
       },
     });
     expect(result.status).toBe("accepted");
     if (result.status !== "accepted") return;
     // Signed against the new head, and the signer was shown the change from it.
     expect(requests).toHaveLength(1);
-    expect(requests[0].summary.changes).toEqual([{ resource: "photo", from: resourceDigest(THEIRS), to: resourceDigest(MINE) }]);
+    expect(requests[0].summary.changes).toEqual([{ from: resourceDigest(THEIRS), to: resourceDigest(MINE) }]);
     expect(result.original.checkpoint).toBe(host.lines.length === 3 ? (parseJson(host.lines[2]) as { versionId: string }).versionId : "");
     expect(result.original.report.history.entries).toBe(3);
     // The refused candidate is kept, labelled with the entry that carried its change; it is still never history (P6.8).
@@ -192,7 +192,7 @@ describe("shared-host saves (P6.7, P6.8)", () => {
 
   test("C12-128: a retry after a lost acknowledgement returns the existing checkpoint and the current head; no second append (P6.4, P6.7)", async () => {
     const { a, b, did, parent, author, signer, host } = await twoDevices();
-    const candidate = await b.sign(await b.prepareEdit(did, { parent, resources: [{ id: "photo", bytes: MINE }], author }), signer);
+    const candidate = await b.sign(await b.prepareEdit(did, { parent, resource: { bytes: MINE }, author }), signer);
     // The host accepts, but the answer never reaches device B.
     await host.submit({ original: did, entry: candidate.line, resources: {}, identities: [] });
     expect((await b.get(did)).checkpoint).toBe(parent);
@@ -248,9 +248,9 @@ describe("review of the shared-host PR (C3, P2, committed candidates)", () => {
   /** B's candidate refused by the host after A saved first. */
   async function refusedOnB() {
     const env = await twoDevices();
-    const theirs = await env.a.sign(await env.a.prepareEdit(env.did, { parent: env.parent, resources: [{ id: "photo", bytes: THEIRS }], author: env.author }), env.signer);
+    const theirs = await env.a.sign(await env.a.prepareEdit(env.did, { parent: env.parent, resource: { bytes: THEIRS }, author: env.author }), env.signer);
     expect((await env.a.submit(theirs, env.host)).status).toBe("accepted");
-    const mine = await env.b.sign(await env.b.prepareEdit(env.did, { parent: env.parent, resources: [{ id: "photo", bytes: MINE }], author: env.author }), env.signer);
+    const mine = await env.b.sign(await env.b.prepareEdit(env.did, { parent: env.parent, resource: { bytes: MINE }, author: env.author }), env.signer);
     expect((await env.b.submit(mine, env.host)).status).toBe("stale-parent");
     return { ...env, theirs, mine };
   }
@@ -271,7 +271,7 @@ describe("review of the shared-host PR (C3, P2, committed candidates)", () => {
 
   test("C12-128: a candidate is kept as pending before it is sent, so a lost acknowledgement is retried byte-identical (P6.4)", async () => {
     const env = await twoDevices();
-    const candidate = await env.a.sign(await env.a.prepareEdit(env.did, { parent: env.parent, resources: [{ id: "photo", bytes: THEIRS }], author: env.author }), env.signer);
+    const candidate = await env.a.sign(await env.a.prepareEdit(env.did, { parent: env.parent, resource: { bytes: THEIRS }, author: env.author }), env.signer);
     // The host accepts, but the acknowledgement is lost.
     const lossy: SharedHost = { submit: async (s) => { await env.host.submit(s); throw new Error("connection reset"); }, accepted: () => env.host.accepted() };
     await expect(env.a.submit(candidate, lossy)).rejects.toThrow("connection reset");
@@ -288,11 +288,11 @@ describe("review of the shared-host PR (C3, P2, committed candidates)", () => {
 
   test("a candidate already committed locally that the host refuses is a fork with the host, not a refused candidate (P6.6, P6.8)", async () => {
     const env = await twoDevices();
-    const theirs = await env.a.sign(await env.a.prepareEdit(env.did, { parent: env.parent, resources: [{ id: "photo", bytes: THEIRS }], author: env.author }), env.signer);
+    const theirs = await env.a.sign(await env.a.prepareEdit(env.did, { parent: env.parent, resource: { bytes: THEIRS }, author: env.author }), env.signer);
     expect((await env.a.submit(theirs, env.host)).status).toBe("accepted");
     // B commits its own change locally first, then shares that same entry.
-    const mine = await env.b.sign(await env.b.prepareEdit(env.did, { parent: env.parent, resources: [{ id: "photo", bytes: MINE }], author: env.author }), env.signer);
-    const draft = await env.b.prepareEdit(env.did, { parent: env.parent, resources: [{ id: "photo", bytes: MINE }], author: env.author });
+    const mine = await env.b.sign(await env.b.prepareEdit(env.did, { parent: env.parent, resource: { bytes: MINE }, author: env.author }), env.signer);
+    const draft = await env.b.prepareEdit(env.did, { parent: env.parent, resource: { bytes: MINE }, author: env.author });
     const committed = await env.b.commit(draft, env.signer);
     const storedLine = readEvidence((await env.b.package(env.did)).bytes).log.trimEnd().split("\n").at(-1)!;
     const entry = parseJson(storedLine) as unknown as typeof mine.entry;

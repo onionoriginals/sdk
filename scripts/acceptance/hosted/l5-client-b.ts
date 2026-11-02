@@ -25,7 +25,7 @@ await phase.check("b3-other-client-restore", "another client finds the work in t
   assertEqual(restored.history.at(-1)!.versionId, work1.checkpoint, "restored at the host's head");
   const next = await engine.update("Harbor, winter", "Orbits", generateArtwork("Harbor, winter", "Orbits", 21).svg);
   assertEqual(next.history.length, work1.entries + 1, "entries after B's revision");
-  phase.facts.work1 = { did: work1.did, alias: work1.alias, checkpoint: next.history.at(-1)!.versionId, entries: next.history.length, resources: [{ id: next.resource.id, mediaType: next.resource.contentType, sha256: next.resource.hash }, ...(next.metadata ? [{ id: next.metadata.id, mediaType: "application/json", sha256: next.metadata.hash }] : [])] };
+  phase.facts.work1 = { did: work1.did, alias: work1.alias, checkpoint: next.history.at(-1)!.versionId, entries: next.history.length, resource: { file: next.resource.id, version: next.resource.version, mediaType: next.resource.contentType, sha256: next.resource.hash } };
   await store.close();
   return phase.facts.work1;
 });

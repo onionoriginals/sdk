@@ -43,7 +43,8 @@ describe('anchoring an Original from the landing (plan 011, PR 10b)', () => {
     expect(state.anchoring?.unpublished).toEqual([state.history[1].versionId]);
     // What Bitcoin will not hold is stated before anything is called anchored (P9.18).
     expect(state.anchoring?.offChain).toMatchObject({ replication: 'not-guaranteed' });
-    expect(state.anchoring?.offChain?.resources.map((r) => r.resource).sort()).toEqual(['artwork.svg', 'metadata.json']);
+    // The anchoring inscription carries the current version as its body, so no version stays off chain (P9.17, P9.18).
+    expect(state.anchoring?.offChain?.resources).toEqual([]);
     expect(chain.sent.length).toBe(2);
 
     chain.mine();

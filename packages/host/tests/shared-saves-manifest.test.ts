@@ -28,9 +28,9 @@ describe('hosted manifest missing items (P14.10)', () => {
   });
 
   test('resource versions come first, in exactly their shape', () => {
-    const v = { resource: 'art', version: 2, digest: 'zQmD', mediaType: 'image/svg+xml', size: 3, versionId: '2-Qm', bytes: 'missing' };
+    const v = { version: 2, digest: 'zQmD', mediaType: 'image/svg+xml', size: 3, versionId: '2-Qm', bytes: 'missing', onBitcoin: false };
     expect(hostedMissing(lines, report([v]), (did) => did === AUTHOR)).toEqual([
-      { kind: 'resource', resource: 'art', version: 2, digest: 'zQmD', versionId: '2-Qm' },
+      { kind: 'resource', version: 2, digest: 'zQmD', versionId: '2-Qm' },
       { kind: 'identity', did: EDITOR, role: 'editor' },
     ]);
   });

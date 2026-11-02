@@ -196,9 +196,9 @@ Automated:
    enters the OTP.
 2. It creates the author identity, the did:webvh at
    `<VITE_WEBVH_HOST>:user-<sub16>`.
-3. It creates a work with an `image/png`, an `application/octet-stream` and
-   a `text/markdown` resource.
-4. It revises the text and the image.
+3. It creates a work from its one resource, the artwork image, with its
+   title and style in the asset metadata (P4.1; originals-spec #53).
+4. It revises the work: the image's next version and a new title.
 5. It publishes. The page must show publication complete only after G5's
    read-back.
 6. It reads the author DID log and the alias log from the host.
@@ -236,8 +236,8 @@ PASS when each reader shows all of these:
   (versionId and entry hash).
 - The alias is `confirmed` in both directions. The Original lists it, and its
   latest document points back (P3.6).
-- `report.resources` is `available`. Every resource SHA-256 matches the bytes
-  client A uploaded. A missing byte doesn't fail `verified` (P7.3), so this
+- `report.resources` is `available`. The resource's version at the checkpoint,
+  and its SHA-256, match the bytes client A uploaded. A missing byte doesn't fail `verified` (P7.3), so this
   is checked separately.
 - These are recorded as **separate** fields:
   - `verified`;
@@ -402,7 +402,7 @@ shape as the section A receipt:
   },
   "originals": [
     { "case": "B1", "did": "did:vh:…", "alias": "did:webvh:…", "checkpoint": { "versionId": "…", "entryHash": "…" },
-      "resources": [{ "id": "…", "mediaType": "…", "sha256": "…" }], "urls": { "aliasLog": "…", "assetLog": "…" } }
+      "resource": { "file": "…", "version": 2, "mediaType": "…", "sha256": "…" }, "urls": { "aliasLog": "…", "assetLog": "…" } }
   ],
   "isolation": { "clients": [{ "name": "A", "userDataDir": "…", "launches": 3, "pids": [] }], "readers": [{ "pid": 0, "envNames": ["PATH", "…"], "cookies": 0 }] },
   "gates": { "B1-turnkey-create-revise-publish": "PASS", "B2-signed-out-reader": "PASS", "B3-restore-continue": "PASS",

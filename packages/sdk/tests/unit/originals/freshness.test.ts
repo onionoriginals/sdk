@@ -19,7 +19,7 @@ async function harbor() {
   const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
   const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: clock() });
   const signer = alice.signer("orig", KEY);
-  const c = await sdk.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("first crop") }], author: alice.ref("orig"), signer });
+  const c = await sdk.create({ name: "Harbor at dawn", resource: { mediaType: "image/jpeg", bytes: bytes("first crop") }, author: alice.ref("orig"), signer });
   if (c.kind !== "original") throw new Error("expected an Original");
   const did = c.original.did;
   const v1 = c.original.checkpoint;
@@ -37,7 +37,7 @@ describe("C12-145: an unanchored Original is never current; it is valid as of it
     const obtainedAt = "2026-10-18T11:59:00.000Z";
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [{ ...alice.evidence(), obtainedAt }], clock: clock() });
     const signer = alice.signer("orig", KEY);
-    const c = await sdk.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("first crop") }], author: alice.ref("orig"), signer });
+    const c = await sdk.create({ name: "Harbor at dawn", resource: { mediaType: "image/jpeg", bytes: bytes("first crop") }, author: alice.ref("orig"), signer });
     if (c.kind !== "original") throw new Error("expected an Original");
     expect(c.original.current).toBe(false);
     expect(c.original.validAsOf).toEqual({ checkpoint: c.original.checkpoint, signers: [{ did: alice.did, role: "author", versionId: alice.versionId, obtainedAt, source: "supplied", location: null }] });
@@ -208,7 +208,7 @@ describe("C12-64: the newest verified author DID version a reader holds is used,
   async function removedKey() {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: clock() });
-    const c = await sdk.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("first crop") }], author: alice.ref("orig"), signer: alice.signer("orig", KEY) });
+    const c = await sdk.create({ name: "Harbor at dawn", resource: { mediaType: "image/jpeg", bytes: bytes("first crop") }, author: alice.ref("orig"), signer: alice.signer("orig", KEY) });
     if (c.kind !== "original") throw new Error("expected an Original");
     const pkg = (await sdk.package(c.original.did)).bytes;
     const before = alice.entries.slice();

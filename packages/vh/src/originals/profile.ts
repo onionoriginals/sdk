@@ -16,7 +16,7 @@ import type { LogEntry, Specialisation, VerifiedEntry, VersionRules } from "../l
 import type { DidVhExtension } from "../didvh/index.js";
 import { parseDidWebvh } from "../webvh/index.js";
 import { authorKey, authorMethod, namedVersion, versionNumberOf, type AuthorHistory } from "./author.js";
-import { ORIGINALS_METHOD, checkAuthorRef, checkEditorChange, checkEditorRef, checkEntryState, resourceIdsThrough, type AuthorRef, type EntryState } from "./state.js";
+import { ORIGINALS_METHOD, checkAuthorRef, checkEditorChange, checkEditorRef, checkEntryState, type AuthorRef, type EntryState } from "./state.js";
 
 export const ORIGINALS_1_0: VersionRules = Object.freeze({
   vhLog: "vh-log:1.0",
@@ -86,17 +86,6 @@ function namedThrough(record: WeakMap<LogEntry, Named>, previous: VerifiedEntry 
 export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialisation, "versions" | "versionParameter"> {
   const byDid = histories(authors);
   const named = new WeakMap<LogEntry, Named>();
-  // P4.1: every resourceID used through an entry, so none is used again, even after removal.
-  const usedIds = new WeakMap<LogEntry, ReadonlySet<string>>();
-  const usedThrough = (history: readonly VerifiedEntry[]): ReadonlySet<string> => {
-    const last = history[history.length - 1];
-    if (!last) return new Set();
-    const known = usedIds.get(last.entry);
-    if (known) return known;
-    let used = new Set<string>();
-    for (const v of history) used = resourceIdsThrough((v.entry.state as unknown as EntryState).asset, used);
-    return used;
-  };
 
   /** The key `signer` authorizes for `proof` at the version it names: the author's, or an editor's (P5.3, P5.18). */
   const signerKey = (entry: LogEntry, previous: VerifiedEntry | undefined, proof: DataIntegrityProof, role: "author" | "editor"): Promise<string> => {
@@ -158,8 +147,8 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
         // so an editor with no grant is rejected, never reported as missing evidence (C12-05).
         lists: (record, editor) => Array.isArray(record) && record.some((g) => isJsonObject(g) && g.did === editor),
         authorize: ({ entry, previous, proof }) => signerKey(entry, previous, proof, "editor"),
-        // P5.16: only the name, metadata and resource descriptors the grant allows change, and no resource
-        // is added or removed; the author reference is the parent's and the operation is update. Judged
+        // P5.16: only the name, metadata and resource descriptor the grant allows change; the author
+        // reference is the parent's and the operation is update. Judged
         // before the state's other rules, so a change outside the grant is reported as that.
         limit: ({ entry, previous, scid, index }) => {
           checkEditorChange(entry.state, {
@@ -168,24 +157,21 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
         },
       },
     },
-    validateEntry: ({ entry, previous, history, scid, index, active }) => {
+    validateEntry: ({ entry, previous, scid, index, active }) => {
       if (Object.keys(active.witness).length > 0) {
         fail("invalid-evidence", "WITNESS_NOT_PERMITTED", "Originals asset logs do not use witnesses; anchor on Bitcoin for proven ordering (owner decision Q14)");
       }
       checkParameterMembers(entry.parameters, index);
       for (const proof of entry.proof) checkProofMembers(proof);
       checkSafeIntegers(entry as unknown as JsonValue);
-      const used = usedThrough(history);
-      const state = checkEntryState(entry.state, {
+      checkEntryState(entry.state, {
         scid,
         index,
         previous: previous?.entry.state as unknown as EntryState | undefined,
         deactivatedParameter: entry.parameters.deactivated === true,
-        usedResourceIds: used,
         // The editor rules run through the engine's editor hook (`keys.editors.limit`).
         editorRules: false,
       });
-      usedIds.set(entry, resourceIdsThrough(state.asset, used));
     },
   };
 }
@@ -295,15 +281,15 @@ export function originalsSpecialisation(authors: Iterable<AuthorHistory>): Speci
 
 /**
  * The DID document of an Original's did:vh at a version, derived from the log
- * and never stored (P3.8). PROVISIONAL (D1): the `#files` service lists each
- * resource's current descriptor.
+ * and never stored (P3.8). PROVISIONAL (D1, P14.9): the `#files` service's
+ * endpoint is the resource's descriptor at that version (originals-spec #53).
  */
 export function deriveDocument(entries: VerifiedEntry[]): JsonObject {
   const state = entries[entries.length - 1].entry.state as unknown as EntryState;
   const service = {
     id: `${state.id}#files`,
     type: "OriginalsFiles",
-    serviceEndpoint: Object.fromEntries(state.asset.resources.map((r) => [r.id, { mediaType: r.mediaType, size: r.size, digest: r.digest }])),
+    serviceEndpoint: { mediaType: state.asset.resource.mediaType, size: state.asset.resource.size, digest: state.asset.resource.digest },
   };
   return {
     "@context": ["https://www.w3.org/ns/did/v1"],

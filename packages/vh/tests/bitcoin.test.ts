@@ -2,7 +2,9 @@
  * Anchored Originals (plan 012; plan 011 PR 9a). Inscriptions on the anchoring
  * sat, as an adapter reports them, decide the log (P9.10, P9.12-P9.17): the
  * anchoring inscription carries the whole log from genesis through the
- * anchoring entry, each later inscription one entry, and each is checked
+ * anchoring entry, each later inscription one entry, in its metadata as CBOR,
+ * with the resource version its last entry names as its body (P14.12;
+ * originals-spec #53), and each is checked
  * against the author DID at its inscription time (P9.15). Tests cite their
  * section 12 rows by registry id (specs/originals-conformance.json).
  */
@@ -10,8 +12,8 @@ import { describe, expect, test } from "bun:test";
 import { appendEntry, serializeLog, signWith, type LogEntry } from "../src/log/index.js";
 import {
   ORIGINALS_INSCRIPTION_MAX_BYTES,
-  ORIGINALS_INSCRIPTION_TYPE,
   createOriginal,
+  encodeCbor,
   deactivateOriginal,
   parseBtcoAlias,
   resourceDigest,
@@ -22,8 +24,10 @@ import {
   type SatInscription,
 } from "../src/originals/index.js";
 import { versionNumberOf } from "../src/originals/author.js";
-import { VhAuthor, bytes, photo, seeded } from "./helpers/originals.js";
+import { canonicalize, type JsonValue } from "../src/json/index.js";
+import { VhAuthor, bytes, carrying, photo, seeded } from "./helpers/originals.js";
 
+const B0 = "harbor at dawn, uncropped";
 const B1 = "harbor at dawn";
 const allBytes = { [resourceDigest(bytes(B1))]: bytes(B1) };
 const KEY = seeded(21);
@@ -36,7 +40,7 @@ const NOW = Date.parse("2026-10-19T00:00:00Z");
 type Inscribed = Omit<SatInscription, "sat" | "network"> & Partial<Pick<SatInscription, "sat" | "network">>;
 
 let counter = 0;
-/** An inscription carrying these entries as JSON Lines, as the adapter reports it. */
+/** An inscription carrying these entries in its metadata, its body the last entry's resource version (P9.17, P14.12). */
 function inscribe(entries: LogEntry | LogEntry[], height: number, extra: Partial<SatInscription> = {}): Inscribed {
   return {
     id: `${(counter++).toString(16).padStart(64, "0")}i0`,
@@ -45,8 +49,7 @@ function inscribe(entries: LogEntry | LogEntry[], height: number, extra: Partial
     inscriptionIndex: 0,
     confirmations: 120 - height,
     inscriptionTime: T0 + height * 600_000,
-    mediaType: ORIGINALS_INSCRIPTION_TYPE,
-    content: bytes(serializeLog(Array.isArray(entries) ? entries : [entries])),
+    ...carrying(entries),
     ...extra,
   };
 }
@@ -64,7 +67,7 @@ async function anchored(opts: { aliases?: string[] } = {}) {
   const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);
   const sign = alice.signer(KEY, "orig");
   const ref = alice.ref("orig");
-  const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resources: [photo(B1)], author: ref, sign });
+  const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resource: photo(B1), author: ref, sign });
   const renamed = await updateOriginal(genesis, { versionTime: time(2), name: "Harbor at dawn", author: ref, sign });
   const anchor = await updateOriginal(renamed, { versionTime: time(10), aliases: [...(opts.aliases ?? []), SAT], author: ref, sign });
   const copy = [genesis, renamed, anchor];
@@ -182,7 +185,7 @@ describe("after anchoring, the sat decides (P9.12, P9.13)", () => {
   test("C12-90: unconfirmed and foreign inscriptions are observed but never accepted", async () => {
     const { alice, copy, anchor, ref, sign, anchoring } = await anchored();
     const next = await updateOriginal(anchor, { versionTime: time(20), name: "Pending", author: ref, sign });
-    const r = await verify(copy, alice, [sat([anchoring(10), inscribe(next, 20, { confirmations: 0 }), inscribe(next, 21, { mediaType: "image/png" })])]);
+    const r = await verify(copy, alice, [sat([anchoring(10), inscribe(next, 20, { confirmations: 0 }), inscribe(next, 21, { mediaType: "image/png", metadata: null })])]);
     expect(r.head).toBe(anchor.versionId);
     expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["unconfirmed", "not-an-originals-inscription"]);
   });
@@ -190,12 +193,13 @@ describe("after anchoring, the sat decides (P9.12, P9.13)", () => {
   test("C12-75 and C12-86: an inscription that does not strictly parse is rejected; after the anchor, so is one carrying more than one entry", async () => {
     const { alice, copy, anchor, ref, sign, anchoring } = await anchored();
     const next = await updateOriginal(anchor, { versionTime: time(20), name: "Next", author: ref, sign });
-    const line = serializeLog([next]);
-    const dup = line.replace('{"versionId"', '{"versionId":"x","versionId"');
-    const bad = [bytes(line + line), bytes(dup), bytes("not json\n"), new Uint8Array([0xff, 0xfe])];
-    const r = await verify(copy, alice, [sat([anchoring(10), ...bad.map((content, k) => inscribe(next, 20 + k, { content }))])]);
+    const one = encodeCbor([next as unknown as JsonValue]);
+    // The entry's map with a second `versionId` key in front of the first (P14.12).
+    const dup = new Uint8Array([one[0], one[1] + 1, ...encodeCbor("versionId"), ...encodeCbor("x"), ...one.slice(2)]);
+    const bad = [encodeCbor([next, next] as unknown as JsonValue), dup, bytes("not cbor\n"), new Uint8Array([0xff, 0xfe]), new Uint8Array([...one, 0x00])];
+    const r = await verify(copy, alice, [sat([anchoring(10), ...bad.map((metadata, k) => inscribe(next, 20 + k, { metadata }))])]);
     expect(r.head).toBe(anchor.versionId);
-    expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["more-than-one-entry", "undecodable", "undecodable", "undecodable"]);
+    expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["more-than-one-entry", "undecodable", "undecodable", "undecodable", "undecodable"]);
   });
 
   test("C12-36: of two anchoring entries on different sats, the first in chain order is the anchor; the other is a conflicting anchor", async () => {
@@ -687,10 +691,10 @@ describe("C12-144: no grant names the anchoring sat's did:btco, before or after 
     const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);
     const sign = alice.signer(KEY, "orig");
     const ref = alice.ref("orig");
-    const editors = [{ did: SAT, name: true, metadata: false, resources: [] }];
-    const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resources: [photo(B1)], author: ref, sign, editors });
+    const editors = [{ did: SAT, name: true, metadata: false, resource: false }];
+    const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resource: photo(B1), author: ref, sign, editors });
     await expect(updateOriginal(genesis, { versionTime: time(10), aliases: [SAT], author: ref, sign })).rejects.toMatchObject({ code: "STATE_EDITORS" });
-    const plain = await createOriginal({ versionTime: time(1), name: "Harbor", resources: [photo(B1)], author: ref, sign });
+    const plain = await createOriginal({ versionTime: time(1), name: "Harbor", resource: photo(B1), author: ref, sign });
     const anchor = await updateOriginal(plain, { versionTime: time(10), aliases: [SAT], author: ref, sign });
     await expect(updateOriginal(anchor, { versionTime: time(11), editors, author: ref, sign })).rejects.toMatchObject({ code: "STATE_EDITORS" });
   });
@@ -759,40 +763,38 @@ describe("the anchoring inscription carries the whole log (P9.17)", () => {
     expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ reason: "more-than-one-entry" })]);
   });
 
-  test("C12-37: an inscription of the Originals media type carrying metadata is rejected, anchoring or later (P9.17)", async () => {
+  test("C12-37: an inscription on the anchoring sat whose metadata is a did:btco DID document is not an Originals inscription, and is ignored (P14.12)", async () => {
     const { alice, anchor, ref, sign, anchoring } = await anchored();
-    const next = await updateOriginal(anchor, { versionTime: time(20), name: "With metadata", author: ref, sign });
-    const cbor = new Uint8Array([0xa1, 0x62, 0x69, 0x64, 0x61, 0x78]);
-    const withMeta = await verify(undefined, alice, [sat([anchoring(10, { metadata: cbor })])]);
-    expect(withMeta.anchoring?.status).toBe("not-anchored");
-    expect(withMeta.anchoring?.ignored.map((i) => i.reason)).toEqual(["carries-metadata"]);
-    const later = await verify(undefined, alice, [sat([anchoring(10, { metadata: null }), inscribe(next, 20, { metadata: cbor })])]);
+    const next = await updateOriginal(anchor, { versionTime: time(20), name: "With a DID document", author: ref, sign });
+    const document = encodeCbor({ "@context": ["https://www.w3.org/ns/did/v1"], id: SAT });
+    const instead = await verify(undefined, alice, [sat([anchoring(10, { metadata: document })])]);
+    expect(instead.anchoring?.status).toBe("not-anchored");
+    expect(instead.anchoring?.ignored.map((i) => i.reason)).toEqual(["not-an-originals-inscription"]);
+    const later = await verify(undefined, alice, [sat([anchoring(10), inscribe(next, 20, { metadata: document })])]);
     expect(later.head).toBe(anchor.versionId);
-    expect(later.anchoring?.ignored.map((i) => i.reason)).toEqual(["carries-metadata"]);
+    expect(later.anchoring?.ignored.map((i) => i.reason)).toEqual(["not-an-originals-inscription"]);
+    expect(later.current, JSON.stringify(later.reasons)).toBe(true);
   });
 
   test("C12-74: an inscription carrying a compact delta is rejected in the baseline, which defines no compact encoding (P9.14, P9.17)", async () => {
     const { alice, anchor, ref, sign, anchoring } = await anchored();
     const next = await updateOriginal(anchor, { versionTime: time(20), name: "Delta", author: ref, sign });
-    const delta = bytes(`${JSON.stringify({ versionId: next.versionId, patch: [{ op: "replace", path: "/state/asset/name", value: "Delta" }] })}\n`);
-    const r = await verify(undefined, alice, [sat([
-      anchoring(10),
-      inscribe(next, 20, { mediaType: "application/vnd.originals.vh-delta+json" }),
-      inscribe(next, 21, { content: delta }),
-    ])]);
+    const delta = encodeCbor([{ versionId: next.versionId, patch: [{ op: "replace", path: "/state/asset/name", value: "Delta" }] }]);
+    const r = await verify(undefined, alice, [sat([anchoring(10), inscribe(next, 21, { metadata: delta })])]);
     expect(r.head).toBe(anchor.versionId);
     expect(r.anchoring?.accepted).toEqual([]);
-    expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["not-an-originals-inscription", "invalid-entry"]);
+    // A delta names no resource version, so no body can be the one it names (P9.17).
+    expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["body-not-the-resource"]);
   });
 
   test("C12-74: an inscription whose own body the reader did not establish is ignored with a reason, never a failed read (M1; P9.12, P9.14)", async () => {
     const { alice, anchor, ref, sign, anchoring } = await anchored();
     const next = await updateOriginal(anchor, { versionTime: time(20), name: "Encoded", author: ref, sign });
     const r = await verify(undefined, alice, [sat([
-      inscribe(next, 5, { mediaType: "image/png", content: new Uint8Array(), unsupported: "delegated" }),
+      inscribe(next, 5, { mediaType: "image/png", content: new Uint8Array(), metadata: null, unsupported: "delegated" }),
       anchoring(10),
       inscribe(next, 20, { content: new Uint8Array(), unsupported: "content-encoding" }),
-      inscribe(next, 21, { mediaType: "text/plain", content: new Uint8Array(), unsupported: "not-read" }),
+      inscribe(next, 21, { mediaType: "text/plain", content: new Uint8Array(), unsupported: "not-read", metadataPresent: false }),
     ])]);
     expect(r.anchoring?.status).toBe("anchored");
     expect(r.head).toBe(anchor.versionId);
@@ -815,65 +817,52 @@ describe("the anchoring inscription carries the whole log (P9.17)", () => {
   });
 });
 
-/** Entries after genesis whose metadata pads the log through the anchoring entry to `target` bytes. */
-async function paddedTo(target: number) {
+/**
+ * An anchored Original of two entries whose anchoring inscription, metadata and
+ * body together, is `target` bytes: the resource takes up the room (P9.17,
+ * P14.12; originals-spec #53).
+ */
+async function sizedTo(target: number) {
   const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);
   const sign = alice.signer(KEY, "orig");
   const ref = alice.ref("orig");
-  const build = async (last: number, base: number) => {
-    const entries = [await createOriginal({ versionTime: time(1), name: "Large", resources: [photo(B1)], author: ref, sign })];
-    for (let k = 0; k < 6; k++) {
-      const pad = "x".repeat(k === 5 ? last : base);
-      entries.push(await updateOriginal(entries[entries.length - 1], { versionTime: time(2 + k), metadata: { pad }, author: ref, sign }));
-    }
-    entries.push(await updateOriginal(entries[entries.length - 1], { versionTime: time(9), metadata: null, aliases: [SAT], author: ref, sign }));
-    return entries;
-  };
-  // Proof values vary in length by a byte or two, so when a size is skipped, shift the other pads.
-  let last = 1_000;
-  let base = 57_000;
+  let length = 340_000;
+  // Proof values vary in length by a byte, so when a size repeats, lengthen the name instead.
+  let name = "Large";
   const tried = new Set<string>();
-  for (let attempt = 0; attempt < 200; attempt++) {
-    const entries = await build(last, base);
-    const size = bytes(serializeLog(entries)).length;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (tried.has(`${name}:${length}`)) name += "!";
+    tried.add(`${name}:${length}`);
+    const genesis = await createOriginal({ versionTime: time(1), name, resource: photo("x".repeat(length)), author: ref, sign });
+    const anchor = await updateOriginal(genesis, { versionTime: time(9), aliases: [SAT], author: ref, sign });
+    const entries = [genesis, anchor];
+    const size = encodeCbor(entries as unknown as JsonValue).length + length;
     if (size === target) return { alice, entries };
-    tried.add(`${base}:${last}`);
-    last += target - size;
-    if (tried.has(`${base}:${last}`)) base += 1;
+    length += target - size;
   }
-  throw new Error(`could not pad a log to ${target} bytes`);
+  throw new Error(`could not size an inscription to ${target} bytes`);
 }
 
-describe("an inscription body is compact JSON Lines, each ending in one LF (P14.2)", () => {
-  test("C12-173: a missing final LF, CRLF or whitespace between tokens makes the body undecodable", async () => {
-    const { alice, copy } = await anchored();
-    const text = serializeLog(copy);
-    const variants = [text.slice(0, -1), text.replaceAll("\n", "\r\n"), text.replace('"versionTime":', '"versionTime": ')];
-    for (const body of variants) {
-      const r = await verify(undefined, alice, [sat([inscribe([], 10, { content: bytes(body) })])]);
-      expect(r.anchoring?.status).toBe("not-anchored");
-      expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ reason: "undecodable" })]);
-    }
-    const ok = await verify(undefined, alice, [sat([inscribe([], 10, { content: bytes(text) })])]);
-    expect(ok.anchoring?.status).toBe("anchored");
-  });
-});
-
-describe("the inscription body limit (P9.17, P14.12; decided, D6; originals-spec #50, merged)", () => {
-  test("C12-111: an anchoring inscription of exactly 350,000 bytes is accepted", async () => {
+describe("the inscription limit covers metadata and body together (P9.17, P14.12; decided, D6; originals-spec #50, #53)", () => {
+  test("C12-111: an anchoring inscription whose metadata and body are exactly 350,000 bytes together is accepted", async () => {
     expect(ORIGINALS_INSCRIPTION_MAX_BYTES).toBe(350_000);
-    const { alice, entries } = await paddedTo(350_000);
-    const r = await verify(undefined, alice, [sat([inscribe(entries, 10)])]);
-    expect(r.anchoring?.status).toBe("anchored");
+    const { alice, entries } = await sizedTo(350_000);
+    const i = inscribe(entries, 10);
+    expect(i.metadata!.length + i.content.length).toBe(350_000);
+    const r = await verify(undefined, alice, [sat([i])], { bytes: {} });
+    expect(r.anchoring?.status, JSON.stringify(r.anchoring?.ignored)).toBe("anchored");
     expect(r.head).toBe(entries[entries.length - 1].versionId);
+    expect(r.resources.versions.map((v) => [v.bytes, v.onBitcoin])).toEqual([["verified", true]]);
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 
-  test("C12-112 (verifier): a larger inscription is rejected", async () => {
-    const { alice, entries } = await paddedTo(350_001);
-    const r = await verify(undefined, alice, [sat([inscribe(entries, 10)])]);
+  test("C12-112 (verifier): one byte more, metadata and body together, is rejected", async () => {
+    const { alice, entries } = await sizedTo(350_001);
+    const i = inscribe(entries, 10);
+    expect(i.metadata!.length + i.content.length).toBe(350_001);
+    const r = await verify(undefined, alice, [sat([i])]);
     expect(r.anchoring?.status).toBe("not-anchored");
-    expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["too-large"]);
+    expect(r.anchoring?.ignored.map((x) => x.reason)).toEqual(["too-large"]);
   });
 });
 
@@ -895,7 +884,7 @@ describe("placement rests on the index (P9.10, P9.11)", () => {
 
   test("C12-109, L3: a disputed inscription neither index reports as an Originals inscription does not hold back later ones", async () => {
     const { alice, copy, anchor, anchoring } = await anchored();
-    const junk = inscribe(copy[0], 5, { mediaType: "text/plain" });
+    const junk = inscribe(copy[0], 5, { mediaType: "text/plain", metadata: null });
     const a = anchoring(10);
     // Only the first index lists the junk; both place the anchoring inscription.
     const r = await verify(copy, alice, [sat([junk, a]), sat([a], SAT, undefined, "ord-b")]);
@@ -911,7 +900,7 @@ describe("placement rests on the index (P9.10, P9.11)", () => {
     expect(blocked.anchoring?.disputed).toEqual([entry.id]);
     expect(blocked.anchoring?.ignored.map((i) => i.reason)).toEqual(["placement-disputed", "after-disputed-placement"]);
     // So does one index's Originals report of it, whatever the other says it is.
-    const mixed = await verify(copy, alice, [sat([entry, a]), sat([{ ...entry, mediaType: "text/plain" }, a], SAT, undefined, "ord-b")]);
+    const mixed = await verify(copy, alice, [sat([entry, a]), sat([{ ...entry, mediaType: "text/plain", metadata: null }, a], SAT, undefined, "ord-b")]);
     expect(mixed.anchoring?.status).toBe("unverified");
   });
 
@@ -1007,7 +996,7 @@ describe("entries before the anchor (P9.15)", () => {
   test("C12-107: an entry before the anchoring entry, signed by a key removed before the inscription, is accepted against the version it names, with claimed ordering", async () => {
     const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);
     const old = alice.signer(KEY, "orig");
-    const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resources: [photo(B1)], author: alice.ref("orig"), sign: old });
+    const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resource: photo(B1), author: alice.ref("orig"), sign: old });
     const renamed = await updateOriginal(genesis, { versionTime: time(2), name: "Harbor at dawn", author: alice.ref("orig"), sign: old });
     alice.timeOverride = new Date(T0 + 5 * 600_000).toISOString();
     const NEW = seeded(31);
@@ -1054,17 +1043,25 @@ describe("a change of anchor is reported (P9.16)", () => {
 });
 
 describe("resource bytes are not needed for the log to verify (P7.3, P7.4, P9.18)", () => {
-  test("C12-97: an anchored Original without its resource bytes, current or historical, verifies with content reported unavailable", async () => {
-    const { alice, anchor, anchoring } = await anchored();
-    const r = await verify(undefined, alice, [sat([anchoring(10)])], { bytes: {} });
+  test("C12-97: an anchored Original whose uninscribed versions are unavailable verifies, with those versions reported unavailable", async () => {
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);
+    const sign = alice.signer(KEY, "orig");
+    const ref = alice.ref("orig");
+    const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resource: photo(B0), author: ref, sign });
+    const cropped = await updateOriginal(genesis, { versionTime: time(2), resource: photo(B1), author: ref, sign });
+    const anchor = await updateOriginal(cropped, { versionTime: time(10), aliases: [SAT], author: ref, sign });
+    const evidence = [sat([inscribe([genesis, cropped, anchor], 10)])];
+    const r = await verify(undefined, alice, evidence, { bytes: {} });
     expect(r.history.status).toBe("valid");
     expect(r.head).toBe(anchor.versionId);
     expect(r.resources.status).toBe("partial");
-    expect(r.resources.missing.map((v) => [v.resource, v.version])).toEqual([["photo", 1]]);
+    // Version 1 was never inscribed; version 2 is the anchoring inscription's body (P9.17, P9.18).
+    expect(r.resources.missing.map((v) => [v.version, v.digest])).toEqual([[1, resourceDigest(bytes(B0))]]);
+    expect(r.resources.versions.map((v) => [v.version, v.bytes, v.onBitcoin])).toEqual([[1, "missing", false], [2, "verified", true]]);
     expect(r.reasons).not.toContain("resources-partial");
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
     // Bytes that are supplied are still checked (P7.4).
-    const wrong = await verify(undefined, alice, [sat([anchoring(10)])], { bytes: { [resourceDigest(bytes(B1))]: bytes("tampered") } });
+    const wrong = await verify(undefined, alice, evidence, { bytes: { [resourceDigest(bytes(B0))]: bytes("tampered") } });
     expect(wrong.resources.status).toBe("digest-failure");
     expect(wrong.current).toBe(false);
   });
@@ -1133,7 +1130,7 @@ describe("C12-150 on Bitcoin: an inscribed entry's size is its stored line (P14.
     const nums = Array.from({ length: 200 }, () => 1.5e-6);
     let pad = 0;
     for (let i = 0; i < 40; i++) {
-      const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", metadata: { nums, pad: "a".repeat(pad) }, resources: [photo(B1)], author: ref, sign });
+      const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", metadata: { nums, pad: "a".repeat(pad) }, resource: photo(B1), author: ref, sign });
       const line = serializeLog([genesis]).slice(0, -1).replaceAll("0.0000015", "1.5e-6");
       const size = bytes(line).length;
       if (size !== 65_536) {
@@ -1146,12 +1143,28 @@ describe("C12-150 on Bitcoin: an inscribed entry's size is its stored line (P14.
     throw new Error("no entry of 65,536 bytes");
   }
 
-  test("an anchoring inscription whose stored line is 65,536 bytes is accepted, however long it re-serializes", async () => {
-    const { alice, anchor, text } = await storedAtLimit();
-    const r = await verify(undefined, alice, [sat([inscribe([], 10, { content: bytes(text) })])]);
-    expect(r.anchoring?.status, JSON.stringify(r.anchoring?.ignored)).toBe("anchored");
-    expect(r.head).toBe(anchor.versionId);
-    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+  test("an entry carried in inscription metadata is measured as its JCS form in UTF-8: 65,536 bytes accepted, 65,537 rejected (P14.12, P14.13)", async () => {
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);
+    const sign = alice.signer(KEY, "orig");
+    const ref = alice.ref("orig");
+    const atSize = async (target: number) => {
+      let pad = 65_000;
+      for (let i = 0; i < 40; i++) {
+        const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", metadata: { pad: "a".repeat(pad) }, resource: photo(B1), author: ref, sign });
+        const size = bytes(canonicalize(genesis as unknown as JsonValue)).length;
+        if (size === target) return [genesis, await updateOriginal(genesis, { versionTime: time(10), metadata: null, aliases: [SAT], author: ref, sign })];
+        pad += target - size;
+      }
+      throw new Error(`no entry of ${target} bytes`);
+    };
+    const fits = await atSize(65_536);
+    const ok = await verify(undefined, alice, [sat([inscribe(fits, 10)])]);
+    expect(ok.anchoring?.status, JSON.stringify(ok.anchoring?.ignored)).toBe("anchored");
+    expect(ok.current, JSON.stringify(ok.reasons)).toBe(true);
+    const over = await atSize(65_537);
+    const r = await verify(undefined, alice, [sat([inscribe(over, 10)])]);
+    expect(r.anchoring?.status).toBe("not-anchored");
+    expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ reason: "invalid-entry", code: "ENTRY_TOO_LARGE" })]);
   });
 
   test("an anchored copy given as text is measured as stored too", async () => {
@@ -1170,7 +1183,7 @@ describe("one confirmation on every network (P9.5, D6; originals-spec #50, merge
       const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);
       const sign = alice.signer(KEY, "orig");
       const ref = alice.ref("orig");
-      const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resources: [photo(B1)], author: ref, sign });
+      const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resource: photo(B1), author: ref, sign });
       const anchor = await updateOriginal(genesis, { versionTime: time(10), aliases: [did], author: ref, sign });
       const one = await verify([genesis, anchor], alice, [sat([inscribe([genesis, anchor], 10, { confirmations: 1 })], did)]);
       expect(one.anchoring, JSON.stringify(one.anchoring?.ignored)).toMatchObject({ sat: did, status: "anchored", anchor: { versionId: anchor.versionId, confirmations: 1 } });
@@ -1181,4 +1194,169 @@ describe("one confirmation on every network (P9.5, D6; originals-spec #50, merge
       expect(none.current).toBe(false);
     });
   }
+});
+
+/**
+ * Encode a JSON value as CBOR with every map's keys in reverse order and every
+ * integer and length in its 8-byte form: well-formed, not shortest (C12-197).
+ */
+function looseCbor(value: JsonValue): Uint8Array {
+  const out: number[] = [];
+  const head = (major: number, n: number) => {
+    out.push((major << 5) | 27);
+    const big = BigInt(n);
+    for (let k = 7; k >= 0; k--) out.push(Number((big >> BigInt(k * 8)) & 0xffn));
+  };
+  const write = (v: JsonValue) => {
+    if (v === null) out.push(0xf6);
+    else if (v === true) out.push(0xf5);
+    else if (v === false) out.push(0xf4);
+    else if (typeof v === "number") v >= 0 ? head(0, v) : head(1, -1 - v);
+    else if (typeof v === "string") {
+      const b = new TextEncoder().encode(v);
+      head(3, b.length);
+      out.push(...b);
+    } else if (Array.isArray(v)) {
+      head(4, v.length);
+      v.forEach(write);
+    } else {
+      const entries = Object.entries(v).reverse();
+      head(5, entries.length);
+      for (const [k, x] of entries) {
+        write(k);
+        write(x);
+      }
+    }
+  };
+  write(value);
+  return new Uint8Array(out);
+}
+
+describe("an inscription's body is the resource version its last entry names (P9.17, P14.12; originals-spec #53)", () => {
+  const B2 = "harbor at dusk";
+
+  test("C12-190: an anchored Original read from Bitcoin alone takes the current version's bytes from the newest accepted inscription's body", async () => {
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);
+    const sign = alice.signer(KEY, "orig");
+    const ref = alice.ref("orig");
+    const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resource: photo(B0), author: ref, sign });
+    const cropped = await updateOriginal(genesis, { versionTime: time(2), resource: photo(B1), author: ref, sign });
+    const anchor = await updateOriginal(cropped, { versionTime: time(10), aliases: [SAT], author: ref, sign });
+    const dusk = await updateOriginal(anchor, { versionTime: time(20), resource: photo(B2), author: ref, sign });
+    const later = inscribe(dusk, 20);
+    expect(later.content).toEqual(bytes(B2));
+    expect(later.mediaType).toBe("image/jpeg");
+    // No log and no resource bytes: only Bitcoin (P9.18).
+    const r = await verifyOriginal({ authors: [alice.evidence()], now: NOW, bitcoin: [sat([inscribe([genesis, cropped, anchor], 10), later])] });
+    expect(r.head).toBe(dusk.versionId);
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.resources.versions.map((v) => [v.version, v.digest, v.bytes, v.onBitcoin])).toEqual([
+      [1, resourceDigest(bytes(B0)), "missing", false],
+      [2, resourceDigest(bytes(B1)), "verified", true],
+      [3, resourceDigest(bytes(B2)), "verified", true],
+    ]);
+    expect(r.state?.resource.digest).toBe(resourceDigest(bytes(B2)));
+    // An inscription Bitcoin does not accept supplies no bytes: an unconfirmed one is only observed.
+    const pending = await verifyOriginal({ authors: [alice.evidence()], now: NOW, bitcoin: [sat([inscribe([genesis, cropped, anchor], 10), inscribe(dusk, 20, { confirmations: 0 })])] });
+    expect(pending.head).toBe(anchor.versionId);
+    expect(pending.resources.versions.map((v) => v.onBitcoin)).toEqual([false, true]);
+  });
+
+  test("C12-191: an inscription whose body's digest or size differs from its last entry's descriptor is rejected, anchoring or later", async () => {
+    const { alice, anchor, ref, sign, anchoring } = await anchored();
+    const next = await updateOriginal(anchor, { versionTime: time(20), resource: photo(B2), author: ref, sign });
+    for (const content of [bytes("tampered"), bytes(`${B1}!`), bytes(B1).slice(1)]) {
+      const first = await verify(undefined, alice, [sat([anchoring(10, { content })])]);
+      expect(first.anchoring?.status).toBe("not-anchored");
+      expect(first.anchoring?.ignored.map((i) => i.reason)).toEqual(["body-not-the-resource"]);
+    }
+    // After the anchor: the previous version's bytes are not the new version.
+    const later = await verify(undefined, alice, [sat([anchoring(10), inscribe(next, 20, { content: bytes(B1) })])]);
+    expect(later.head).toBe(anchor.versionId);
+    expect(later.anchoring?.ignored).toEqual([expect.objectContaining({ reason: "body-not-the-resource", versionId: next.versionId })]);
+  });
+
+  test("C12-192: an inscription whose content type differs from the resource's mediaType, or whose body has a content encoding, is rejected", async () => {
+    const { alice, anchor, ref, sign, anchoring } = await anchored();
+    const next = await updateOriginal(anchor, { versionTime: time(20), name: "Renamed", author: ref, sign });
+    for (const mediaType of ["image/png", "image/jpeg; charset=binary", "IMAGE/JPEG", "application/vnd.originals.vh+jsonl"]) {
+      const r = await verify(undefined, alice, [sat([anchoring(10, { mediaType })])]);
+      expect(r.anchoring?.status, mediaType).toBe("not-anchored");
+      expect(r.anchoring?.ignored.map((i) => i.reason), mediaType).toEqual(["content-type-mismatch"]);
+    }
+    const r = await verify(undefined, alice, [sat([
+      anchoring(10),
+      inscribe(next, 20, { content: new Uint8Array(), unsupported: "content-encoding" }),
+      inscribe(next, 21, { content: new Uint8Array(), unsupported: "delegated" }),
+    ])]);
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["unsupported-encoding", "unsupported-encoding"]);
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+  });
+
+  test("C12-194: an inscription after the anchor whose entry changes only the name or metadata carries the unchanged current version again", async () => {
+    const { alice, anchor, ref, sign, anchoring } = await anchored();
+    const renamed = await updateOriginal(anchor, { versionTime: time(20), name: "Harbor, renamed", author: ref, sign });
+    const captioned = await updateOriginal(renamed, { versionTime: time(30), metadata: { caption: "Morning" }, author: ref, sign });
+    const a = inscribe(renamed, 20);
+    const b = inscribe(captioned, 30);
+    expect(a.content).toEqual(bytes(B1));
+    expect(b.content).toEqual(bytes(B1));
+    const r = await verifyOriginal({ authors: [alice.evidence()], now: NOW, bitcoin: [sat([anchoring(10), a, b])] });
+    expect(r.head).toBe(captioned.versionId);
+    expect(r.anchoring?.accepted.map((x) => x.versionId)).toEqual([renamed.versionId, captioned.versionId]);
+    // Still one version, on Bitcoin (P4.4).
+    expect(r.resources.versions.map((v) => [v.version, v.bytes, v.onBitcoin])).toEqual([[1, "verified", true]]);
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    // Without the version again, the inscription is not the Original's (P9.17).
+    const bare = await verify(undefined, alice, [sat([anchoring(10), inscribe(renamed, 20, { content: new Uint8Array() })])]);
+    expect(bare.head).toBe(anchor.versionId);
+    expect(bare.anchoring?.ignored.map((i) => i.reason)).toEqual(["body-not-the-resource"]);
+  });
+
+  test("C12-195: inscription metadata holding a tag, byte string, float, indefinite-length item, non-text or duplicate key, or an integer beyond 2^53 - 1 is rejected", async () => {
+    const { alice, copy, anchoring } = await anchored();
+    const meta = encodeCbor(copy as unknown as JsonValue);
+    // Each bad item stands in for the anchoring entry's `versionTime` value, so the metadata would otherwise decode to entries.
+    const key = encodeCbor("versionTime");
+    const at = (item: number[]) => {
+      // The last `versionTime` key is the anchoring entry's; its value is a short text string.
+      for (let i = meta.length - key.length; i >= 0; i--) {
+        if (!key.every((b, k) => meta[i + k] === b)) continue;
+        const start = i + key.length;
+        const head = meta[start];
+        const skip = head === 0x78 ? 2 + meta[start + 1] : 1 + (head & 0x1f);
+        return new Uint8Array([...meta.slice(0, start), ...item, ...meta.slice(start + skip)]);
+      }
+      throw new Error("no versionTime");
+    };
+    const bad: Record<string, number[]> = {
+      tag: [0xc0, ...encodeCbor("2026-10-18T13:29:00.000Z")],
+      "byte string": [0x41, 0x00],
+      float: [0xf9, 0x3c, 0x00],
+      "indefinite-length": [0x7f, 0x61, 0x61, 0xff],
+      "non-text key": [0xa1, 0x01, 0x02],
+      "duplicate key": [0xa2, 0x61, 0x61, 0x01, 0x61, 0x61, 0x02],
+      "2^53": [0x1b, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+      "-2^53": [0x3b, 0x00, 0x1f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+    };
+    for (const [what, item] of Object.entries(bad)) {
+      const r = await verify(undefined, alice, [sat([anchoring(10, { metadata: at(item) })])]);
+      expect(r.anchoring?.status, what).toBe("not-anchored");
+      expect(r.anchoring?.ignored.map((i) => i.reason), what).toEqual(["undecodable"]);
+    }
+    // The control: a well-formed text there decodes, and the entry then fails its own checks.
+    const control = await verify(undefined, alice, [sat([anchoring(10, { metadata: at([...encodeCbor("x")]) })])]);
+    expect(control.anchoring?.ignored.map((i) => i.reason)).not.toContain("undecodable");
+  });
+
+  test("C12-197: an entry carried in metadata is checked over its JCS form; key order and integer encoding in the CBOR do not matter", async () => {
+    const { alice, copy, anchor, anchoring } = await anchored();
+    const loose = looseCbor(copy as unknown as JsonValue);
+    expect(loose).not.toEqual(encodeCbor(copy as unknown as JsonValue));
+    const r = await verify(undefined, alice, [sat([anchoring(10, { metadata: loose })])]);
+    expect(r.anchoring?.status, JSON.stringify(r.anchoring?.ignored)).toBe("anchored");
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+  });
 });

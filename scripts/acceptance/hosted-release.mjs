@@ -88,7 +88,7 @@ function runPhase(name, cmd, cmdArgs, input, { interactive = false } = {}) {
   return result;
 }
 const factsOf = (name) => results.find((r) => r.phase === name)?.facts ?? {};
-const readerCases = (works, expect) => works.map(([name, w, e]) => ({ name, alias: w?.alias, checkpoint: w?.checkpoint, resources: w?.resources, expect: e ?? expect }));
+const readerCases = (works, expect) => works.map(([name, w, e]) => ({ name, alias: w?.alias, checkpoint: w?.checkpoint, resource: w?.resource, expect: e ?? expect }));
 
 let server = null;
 const blocked = preflight.some((p) => p.status === "FAIL");

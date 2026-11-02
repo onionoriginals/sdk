@@ -70,7 +70,7 @@
  *
  * Bounds (PROVISIONAL): the body is read with a byte counter (body.ts); at
  * most MAX_IDENTITIES signer DID logs of MAX_IDENTITY_BYTES each and
- * ORIGINALS_LIMITS.resources resources per submission; at most MAX_QUEUED
+ * one resource version per submission (P4.1, originals-spec #53); at most MAX_QUEUED
  * submissions waiting per Original (503 busy past that).
  *
  * The host stores the exact submitted line. It never re-signs, rebases,
@@ -127,7 +127,8 @@ export const SUBMISSION_LIMITS = Object.freeze({
   /** The author and every editor a state can grant (P5.15, P7.7). */
   identities: ORIGINALS_LIMITS.editors + 1,
   identityBytes: 2 * 1024 * 1024,
-  resources: ORIGINALS_LIMITS.resources,
+  /** An entry names at most one new resource version (P4.1, P14.4; originals-spec #53). */
+  resources: 1,
   queued: 8,
 });
 
@@ -285,7 +286,7 @@ function signerDids(lines: string[]): string[] {
  * is judged from both, never from resources alone.
  */
 export function hostedMissing(lines: string[], report: OriginalsReport, hosted: (did: string) => boolean): Array<Record<string, unknown>> {
-  const out: Array<Record<string, unknown>> = report.resources.missing.map((v) => ({ kind: 'resource', resource: v.resource, version: v.version, digest: v.digest, versionId: v.versionId }));
+  const out: Array<Record<string, unknown>> = report.resources.missing.map((v) => ({ kind: 'resource', version: v.version, digest: v.digest, versionId: v.versionId }));
   const author = (lineState(lines[0]) as { author?: { did?: unknown } } | undefined)?.author?.did;
   for (const did of signerDids(lines)) {
     if (!hosted(did)) out.push({ kind: 'identity', did, role: did === author ? 'author' : 'editor' });
@@ -530,6 +531,7 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     if (verifies === undefined) return refuse(422, 'signer_version_unavailable', { did: signer.did, versionId: signer.versionId });
     if (verifies === false) return refuse(422, 'proof_invalid');
 
+    // P14.4 (originals-spec #53): at most one transition, naming the new version's digest.
     const entryState = lineState(s.entry) as { transitions?: Array<{ to?: unknown }> } | undefined;
     const added = new Set((entryState?.transitions ?? []).map((t) => t.to).filter((d): d is string => typeof d === 'string'));
     for (const [digest, bytes] of s.resources) {

@@ -15,13 +15,19 @@
  *   it on that sat, undecided: missing evidence until they agree. A disputed
  *   inscription that no index reports as an Originals inscription cannot be
  *   an entry: it is ignored and holds back nothing after it (`couldCount`).
- * - Inscriptions carry complete entries as JSON Lines of
- *   `application/vnd.originals.vh+jsonl`, with no metadata, at most 350,000
- *   bytes (P9.17, P14.12; owner decision, D6; originals-spec #50, merged). The anchoring inscription carries the whole
- *   log from genesis through the anchoring entry, its last entry; every later
- *   one carries exactly one entry. So every anchoring inscription checks
- *   itself, and a copy of the log is never needed: one that differs from the
- *   sat's entries is ignored.
+ * - An Originals inscription carries complete entries in its metadata (ord
+ *   tag 5), as the CBOR encoding of a JSON array of entries; its body is the
+ *   exact bytes of the resource version its last entry names, under that
+ *   version's media type, with no content encoding. Metadata and body
+ *   together are at most 350,000 bytes (P9.17, P14.12; owner decision of 1
+ *   November 2026, D6, originals-spec #53). An inscription whose metadata
+ *   does not decode to a JSON array is not an Originals inscription. The
+ *   anchoring inscription carries the whole log from genesis through the
+ *   anchoring entry, its last entry; every later one carries exactly one
+ *   entry. So every anchoring inscription checks itself, and a copy of the log
+ *   is never needed: one that differs from the sat's entries is ignored. The
+ *   bodies of the anchor and of the inscriptions accepted after it are
+ *   resource versions on Bitcoin (`Assembly.bytes`, P9.18).
  * - The anchor is the first valid anchoring inscription, in chain order,
  *   on the sat its anchoring entry names. Any other, on that sat or another,
  *   is a conflicting anchor (P9.16).
@@ -44,27 +50,78 @@
  */
 import { OriginalsError } from "../errors.js";
 import { isJsonObject } from "../json/index.js";
-import { exactNumberError } from "./profile.js";
-import { compactLineError, parseLog, type LogEntry, type LogVerification } from "../log/index.js";
+import type { LogEntry, LogVerification } from "../log/index.js";
 import { authorKey, stillAuthorized, versionNumberOf, type AuthorHistory, type AuthorVersion } from "./author.js";
 import { btcoAliasOf, chainOrder, parseBtcoAlias, readSat, type ChainPosition, type PlacementReason, type SatEvidence, type SatInscription, type SatRead } from "./btco.js";
-import { ORIGINALS_LIMITS, signerOf, type AuthorRef, type EntryState } from "./state.js";
+import { decodeCbor } from "./cbor.js";
+import { ORIGINALS_LIMITS, resourceDigest, signerOf, type AuthorRef, type EntryState, type ResourceDescriptor } from "./state.js";
 
-/** The media type of an Originals inscription (P9.17, P14.12; owner decision, D6; originals-spec #50, merged). */
-export const ORIGINALS_INSCRIPTION_TYPE = "application/vnd.originals.vh+jsonl";
-
-/** The largest inscription body, in bytes (P9.17, P14.12; owner decision, D6; originals-spec #50, merged). */
+/**
+ * The largest inscription, its metadata and body together, in bytes (P9.17,
+ * P14.12; owner decision, D6; originals-spec #50, and #53 for what it covers).
+ */
 export const ORIGINALS_INSCRIPTION_MAX_BYTES = 350_000;
+
+/**
+ * An inscription's metadata, as the entries it carries (P14.12;
+ * originals-spec #53): `entries` when it decodes to a JSON array of entry
+ * objects; `not-originals` when there is none or it decodes to anything but an
+ * array, such as a did:btco DID document; `invalid` when it is not one
+ * well-formed CBOR item, holds a tag, byte string, float, indefinite-length
+ * item, non-text or duplicate map key or an integer beyond 2^53 − 1, or is an
+ * array that is empty or holds anything but objects. PROVISIONAL (D6): the
+ * JSON-to-CBOR mapping is ord's for `--json-metadata`. Integers need not be
+ * in shortest form: hashes and proofs are computed over each entry's JCS
+ * form, so key order and encoding do not matter (P14.3).
+ */
+export type InscribedEntries = { kind: "entries"; entries: LogEntry[] } | { kind: "not-originals" } | { kind: "invalid"; message: string };
+
+export function readInscribedEntries(metadata: Uint8Array | null | undefined): InscribedEntries {
+  if (metadata === null || metadata === undefined || metadata.length === 0) return { kind: "not-originals" };
+  let value: unknown;
+  try {
+    value = decodeCbor(metadata, { shortest: false });
+  } catch (error) {
+    if (error instanceof OriginalsError) return { kind: "invalid", message: error.message };
+    throw error;
+  }
+  if (!Array.isArray(value)) return { kind: "not-originals" };
+  if (value.length === 0 || !value.every(isJsonObject)) return { kind: "invalid", message: "the metadata is not an array of entries" };
+  return { kind: "entries", entries: value as unknown as LogEntry[] };
+}
+
+/** The resource descriptor an entry's state names, when it has one (P9.17). */
+function descriptorOf(entry: unknown): ResourceDescriptor | undefined {
+  const d = stateOf(entry).asset?.resource as unknown;
+  if (!isJsonObject(d) || typeof d.mediaType !== "string" || typeof d.size !== "number" || typeof d.digest !== "string") return undefined;
+  return d as unknown as ResourceDescriptor;
+}
+
+/**
+ * P9.17 (originals-spec #53): whether an inscription's body and content type
+ * are the resource version its last entry names, or why not.
+ */
+function bodyMismatch(i: SatInscription, last: LogEntry): "content-type-mismatch" | "body-not-the-resource" | null {
+  const d = descriptorOf(last);
+  if (!d) return "body-not-the-resource";
+  if (i.mediaType !== d.mediaType) return "content-type-mismatch";
+  return i.content.length === d.size && resourceDigest(i.content) === d.digest ? null : "body-not-the-resource";
+}
 
 export type IgnoredReason =
   | PlacementReason
   | "unconfirmed"
+  /** Its metadata does not decode to a JSON array: none, or for example a did:btco DID document (P14.12). */
   | "not-an-originals-inscription"
-  /** An Originals media type whose own body is delegated or encoded (P9.14, P9.17). */
+  /** Originals metadata on an inscription whose own body is delegated or has a content encoding (P9.14, P9.17). */
   | "unsupported-encoding"
-  | "carries-metadata"
   | "too-large"
+  /** Its metadata breaks the CBOR rules of P14.12, or is an array that is not one of entries. */
   | "undecodable"
+  /** Its content type is not the `mediaType` of its last entry's resource (P9.17). */
+  | "content-type-mismatch"
+  /** Its body's size or digest is not its last entry's resource descriptor's (P9.17, P4.3). */
+  | "body-not-the-resource"
   | "another-original"
   | "does-not-start-at-genesis"
   | "not-one-log"
@@ -199,19 +256,6 @@ function satNamedBy(entry: unknown): string | undefined {
 /** The index of the first entry that lists a did:btco alias: the anchoring entry (P9.10). */
 export function anchoringIndex(entries: unknown[]): number {
   return entries.findIndex((e) => satNamedBy(e) !== undefined);
-}
-
-/** The body's entries: compact JSON Lines, each line ending in one LF (P14.2), or undefined. */
-function decode(content: Uint8Array): LogEntry[] | undefined {
-  try {
-    const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(content);
-    if (!text.endsWith("\n") || text.slice(0, -1).split("\n").some((line) => compactLineError(line) !== undefined || exactNumberError(line) !== undefined)) return undefined;
-    const entries = parseLog(text);
-    return entries.length > 0 && entries.every(isJsonObject) ? (entries as unknown as LogEntry[]) : undefined;
-  } catch (error) {
-    if (error instanceof OriginalsError || error instanceof TypeError) return undefined;
-    throw error;
-  }
 }
 
 /**
@@ -396,6 +440,12 @@ export interface Assembly {
   rejectedByAuthorState: Set<string>;
   /** The anchoring inscription's chain position, when anchored: entries in it are checked against signer DID state there (P5.13). */
   anchorPosition?: ChainPosition;
+  /**
+   * The resource versions on Bitcoin, by digest: the bodies of the anchor and
+   * of each inscription accepted after it, each checked against its entry's
+   * descriptor (P9.17, P9.18; originals-spec #53).
+   */
+  bytes: Map<string, Uint8Array>;
 }
 
 type Verify = (entries: unknown[], options?: { unauthorized?: ReadonlySet<number> }) => Promise<LogVerification>;
@@ -453,8 +503,10 @@ export async function assembleFromBitcoin(
     byAlias.set(did, [...(byAlias.get(did) ?? []), e]);
   }
   // A disputed inscription no index reports as an Originals inscription cannot be an entry, so it
-  // holds back nothing after it; a disputed Originals inscription does (P9.10; L3).
-  const couldCount = (reports: SatInscription[]) => reports.some((r) => r.mediaType === ORIGINALS_INSCRIPTION_TYPE);
+  // holds back nothing after it; a disputed Originals inscription does, as does one whose metadata
+  // was not read (P9.10; L3; P14.12).
+  const couldCount = (reports: SatInscription[]) => reports.some((r) =>
+    r.unsupported === "not-read" ? r.metadataPresent !== false : r.metadata === undefined || readInscribedEntries(r.metadata).kind !== "not-originals");
   const reads = [...byAlias].map(([did, list]) => readSat(did, list, { couldCount }));
   // The report lists what was ignored in chain order.
   const position = new Map<string, SatInscription>();
@@ -466,19 +518,24 @@ export async function assembleFromBitcoin(
   const usable = (read: SatRead, i: SatInscription): LogEntry[] | undefined => {
     const sat = read.alias.did;
     if (i.confirmations < 1) return void ignore(sat, i, "unconfirmed");
-    if (i.mediaType !== ORIGINALS_INSCRIPTION_TYPE) return void ignore(sat, i, "not-an-originals-inscription");
     if (i.unsupported === "not-read") {
-      // What the index reports already rejects it, read or not (P9.17). PROVISIONAL.
-      if (i.metadataPresent) return void ignore(sat, i, "carries-metadata");
+      // What the index reports already decides it, read or not (P9.17, P14.12). PROVISIONAL.
+      if (i.metadataPresent === false) return void ignore(sat, i, "not-an-originals-inscription");
       if ((i.contentLength ?? 0) > ORIGINALS_INSCRIPTION_MAX_BYTES) return void ignore(sat, i, "too-large");
       throw new OriginalsError("incomplete-evidence", "SAT_READ_INCOMPLETE", `inscription ${i.id} on ${sat} was not read in full (P9.17)`);
     }
-    if (i.unsupported) return void ignore(sat, i, "unsupported-encoding");
-    if ((i.metadata ?? null) !== null) return void ignore(sat, i, "carries-metadata");
-    if (i.content.length > ORIGINALS_INSCRIPTION_MAX_BYTES) return void ignore(sat, i, "too-large");
-    const entries = decode(i.content);
-    if (!entries) return void ignore(sat, i, "undecodable");
-    return entries;
+    // P14.12 (originals-spec #53): the metadata decides whether it is an Originals inscription.
+    const carried = i.metadata === undefined ? undefined : readInscribedEntries(i.metadata);
+    if (i.unsupported) {
+      // A delegated or encoded body is never the resource's exact bytes (P9.14, P9.17).
+      return void ignore(sat, i, carried?.kind === "not-originals" ? "not-an-originals-inscription" : "unsupported-encoding");
+    }
+    if (!carried || carried.kind === "not-originals") return void ignore(sat, i, "not-an-originals-inscription");
+    if ((i.metadata?.length ?? 0) + i.content.length > ORIGINALS_INSCRIPTION_MAX_BYTES) return void ignore(sat, i, "too-large");
+    if (carried.kind === "invalid") return void ignore(sat, i, "undecodable");
+    const mismatch = bodyMismatch(i, carried.entries[carried.entries.length - 1]);
+    if (mismatch) return void ignore(sat, i, mismatch, carried.entries[carried.entries.length - 1]);
+    return carried.entries;
   };
 
   /** The anchoring inscription's verified log, or why it is not an anchor (P9.17). */
@@ -546,6 +603,13 @@ export async function assembleFromBitcoin(
     return k >= 0 ? satNamedBy(copy[k]) : undefined;
   })() : undefined;
 
+  /** The inscriptions' bodies, by the digest each was checked against (P9.17, P9.18). */
+  const bytes = new Map<string, Uint8Array>();
+  const keepBody = (i: SatInscription, entry: LogEntry) => {
+    const d = descriptorOf(entry);
+    if (d) bytes.set(d.digest, i.content);
+  };
+
   if (!chosen) {
     for (const r of rejected) ignore(r.read.alias.did, r.inscription, r.reason, r.entries[r.entries.length - 1], r.code);
     const status = evidence.length === 0 || disputed.length > 0 ? "unverified" : "not-anchored";
@@ -567,12 +631,14 @@ export async function assembleFromBitcoin(
       owner: null,
       ownerDisputed: false,
       rejectedByAuthorState,
+      bytes,
     };
   }
 
   const read = chosen.read;
   const sat = read.alias.did;
   const anchor = place(sat, chosen.inscription, lastOf(chosen));
+  keepBody(chosen.inscription, lastOf(chosen));
   const conflicting = mine.slice(1).map((a) => place(a.read.alias.did, a.inscription, lastOf(a)));
   // Inscriptions that are neither anchors nor, on the anchoring sat after the anchor, single entries.
   /**
@@ -698,6 +764,7 @@ export async function assembleFromBitcoin(
     }
     head.push(entry);
     accepted.push(place(sat, i, entry));
+    keepBody(i, entry);
     lastHeight = i.height;
   }
 
@@ -747,5 +814,6 @@ export async function assembleFromBitcoin(
       : null,
     ownerDisputed: read.ownerDisputed,
     rejectedByAuthorState,
+    bytes,
   };
 }

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { MemoryStore } from '@originals/sdk/originals';
+import { MemoryStore, OriginalsSDK } from '@originals/sdk/originals';
 import { DemoEngine } from './engine';
 import { createLocalAuthor } from './local-author';
 
@@ -63,16 +63,13 @@ test('an old unscoped pair can be adopted only by its verified author and deposi
   expect(await legacySubmissionBelongs({ ...entry, evidence: 'AAAA' }, a.did, a.author.ref.did, WALLET_ADDRESS)).toBe(false);
 });
 
-test('the saved Stage A Original reopens from its committed export in a fresh consumer (C12-01, P7.5)', async () => {
+// The Stage A receipt of 24 October 2026 was written before originals-spec #53 (one resource per
+// Original). Originals under an earlier encoding are not converted and no longer verify (D1, D7),
+// so a fresh consumer refuses it rather than reopening it as an Original.
+test('the Stage A export written under the previous encoding no longer verifies as an Original (originals-spec #53, D1)', async () => {
   const zip = new Uint8Array(await Bun.file(new URL('../../../../docs/regtest/receipts/originals-live-turnkey-975-2026-10-24.zip', import.meta.url)).arrayBuffer());
   const reader = new DemoEngine();
-  const state = await reader.importEvidence(zip, 'did:vh:QmRBdNNBMkjWTtXDhGTMY3E5eWKY7nGaAfMHDYXKxehtTB');
-  expect(state.history.length).toBe(4);
-  expect(state.history.at(-1)?.versionId).toBe('4-QmTfH5NP9qQs2YUTUafCodBefqHdeW4udiKwpgsWbG1MYS');
-  expect(state.btcoDid).toBe('did:btco:reg:5000000000');
-  expect((state.provenance as any).authorBinding.status).toBe('valid');
-  expect((state.provenance as any).identityEvidence.status).toBe('complete');
-  expect((state.provenance as any).resources.status).toBe('available');
-  // The export is evidence for a copy, not a fresh Bitcoin read (P9.17).
-  expect((state.provenance as any).current).toBe(false);
+  await expect(reader.importEvidence(zip, 'did:vh:QmRBdNNBMkjWTtXDhGTMY3E5eWKY7nGaAfMHDYXKxehtTB')).rejects.toThrow();
+  const { report } = await OriginalsSDK.create({ store: new MemoryStore(), authors: [] }).load(zip);
+  expect(report.history).toMatchObject({ status: 'invalid', failure: { code: 'STATE_MEMBERS' } });
 });

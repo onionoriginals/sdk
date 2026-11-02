@@ -44,18 +44,21 @@ export interface PublicationObservation {
     /**
      * Observed, but its body and metadata were not read, or not kept, because
      * they would pass the read's byte budget (`SatSnapshotBudget.maxContentBytes`,
-     * `maxOriginalsBytes`) or the transport's response cap, or because it is
-     * an `application/vnd.originals.vh+jsonl` body over 350,000 bytes that an
-     * Originals read skips (P9.17). `contentLength` is the length the index
-     * reports. `metadataPresent`: the body was read but it carries metadata
-     * past the budget or cap. The read goes on. PROVISIONAL.
+     * `maxOriginalsBytes`) or the transport's response cap. `contentLength` is
+     * the length the index reports. `metadataPresent`: it carries metadata,
+     * but the metadata or the body past the budget or cap was not kept; an
+     * Originals read cannot tell whether it is an Originals inscription
+     * (P14.12). The read goes on. PROVISIONAL.
      */
     | { status: 'unavailable'; reason: 'over-budget'; mediaType: string | null; contentLength: number; metadataPresent?: true }
     /**
-     * Observed, but its body and metadata were not asked for: an Originals
-     * read (`bodies: 'originals'`) reads only Originals inscriptions. PROVISIONAL.
+     * Observed, but its body was not asked for: an Originals read (`bodies:
+     * 'originals'`) reads a body only when the inscription carries metadata,
+     * as an Originals inscription does (P14.12; originals-spec #53), and never
+     * one over 350,000 bytes (P9.17). `metadata: null`: its metadata was read
+     * and it carries none, so it is not an Originals inscription. PROVISIONAL.
      */
-    | { status: 'unavailable'; reason: 'not-requested'; mediaType: string | null; contentLength: number }
+    | { status: 'unavailable'; reason: 'not-requested'; mediaType: string | null; contentLength: number; metadata?: null }
     | {
         status: 'complete';
         mediaType: string;

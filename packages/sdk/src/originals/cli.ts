@@ -64,7 +64,7 @@ async function main(argv: string[]): Promise<number> {
       // Section 7, P9.15: notices go on the verdict line and are listed under it, never left off.
       process.stdout.write(`${verdictLine(report, verified)}\n`);
       for (const line of noticeLines(report)) process.stdout.write(`  ${line}\n`);
-      for (const v of report.resources.versions) process.stdout.write(`  ${v.resource} v${v.version} ${v.digest} ${v.bytes}\n`);
+      for (const v of report.resources.versions) process.stdout.write(`  resource v${v.version} ${v.digest} ${v.bytes}${v.onBitcoin ? " (on Bitcoin)" : ""}\n`);
       if (report.validAsOf) {
         process.stdout.write(`  valid as of ${report.validAsOf.checkpoint}, not current: not anchored (P7.10)\n`);
         for (const s of report.validAsOf.signers) process.stdout.write(`  ${s.role} ${s.did} at ${s.versionId ?? "no version"}, obtained ${s.obtainedAt ?? "at an unknown time"} from ${s.source ?? "an unknown source"}\n`);

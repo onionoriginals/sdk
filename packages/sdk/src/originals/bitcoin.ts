@@ -12,15 +12,18 @@
  * reports for each inscription (P9.10). A delegated or encoded inscription,
  * one the read did not ask for (`bodies: 'originals'`), or one past the
  * reader's byte budget, is passed on flagged `unsupported` and the verifier
- * ignores it with a reason (P9.12, P9.14). An Originals inscription the
- * reader did not read, unless the length or metadata the index reports
- * already rejects it (P9.17), or any publication whose body it could not
- * establish otherwise, fails the whole read: the anchoring sat
- * carries the Original's whole log, and a copy is no substitute (P9.17;
- * VH-Log PR 2).
+ * ignores it with a reason (P9.12, P9.14). What it could not read is passed
+ * on flagged `not-read`, with what the index reported (its length, and
+ * whether its metadata was read and absent), and the verifier decides: on an
+ * anchoring sat an unread inscription that could be an Originals one is
+ * missing evidence (`SAT_READ_INCOMPLETE`, P9.17, P14.12; originals-spec
+ * #53), and on a did:btco signer's sat the history stops before it (P5.13).
+ * A publication whose body it could not establish otherwise fails the whole
+ * read: the anchoring sat carries the Original's whole log, and a copy is no
+ * substitute (P9.17; VH-Log PR 2).
  */
 import { OriginalsError } from "@originals/vh";
-import { ORIGINALS_INSCRIPTION_MAX_BYTES, ORIGINALS_INSCRIPTION_TYPE, type SatEvidence, type SatInscription } from "@originals/vh/originals";
+import type { SatEvidence, SatInscription } from "@originals/vh/originals";
 import { hex } from "@scure/base";
 import type { BitcoinNetwork, SatSnapshot } from "../bitcoin/sat-snapshot-types.js";
 import { crc32 } from "./zip.js";
@@ -464,12 +467,14 @@ export async function satEvidence(snapshot: SatSnapshot, options: SatEvidenceOpt
   for (const p of snapshot.publications) {
     const body = p.body;
     // Observed but not read: a delegated or encoded body, one the read did not ask for, or one past the
-    // read's byte budget (M1). An unread Originals inscription is missing evidence (P9.17), unless what
-    // the index reports already rejects it: a body over 350,000 bytes, or metadata. Anything else is
-    // flagged and the verifier ignores it with a reason, so the sat's holder cannot fail every read (P9.12).
+    // read's byte budget (M1). Any inscription can carry metadata, so whether an unread one could be an
+    // Originals inscription is the verifier's to decide, from what the index reports: a body over
+    // 350,000 bytes (P9.17), or metadata read and absent (P14.12; originals-spec #53), rules it out;
+    // otherwise an anchoring sat's read is missing evidence there (P9.17), and a did:btco signer's
+    // history stops before it (P5.13). So the sat's holder cannot fail every read (P9.12).
     const unread = body.status === "unavailable" && "reason" in body;
-    const rejectedUnread = unread && (body.contentLength > ORIGINALS_INSCRIPTION_MAX_BYTES || (body.reason === "over-budget" && body.metadataPresent === true));
-    const observed = "reason" in body && body.reason !== undefined && !(unread && body.mediaType === ORIGINALS_INSCRIPTION_TYPE && !rejectedUnread);
+    const noMetadata = unread && body.reason === "not-requested" && body.metadata === null;
+    const observed = "reason" in body && body.reason !== undefined;
     if ((body.status !== "complete" && !observed) || !p.creation) {
       throw new OriginalsError("unavailable-bytes", "SAT_READ_INCOMPLETE", `inscription ${p.id} on sat ${snapshot.sat} could not be read`);
     }
@@ -485,7 +490,7 @@ export async function satEvidence(snapshot: SatSnapshot, options: SatEvidenceOpt
             ...(!unread && "metadata" in body && body.metadata !== undefined ? { metadata: body.metadata } : {}),
             unsupported: unread ? ("not-read" as const) : (body as { reason: "delegated" | "content-encoding" }).reason,
             ...(unread ? { contentLength: body.contentLength } : {}),
-            ...(unread && body.reason === "over-budget" && body.metadataPresent ? { metadataPresent: true } : {}),
+            ...(noMetadata ? { metadataPresent: false } : unread && body.reason === "over-budget" && body.metadataPresent ? { metadataPresent: true } : {}),
           };
     inscriptions.push({
       id: p.id,

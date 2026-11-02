@@ -19,10 +19,9 @@ const input = phase.input as LocalInput;
 const { engine, store, custody } = await signedInEngine(input, input.dirs.storeA);
 const read = strangerRead(input);
 const art = (title: string, seed: number) => generateArtwork(title, "Orbits", seed).svg;
-const resourcesOf = (s: { resource: { id: string; hash: string; contentType: string }; metadata?: { id: string; hash: string } }) => [
-  { id: s.resource.id, mediaType: s.resource.contentType, sha256: s.resource.hash },
-  ...(s.metadata ? [{ id: s.metadata.id, mediaType: "application/json", sha256: s.metadata.hash }] : []),
-];
+/** The Original's one resource at its current version (P4.1; originals-spec #53); title and style are in its metadata. */
+const resourceOf = (s: { resource: { id: string; hash: string; contentType: string; version: number } }) =>
+  ({ file: s.resource.id, version: s.resource.version, mediaType: s.resource.contentType, sha256: s.resource.hash });
 
 let work1: Awaited<ReturnType<typeof engine.publish>> | undefined;
 await phase.check("b1-create-revise", "a work is created and revised by the author's #key-1", async () => {
@@ -37,7 +36,7 @@ await phase.check("b1-publish", "publishing completes only once a stranger verif
   work1 = await engine.publish();
   assertEqual(work1.publication, "complete", "publication");
   assertEqual(work1.layer, "did:webvh", "layer");
-  phase.facts.work1 = { did: work1.did, alias: work1.webvhDid, checkpoint: work1.history.at(-1)!.versionId, entries: work1.history.length, resources: resourcesOf(work1) };
+  phase.facts.work1 = { did: work1.did, alias: work1.webvhDid, checkpoint: work1.history.at(-1)!.versionId, entries: work1.history.length, resource: resourceOf(work1) };
   return phase.facts.work1;
 });
 
@@ -92,7 +91,7 @@ for (const [name, fails] of [
     assertEqual(s.publication, "incomplete", "publication after the interruption");
     assertEqual(s.layer, "did:vh", "layer after the interruption");
     assertEqual(s.history.length, created.history.length + 1, "the publish entry is committed");
-    phase.facts[name] = { did: s.did, alias: s.webvhDid, checkpoint: s.history.at(-1)!.versionId, entries: s.history.length, resources: resourcesOf(s) };
+    phase.facts[name] = { did: s.did, alias: s.webvhDid, checkpoint: s.history.at(-1)!.versionId, entries: s.history.length, resource: resourceOf(s) };
     return phase.facts[name];
   });
 }

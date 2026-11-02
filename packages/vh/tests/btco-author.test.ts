@@ -9,7 +9,6 @@ import type { ProofSigner } from "../src/crypto/index.js";
 import type { JsonObject } from "../src/json/index.js";
 import { serializeLog, signWith, type LogEntry } from "../src/log/index.js";
 import {
-  ORIGINALS_INSCRIPTION_TYPE,
   checkBeforeAnchor,
   createOriginal,
   decodeCbor,
@@ -25,7 +24,7 @@ import {
   type SatInscription,
 } from "../src/originals/index.js";
 import { OriginalsError } from "../src/errors.js";
-import { VhAuthor, bytes, photo, seeded } from "./helpers/originals.js";
+import { VhAuthor, bytes, carrying, photo, seeded } from "./helpers/originals.js";
 
 const B1 = "harbor at dawn";
 const allBytes = { [resourceDigest(bytes(B1))]: bytes(B1) };
@@ -94,7 +93,7 @@ describe("review fixes (PR 9b)", () => {
 
   test("a retained did:btco author version is found by its inscription id", async () => {
     const v1 = version(10, document([{ fragment: "orig", signer: KEY }]));
-    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resources: [photo(B1)], author: ref(v1.id), sign });
+    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resource: photo(B1), author: ref(v1.id), sign });
     const options = { log: [genesis], now: NOW, bytes: allBytes, authors: [{ did: AUTHOR, bitcoin: sat(AUTHOR, [v1]) }] };
     const r = await verifyOriginal({ ...options, retained: { authors: { [AUTHOR]: v1.id } } });
     expect(r.identityEvidence.freshness).toBe("not-established");
@@ -103,17 +102,18 @@ describe("review fixes (PR 9b)", () => {
     expect(gone.identityEvidence.freshness).toBe("stale");
   });
 
-  test("an inscription whose content starts with a BOM is undecodable", async () => {
+  test("an inscription in the previous encoding, the log as a JSON Lines body with no metadata, is not an Originals inscription (P14.12; originals-spec #53, D1)", async () => {
     const v1 = version(10, document([{ fragment: "orig", signer: KEY }]));
-    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resources: [photo(B1)], author: ref(v1.id), sign });
+    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resource: photo(B1), author: ref(v1.id), sign });
     const anchor = await updateOriginal(genesis, { versionTime: time(30), aliases: [SAT], author: ref(v1.id), sign });
-    const content = bytes(`\uFEFF${serializeLog([genesis, anchor])}`);
+    const content = bytes(serializeLog([genesis, anchor]));
     const r = await verifyOriginal({
       log: [genesis, anchor], now: NOW, bytes: allBytes,
       authors: [{ did: AUTHOR, bitcoin: sat(AUTHOR, [v1]) }],
-      bitcoin: [sat(SAT, [at(31, { mediaType: ORIGINALS_INSCRIPTION_TYPE, content })])],
+      bitcoin: [sat(SAT, [at(31, { mediaType: "application/vnd.originals.vh+jsonl", content, metadata: null })])],
     });
-    expect(r.anchoring?.ignored[0]?.reason).toBe("undecodable");
+    expect(r.anchoring?.status).toBe("not-anchored");
+    expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["not-an-originals-inscription"]);
   });
 });
 
@@ -147,13 +147,13 @@ describe("did:btco author histories (P5.13)", () => {
 describe("Originals by a did:btco author", () => {
   async function setup() {
     const v1 = version(10, document([{ fragment: "orig", signer: KEY }]));
-    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resources: [photo(B1)], author: ref(v1.id), sign });
+    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resource: photo(B1), author: ref(v1.id), sign });
     const anchor = await updateOriginal(genesis, { versionTime: time(30), aliases: [SAT], author: ref(v1.id), sign });
     return { v1, genesis, anchor };
   }
   /** An Originals inscription; the anchoring one carries the whole log through the anchoring entry (P9.17). */
   const inscribed = (entries: LogEntry[], height: number, extra: Partial<SatInscription> = {}) =>
-    at(height, { mediaType: ORIGINALS_INSCRIPTION_TYPE, content: bytes(serializeLog(entries)), ...extra });
+    at(height, { ...carrying(entries), ...extra });
 
   test("C12-58: an anchored Original with a did:btco author verifies from Bitcoin alone", async () => {
     const { v1, genesis, anchor } = await setup();
@@ -215,7 +215,7 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
   const onlyB = () => document([{ fragment: "b", signer: KEY_B }]);
   const off = () => ({ "@context": ["https://www.w3.org/ns/did/v1"], id: AUTHOR, deactivated: true });
   const inscribed = (entries: LogEntry[], height: number, extra: Partial<SatInscription> = {}) =>
-    at(height, { mediaType: ORIGINALS_INSCRIPTION_TYPE, content: bytes(serializeLog(entries)), ...extra });
+    at(height, { ...carrying(entries), ...extra });
   /** Verify from Bitcoin alone: the author's sat and the anchoring sat, no copy of the log (P9.18). */
   const fromBitcoin = (author: Inscribed[] | SatEvidence[], anchoring: Inscribed[], retained?: OriginalsReport["retain"]) =>
     verifyOriginal({
@@ -228,14 +228,14 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
   /** The issue's repro: V1 lists key A; the anchoring entry is signed with B and names V2, the grant of B. */
   async function grant(v2: Inscribed) {
     const v1 = version(10, onlyA());
-    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resources: [photo(B1)], author: ref(v1.id), sign });
+    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resource: photo(B1), author: ref(v1.id), sign });
     const anchor = await updateOriginal(genesis, { versionTime: time(30), aliases: [SAT], author: refB(v2.id), sign: signB });
     return { v1, v2, genesis, anchor };
   }
   /** Genesis and anchoring entry by V1 and key A. */
   async function byA() {
     const v1 = version(10, onlyA());
-    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resources: [photo(B1)], author: ref(v1.id), sign });
+    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resource: photo(B1), author: ref(v1.id), sign });
     const anchor = await updateOriginal(genesis, { versionTime: time(30), aliases: [SAT], author: ref(v1.id), sign });
     return { v1, genesis, anchor };
   }
@@ -361,7 +361,7 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
   test("C12-95: an entry before the anchor naming a did:btco author version inscribed after the anchoring inscription is rejected", async () => {
     const v1 = version(10, onlyA());
     const v2 = version(35, both());
-    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resources: [photo(B1)], author: ref(v1.id), sign });
+    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resource: photo(B1), author: ref(v1.id), sign });
     const renamed = await updateOriginal(genesis, { versionTime: time(21), name: "Signed with B", author: refB(v2.id), sign: signB });
     const anchor = await updateOriginal(renamed, { versionTime: time(30), aliases: [SAT], author: refB(v2.id), sign: signB });
     const anchoring = inscribed([genesis, renamed, anchor], 31);
@@ -379,7 +379,7 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
     // V2 removes key A before the anchoring inscription; genesis, signed with A under V1, still stands.
     const v1 = version(10, onlyA());
     const v2 = version(25, onlyB());
-    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resources: [photo(B1)], author: ref(v1.id), sign });
+    const genesis = await createOriginal({ versionTime: time(20), name: "Harbor", resource: photo(B1), author: ref(v1.id), sign });
     const anchor = await updateOriginal(genesis, { versionTime: time(30), aliases: [SAT], author: refB(v2.id), sign: signB });
     const r = await fromBitcoin([v1, v2], [inscribed([genesis, anchor], 31)]);
     expect(r.anchoring?.status).toBe("anchored");
@@ -489,7 +489,7 @@ describe("did:btco author versions in chain order (P5.13; #972)", () => {
   test("C12-98 and C12-44 unchanged: a did:vh author's named later version that lists a removed key again is accepted", async () => {
     const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);
     const vhSign = alice.signer(KEY, "orig");
-    const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resources: [photo(B1)], author: alice.ref("orig"), sign: vhSign });
+    const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", resource: photo(B1), author: alice.ref("orig"), sign: vhSign });
     const anchor = await updateOriginal(genesis, { versionTime: time(10), aliases: [SAT], author: alice.ref("orig"), sign: vhSign });
     // Removed at versionTime 20, listed again at versionTime 35; the entry is inscribed at 30 and names the later version.
     alice.timeOverride = new Date(T0 + 20 * 600_000).toISOString();

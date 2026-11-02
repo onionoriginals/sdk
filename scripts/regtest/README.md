@@ -17,10 +17,11 @@ The Originals journey asserts each step on real transactions:
 
 1. A local Original is anchored to a sat the wallet holds. The SDK verifies
    the log and the author's identity evidence through the anchoring entry,
-   reports what Bitcoin will not hold (the photo's bytes, the author's did:vh
-   history), and inscribes the whole stored log from genesis through the
-   anchoring entry; ord returns exactly those stored lines, with no metadata
-   (P9.17, P9.18). Broadcast but unmined, it does not count (P9.4) and reads
+   reports what Bitcoin will not hold (photo versions before the anchoring
+   entry's, the author's did:vh history), and inscribes the whole stored log
+   from genesis through the anchoring entry as CBOR metadata, with the current
+   photo version as the body under its media type; ord returns exactly those
+   entries and bytes (P9.17, P9.18, P14.12; originals-spec #53). Broadcast but unmined, it does not count (P9.4) and reads
    `pending-bitcoin-acceptance`; mined, it reads `anchored` and the Original
    verifies as anchored and current, with provisional ownership of the reveal
    output (P9.11, P9.16). Every read names its index (P9.11).
@@ -47,18 +48,19 @@ The Originals journey asserts each step on real transactions:
    rather than preparing it again. Each accepted inscription is at a strictly
    greater height, and once Bitcoin shows the committed head there is nothing
    to inscribe (`NOTHING_TO_INSCRIBE`) (P9.4, P9.6, P9.13).
-8. A second Original with an editor: Bob, granted the photo, replaces it
+8. A second Original with an editor: Bob, granted the resource, makes its next version
    before the anchor; Alice anchors and edits, and Bob edits again, all before
    anything is published. Without Bob's DID history the same store refuses to
    inscribe (`ANCHORING_NOT_VERIFIED`, P9.18). Catching up inscribes the log
    through the anchoring entry (Bob's entry inside it; ord returns the exact
-   stored lines), labelled pending until mined (asking for the edit first is
+   stored entries as metadata and the current version as the body), labelled pending until mined (asking for the edit first is
    `HEAD_NOT_NEXT`), then Alice's edit, then Bob's editor entry, which the
    holder inscribes and Bitcoin accepts, each in a later block (P5.16, P9.12,
    P9.13).
 9. Fresh readers: each Original verifies from its sat alone, with no copy of
-   the log, given only the off-chain signer DID histories; resource bytes are
-   unavailable, not a failure, and without the editor's history identity
+   the log, given only the off-chain signer DID histories; the current version
+   is read from the newest accepted inscription's body and verified, earlier
+   uninscribed versions are unavailable, not a failure, and without the editor's history identity
    evidence is incomplete (P9.17, P9.18). A recipient of the second sat, with
    an empty store, verifies the sender's `transferHandoff` package against the
    sat (`verifyHandoff`): anchored, identity complete, resources available.
@@ -75,7 +77,8 @@ only the store paths and the local node's endpoints in its environment.
 1. The journey creates an Original, anchors it and inscribes the log through
    the anchoring entry (unmined, it does not count and reads
    `pending-bitcoin-acceptance`; mined, `anchored`, and ord returns the exact
-   stored genesis and anchoring lines), then edits it with new resource bytes.
+   stored genesis and anchoring entries as metadata, with the resource as the
+   body), then edits it with the resource's next version.
 2. A writer process prepares and submits the edit's pair. When the state
    machine asks to broadcast the reveal (the commit is out and the record says
    `reveal_broadcast_unknown` on disk) the writer reports that, re-read from
@@ -97,7 +100,8 @@ only the store paths and the local node's endpoints in its environment.
    not claim the result current. The same reader also verifies from the sat
    alone, with no copy of the log and only the package's author DID history:
    the anchor, the resumed inscription and a valid history to the edit, with
-   the resource bytes unavailable (P9.17, P9.18).
+   the current version read from the resumed inscription's body (P9.17,
+   P9.18).
 
 It writes a receipt (git revision, Core and ord versions, txids, inscription
 ids, process ids and signals, store paths, PASS or FAIL per check) to

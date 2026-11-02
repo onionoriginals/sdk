@@ -1,8 +1,9 @@
 /**
- * Strict CBOR for did:btco DID-document metadata (did:btco method v0.2.0;
- * plan 012 §3.8). Only what a JSON DID document needs: unsigned and negative
- * integers within the safe range, text strings, arrays, maps with text keys,
- * true, false and null, all definite-length. Indefinite lengths, byte
+ * Strict CBOR for inscription metadata: did:btco DID documents (did:btco
+ * method v0.2.0; plan 012 §3.8; P5.13) and Originals entries (P14.12;
+ * originals-spec #53). Only what JSON needs: unsigned and negative integers
+ * of magnitude at most 2^53 − 1 (P14.3), text strings, arrays, maps with text
+ * keys, true, false and null, all definite-length. Indefinite lengths, byte
  * strings, tags, floats, undefined, duplicate keys, a `__proto__` key and
  * trailing bytes are rejected, and a leading BOM in text is kept, so a
  * metadata blob decodes one way or not at all.
@@ -16,8 +17,18 @@ function invalid(message: string): never {
   return fail("invalid-evidence", "CBOR_INVALID", message);
 }
 
+export interface DecodeCborOptions {
+  /**
+   * Require each integer and length in its shortest form (default true), as a
+   * did:btco DID document must be (P14.12). Originals entries need not be:
+   * they are checked over their JCS form (P14.3, P14.12).
+   */
+  shortest?: boolean;
+}
+
 /** Decode `bytes` as one strict CBOR data item. */
-export function decodeCbor(bytes: Uint8Array): JsonValue {
+export function decodeCbor(bytes: Uint8Array, options: DecodeCborOptions = {}): JsonValue {
+  const shortest = options.shortest !== false;
   let at = 0;
   const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
   const need = (n: number) => {
@@ -31,7 +42,7 @@ export function decodeCbor(bytes: Uint8Array): JsonValue {
     for (let k = 0; k < size; k++) value = (value << 8n) | BigInt(bytes[at++]);
     // Preferred (shortest) serialization only, so each value has one encoding.
     const min = size === 1 ? 24n : size === 2 ? 0x100n : size === 4 ? 0x10000n : 0x100000000n;
-    if (value < min) invalid("non-shortest integer encoding");
+    if (shortest && value < min) invalid("non-shortest integer encoding");
     if (value > BigInt(Number.MAX_SAFE_INTEGER)) invalid("integer beyond the safe range");
     return Number(value);
   };
@@ -44,8 +55,12 @@ export function decodeCbor(bytes: Uint8Array): JsonValue {
     switch (major) {
       case 0:
         return argument(info);
-      case 1:
-        return -1 - argument(info);
+      case 1: {
+        // P14.3: no magnitude above 2^53 − 1, so -2^53 is out of range too.
+        const n = argument(info);
+        if (n >= Number.MAX_SAFE_INTEGER) invalid("integer beyond the safe range");
+        return -1 - n;
+      }
       case 3: {
         const n = argument(info);
         need(n);

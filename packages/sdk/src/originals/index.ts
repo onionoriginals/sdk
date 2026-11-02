@@ -11,3 +11,5 @@ export { readZip, writeZip, crc32, checkArchivePath, ZIP_LIMITS, type ZipLimits 
 export * from "./hosting.js";
 export * from "./shared.js";
 export * from "./bitcoin.js";
+// What an Originals inscription carries and what the author is told before one (P9.17, P9.18, P14.12).
+export { inscriptionMetadata, descriptorOfLine, isActiveContent, inscriptionNotice, type InscriptionNotice } from "./inscription.js";

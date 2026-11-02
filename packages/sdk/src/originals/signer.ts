@@ -35,9 +35,9 @@ export interface EntrySummary {
   /** The identity whose key signs this entry (P5.11): the author, or the editor of an editor entry. */
   signer: SignerIdentity;
   /**
-   * Resource changes, as the entry's transitions: the prior and new digest of
-   * each changed resource, `from: null` for an added one and `to: null` for a
-   * removed one (P4.1, P14.4).
+   * The resource change, as the entry's transitions: at most one, the prior
+   * and new digest of the Original's one resource, `from: null` at genesis
+   * (P4.1, P14.4; originals-spec #53).
    */
   changes: Transition[];
   nameChanged: boolean;
@@ -106,19 +106,18 @@ export function describeEntry(summary: EntrySummary): string {
     `Operation: ${summary.operation}`,
     `Author: ${summary.author.did}${s.role === "editor" ? " (unchanged; an editor entry carries its parent's author)" : ""}`,
   ];
-  if (summary.changes.length === 0) lines.push("Resources: no change");
-  // Additions and removals are named as such (P4.1, P5.11): a removal leaves the resource's history.
+  // One resource per Original (P4.1, P14.4; originals-spec #53): at most one transition.
+  if (summary.changes.length === 0) lines.push("Resource: no new version");
   for (const c of summary.changes) {
-    if (c.from === null) lines.push(`Resource ${c.resource}: added ${c.to}`);
-    else if (c.to === null) lines.push(`Resource ${c.resource}: removed (was ${c.from}; its earlier versions stay in history)`);
-    else lines.push(`Resource ${c.resource}: ${c.from} -> ${c.to}`);
+    if (c.from === null) lines.push(`Resource: first version ${c.to}`);
+    else lines.push(`Resource: new version ${c.from} -> ${c.to}`);
   }
   if (summary.nameChanged) lines.push(`Name: changed to ${JSON.stringify(summary.name)}`);
   if (summary.metadataChanged) lines.push("Metadata: changed");
   if (summary.editorsChanged) {
     const grants = summary.editors ?? [];
     lines.push(`Editor grants: changed${grants.length === 0 ? " (none remain)" : ""}`);
-    for (const g of grants) lines.push(`  ${g.did}: name ${g.name ? "yes" : "no"}, metadata ${g.metadata ? "yes" : "no"}, resources ${g.resources.length > 0 ? g.resources.join(", ") : "none"}`);
+    for (const g of grants) lines.push(`  ${g.did}: name ${g.name ? "yes" : "no"}, metadata ${g.metadata ? "yes" : "no"}, resource ${g.resource ? "yes" : "no"}`);
   }
   return lines.join("\n");
 }
