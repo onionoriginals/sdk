@@ -368,6 +368,23 @@ await sdk.edit(did, { parent, resources: [{ id: "photo", bytes }], editor: bobRe
   supplies the grants, the `editor` reference, the editor key rules and the
   grant's scope. No signer is required to use did:btco.
 
+## Custody roles: devices and agents under one author
+
+Key custody is outside the protocol (originals-spec #46), but a consumer
+that keeps several keys per author maps them onto the constructs above.
+[Plan 048](../../plans/048-originals-5-vh-log-map.md) records the mapping
+against issue #953:
+
+| Consumer role | Originals construct | Rule |
+|---|---|---|
+| The key that administers the author's identity | the author DID's own update key. It never signs an asset entry | P5.11 |
+| A per-device signing key | an `assertionMethod` key embedded in the author DID, added by an author DID update; it signs author entries from that device, online or offline | P5.3, P5.10 |
+| A delegated agent | the agent's own DID with an editor grant; its entries read as the editor's, bounded to the granted content | P5.15–P5.18 |
+| Revocation | remove the key from the author DID, or remove the grant. Later entries by it are refused at a host and reported historically authorized only by a verifier | P7.9, P6.5 |
+
+Only `eddsa-jcs-2022` and `bip340-jcs-2025` keys can sign entries (P5.12), so
+a P-256 device key cannot sign today; that question is open to the spec.
+
 ## Moved author DIDs — identity continuity (P5.14, implemented)
 
 A did:webvh author DID can move to another host or path under the did:webvh
