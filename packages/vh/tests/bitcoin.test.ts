@@ -25,7 +25,7 @@ import {
 } from "../src/originals/index.js";
 import { versionNumberOf } from "../src/originals/author.js";
 import { canonicalize, type JsonValue } from "../src/json/index.js";
-import { VhAuthor, bytes, carrying, genesisWithMetadata, photo, seeded } from "./helpers/originals.js";
+import { VhAuthor, bytes, carrying, photo, seeded } from "./helpers/originals.js";
 
 const B0 = "harbor at dawn, uncropped";
 const B1 = "harbor at dawn";
@@ -1142,7 +1142,7 @@ describe("C12-150 on Bitcoin: an inscribed entry's size is its stored line (P14.
     const nums = Array.from({ length: 200 }, () => 1.5e-6);
     let pad = 0;
     for (let i = 0; i < 40; i++) {
-      const genesis = await genesisWithMetadata({ versionTime: time(1), name: "Harbor", metadata: { nums, pad: "a".repeat(pad) }, resource: photo(B1), author: ref, sign });
+      const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", metadata: { nums, pad: "a".repeat(pad) }, resource: photo(B1), author: ref, sign });
       const line = serializeLog([genesis]).slice(0, -1).replaceAll("0.0000015", "1.5e-6");
       const size = bytes(line).length;
       if (size !== 65_536) {
@@ -1326,7 +1326,7 @@ describe("an inscription's body is the resource version its last entry names (P9
     expect(bare.anchoring?.ignored.map((i) => i.reason)).toEqual(["body-not-the-resource"]);
   });
 
-  test("C12-195: inscription metadata holding a tag, byte string, float, indefinite-length item, non-text or duplicate key, or an integer beyond 2^53 - 1 is rejected", async () => {
+  test("C12-195, C12-199: inscription metadata holding a tag, byte string, indefinite-length item, non-text or duplicate key, an integer beyond 2^53 - 1, or a NaN, infinite, negative-zero or out-of-bound float is rejected", async () => {
     const { alice, copy, anchoring } = await anchored();
     const meta = encodeCbor(copy as unknown as JsonValue);
     // Each bad item stands in for the anchoring entry's `versionTime` value, so the metadata would otherwise decode to entries.
@@ -1345,7 +1345,10 @@ describe("an inscription's body is the resource version its last entry names (P9
     const bad: Record<string, number[]> = {
       tag: [0xc0, ...encodeCbor("2026-10-18T13:29:00.000Z")],
       "byte string": [0x41, 0x00],
-      float: [0xf9, 0x3c, 0x00],
+      NaN: [0xf9, 0x7e, 0x00],
+      Infinity: [0xf9, 0x7c, 0x00],
+      "negative zero": [0xf9, 0x80, 0x00],
+      "float 2^53": [0xfa, 0x5a, 0x00, 0x00, 0x00],
       "indefinite-length": [0x7f, 0x61, 0x61, 0xff],
       "non-text key": [0xa1, 0x01, 0x02],
       "duplicate key": [0xa2, 0x61, 0x61, 0x01, 0x61, 0x61, 0x02],
@@ -1369,6 +1372,27 @@ describe("an inscription's body is the resource version its last entry names (P9
     // The control: a well-formed text there decodes, and the entry then fails its own checks.
     const control = await verify(undefined, alice, [sat([anchoring(10, { metadata: at([...encodeCbor("x")]) })])]);
     expect(control.anchoring?.ignored.map((i) => i.reason)).not.toContain("undecodable");
+  });
+
+  test("C12-198: an entry whose metadata holds non-integer numbers is inscribed as floats of any width and verifies over its JCS form (P14.3, P14.12)", async () => {
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);
+    const sign = alice.signer(KEY, "orig");
+    const ref = alice.ref("orig");
+    const genesis = await createOriginal({ versionTime: time(1), name: "Harbor", metadata: { rating: 4.5, place: [51.5072, -0.1276], tiny: 1.5e-6 }, resource: photo(B1), author: ref, sign });
+    const anchor = await updateOriginal(genesis, { versionTime: time(10), aliases: [SAT], author: ref, sign });
+    const narrow = carrying([genesis, anchor]);
+    // 4.5 as ord writes it (a half float), and the same number widened to a double.
+    const half = [0xf9, 0x44, 0x80];
+    const at = narrow.metadata!.findIndex((_, k) => half.every((b, j) => narrow.metadata![k + j] === b));
+    expect(at).toBeGreaterThan(0);
+    const wide = new Uint8Array([...narrow.metadata!.slice(0, at), 0xfb, 0x40, 0x12, 0, 0, 0, 0, 0, 0, ...narrow.metadata!.slice(at + 3)]);
+    for (const metadata of [narrow.metadata!, wide]) {
+      const r = await verify(undefined, alice, [sat([inscribe([], 10, { ...narrow, metadata })])]);
+      expect(r.anchoring?.status, JSON.stringify(r.anchoring?.ignored)).toBe("anchored");
+      expect(r.head).toBe(anchor.versionId);
+      expect(r.current).toBe(true);
+      expect(r.state?.metadata).toEqual({ rating: 4.5, place: [51.5072, -0.1276], tiny: 1.5e-6 });
+    }
   });
 
   test("C12-197: an entry carried in metadata is checked over its JCS form; key order and integer encoding in the CBOR do not matter", async () => {

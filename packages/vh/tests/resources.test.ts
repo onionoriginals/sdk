@@ -175,15 +175,15 @@ describe("C12-159: transitions in the genesis entry / an entry changing the reso
   });
 });
 
-describe("metadata the inscription metadata cannot carry (P14.12; PROVISIONAL)", () => {
-  test("a non-integer number in metadata is refused before signing, at create and at edit", async () => {
+describe("C12-198: metadata with non-integer numbers (P14.3, P14.12; originals-spec #54)", () => {
+  test("the builders accept a non-integer number in metadata, at create and at edit", async () => {
     const author = await VhAuthor.create([{ fragment: "orig", signer: seeded(41) }]);
     const ref = author.ref("orig");
     const sign = author.signer(seeded(41), "orig");
-    expect(() => prepareCreateOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", metadata: { rating: 4.5 }, resource: photo("m1"), author: ref }))
-      .toThrow(expect.objectContaining({ category: "unsupported-profile", code: "METADATA_NOT_INSCRIBABLE" }));
-    const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", metadata: { rating: 4 }, resource: photo("m1"), author: ref, sign });
-    expect(() => prepareUpdateOriginal(genesis, { versionTime: "2026-10-18T12:00:01.000Z", metadata: { rating: 4.5 }, author: ref }))
-      .toThrow(expect.objectContaining({ code: "METADATA_NOT_INSCRIBABLE" }));
+    const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", metadata: { rating: 4.5 }, resource: photo("m1"), author: ref, sign });
+    expect((genesis.state as { asset: { metadata: unknown } }).asset.metadata).toEqual({ rating: 4.5 });
+    const next = prepareUpdateOriginal(genesis, { versionTime: "2026-10-18T12:00:01.000Z", metadata: { rating: 0.1 }, author: ref });
+    expect((next.state as { asset: { metadata: unknown } }).asset.metadata).toEqual({ rating: 0.1 });
+    expect(prepareCreateOriginal).toBeDefined();
   });
 });

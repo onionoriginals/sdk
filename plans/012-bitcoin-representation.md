@@ -83,10 +83,12 @@ JSON Lines body of 21 October 2026; P9.17, P14.12):
   log entries, each the parsed JSON of one `did.jsonl` line, split into data
   pushes of at most 520 bytes that a reader concatenates. The JSON-to-CBOR
   mapping is ord's for `--json-metadata` (PROVISIONAL): maps with text keys in
-  the object's order, shortest-form integers, `true`, `false`, `null`. A reader
-  rejects tags, byte strings, floats, indefinite lengths, non-text or duplicate
-  keys and integers beyond 2^53 − 1, and checks each entry over its JCS form,
-  so key order and integer encoding do not matter. Metadata that does not
+  the object's order, shortest-form integers, other numbers as the narrowest
+  exact float, `true`, `false`, `null` (originals-spec #54). A reader rejects
+  tags, byte strings, indefinite lengths, non-text or duplicate keys, integers
+  beyond 2^53 − 1 and floats that are NaN, infinite, negative zero or beyond
+  that bound; it accepts a float of any width, and checks each entry over its
+  JCS form, so key order, integer form and float width do not matter. Metadata that does not
   decode to an array, such as a did:btco DID document, is not an Originals
   inscription.
 - **Content type (ord tag 1):** the `mediaType` of the resource in the last

@@ -70,7 +70,10 @@ describe("strict CBOR for DID documents", () => {
     expect(code([0xa2, 0x61, 0x61, 0x01, 0x61, 0x61, 0x02])).toThrow(OriginalsError); // duplicate key
     expect(code([0x9f, 0x01, 0xff])).toThrow(/additional information/); // indefinite length
     expect(code([0xc0, 0x01])).toThrow(/tags/);
-    expect(code([0xfb, 0, 0, 0, 0, 0, 0, 0, 0])).toThrow(/floats/);
+    // A DID document is in shortest form (P14.12): 0.0 written as a double is not; NaN never is JSON.
+    expect(code([0xfb, 0, 0, 0, 0, 0, 0, 0, 0])).toThrow(/non-shortest float/);
+    expect(code([0xf9, 0x7e, 0x00])).toThrow(/NaN/);
+    expect(decodeCbor(new Uint8Array([0xf9, 0x44, 0x80]))).toBe(4.5);
     expect(code([0x18, 0x05])).toThrow(/shortest/);
     expect(code([0x01, 0x02])).toThrow(/trailing/);
     expect(code([0x42, 0x01, 0x02])).toThrow(/byte strings/);

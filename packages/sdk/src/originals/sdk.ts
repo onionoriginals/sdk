@@ -1116,22 +1116,26 @@ export class OriginalsSDK {
     const storedLines = lines(stored);
     const parentEntry = storedLines.length > 0 ? (parseJson(storedLines[storedLines.length - 1]) as unknown as UnsignedEntry) : undefined;
     const predecessor = storedLines.length > 1 ? (parseJson(storedLines[storedLines.length - 2]) as { versionId: string }).versionId : undefined;
+    // P9.17 (originals-spec #53): after the anchoring entry each entry is published in an inscription
+    // of its own, its metadata and the resource version it names together at most 350,000 bytes.
+    // One that could never be inscribed would block every later publication, so it is not signed into history.
+    // Checked first with the shortest proof a 64-byte signature encodes to (P5.12), so an author is never
+    // asked to sign an entry that is refused anyway; checked again on the signed entry below.
+    const afterAnchor = ((parentEntry?.state as unknown as EntryState | undefined)?.asset?.aliases ?? []).some((a) => a.startsWith("did:btco:"));
+    const checkInscribable = (e: LogEntry) => {
+      const size = inscriptionMetadata([JSON.stringify(e)]).length + (e.state as unknown as EntryState).asset.resource.size;
+      if (size > ORIGINALS_INSCRIPTION_MAX_BYTES) {
+        sdkError("limit-exceeded", "INSCRIPTION_TOO_LARGE", `entry ${e.versionId} and the resource version it names would be ${size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, { size, limit: ORIGINALS_INSCRIPTION_MAX_BYTES });
+      }
+    };
+    if (afterAnchor) checkInscribable({ ...draft.entry, proof: [{ ...proofOptions, proofValue: multibaseEncode(new Uint8Array(64)) }] });
     const signature = await signer.sign({
       entry: draft.entry, proofOptions, summary: draft.summary, display: draft.display ?? describeEntry(draft.summary),
       ...(parentEntry ? { parent: { entry: parentEntry, ...(predecessor ? { predecessor } : {}) } } : {}),
     });
     const entry: LogEntry = { ...draft.entry, proof: [{ ...proofOptions, proofValue: multibaseEncode(signature) }] };
     const candidate = stored + serializeLog([entry]);
-    // P9.17 (originals-spec #53): after the anchoring entry each entry is published in an inscription
-    // of its own, its metadata and the resource version it names together at most 350,000 bytes.
-    // One that could never be inscribed would block every later publication, so it is not signed into history.
-    const parentAliases = (parentEntry?.state as unknown as EntryState | undefined)?.asset?.aliases ?? [];
-    if (parentAliases.some((a) => a.startsWith("did:btco:"))) {
-      const size = inscriptionMetadata([JSON.stringify(entry)]).length + (entry.state as unknown as EntryState).asset.resource.size;
-      if (size > ORIGINALS_INSCRIPTION_MAX_BYTES) {
-        sdkError("limit-exceeded", "INSCRIPTION_TOO_LARGE", `entry ${entry.versionId} and the resource version it names would be ${size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, { size, limit: ORIGINALS_INSCRIPTION_MAX_BYTES });
-      }
-    }
+    if (afterAnchor) checkInscribable(entry);
 
     const report = await this.verify(candidate, undefined, draft.bytes);
     const added = report.resources.versions.filter((v) => v.versionId === entry.versionId);

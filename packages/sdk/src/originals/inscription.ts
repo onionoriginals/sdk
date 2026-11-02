@@ -1,12 +1,13 @@
 /**
  * What an Originals inscription carries (P9.17, P14.12; owner decision of 1
- * November 2026, originals-spec #53):
+ * November 2026, originals-spec #53, #54):
  * - metadata (ord tag 5): the CBOR encoding of a JSON array of the entries it
  *   carries, each the parsed JSON of one stored asset log line. The JSON-to-CBOR
  *   mapping is ord's for `--json-metadata` and stays PROVISIONAL (D6, P14.12):
  *   objects are maps with text keys in the object's order, integers in
- *   shortest form. Hashes and proofs are over each entry's JCS form, so key
- *   order does not matter (P14.3).
+ *   shortest form, other numbers as the narrowest float (half, single or
+ *   double precision) that holds them exactly (#54). Hashes and proofs are over
+ *   each entry's JCS form, so key order and float width do not matter (P14.3).
  * - content type (ord tag 1): the `mediaType` of the resource in the last entry.
  * - body: the exact bytes of the resource version that entry's descriptor names,
  *   with no content encoding.
@@ -14,30 +15,23 @@
  */
 import { OriginalsError } from "@originals/vh";
 import { parseJson } from "@originals/vh/json";
-import { encodeCbor, type ResourceDescriptor } from "@originals/vh/originals";
+import { checkDescriptor, encodeCbor, type ResourceDescriptor } from "@originals/vh/originals";
 
 /** The CBOR metadata of an inscription carrying these stored lines, in order (P14.12). */
 export function inscriptionMetadata(lines: readonly string[]): Uint8Array {
-  try {
-    return encodeCbor(lines.map((line) => parseJson(line)));
-  } catch (error) {
-    // A valid entry with a non-integer number (P14.5 allows one) has no CBOR form under the mapping
-    // P14.12 gives, so it can never be inscribed. PROVISIONAL, pending a spec fix (plan 011 finding S13).
-    if (error instanceof OriginalsError && error.code === "CBOR_INVALID") {
-      throw new OriginalsError("unsupported-profile", "METADATA_NOT_INSCRIBABLE", "an entry holds a number that is not an integer of magnitude at most 2^53 - 1, which inscription metadata cannot carry (P14.12)");
-    }
-    throw error;
-  }
+  return encodeCbor(lines.map((line) => parseJson(line)));
 }
 
-/** The resource descriptor the entry on `line` names (P9.17). */
+/**
+ * The resource descriptor the entry on `line` names (P9.17), checked as the
+ * state rules check it (P14.6). Throws `invalid-evidence` / `STATE_RESOURCE`
+ * when the entry names none, or a malformed one.
+ */
 export function descriptorOfLine(line: string): ResourceDescriptor {
-  const entry = parseJson(line) as { state?: { asset?: { resource?: ResourceDescriptor } } };
-  const d = entry.state?.asset?.resource;
-  if (!d || typeof d.digest !== "string" || typeof d.mediaType !== "string" || typeof d.size !== "number") {
-    throw new TypeError("the entry names no resource descriptor");
-  }
-  return d;
+  const entry = parseJson(line) as { state?: { asset?: { resource?: unknown } } };
+  const d = entry?.state?.asset?.resource;
+  if (d === undefined) throw new OriginalsError("invalid-evidence", "STATE_RESOURCE", "the entry names no resource descriptor (P9.17)");
+  return checkDescriptor(d, "state.asset.resource");
 }
 
 /**

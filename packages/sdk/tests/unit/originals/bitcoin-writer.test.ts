@@ -541,8 +541,14 @@ describe("C12-112: the anchoring inscription is the log through the anchoring en
     const did = small.did;
     const head = (await small.sdk.get(did)).checkpoint;
     const committed = await small.sdk.committedLog(did);
-    await expect(small.sdk.edit(did, { parent: head, resource: { bytes: new Uint8Array(ORIGINALS_INSCRIPTION_MAX_BYTES - 100) }, author: small.alice.ref("orig"), signer: small.signer }))
+    // Refused before the signer is asked: a hardware or Turnkey signer never prompts for it.
+    let prompts = 0;
+    const counting = Object.assign(Object.create(Object.getPrototypeOf(small.signer)), small.signer, {
+      sign: (input: Parameters<typeof small.signer.sign>[0]) => { prompts++; return small.signer.sign(input); },
+    }) as typeof small.signer;
+    await expect(small.sdk.edit(did, { parent: head, resource: { bytes: new Uint8Array(ORIGINALS_INSCRIPTION_MAX_BYTES - 100) }, author: small.alice.ref("orig"), signer: counting }))
       .rejects.toMatchObject({ category: "limit-exceeded", code: "INSCRIPTION_TOO_LARGE" });
+    expect(prompts).toBe(0);
     expect(await small.sdk.committedLog(did)).toBe(committed);
   });
 
@@ -592,6 +598,22 @@ describe("C12-112: the anchoring inscription is the log through the anchoring en
     await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) });
     store.deleteResource(resourceDigest(bytes("one")));
     await expect(pairFor(sdk, c.original.did, node(snapshot([])).provider)).rejects.toMatchObject({ category: "incomplete-evidence", code: "RESOURCE_BYTES_MISSING", details: { digest: resourceDigest(bytes("one")) } });
+  });
+
+  test("a prepared pair is submitted without a stored copy of its body: the reveal is checked against the descriptor (P9.6, P9.17)", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const store = new MemoryStore();
+    const sdk = OriginalsSDK.create({ store, authors: async () => alice.evidence(), freshness: "asserted", clock: clock() });
+    const signer = alice.signer("orig", KEY);
+    const c = await sdk.create({ name: "Harbor", resource: { mediaType: "image/jpeg", bytes: bytes("one") }, author: alice.ref("orig"), signer });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) });
+    const r = recovery();
+    const chain = node(snapshot([]));
+    const pair = await pairFor(sdk, c.original.did, chain.provider, undefined, { recoveryStore: r.store, recoveryIds: r.ids() });
+    store.deleteResource(resourceDigest(bytes("one")));
+    const sent = await submitEntryInscription({ sdk, did: c.original.did, pair, provider: chain.provider, clock: blocks(), index: INDEX, recoveryStore: r.store, recoveryIds: r.ids() });
+    expect(sent.broadcast).toBe("reveal_broadcast");
   });
 
   test("a pair whose metadata, body or content type is not the stored entries and the version they name is not sent (PAIR_BODY_MISMATCH, P9.6, P9.17)", async () => {
@@ -648,6 +670,26 @@ describe("the review of #1026 (P9.6, P9.17, P9.18)", () => {
     // Through the accepted head, version 2 is the anchor's body; only version 1 stays off chain.
     const accepted = await transferHandoff(sdk, did, { provider: provider(SAT, snapshot([anchorBody(all, 2)])), clock: blocks(), index: INDEX });
     expect(accepted.offChain.resources.map((r) => r.version)).toEqual([1]);
+  });
+
+  test("C12-198: an Original whose metadata holds non-integer numbers is anchored and inscribed, its floats at the narrowest exact width (P14.12; originals-spec #54)", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: clock() });
+    const signer = alice.signer("orig", KEY);
+    const metadata = { rating: 4.5, place: [51.5072, -0.1276] };
+    const c = await sdk.create({ name: "Harbor", metadata, resource: { mediaType: "image/jpeg", bytes: bytes("one") }, author: alice.ref("orig"), signer });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) });
+    const pair = await pairFor(sdk, c.original.did, node(snapshot([])).provider);
+    const raw = rawMetadataPerEnvelope(scriptOf(pair.prepared), 1)[0]!;
+    // 4.5 is a half float, as ord writes it.
+    expect([0xf9, 0x44, 0x80].every((b, j, h) => raw.some((_, k) => h.every((x, i) => raw[k + i] === x)))).toBe(true);
+    // Decoded, the entries are the stored lines exactly, and Bitcoin shows the Original anchored and current.
+    const all = (await sdk.committedLog(c.original.did)).trimEnd().split("\n");
+    expect(inscribed(pair.prepared)).toBe(all.map((l) => `${l}\n`).join(""));
+    const shown = await readAnchored(sdk, c.original.did, { provider: node(snapshot([anchorBody(all)])).provider, clock: blocks(), index: INDEX });
+    expect(shown.publication).toBe("anchored");
+    expect(shown.state.metadata).toEqual(metadata);
   });
 
   test("the notice names the whole log for an anchoring inscription and the one entry for a later one (P9.18)", () => {

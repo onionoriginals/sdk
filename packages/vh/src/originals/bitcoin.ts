@@ -54,7 +54,7 @@ import type { LogEntry, LogVerification } from "../log/index.js";
 import { authorKey, stillAuthorized, versionNumberOf, type AuthorHistory, type AuthorVersion } from "./author.js";
 import { btcoAliasOf, chainOrder, parseBtcoAlias, readSat, type ChainPosition, type PlacementReason, type SatEvidence, type SatInscription, type SatRead } from "./btco.js";
 import { decodeCbor } from "./cbor.js";
-import { ORIGINALS_LIMITS, resourceDigest, signerOf, type AuthorRef, type EntryState, type ResourceDescriptor } from "./state.js";
+import { ORIGINALS_LIMITS, checkDescriptor, resourceDigest, signerOf, type AuthorRef, type EntryState, type ResourceDescriptor } from "./state.js";
 
 /**
  * The largest inscription, its metadata and body together, in bytes (P9.17,
@@ -90,11 +90,14 @@ export function readInscribedEntries(metadata: Uint8Array | null | undefined): I
   return { kind: "entries", entries: value as unknown as LogEntry[] };
 }
 
-/** The resource descriptor an entry's state names, when it has one (P9.17). */
+/** The resource descriptor an entry's state names, when it is a valid one (P9.17, P14.6). */
 function descriptorOf(entry: unknown): ResourceDescriptor | undefined {
-  const d = stateOf(entry).asset?.resource as unknown;
-  if (!isJsonObject(d) || typeof d.mediaType !== "string" || typeof d.size !== "number" || typeof d.digest !== "string") return undefined;
-  return d as unknown as ResourceDescriptor;
+  try {
+    return checkDescriptor(stateOf(entry).asset?.resource, "state.asset.resource");
+  } catch (error) {
+    if (error instanceof OriginalsError) return undefined;
+    throw error;
+  }
 }
 
 /**

@@ -39,15 +39,15 @@ for (const root of roots) {
 }
 
 describe("section 12 conformance registry", () => {
-  // The pinned table (originals-spec master a9ecdbb, with #53 merged: one resource per Original) has
-  // 190 rows. Ids are stable across re-pins, so they need not equal table positions; each row records
+  // The pinned table (originals-spec master 45ed1dc, with #53 merged: one resource per Original, and
+  // #54: non-integer metadata numbers as CBOR floats) has 192 rows. Ids are stable across re-pins, so they need not equal table positions; each row records
   // its position in the pinned table. A row from an open spec pull request would carry `proposal`.
-  test("registers all 190 pinned rows with unique ids, in table order", () => {
-    expect(registry.rows.length).toBe(190);
+  test("registers all 192 pinned rows with unique ids, in table order", () => {
+    expect(registry.rows.length).toBe(192);
     const pinned = registry.rows.filter((r) => r.proposal === undefined);
-    expect(pinned.length).toBe(190);
+    expect(pinned.length).toBe(192);
     expect(registry.rows.map((r) => r.position)).toEqual(registry.rows.map((_, i) => i + 1));
-    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(190);
+    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(192);
     for (const r of registry.rows) expect(r.id).toMatch(/^C12-\d{2,3}$/);
   });
 

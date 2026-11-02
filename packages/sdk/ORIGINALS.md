@@ -803,11 +803,11 @@ received.report.ownership?.output;                           // compare with the
   blocks later publications. A large resource leaves little room for the
   log: anchor early. The writer needs the bytes it inscribes; if this SDK
   does not hold the version the entry names, the pair is refused
-  (`incomplete-evidence`, `RESOURCE_BYTES_MISSING`). Inscription metadata
-  carries integers only (P14.12), so `create` and `edit` refuse metadata with
-  a non-integer number, and the writer refuses a stored entry holding one
-  (`unsupported-profile`, `METADATA_NOT_INSCRIBABLE`; PROVISIONAL pending a
-  spec fix, plan 011 S13). The verifier accepts such entries, as the spec does.
+  (`incomplete-evidence`, `RESOURCE_BYTES_MISSING`). Non-integer numbers in
+  metadata, such as `4.5`, are inscribed as the narrowest exact CBOR float,
+  as ord writes them; a reader accepts any width and rejects NaN, infinities,
+  negative zero and magnitudes above 2^53 − 1 (P14.3, P14.12;
+  originals-spec #54).
 - **Told before inscribing (P9.18).** `pair.notice` is what the caller shows
   the author before sending: the resource version the inscription carries,
   and the log with its name and metadata, become public and permanent on

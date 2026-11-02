@@ -185,8 +185,7 @@ function planFor(log: StoredLog, index: number): Planned {
 }
 
 /** The inscription's full contents: the plan and the stored bytes of the version it names (P9.17). */
-async function contentsFor(sdk: OriginalsSDK, log: StoredLog, index: number): Promise<Planned & { body: Uint8Array }> {
-  const plan = planFor(log, index);
+async function contentsFor(sdk: OriginalsSDK, log: StoredLog, index: number, plan: Planned = planFor(log, index)): Promise<Planned & { body: Uint8Array }> {
   const body = await sdk.resourceBytes(plan.resource.digest);
   if (!body) {
     refuse("incomplete-evidence", "RESOURCE_BYTES_MISSING", `the inscription of ${log.ids[index]} carries resource version ${plan.resource.digest} as its body, and this SDK does not hold those bytes (P9.17)`, { digest: plan.resource.digest, versionId: log.ids[index] });
@@ -464,7 +463,8 @@ export async function prepareEntryInscription(params: EntryInscriptionParams): P
     refuse("invalid-evidence", "NETWORK_MISMATCH", `${log.sat.did} is a ${log.sat.network} sat; the writer is on ${params.network}`);
   }
   // A log and current version over the limit through the anchoring entry can never be anchored (P9.17).
-  checkSize(log, log.anchor, planFor(log, log.anchor));
+  const anchorPlan = planFor(log, log.anchor);
+  checkSize(log, log.anchor, anchorPlan);
   const { pending, found, disagreement } = await observe(sdk, did, log, { provider: params.provider, clock, index: satIndex, ...(indexes ? { indexes } : {}), ...(recoveryStore ? { recoveryStore } : {}), ...(recoveryIds ? { recoveryIds } : {}) });
   refuseDisagreement(did, disagreement);
   const target = versionId ?? pending.next;
@@ -483,8 +483,9 @@ export async function prepareEntryInscription(params: EntryInscriptionParams): P
     refuse("stale-parent", "PAIR_IN_FLIGHT", `a recorded pair for ${target} can still land (${ids.join(", ")}); resume it, or name it in \`replaces\` to prepare a replacement (P9.6)`, { recoveryIds: ids });
   }
   // The stored lines, as signed, and the stored bytes of the version they name (P9.6, P9.17).
-  checkSize(log, index, planFor(log, index));
-  const contents = await contentsFor(sdk, log, index);
+  const plan = index === log.anchor ? anchorPlan : planFor(log, index);
+  checkSize(log, index, plan);
+  const contents = await contentsFor(sdk, log, index, plan);
   const offChain = await verifyThrough(sdk, did, log, index);
   const prepared = await prepareInscriptionOnSat({
     ...rest,
@@ -535,7 +536,9 @@ export async function submitEntryInscription(params: SubmitEntryParams): Promise
   const index = log.ids.indexOf(pair.versionId);
   if (index < 0) refuse("invalid-evidence", "ENTRY_NOT_STORED", `${pair.versionId} is not in the stored log of ${did}`);
   const inscribed = inscribedOf(pair.prepared);
-  const expected = await contentsFor(sdk, log, index);
+  // The reveal's body is checked against the descriptor (size and digest), so a submit needs no
+  // stored copy of the bytes: the pair already carries them (P9.6, P9.17).
+  const expected = planFor(log, index);
   if (!inscribed || !sameInscription(inscribed, expected) || pair.prepared.satoshi !== log.sat.sat) {
     refuse("invalid-evidence", "PAIR_BODY_MISMATCH", `the pair does not inscribe the stored entries of ${pair.versionId} and the version they name on ${log.sat.did}`);
   }

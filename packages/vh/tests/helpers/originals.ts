@@ -1,8 +1,8 @@
 /** Test helpers: did:vh author DIDs and Originals built with the library's own builders. */
 import { localSigner, type CryptosuiteName, type KeyType, type ProofSigner } from "../../src/crypto/index.js";
 import type { JsonObject } from "../../src/json/index.js";
-import { SCID_PLACEHOLDER, appendEntry, createLog, prepareGenesis, serializeLog, signEntry, signWith, type EntrySigner, type LogEntry } from "../../src/log/index.js";
-import { ORIGINALS_METHOD, encodeCbor, resourceDigest, type AuthorDidEvidence, type AuthorRef, type ResourceDescriptor, type SatInscription } from "../../src/originals/index.js";
+import { appendEntry, createLog, serializeLog, signWith, type EntrySigner, type LogEntry } from "../../src/log/index.js";
+import { encodeCbor, resourceDigest, type AuthorDidEvidence, type AuthorRef, type ResourceDescriptor, type SatInscription } from "../../src/originals/index.js";
 import type { JsonValue } from "../../src/json/index.js";
 
 export const NOW = Date.parse("2026-10-19T00:00:00Z");
@@ -221,19 +221,4 @@ export class WebvhAuthor {
   signer(signer: ProofSigner, ref: AuthorRef): EntrySigner {
     return signWith(signer, { cryptosuite: suiteOf(signer), verificationMethod: ref.verificationMethod });
   }
-}
-
-/**
- * A genesis entry built below the SDK's builders, for metadata they refuse but the verifier accepts:
- * a non-integer number, which no inscription can carry (P14.12; PROVISIONAL builder rule).
- */
-export async function genesisWithMetadata(input: { versionTime: string; name: string; metadata: JsonObject; resource: ResourceDescriptor; author: AuthorRef; sign: EntrySigner }): Promise<LogEntry> {
-  const state = {
-    id: `did:vh:${SCID_PLACEHOLDER}`,
-    operation: "create",
-    author: input.author,
-    asset: { name: input.name, metadata: input.metadata, status: "active", resource: input.resource, aliases: [] },
-    transitions: [{ from: null, to: input.resource.digest }],
-  } as unknown as JsonObject;
-  return signEntry(prepareGenesis({ versionTime: input.versionTime, parameters: { method: ORIGINALS_METHOD, scid: SCID_PLACEHOLDER }, state }), input.sign);
 }

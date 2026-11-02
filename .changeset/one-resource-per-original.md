@@ -33,3 +33,8 @@ Original is exactly one resource, which can have many versions (P4.1).
 Originals written under the earlier encoding, including the mainnet
 acceptance Original of 1 November 2026, are not converted and no longer
 verify (D1, D7).
+
+Non-integer numbers in asset metadata, such as `4.5`, are inscribed as the
+narrowest exact CBOR float, as ord writes them; readers accept any width and
+reject NaN, infinities, negative zero and magnitudes above 2^53 − 1
+(originals-spec #54, P14.12).
