@@ -64,6 +64,17 @@ The Originals journey asserts each step on real transactions:
    evidence is incomplete (P9.17, P9.18). A recipient of the second sat, with
    an empty store, verifies the sender's `transferHandoff` package against the
    sat (`verifyHandoff`): anchored, identity complete, resources available.
+11. Read budgets (step 10, chain order after an unverifiable inscription, is
+    described in the script's header): the holder adds two ordinary
+    20,000-byte images to the second Original's sat, one with a collection's
+    CBOR map metadata and one with none. A full read with a one-byte content
+    budget still verifies the Original as anchored: each image is judged by its
+    metadata (`not-requested`) and ignored, and the Originals inscriptions are
+    read from the Originals pool. An Originals read passed through the host's
+    JSON codec and the landing's decoder keeps the image's metadata as bytes
+    and verifies. A read whose Originals pool cannot hold the first inscription
+    stops asking for metadata, reports it unknown, and is
+    `SAT_READ_INCOMPLETE`, never a wrong result (P9.12, P9.17, P14.12).
 
 The recovery store in this journey is in memory: step 7 shows resuming within
 one process. The restart journey below shows it after a process is killed.

@@ -46,6 +46,15 @@
  *     for that evidence and prepares nothing, and a result current with them
  *     carries the notices. A reader with the newer version accepts the earlier
  *     edit; the later one no longer extends the head.
+ * 11. Read budgets on a real sat (P9.12, P9.17, P14.12): the holder adds two
+ *     ordinary images to the second Original's sat, one with a collection's
+ *     map metadata and one with none. A full read whose content budget cannot
+ *     hold any body still verifies the Original: the images are judged by
+ *     their metadata and ignored, and the Originals inscriptions are read from
+ *     the Originals pool. An Originals read survives the host's JSON codec and
+ *     the landing's decoder with the images' metadata intact. A read whose
+ *     Originals pool cannot hold the first inscription stops asking for
+ *     metadata and is an explicit incomplete result, never a wrong one.
  *  9. Fresh readers: each Original verifies from its sat alone, with no copy
  *     of the log, plus the off-chain signer DID histories (P9.17, P9.18); the
  *     inscribed versions come from the sat, and only versions before the
@@ -66,7 +75,11 @@ import { RegtestProvider } from '../../packages/sdk/src/adapters/providers/Regte
 import type { InscriptionRecoveryRecord, InscriptionRecoveryStore } from '../../packages/sdk/src/bitcoin/inscription-recovery';
 import type { BitcoinSigner } from '../../packages/sdk/src/types/common';
 import type { Utxo } from '../../packages/sdk/src/types/bitcoin';
-import { decodeCbor, verifyOriginal, type AuthorDidEvidence } from '@originals/vh/originals';
+import { decodeCbor, encodeCbor, verifyOriginal, type AuthorDidEvidence } from '@originals/vh/originals';
+import { prepareInscriptionOnSat, submitPreparedInscriptionOnSat } from '../../packages/sdk/src/bitcoin/inscribe-on-sat';
+import type { SatSnapshot } from '../../packages/sdk/src/bitcoin/sat-snapshot-types';
+import { encodeSatSnapshot } from '../../packages/host/src/sat-snapshot-codec';
+import { decodeSatSnapshot } from '../../apps/landing/src/sdk/http-ordinals-provider';
 import { InscriptionClock, MemoryStore, OriginalsSDK, btcoAlias, keySigner, satEvidence } from '../../packages/sdk/src/originals/index';
 import { catchUp, prepareEntryInscription, readAnchored, resumeEntryInscription, submitEntryInscription, transferHandoff, verifyHandoff, type CatchUpStep } from '../../packages/sdk/src/originals/bitcoin-writer';
 import type { OriginalView } from '../../packages/sdk/src/originals/index';
@@ -566,6 +579,65 @@ try {
       completeness: handoff.package.manifest.completeness, identities: handoff.offChain.identities, resources: handoff.offChain.resources.length,
       recipient: { anchoring: received.report.anchoring?.status, head: received.report.head, identity: received.report.identityEvidence.status, resources: received.report.resources.status, reasons: received.reasons },
     },
+  };
+
+  step('11: read budgets on a real sat');
+  // 11. The holder adds ordinary inscriptions to the Lighthouse sat: images, not Originals inscriptions.
+  const sat2Number = sat2.split(':').at(-1)!;
+  const collection = encodeCbor({ collection: 'regtest harbour prints', edition: 1 });
+  const junk: Array<{ id: string; metadata: Uint8Array | null }> = [];
+  for (const metadata of [collection, null]) {
+    const holder = await holdingOf(await readAnchored(sdk, did2, { provider, clock, index: ORD }));
+    const image = crypto.getRandomValues(new Uint8Array(20_000));
+    const prepared = await prepareInscriptionOnSat({
+      fundingUtxos: [holder, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider,
+      buildContent: () => Promise.resolve({ content: image, contentType: 'image/png', ...(metadata ? { metadata } : {}) }),
+    });
+    assert.equal((await submitPreparedInscriptionOnSat({ prepared, provider, recoveryStore })).broadcast, 'reveal_broadcast');
+    await env.mine();
+    junk.push({ id: prepared.inscriptionId, metadata });
+  }
+  const verifiedFrom = async (snapshot: SatSnapshot) => {
+    const satpoint = snapshot.ownership.satpoint!;
+    const ownerConfirmations = (await provider.getTransactionStatus(satpoint.split(':')[0])).confirmations ?? 0;
+    return verifyOriginal({ bitcoin: [await satEvidence(snapshot, { clock, ownerConfirmations, index: ORD })], authors: [alice.evidence, bob.evidence], now: Date.now() });
+  };
+  const bodyOf = (snapshot: SatSnapshot, id: string) => snapshot.publications.find((p) => p.id === id)!.body;
+  const originalsInscriptions = [anchor2Pair, early2Pair, bob2Pair].map((pair) => pair.prepared.inscriptionId);
+
+  // A full read whose content budget holds no body: metadata decides for each inscription past it.
+  const noContent = new RegtestProvider({ ...env, snapshotBudget: { maxContentBytes: 1 } });
+  const full = await noContent.getSatSnapshot!(sat2Number);
+  assert.equal(full.bodies, 'all');
+  assert.deepEqual(bodyOf(full, junk[0].id), { status: 'unavailable', reason: 'not-requested', mediaType: 'image/png', contentLength: 20_000, metadata: collection }, 'the collection image is judged by its metadata, its body not read');
+  assert.deepEqual(bodyOf(full, junk[1].id), { status: 'unavailable', reason: 'not-requested', mediaType: 'image/png', contentLength: 20_000, metadata: null }, 'the bare image carries no metadata');
+  for (const id of originalsInscriptions) assert.equal(bodyOf(full, id).status, 'complete', `the Originals inscription ${id} is read from the Originals pool`);
+  const fullRead = await verifiedFrom(full);
+  assert.equal(fullRead.anchoring?.status, 'anchored');
+  assert.equal(fullRead.head, bobAfter.original.checkpoint);
+  assert.deepEqual(fullRead.anchoring?.ignored.filter((i) => junk.some((j) => j.id === i.inscription)).map((i) => i.reason), ['not-an-originals-inscription', 'not-an-originals-inscription']);
+
+  // An Originals read through the host's JSON codec and the landing's decoder: the images' metadata arrives as bytes.
+  const originalsRead = await provider.getSatSnapshot!(sat2Number, { bodies: 'originals' });
+  const overTheWire = decodeSatSnapshot(JSON.parse(JSON.stringify(encodeSatSnapshot(originalsRead))));
+  assert.deepEqual((bodyOf(overTheWire, junk[0].id) as { metadata?: unknown }).metadata, collection, 'the metadata survives the codec as bytes');
+  const wireRead = await verifiedFrom(overTheWire);
+  assert.equal(wireRead.anchoring?.status, 'anchored');
+  assert.equal(wireRead.head, bobAfter.original.checkpoint);
+
+  // A read whose Originals pool cannot hold the first inscription: it stops asking for metadata, and the
+  // read is an explicit incomplete result (P9.17).
+  const starved = new RegtestProvider({ ...env, snapshotBudget: { maxOriginalsBytes: 1, concurrency: 1 } });
+  const starvedRead = await starved.getSatSnapshot!(sat2Number, { bodies: 'originals' });
+  const unknown = starvedRead.publications.filter((p) => p.body.status === 'unavailable' && 'reason' in p.body && p.body.reason === 'over-budget' && !('metadataPresent' in p.body));
+  assert.ok(unknown.length >= 1, 'past the spent pool, metadata is not asked for and is reported unknown');
+  const incomplete = await verifiedFrom(starvedRead).then(() => 'verified', (error: unknown) => (error as { code?: string }).code ?? String(error));
+  assert.equal(incomplete, 'SAT_READ_INCOMPLETE', 'a starved read is incomplete, never a wrong one');
+  evidence.readBudgets = {
+    sat: sat2, ordinaryInscriptions: junk.map((j) => ({ inscription: j.id, metadata: j.metadata ? 'collection map' : 'none', bytes: 20_000 })),
+    fullReadNoContentBudget: { head: fullRead.head, anchoring: fullRead.anchoring?.status, ordinary: junk.map((j) => (bodyOf(full, j.id) as { reason?: string }).reason) },
+    throughCodec: { head: wireRead.head, anchoring: wireRead.anchoring?.status },
+    starvedOriginalsPool: { unknownMetadata: unknown.length, result: incomplete },
   };
 
   evidence.result = 'passed';
