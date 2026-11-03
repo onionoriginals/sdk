@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "@originals/monorepo",
@@ -8,8 +9,8 @@
         "@commitlint/cli": "^21.2.2",
         "@commitlint/config-conventional": "^21.2.2",
         "railway": "3.11.0",
-        "turbo": "^2.3.3"
-      }
+        "turbo": "^2.3.3",
+      },
     },
     "apps/landing": {
       "name": "@originals/landing",
@@ -32,7 +33,7 @@
         "didwebvh-ts": "^3.0.0",
         "qrcode-generator": "2.0.4",
         "react": "^19.2.7",
-        "react-dom": "^19.2.7"
+        "react-dom": "^19.2.7",
       },
       "devDependencies": {
         "@turnkey/sdk-server": "^8.3.0",
@@ -46,8 +47,8 @@
         "path-browserify": "^1.0.1",
         "playwright-core": "^1.49.0",
         "typescript": "^7.0.2",
-        "vite": "^8.1.6"
-      }
+        "vite": "^8.1.6",
+      },
     },
     "packages/auth": {
       "name": "@originals/auth",
@@ -58,7 +59,7 @@
         "@originals/sdk": "^6.0.0",
         "@turnkey/crypto": "^2.10.0",
         "@turnkey/sdk-server": "^8.3.0",
-        "jsonwebtoken": "^9.0.2"
+        "jsonwebtoken": "^9.0.2",
       },
       "devDependencies": {
         "@eslint/js": "^9.0.0",
@@ -70,14 +71,14 @@
         "bun-types": "^1.3.1",
         "eslint": "^10.6.0",
         "typescript": "^6.0.3",
-        "typescript-eslint": "^8.62.0"
+        "typescript-eslint": "^8.62.0",
       },
       "peerDependencies": {
-        "express": ">=4.0.0"
+        "express": ">=4.0.0",
       },
       "optionalPeers": [
-        "express"
-      ]
+        "express",
+      ],
     },
     "packages/host": {
       "name": "@originals/host",
@@ -86,7 +87,7 @@
         "@noble/hashes": "^2.0.1",
         "@originals/sdk": "^6.0.0",
         "@originals/vh": "^0.4.0",
-        "@scure/base": "^2.2.0"
+        "@scure/base": "^2.2.0",
       },
       "devDependencies": {
         "@eslint/js": "^9.0.0",
@@ -98,14 +99,14 @@
         "eslint": "^10.6.0",
         "prettier": "^3.0.0",
         "typescript": "^6.0.3",
-        "typescript-eslint": "^8.0.0"
-      }
+        "typescript-eslint": "^8.0.0",
+      },
     },
     "packages/sdk": {
       "name": "@originals/sdk",
       "version": "6.0.0",
       "bin": {
-        "originals": "./dist/originals/cli.js"
+        "originals": "./dist/originals/cli.js",
       },
       "dependencies": {
         "@noble/curves": "^2.2.0",
@@ -117,12 +118,12 @@
         "@scure/btc-signer": "^2.2.0",
         "b58": "^4.0.3",
         "bitcoinjs-lib": "^7.0.2",
-        "cborg": "^6.1.1",
+        "cborg": "^6.2.1",
         "didwebvh-ts": "^3.0.0",
         "fflate": "^0.8.3",
         "jsonld": "^9.0.0",
         "micro-ordinals": "^0.2.2",
-        "uuid": "^14.0.1"
+        "uuid": "^14.0.1",
       },
       "devDependencies": {
         "@eslint/js": "^9.0.0",
@@ -134,8 +135,8 @@
         "eslint": "^10.6.0",
         "prettier": "^3.0.0",
         "typescript": "^6.0.3",
-        "typescript-eslint": "^8.0.0"
-      }
+        "typescript-eslint": "^8.0.0",
+      },
     },
     "packages/vh": {
       "name": "@originals/vh",
@@ -143,7 +144,7 @@
       "dependencies": {
         "@noble/curves": "^2.2.0",
         "@noble/hashes": "^2.0.1",
-        "@scure/base": "^2.2.0"
+        "@scure/base": "^2.2.0",
       },
       "devDependencies": {
         "@eslint/js": "^9.0.0",
@@ -155,9 +156,9 @@
         "eslint": "^10.6.0",
         "prettier": "^3.0.0",
         "typescript": "^6.0.3",
-        "typescript-eslint": "^8.0.0"
-      }
-    }
+        "typescript-eslint": "^8.0.0",
+      },
+    },
   },
   "overrides": {
     "brace-expansion": "^5.0.8",
@@ -645,7 +646,7 @@
 
     "cbor-js": ["cbor-js@0.1.0", "", {}, "sha512-7sQ/TvDZPl7csT1Sif9G0+MA0I0JOVah8+wWlJVQdVEgIbCzlN/ab3x+uvMNsc34TUvO6osQTAmB2ls80JX6tw=="],
 
-    "cborg": ["cborg@6.1.2", "", { "bin": { "cborg": "lib/bin.js" } }, "sha512-hQfFh6FuuCDoycN68FtUpjtQx5kCtxOLA8msbpJZxjtxaMqxgHl+4GNwO+0YexH/lHmVzhhAKa0ua+vtmTRoVw=="],
+    "cborg": ["cborg@6.2.1", "", { "bin": { "cborg": "lib/bin.js" } }, "sha512-DwiF3Jd5RW6kJuTQMzQb/sdZD03utp15EcQNOMTvE/ZYCdDPzETsGOY5lj8imKxbsEuYvOzcMSiKLiT4C2/2Lw=="],
 
     "cliui": ["cliui@9.0.1", "", { "dependencies": { "string-width": "^7.2.0", "strip-ansi": "^7.1.0", "wrap-ansi": "^9.0.0" } }, "sha512-k7ndgKhwoQveBL+/1tqGJYNz097I7WOvwbmmU2AR5+magtbjPWQTS1C5vzGkBC8Ym8UWRzfKUzUUqFLypY4Q+w=="],
 
