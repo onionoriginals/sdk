@@ -1,5 +1,62 @@
 # @originals/landing
 
+## 0.5.0
+
+### Minor Changes
+
+- bfda41c: Remove retired identity hostnames and context aliases. SDK WebVH profile names
+  are now `development`, `staging`, and `production`; update `webvhNetwork` inputs
+  to those names. Every profile uses the canonical `originals.build` domain and
+  context; DID creation continues to require an explicit domain.
+
+  The landing defaults to `originals.build` and reads identities only from its
+  configured `VITE_WEBVH_HOST`. Accounts with an identity on another host must
+  explicitly create a new identity. Existing signed work is not migrated or
+  re-signed. The landing no longer serves an additional legacy identity host.
+
+- 7aeaf54: Follow originals-spec #53 (`a9ecdbb`; owner decision, 1 November 2026): an
+  Original is exactly one resource, which can have many versions (P4.1).
+
+  - Asset state: `asset.resource` is a single descriptor
+    `{mediaType, size, digest}` with no id; `resources`, resource ids, adding,
+    removing and the 256-resource limit are gone (P4.1, P14.5, P14.6, P14.13).
+    `transitions` is `[{from: null, to}]` at genesis, `[{from, to}]` when the
+    digest changes and `[]` otherwise (P14.4). Editor grants are exactly
+    `{did, name, metadata, resource}`, all but `did` booleans (P5.15). The
+    `#files` service endpoint is the descriptor (P14.9), and the evidence
+    manifest's missing resource item drops `resource` (P14.10).
+  - SDK: `create` takes `resource: { mediaType, bytes }`; `edit` takes
+    `resource: { bytes, mediaType?, expectedDigest? }` for the next version, and
+    `remove` is gone. `ResourceVersion` has no `resource` and gains `onBitcoin`.
+  - Bitcoin (P9.17, P14.12): an inscription's metadata is the CBOR of a JSON
+    array of the entries it carries; its body is the exact bytes of the resource
+    version its last entry names, under that version's media type, with no
+    content encoding; metadata and body together are at most 350,000 bytes.
+    `ORIGINALS_INSCRIPTION_TYPE` is removed. An anchored Original read from
+    Bitcoin alone gets its inscribed versions from the sat. `prepareEntryInscription`
+    returns a `notice` to show the author before inscribing: what becomes
+    public and permanent, and a warning for active content (P9.18).
+  - The landing creates an Original from one file and edits it by giving the
+    file's next version; title, style and file name are asset metadata.
+
+  Originals written under the earlier encoding, including the mainnet
+  acceptance Original of 1 November 2026, are not converted and no longer
+  verify (D1, D7).
+
+  Non-integer numbers in asset metadata, such as `4.5`, are inscribed as the
+  narrowest exact CBOR float, as ord writes them; readers accept any width and
+  reject NaN, infinities, negative zero and magnitudes above 2^53 − 1
+  (originals-spec #54, P14.12).
+
+### Patch Changes
+
+- Updated dependencies [bfda41c]
+- Updated dependencies [7aeaf54]
+  - @originals/sdk@6.0.0
+  - @originals/vh@0.4.0
+  - @originals/host@0.3.0
+  - @originals/auth@4.0.3
+
 ## 0.4.0
 
 ### Minor Changes
