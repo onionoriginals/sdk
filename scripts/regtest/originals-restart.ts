@@ -45,6 +45,7 @@ import { hex } from '@scure/base';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { localSigner } from '@originals/vh/crypto';
+import { decodeCbor } from '@originals/vh/originals';
 import { createLog, serializeLog, signWith } from '@originals/vh/log';
 import { RegtestProvider } from '../../packages/sdk/src/adapters/providers/RegtestProvider';
 import type { Utxo } from '../../packages/sdk/src/types/bitcoin';
@@ -156,7 +157,7 @@ try {
   };
   const bytesA = new TextEncoder().encode('regtest restart photo, version 1');
   const bytesB = new TextEncoder().encode('regtest restart photo, version 2 (the edit)');
-  const created = await sdk.create({ name: 'Harbor after restart', resources: [{ id: 'photo', mediaType: 'image/jpeg', bytes: bytesA }], author, signer });
+  const created = await sdk.create({ name: 'Harbor after restart', resource: { mediaType: 'image/jpeg', bytes: bytesA }, author, signer });
   if (created.kind !== 'original') throw new Error('expected an Original');
   const did = created.original.did;
   const genesisId = created.original.checkpoint;
@@ -176,14 +177,17 @@ try {
   check('R03', 'mined, the Original is anchored with the anchoring entry as head', v1.report.anchoring?.status === 'anchored' && v1.publication === 'anchored' && v1.head === anchorId && v1.current, { head: v1.head, publication: v1.publication, reasons: v1.report.reasons });
   const storedLines = (await sdk.committedLog(did)).trimEnd().split('\n');
   const onOrd = (await provider.getSatSnapshot!(satDid.split(':').at(-1)!)).publications.find((p) => p.id === anchorPair.prepared.inscriptionId);
-  const anchorBody = onOrd?.body.status === 'complete' ? new TextDecoder().decode(onOrd.body.bytes) : null;
-  check('R30', 'the anchoring inscription ord returns is the exact stored log, genesis through the anchoring entry (P9.17)',
-    anchorBody === `${storedLines.slice(0, 2).join('\n')}\n` && JSON.stringify(anchorPair.carries) === JSON.stringify([genesisId, anchorId]) && (onOrd?.body.status === 'complete' ? onOrd.body.metadata : 'unread') === null,
-    { carries: anchorPair.carries, bodyBytes: onOrd?.body.status === 'complete' ? onOrd.body.bytes.length : null });
-  const edit = await sdk.edit(did, { parent: v1.checkpoint, name: 'Harbor after restart, edited', resources: [{ id: 'photo', bytes: bytesB }], author, signer });
+  const anchorMetadata = onOrd?.body.status === 'complete' && onOrd.body.metadata ? onOrd.body.metadata : null;
+  const anchorEntries = anchorMetadata ? (decodeCbor(anchorMetadata) as unknown[]).map((e) => `${JSON.stringify(e)}\n`).join('') : null;
+  const anchorBody = onOrd?.body.status === 'complete' ? onOrd.body.bytes : null;
+  check('R30', 'the anchoring inscription ord returns carries the stored entries, genesis through the anchoring entry, as metadata, and the current version as its body (P9.17, P14.12)',
+    anchorEntries === `${storedLines.slice(0, 2).join('\n')}\n` && JSON.stringify(anchorPair.carries) === JSON.stringify([genesisId, anchorId]) &&
+    anchorBody !== null && hex.encode(anchorBody) === hex.encode(bytesA) && (onOrd?.body.status === 'complete' ? onOrd.body.mediaType : null) === 'image/jpeg',
+    { carries: anchorPair.carries, metadataBytes: anchorMetadata?.length ?? null, bodyBytes: anchorBody?.length ?? null });
+  const edit = await sdk.edit(did, { parent: v1.checkpoint, name: 'Harbor after restart, edited', resource: { bytes: bytesB }, author, signer });
   const editId = edit.original.checkpoint;
   receipt.original = { did, sat: satDid, author: authorDid, genesis: genesisId, anchoringEntry: anchorId, edit: editId };
-  receipt.anchor = { versionId: anchorId, carries: anchorPair.carries, bodyBytes: anchorBody === null ? null : new TextEncoder().encode(anchorBody).length, publication: [unmined.publication, v1.publication], offChain: anchorPair.offChain, commitTxId: anchorPair.prepared.commitTxId, revealTxId: anchorPair.prepared.revealTxId, inscriptionId: anchorPair.prepared.inscriptionId, height: v1.report.anchoring?.anchor?.height };
+  receipt.anchor = { versionId: anchorId, carries: anchorPair.carries, metadataBytes: anchorMetadata?.length ?? null, bodyBytes: anchorBody?.length ?? null, publication: [unmined.publication, v1.publication], offChain: anchorPair.offChain, commitTxId: anchorPair.prepared.commitTxId, revealTxId: anchorPair.prepared.revealTxId, inscriptionId: anchorPair.prepared.inscriptionId, height: v1.report.anchoring?.anchor?.height };
 
   step('2: writer child submits the edit and is killed after the commit, before the reveal');
   /** Start a writer child that submits the next entry and halts after the commit, before the reveal. */
@@ -303,9 +307,9 @@ try {
     read.current === true && relied?.did === authorDid && relied?.versionId === read.identityEvidence.latestVersionId && relied?.source === 'package' && typeof relied?.obtainedAt === 'string',
     { current: read.current, reasons: read.reasons, validAsOf: read.validAsOf });
   const alone = read.fromBitcoinAlone;
-  check('R31', 'with no copy of the log, the sat alone plus the package\'s author DID history verifies the Original to the edit (P9.17, P9.18)',
+  check('R31', 'with no copy of the log, the sat alone plus the package\'s author DID history verifies the Original to the edit, both versions read from inscription bodies (P9.17, P9.18)',
     alone.copy === 'absent' && alone.anchoring === 'anchored' && alone.head === editId && alone.entries === 3 && alone.history === 'valid' && alone.authorBinding === 'valid' && alone.identity === 'complete' &&
-    alone.anchor === anchorPair.prepared.inscriptionId && JSON.stringify(alone.accepted) === JSON.stringify([killed.inscriptionId]) && alone.resources === 'partial',
+    alone.anchor === anchorPair.prepared.inscriptionId && JSON.stringify(alone.accepted) === JSON.stringify([killed.inscriptionId]) && alone.resources === 'available',
     alone);
   receipt.reader = {
     pid: read.pid, store: read.store, inputs: { sat: satDid, package: stores.package, packageSha256: digest(exported.bytes) },

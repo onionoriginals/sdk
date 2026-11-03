@@ -44,16 +44,17 @@ export async function verifyExample(now: number = Date.now()): Promise<VerifiedE
   const zip = decodeBase64(FIRST_LIGHT_ZIP_BASE64);
   const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: () => now });
   const { report } = await reader.load(zip);
-  const artwork = report.resources.versions.find((v) => v.resource === "artwork.svg");
+  // The Original's one resource, at its latest version; its style is in the asset state's metadata (P4.1).
+  const artwork = report.resources.versions[report.resources.versions.length - 1];
   const contents = readEvidence(zip);
   const svg = artwork ? new TextDecoder().decode(contents.bytes[artwork.digest] ?? new Uint8Array()) : "";
-  const metadata = report.resources.versions.find((v) => v.resource === "metadata.json");
-  const style = metadata ? (JSON.parse(new TextDecoder().decode(contents.bytes[metadata.digest])) as { style?: string }).style : undefined;
+  const recorded = report.state?.metadata?.style;
+  const style = typeof recorded === "string" ? recorded : undefined;
   const checks: ExampleCheck[] = [
     {
       id: "hash",
       ok: report.resources.status === "available",
-      detail: report.resources.versions.map((v) => `${v.resource} v${v.version}: ${v.bytes}`).join("; "),
+      detail: report.resources.versions.map((v) => `${v.mediaType} v${v.version}: ${v.bytes}`).join("; "),
     },
     {
       id: "history",

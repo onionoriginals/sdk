@@ -23,9 +23,9 @@ describe("C12-01: package in one process, verify in another", () => {
       const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: clock() });
       const signer = alice.signer("orig", key);
       const author = alice.ref("orig");
-      const c = await sdk.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("B1") }], author, signer });
+      const c = await sdk.create({ name: "Harbor at dawn", resource: { mediaType: "image/jpeg", bytes: bytes("B1") }, author, signer });
       if (c.kind !== "original") throw new Error("expected an Original");
-      const e = await sdk.edit(c.original.did, { parent: c.original.checkpoint, resources: [{ id: "photo", bytes: bytes("B2") }], author, signer });
+      const e = await sdk.edit(c.original.did, { parent: c.original.checkpoint, resource: { bytes: bytes("B2") }, author, signer });
       const file = join(dir, "harbor.zip");
       writeFileSync(file, (await sdk.package(c.original.did)).bytes);
 
@@ -56,9 +56,9 @@ describe("C12-01: package in one process, verify in another", () => {
       // Missing bytes leave the package verified, with the content reported unavailable (P7.3, P7.4).
       const store = new MemoryStore();
       const partialSdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: clock() });
-      const p = await partialSdk.create({ name: "Partial", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("P1") }], author, signer });
+      const p = await partialSdk.create({ name: "Partial", resource: { mediaType: "image/jpeg", bytes: bytes("P1") }, author, signer });
       if (p.kind !== "original") throw new Error("expected an Original");
-      await partialSdk.edit(p.original.did, { parent: p.original.checkpoint, resources: [{ id: "photo", bytes: bytes("P2") }], author, signer });
+      await partialSdk.edit(p.original.did, { parent: p.original.checkpoint, resource: { bytes: bytes("P2") }, author, signer });
       store.deleteResource(p.original.resources[0].digest);
       const partial = join(dir, "partial.zip");
       writeFileSync(partial, (await partialSdk.package(p.original.did)).bytes);

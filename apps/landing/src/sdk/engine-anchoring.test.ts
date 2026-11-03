@@ -12,6 +12,8 @@ import { AnchoringCancelledError, AnchoringRefusedError, AnchoringSubmitError, S
 import { HttpOrdinalsProvider } from './http-ordinals-provider';
 import { createLocalAuthor } from './local-author';
 import { generateArtwork } from './artwork';
+import { inscriptionNoticePreview } from '../components/anchoring-view';
+import { demo } from '../content';
 import { WALLET_ADDRESS, fakeChain, walletSigner } from '../../server/tests/originals-chain-fixture';
 import { inProcessLanding } from '../../server/tests/landing-server-fixture';
 
@@ -43,7 +45,8 @@ describe('anchoring an Original from the landing (plan 011, PR 10b)', () => {
     expect(state.anchoring?.unpublished).toEqual([state.history[1].versionId]);
     // What Bitcoin will not hold is stated before anything is called anchored (P9.18).
     expect(state.anchoring?.offChain).toMatchObject({ replication: 'not-guaranteed' });
-    expect(state.anchoring?.offChain?.resources.map((r) => r.resource).sort()).toEqual(['artwork.svg', 'metadata.json']);
+    // The anchoring inscription carries the current version as its body, so no version stays off chain (P9.17, P9.18).
+    expect(state.anchoring?.offChain?.resources).toEqual([]);
     expect(chain.sent.length).toBe(2);
 
     chain.mine();
@@ -147,6 +150,25 @@ describe('anchoring an Original from the landing (plan 011, PR 10b)', () => {
     expect(state.anchoring?.lastSent).toMatchObject({ outcome: 'sent', versionId: revised.history.at(-1)!.versionId });
     chain.mine();
     expect((await engine.anchoringStatus()).anchoring?.status).toMatchObject({ publication: 'anchored', action: 'done', heads: { accepted: revised.history.at(-1)!.versionId } });
+  });
+  test('C12-193: the notice before inscribing next names the version that inscription carries, not the head\'s (P9.17, P9.18)', async () => {
+    const { chain, engine, funding } = await setup();
+    await engine.inscribe({ funding: funding() });
+    chain.mine();
+    // v2 an SVG (active content), then v3 a PNG: both unpublished. The next inscription carries v2.
+    await engine.update('Harbor at dusk', 'Orbits', generateArtwork('Harbor at dusk', 'Orbits', 8).svg);
+    const png = { content: Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), contentType: 'image/png', filename: 'harbor.png' };
+    const head = await engine.update('Harbor at night', 'Orbits', png);
+    expect(head.resource).toMatchObject({ version: 3, contentType: 'image/png' });
+    const state = await engine.anchoringStatus();
+    expect(state.anchoring?.unpublished).toHaveLength(2);
+    expect(state.anchoring?.next).toEqual({ version: 2, mediaType: 'image/svg+xml' });
+    const notice = inscriptionNoticePreview(state, state.anchoring?.next);
+    expect(notice.permanent).toBe(demo.anchoring.permanent(state.resource.id, 2));
+    expect(notice.activeContent).toBe(demo.anchoring.activeContent('image/svg+xml'));
+    // The pair the engine prepares carries that version (P9.17).
+    const sent = await engine.inscribe({ funding: funding([chain.fund(50_000)]) });
+    expect(sent.anchoring?.notice).toMatchObject({ version: { mediaType: 'image/svg+xml' }, activeContent: true });
   });
 });
 

@@ -1,7 +1,8 @@
 # @originals/sdk
 
 The SDK for the Originals Protocol. Each Original is a `did:vh` log under the
-`originals:1.0` extension, signed by its author's DID. The root export is the
+`originals:1.0` extension, signed by its author's DID, and has exactly one
+resource, which can have many versions (P4.1). The root export is the
 Originals workflow; [ORIGINALS.md](ORIGINALS.md) is the consumer contract and
 says which parts are implemented.
 
@@ -12,7 +13,7 @@ const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [authorDidE
 const signer = keySigner({ keyType: 'Ed25519', secretKey, verificationMethod: `${authorDid}#orig` });
 const author = { did: authorDid, verificationMethod: `${authorDid}#orig`, versionId: authorVersionId };
 
-const created = await sdk.create({ name: 'Harbor at dawn', resources: [{ id: 'photo', mediaType: 'image/jpeg', bytes }], author, signer });
+const created = await sdk.create({ name: 'Harbor at dawn', resource: { mediaType: 'image/jpeg', bytes }, author, signer });
 if (created.kind !== 'original') throw new Error('no signer: an unsigned draft');
 const pkg = await sdk.package(created.original.did);  // ZIP evidence package
 const { report } = await sdk.load(pkg.bytes);          // offline, read-only verification

@@ -28,7 +28,7 @@ await phase.check("b3-reopen-continue", "the published work reopens at its check
   assertEqual(reopened.publication, "complete", "publication");
   const next = await engine.update("Harbor at night", "Orbits", generateArtwork("Harbor at night", "Orbits", 9).svg);
   assertEqual(next.history.length, work1.entries + 1, "entries after the revision");
-  phase.facts.work1 = { did: work1.did, alias: work1.alias, checkpoint: next.history.at(-1)!.versionId, entries: next.history.length, resources: [{ id: next.resource.id, mediaType: next.resource.contentType, sha256: next.resource.hash }, ...(next.metadata ? [{ id: next.metadata.id, mediaType: "application/json", sha256: next.metadata.hash }] : [])] };
+  phase.facts.work1 = { did: work1.did, alias: work1.alias, checkpoint: next.history.at(-1)!.versionId, entries: next.history.length, resource: { file: next.resource.id, version: next.resource.version, mediaType: next.resource.contentType, sha256: next.resource.hash } };
   return phase.facts.work1;
 });
 
@@ -49,7 +49,7 @@ for (const [name, w] of [["work2", work2], ["work3", work3]] as const) {
     assertEqual(resumed.webvhDid, w.alias, "alias");
     assertEqual(resumed.history.at(-1)!.versionId, w.checkpoint, "checkpoint");
     assertEqual(resumed.history.length, w.entries, "entries (no second publish entry)");
-    phase.facts[name] = { ...w, resources: [{ id: resumed.resource.id, mediaType: resumed.resource.contentType, sha256: resumed.resource.hash }, ...(resumed.metadata ? [{ id: resumed.metadata.id, mediaType: "application/json", sha256: resumed.metadata.hash }] : [])] };
+    phase.facts[name] = { ...w, resource: { file: resumed.resource.id, version: resumed.resource.version, mediaType: resumed.resource.contentType, sha256: resumed.resource.hash } };
     return phase.facts[name];
   });
 }

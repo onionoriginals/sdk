@@ -8,7 +8,7 @@
  *   don't fail `verified` (P7.3), so availability is its own check;
  * - `current` (never true unanchored, P7.10), freshness and ordering.
  *
- * Input (ACCEPTANCE_INPUT): { phaseName, target, port?, cases: [{ name, alias, expect, checkpoint, resources }] }.
+ * Input (ACCEPTANCE_INPUT): { phaseName, target, port?, cases: [{ name, alias, expect, checkpoint, resource }] }.
  * `expect: "complete"` must verify completely; `"incomplete"` must not.
  * With target "local", https://<host>/<path> is read from the loopback host
  * under that Host header (node:http, since fetch won't send one); otherwise
@@ -61,7 +61,7 @@ for (const c of input.cases) {
     } catch (e) {
       error = `${e?.code ?? e?.name}: ${String(e?.message).slice(0, 200)}`;
     }
-    const digests = (r?.report.resources.versions ?? []).map((v) => ({ resource: v.resource, version: v.version, sha256: hexOf(v.digest) }));
+    const digests = (r?.report.resources.versions ?? []).map((v) => ({ version: v.version, sha256: hexOf(v.digest) }));
     const facts = r && {
       verified: r.verified,
       checkpoint: r.report.validAsOf?.checkpoint ?? null,
@@ -85,10 +85,10 @@ for (const c of input.cases) {
     assertEqual(facts.resources, "available", "resource availability");
     assert(facts.current === false && (facts.reasons ?? []).includes("not-anchored"), "an unanchored Original was reported current (P7.10)", facts);
     assertEqual(facts.ordering, "claimed", "ordering");
-    // Every resource the author published, at the checkpoint, by its exact bytes (P8.1).
-    for (const res of c.resources ?? []) {
-      const at = digests.filter((d) => d.resource === res.id).at(-1);
-      assertEqual(at?.sha256, res.sha256, `${res.id}: the verified bytes' SHA-256`);
+    // The one resource the author published, at its version at the checkpoint, by its exact bytes (P4.1, P8.1).
+    if (c.resource) {
+      const at = digests.at(-1);
+      assertEqual([at?.version, at?.sha256], [c.resource.version, c.resource.sha256], `${c.resource.file}: the verified version and its bytes' SHA-256`);
     }
     return { ...facts, digests };
   });

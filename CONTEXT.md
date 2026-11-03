@@ -1,28 +1,28 @@
 # Originals
 
-An Original is a digital asset with a verifiable, signed history of named
-resources. Its author and its owner are separate roles, and neither role
+An Original is a digital asset with a verifiable, signed history of one
+resource and its versions. Its author and its owner are separate roles, and neither role
 implies the other. Terms follow the pinned
 [Originals Protocol](specs/README.md); rule IDs refer to it.
 
 ## Language
 
 **Original**:
-A logical asset with a stable `did:vh:<SCID>` identifier, a verifiable state history and a fixed set of named resources.
+A logical asset with a stable `did:vh:<SCID>` identifier, a verifiable state history and exactly one resource, which can have many versions (P4.1).
 _Avoid_: DID document, inscription, envelope (as synonyms for the asset)
 
 **Asset log**:
 The Original's did:vh log under the Originals extension (`originals:1.0`). It is the Original's only history.
 
 **Asset state**:
-The full state in every asset log entry: name, metadata, lifecycle status, resource descriptors and aliases. It is never a delta and never a DID document.
+The full state in every asset log entry: name, metadata, lifecycle status, the resource descriptor, aliases and editor grants. It is never a delta and never a DID document.
 _Avoid_: DID document (the DID document is derived from the log, never stored, P3.8)
 
 **Resource**:
-A named file belonging to an Original, identified by a resourceID that names it for the Original's whole history. Genesis names at least one; only the author adds or removes resources, and a resourceID is never used again, even after its resource is removed (P4.1).
+The one file an Original has, from genesis for its whole history. It is never added, removed or replaced by another; a change to its bytes or mediaType is its next version (P4.1). Descriptive values such as a title belong in the asset state's metadata, not in a second resource.
 
 **Resource version**:
-An exact byte sequence bound to a mediaType and a SHA-256 digest in verified history. Version numbers are derived from history and advance only when the digest changes (P4.4).
+An exact byte sequence bound to a mediaType, a size and a SHA-256 digest in verified history. Genesis is version 1; version numbers are derived from history and advance only when the digest changes (P4.4).
 
 **Author**:
 The DID that signs every change for the Original's whole life. It is fixed at genesis, and authorship never transfers (P5.8).

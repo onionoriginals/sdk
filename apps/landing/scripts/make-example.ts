@@ -15,18 +15,17 @@ import { createLocalAuthor } from "../src/sdk/local-author";
 const directory = join(import.meta.dir, "..", "public", "example");
 mkdirSync(directory, { recursive: true });
 
-const author = await createLocalAuthor();
-const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [author.evidence] });
+// Fixed times, so the example verifies under the clocks its tests use.
+const author = await createLocalAuthor(new Date("2026-10-22T04:32:13Z"));
+const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [author.evidence], clock: () => Date.parse("2026-10-22T04:32:14Z") });
 const artwork = new TextEncoder().encode(generateArtwork("First Light", "Orbits", 20260706).svg);
-const metadata = new TextEncoder().encode(
-  JSON.stringify({ title: "First Light", style: "Orbits", creator: "Originals example" }, null, 2),
-);
+// One resource per Original; descriptive values go in the asset state's metadata (P4.1; originals-spec #53).
+const description = { title: "First Light", style: "Orbits", creator: "Originals example" };
+const metadata = new TextEncoder().encode(JSON.stringify(description, null, 2));
 const created = await sdk.create({
   name: "First Light",
-  resources: [
-    { id: "artwork.svg", mediaType: "image/svg+xml", bytes: artwork },
-    { id: "metadata.json", mediaType: "application/json", bytes: metadata },
-  ],
+  metadata: description,
+  resource: { mediaType: "image/svg+xml", bytes: artwork },
   author: author.ref,
   signer: author.signer,
 });

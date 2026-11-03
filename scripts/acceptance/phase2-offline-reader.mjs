@@ -65,22 +65,22 @@ await phase.check("author-binding", "author binding: every entry signed by an as
 await phase.check("resources", "every resource version's bytes are present and verified", () => {
   assertEqual(report.resources.status, "available", "resources.status");
   assert(report.resources.versions.every((v) => v.bytes === "verified"), "a version is not verified", report.resources.versions);
-  // Every version the author claimed, including the removed extra.txt@1 (P4.1, P8.3).
-  assertEqual(report.resources.versions.map((v) => `${v.resource}@${v.version}`).sort(), Object.keys(expected.sha256).sort(), "resource versions");
-  assert(!report.state.resources.some((r) => r.id === "extra.txt"), "extra.txt is still in the current resource set");
-  return report.resources.versions.map((v) => `${v.resource}@${v.version}:${v.bytes}`);
+  // Every version of the one resource the author claimed, the earlier ones included (P4.1, P8.3).
+  assertEqual(report.resources.versions.map((v) => `v${v.version}`), Object.keys(expected.sha256), "resource versions");
+  assertEqual(report.state.resource.digest, expected.versions.at(-1).resource.digest, "the current version");
+  return report.resources.versions.map((v) => `v${v.version}:${v.bytes}`);
 });
 await phase.check("byte-digests", "independently: each packaged byte string hashes to its SHA-256 multihash digest and the author's claim", () => {
   const out = {};
   for (const v of report.resources.versions) {
     const bytes = contents.bytes[v.digest];
-    assert(bytes, `no bytes for ${v.resource}@${v.version}`);
+    assert(bytes, `no bytes for v${v.version}`);
     const multihash = base58btcDecode(v.digest.slice(1));
     assert(v.digest.startsWith("z") && multihash[0] === 0x12 && multihash[1] === 0x20, "digest is not a base58btc sha2-256 multihash", v.digest);
     const hex = sha256Hex(bytes);
-    assertEqual(Buffer.from(multihash.subarray(2)).toString("hex"), hex, `${v.resource}@${v.version} digest`);
-    assertEqual(hex, expected.sha256[`${v.resource}@${v.version}`], `${v.resource}@${v.version} vs the author's claim`);
-    out[`${v.resource}@${v.version}`] = hex;
+    assertEqual(Buffer.from(multihash.subarray(2)).toString("hex"), hex, `v${v.version} digest`);
+    assertEqual(hex, expected.sha256[`v${v.version}`], `v${v.version} vs the author's claim`);
+    out[`v${v.version}`] = hex;
   }
   return out;
 });
@@ -90,8 +90,8 @@ await phase.check("historical-versions", "every historical checkpoint verifies f
     const r = await verifyOriginal({ log: contents.log, authors: contents.authors, bytes: contents.bytes, checkpoint: want.versionId, now: Date.now() });
     assertEqual([r.history.status, r.authorBinding.status, r.identityEvidence.status, r.checkpoint], ["valid", "valid", "complete", want.versionId], `version ${i + 1}`);
     assertEqual(r.state.name, want.name, `version ${i + 1} name`);
-    assertEqual(r.state.resources.map((x) => [x.id, x.digest]), want.resources.map((x) => [x.id, x.digest]), `version ${i + 1} resources`);
-    out.push({ versionId: want.versionId, name: r.state.name, resources: r.state.resources.length });
+    assertEqual(r.state.resource, want.resource, `version ${i + 1} resource`);
+    out.push({ versionId: want.versionId, name: r.state.name, resource: r.state.resource.digest });
   }
   return out;
 });

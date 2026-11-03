@@ -55,7 +55,10 @@ export interface VerifyOriginalOptions {
   log?: string | unknown[];
   /** Author DID histories. Missing history is incomplete evidence, never trust in the key (P5.6). */
   authors: AuthorDidEvidence[];
-  /** Resource bytes by digest. */
+  /**
+   * Resource bytes by digest. An anchored Original's inscribed versions come
+   * from the sat itself (P9.17, P9.18); these add the others.
+   */
   bytes?: Record<string, Uint8Array> | ((digest: string) => Uint8Array | undefined);
   /** Verify this exact checkpoint instead of the head (P3.2). */
   checkpoint?: string;
@@ -172,9 +175,9 @@ export interface OriginalsFork {
   branches: Array<{ source: string; versionId: string }>;
 }
 
+/** A version of the Original's one resource (P4.1, P4.4; originals-spec #53). */
 export interface ResourceVersion {
-  resource: string;
-  /** Derived from accepted digest changes (P4.4). */
+  /** Derived from accepted digest changes; genesis is version 1 (P4.4). */
   version: number;
   digest: string;
   mediaType: string;
@@ -182,6 +185,8 @@ export interface ResourceVersion {
   /** The entry that introduced these bytes. */
   versionId: string;
   bytes: "verified" | "missing" | "mismatch";
+  /** Whether these bytes were read from an inscription's body on the anchoring sat (P9.17, P9.18). */
+  onBitcoin: boolean;
 }
 
 /** Identity evidence for one editor DID the report relied on (P7.8, P5.18). */
@@ -391,24 +396,21 @@ function lookup(bytes: VerifyOriginalOptions["bytes"], digest: string): Uint8Arr
 }
 
 /**
- * Resource versions through the prefix, with each version's bytes checked (P4.3, P4.4, P7.4).
- * An added resource starts at version 1; a removal adds no version, and a removed resource's
- * earlier versions stay listed and checked (P4.1, P8.3; originals-spec #49).
+ * The versions of the resource through the prefix, with each version's bytes checked (P4.3,
+ * P4.4, P7.4): one per entry whose transition changes the digest, genesis first. A version
+ * inscribed on the anchoring sat is read from there, already checked against its descriptor;
+ * earlier ones need `bytes` (P9.17, P9.18; originals-spec #53).
  */
-function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOptions["bytes"]): ResourceVersion[] {
+function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOptions["bytes"], onSat: ReadonlyMap<string, Uint8Array>): ResourceVersion[] {
   const out: ResourceVersion[] = [];
-  const counts = new Map<string, number>();
   for (const v of prefix) {
     const state = v.entry.state as unknown as EntryState;
-    for (const t of state.transitions) {
-      if (t.to === null) continue;
-      const d = state.asset.resources.find((r) => r.id === t.resource)!;
-      const version = (counts.get(d.id) ?? 0) + 1;
-      counts.set(d.id, version);
-      const supplied = lookup(bytes, d.digest);
-      const check = supplied === undefined ? "missing" : supplied.length === d.size && resourceDigest(supplied) === d.digest ? "verified" : "mismatch";
-      out.push({ resource: d.id, version, digest: d.digest, mediaType: d.mediaType, size: d.size, versionId: v.entry.versionId, bytes: check });
-    }
+    if (state.transitions.length === 0) continue;
+    const d = state.asset.resource;
+    const inscribed = onSat.get(d.digest);
+    const supplied = inscribed ?? lookup(bytes, d.digest);
+    const check = supplied === undefined ? "missing" : supplied.length === d.size && resourceDigest(supplied) === d.digest ? "verified" : "mismatch";
+    out.push({ version: out.length + 1, digest: d.digest, mediaType: d.mediaType, size: d.size, versionId: v.entry.versionId, bytes: check, onBitcoin: inscribed !== undefined });
   }
   return out;
 }
@@ -593,7 +595,8 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     else if (selected !== head) reasons.push("checkpoint-is-not-head");
   }
   const prefix = selected ? log.entries.slice(0, selected.versionNumber) : [];
-  const versions = resourceVersions(prefix, options.bytes);
+  // Only an anchor's sat supplies bytes: what Bitcoin accepted, never an ignored inscription (P9.17).
+  const versions = resourceVersions(prefix, options.bytes, onBitcoin ? assembly!.bytes : new Map());
   const missing = versions.filter((v) => v.bytes === "missing");
   const mismatched = versions.filter((v) => v.bytes === "mismatch");
   const state = selected ? (selected.entry.state as unknown as EntryState) : undefined;

@@ -14,7 +14,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { OriginalsSDK, keySigner } from "@originals/sdk/originals";
 import { FileStore } from "@originals/sdk/originals/fs";
-import { assert, assertEqual, describeError, filesUnder, findSecrets, fromHex, Phase, readBytes, rejection, sha256Hex, utf8 } from "./lib/phase.mjs";
+import { assert, assertEqual, describeError, filesUnder, findSecrets, fromHex, Phase, readBytes, rejection, sha256Hex } from "./lib/phase.mjs";
+import { png } from "./lib/png.mjs";
 
 const phase = new Phase("3-author-b");
 const { dirs } = phase.input;
@@ -82,11 +83,10 @@ await phase.check("update-key-cannot-author", "the DID's update (identity) key c
 
 const signer = keySigner({ keyType: "Ed25519", secretKey: secrets.authorship, verificationMethod: custody.authorship.verificationMethod });
 let continued;
-const notes3 = utf8("# Harbor at dawn\n\nThird pass, from client B — framing notes. Ünïcödé ✓\n");
+const art4 = png();
 
 await phase.check("continue-editing", "with the author key supplied separately, edit from the explicit imported parent", async () => {
-  const notes = imported.state.resources.find((r) => r.id === "notes.md");
-  const e = await sdk.edit(did, { parent: imported.checkpoint, name: "Harbor at dawn (framed)", resources: [{ id: "notes.md", bytes: notes3, expectedDigest: notes.digest }], author: ref(), signer });
+  const e = await sdk.edit(did, { parent: imported.checkpoint, name: "Harbor at dawn (framed)", resource: { bytes: art4, expectedDigest: imported.state.resource.digest }, author: ref(), signer });
   assertEqual([e.status, e.original.did], ["committed", did], "edit");
   const ids = e.original.report.resources.versions.map((v) => v.versionId);
   // Never current off Bitcoin (P7.10): valid as of its checkpoint, judged with the author DID log this
@@ -98,7 +98,7 @@ await phase.check("continue-editing", "with the author key supplied separately, 
   const log = (await store.get(did)).log.trimEnd().split("\n").map((l) => JSON.parse(l).versionId);
   assertEqual(log.slice(0, expected.versions.length), expected.versions.map((v) => v.versionId), "versionIds prefix");
   assertEqual([log.length, log[log.length - 1]], [expected.versions.length + 1, e.original.checkpoint], "new head");
-  assertEqual(e.original.resources.filter((r) => r.resource === "notes.md").map((r) => r.version), [1, 2, 3], "notes.md versions");
+  assertEqual(e.original.resources.map((r) => r.version), [1, 2, 3, 4], "resource versions");
   return { checkpoint: e.original.checkpoint, versionIds: log, resourceVersionIds: [...new Set(ids)].length };
 });
 
@@ -112,8 +112,8 @@ await phase.check("stale-parent", "an edit against the old parent is a conflict,
 
 await phase.check("stale-digest", "an edit naming a resource digest that has moved is a conflict (P4.5)", async () => {
   const before = (await store.get(did)).log;
-  const old = imported.state.resources.find((r) => r.id === "notes.md").digest;
-  const error = await rejection(sdk.edit(did, { parent: continued.checkpoint, resources: [{ id: "notes.md", bytes: utf8("lost update"), expectedDigest: old }], author: ref(), signer }), "stale-digest edit");
+  const old = imported.state.resource.digest;
+  const error = await rejection(sdk.edit(did, { parent: continued.checkpoint, resource: { bytes: png(), expectedDigest: old }, author: ref(), signer }), "stale-digest edit");
   assertEqual([error.category, error.code], ["stale-parent", "STALE_DIGEST"], "error");
   assertEqual((await store.get(did)).log, before, "log after the stale-digest edit");
   return describeError(error);

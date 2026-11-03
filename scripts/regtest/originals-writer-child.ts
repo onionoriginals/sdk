@@ -134,7 +134,7 @@ async function main(mode: string): Promise<Record<string, unknown>> {
         status: r.resources.status, missing: r.resources.missing.length, failures: r.resources.failures.length,
         versions: r.resources.versions.map((v) => {
           const data = contents.bytes[v.digest];
-          return { resource: v.resource, version: v.version, digest: v.digest, bytes: v.bytes, sha256: data ? hex.encode(sha256(data)) : null, length: data?.length ?? null };
+          return { version: v.version, digest: v.digest, bytes: v.bytes, onBitcoin: v.onBitcoin, sha256: data ? hex.encode(sha256(data)) : null, length: data?.length ?? null };
         }),
       },
     };

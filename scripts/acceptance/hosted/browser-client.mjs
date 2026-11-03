@@ -126,8 +126,9 @@ const must = async (page, method, ...args) => {
   return r.value;
 };
 const png = (hex) => ({ content: { __bytes: [...Buffer.from(hex, "hex")] }, contentType: "image/png", filename: "work.png" });
-const resourcesOf = (s) => [{ id: s.resource.id, mediaType: s.resource.contentType, sha256: s.resource.hash }, ...(s.metadata ? [{ id: s.metadata.id, mediaType: "application/json", sha256: s.metadata.hash }] : [])];
-const facts = (s) => ({ did: s.did, alias: s.webvhDid, checkpoint: s.history.at(-1).versionId, entries: s.history.length, resources: resourcesOf(s) });
+/** The Original's one resource at its current version (P4.1; originals-spec #53); title and style are in its metadata. */
+const resourceOf = (s) => ({ file: s.resource.id, version: s.resource.version, mediaType: s.resource.contentType, sha256: s.resource.hash });
+const facts = (s) => ({ did: s.did, alias: s.webvhDid, checkpoint: s.history.at(-1).versionId, entries: s.history.length, resource: resourceOf(s) });
 const text = async (url) => new TextDecoder().decode((await safeFetch(url)).bytes);
 const jsonl = (t) => t.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
 

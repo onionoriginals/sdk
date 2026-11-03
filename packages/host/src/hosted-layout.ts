@@ -97,10 +97,10 @@ export function signedMediaType(assetLog: string, digest: string): string | null
   for (const line of assetLog.split('\n')) {
     if (!line.trim()) continue;
     try {
-      const entry = JSON.parse(line) as { state?: { asset?: { resources?: Array<{ digest?: unknown; mediaType?: unknown }> } } };
-      for (const r of entry.state?.asset?.resources ?? []) {
-        if (r.digest === digest) found = typeof r.mediaType === 'string' && MEDIA_TYPE.test(r.mediaType) ? r.mediaType : null;
-      }
+      // One resource per Original, each entry naming its version (P4.1, P14.5; originals-spec #53).
+      const entry = JSON.parse(line) as { state?: { asset?: { resource?: { digest?: unknown; mediaType?: unknown } } } };
+      const r = entry.state?.asset?.resource;
+      if (r && r.digest === digest) found = typeof r.mediaType === 'string' && MEDIA_TYPE.test(r.mediaType) ? r.mediaType : null;
     } catch {
       return null;
     }

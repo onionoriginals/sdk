@@ -7,18 +7,31 @@
  */
 import { demo } from '../content';
 import type { DemoAssetState } from '../sdk/engine';
-import { anchoringView, offChainPreview } from './anchoring-view';
+import { anchoringView, inscriptionNoticePreview, offChainPreview } from './anchoring-view';
+
+/** P9.18 (C12-193): before any inscription is signed, what becomes public and permanent. */
+function InscriptionNotice({ asset, carries }: { asset: DemoAssetState; carries?: { version: number; mediaType: string } }) {
+  const notice = inscriptionNoticePreview(asset, carries);
+  return (
+    <>
+      <p className="demo-inscribe-note" data-testid="inscription-permanent">{notice.permanent}</p>
+      {notice.activeContent && <p className="demo-error" role="alert" data-testid="inscription-active-content">{notice.activeContent}</p>}
+    </>
+  );
+}
 
 export function AnchoringBeforeSign({ asset }: { asset: DemoAssetState }) {
   const copy = demo.anchoring;
+  const offChain = offChainPreview(asset);
   return (
     <div className="demo-anchoring-notice" data-testid="anchoring-before-sign">
       <strong>{copy.beforeHeading}</strong>
       <p className="demo-inscribe-note">{copy.terminal}</p>
       <p className="demo-inscribe-note">{copy.twoKeys}</p>
+      <InscriptionNotice asset={asset} />
       <p className="demo-inscribe-note">{copy.offChainLead}</p>
       <ul className="demo-anchoring-offchain">
-        {offChainPreview(asset).map((line) => (
+        {offChain.map((line) => (
           <li key={line}>
             <code>{line}</code>
           </li>
@@ -41,6 +54,8 @@ export function AnchoringPanel(props: {
   const copy = demo.anchoring;
   if (!view) return null;
   const offChain = asset.anchoring?.offChain;
+  // The SDK's own words for the inscription just prepared (P9.18; C12-193), beside the preview shown before signing.
+  const notice = asset.anchoring?.notice;
   return (
     <div className="demo-anchoring" data-tone={view.tone} data-testid="anchoring-panel">
       <div className="demo-deposit-head">
@@ -68,13 +83,18 @@ export function AnchoringPanel(props: {
       )}
       {view.holderElsewhere && <p className="demo-error" role="alert">{copy.holderElsewhere}</p>}
       {view.indexNote && <p className="demo-inscribe-note" data-testid="anchoring-index">{view.indexNote}</p>}
+      {notice && (
+        <p className={notice.activeContent ? 'demo-error' : 'demo-inscribe-note'} {...(notice.activeContent ? { role: 'alert' } : {})} data-testid="inscription-notice-sdk">
+          {notice.text}
+        </p>
+      )}
       {offChain && (
         <>
           <p className="demo-inscribe-note">{copy.offChainLead}</p>
           <ul className="demo-anchoring-offchain">
             {offChain.resources.map((r) => (
-              <li key={`${r.resource}-${r.version}`}>
-                <code>{r.resource}</code> v{r.version}
+              <li key={`${r.digest}-${r.version}`}>
+                <code>{asset.resource.id}</code> v{r.version}
               </li>
             ))}
             {offChain.identities.map((i) => (
@@ -93,6 +113,8 @@ export function AnchoringPanel(props: {
         </>
       )}
       {view.unpublishedNote && <p className="demo-inscribe-note" data-testid="anchoring-unpublished">{view.unpublishedNote}</p>}
+      {/* The version the next inscription carries is the one its entry names, not the head's (P9.17, P9.18). */}
+      {view.canInscribeNext && !props.pendingHandOff && <InscriptionNotice asset={asset} carries={asset.anchoring?.next} />}
       {view.canInscribeNext && !props.pendingHandOff && (
         <button type="button" className="btn btn-primary demo-step-btn" disabled={busy} data-busy={busy || undefined} onClick={props.onInscribeNext}>
           {busy ? copy.inscribeNextPending : copy.inscribeNext}

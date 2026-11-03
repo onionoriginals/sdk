@@ -327,8 +327,13 @@ export const demo = {
       'Anchoring happens once and cannot be undone: from then on, Bitcoin is where this Original’s history is read, and each new version is inscribed on the same sat.',
     twoKeys:
       'Two keys sign. Your authorship key signs the entry that names the sat; your deposit key signs the Bitcoin transaction that pays for it. Holding the sat makes you its owner, not its author: only the authorship key can change the Original.',
-    offChainLead: 'Bitcoin will hold the signed history only. These stay off chain, with you and this site:',
+    offChainLead: 'Bitcoin will hold the signed history and the current version of your file. These stay off chain, with you and this site:',
     offChainIdentity: (did: string) => `the history of your DID, ${did}`,
+    offChainEarlier: (file: string, through: number) => (through === 1 ? `version 1 of ${file}` : `versions 1 to ${through} of ${file}`),
+    permanent: (file: string, version: number) =>
+      `Version ${version} of ${file}, and the history with this Original’s name and description, become public and permanent on Bitcoin. A later version cannot remove them.`,
+    activeContent: (mediaType: string) =>
+      `${mediaType} is active content: Bitcoin explorers may display or run it outside the protections this site applies.`,
     offChainNote:
       'Nothing guarantees anyone else keeps them. Download the evidence package to keep your own copy, and hand it on with the sat if you sell or give it away.',
     cancel: 'Cancel',

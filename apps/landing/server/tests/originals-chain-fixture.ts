@@ -7,7 +7,6 @@
 import * as btc from '@scure/btc-signer';
 import { base64, hex } from '@scure/base';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
-import { ORIGINALS_INSCRIPTION_TYPE } from '@originals/vh/originals';
 import { InscriptionClock, MemoryStore, OriginalsSDK, btcoAlias } from '@originals/sdk/originals';
 import type { BitcoinSigner, OrdinalsProvider, SatSnapshot } from '@originals/sdk';
 import { createLocalAuthor } from '../../src/sdk/local-author';
@@ -41,7 +40,19 @@ export const headerClock = () => new InscriptionClock(async (h) => blockHeader(h
 const parse = (raw: string) => btc.Transaction.fromRaw(hex.decode(raw), { allowUnknownInputs: true, allowUnknownOutputs: true });
 
 /** The body of an inscription envelope in a reveal's first input, or null. */
-export function inscribedBody(raw: string): { contentType: string; body: Uint8Array } | null {
+const concat = (chunks: Uint8Array[]) => {
+  const out = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+  let o = 0;
+  for (const c of chunks) { out.set(c, o); o += c.length; }
+  return out;
+};
+
+/**
+ * The inscription a reveal carries, as ord reads it: content type (tag 1), metadata (tag 5, its
+ * pushes concatenated, P14.12), and body. An Originals inscription is the one whose metadata is a
+ * CBOR array of entries (P9.17; originals-spec #53); the verifier decides that, not this fixture.
+ */
+export function inscribedBody(raw: string): { contentType: string; metadata: Uint8Array | null; body: Uint8Array } | null {
   const witness = parse(raw).getInput(0).finalScriptWitness;
   if (!witness || witness.length < 3) return null;
   const ops = btc.Script.decode(witness[witness.length - 2]);
@@ -49,20 +60,19 @@ export function inscribedBody(raw: string): { contentType: string; body: Uint8Ar
   if (start < 0) return null;
   let k = start + 2;
   let contentType = '';
+  const metadata: Uint8Array[] = [];
   const isZero = (op: unknown) => op === 0 || (op instanceof Uint8Array && op.length === 0);
   while (k < ops.length && !isZero(ops[k])) {
     const tag = ops[k];
     const value = ops[k + 1];
     const tagNum = typeof tag === 'number' ? tag : tag instanceof Uint8Array && tag.length === 1 ? tag[0] : -1;
     if (tagNum === 1 && value instanceof Uint8Array) contentType = new TextDecoder().decode(value);
+    if (tagNum === 5 && value instanceof Uint8Array) metadata.push(value);
     k += 2;
   }
   const chunks: Uint8Array[] = [];
   for (k = k + 1; k < ops.length && ops[k] !== 'ENDIF'; k++) if (ops[k] instanceof Uint8Array) chunks.push(ops[k] as Uint8Array);
-  const body = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
-  let o = 0;
-  for (const c of chunks) { body.set(c, o); o += c.length; }
-  return { contentType, body };
+  return { contentType, metadata: metadata.length > 0 ? concat(metadata) : null, body: concat(chunks) };
 }
 
 export function fakeChain() {
@@ -146,11 +156,11 @@ export function fakeChain() {
         if (spends(raw)[0] === holder) {
           holder = `${id}:0`;
           const found = inscribedBody(raw);
-          if (found && found.contentType === ORIGINALS_INSCRIPTION_TYPE) {
+          if (found) {
             publications.push({
               id: `${id}i0`, revealTxid: id, network: NETWORK, sat: SAT, confirmed: true,
               creation: { height, blockHash: hashAt(height), transactionIndex: 1, inscriptionIndex: 0 },
-              body: { status: 'complete', mediaType: ORIGINALS_INSCRIPTION_TYPE, bytes: found.body, metadata: null },
+              body: { status: 'complete', mediaType: found.contentType, bytes: found.body, metadata: found.metadata },
             } as SatSnapshot['publications'][number]);
           }
         }
@@ -217,7 +227,7 @@ export function fakeChain() {
 export async function authorWithOriginal() {
   const author = await createLocalAuthor(new Date('2026-10-22T11:00:00Z'));
   const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => author.evidence });
-  const created = await sdk.create({ name: 'Harbor', resources: [{ id: 'photo.txt', mediaType: 'text/plain', bytes: new TextEncoder().encode('one') }], author: author.ref, signer: author.signer });
+  const created = await sdk.create({ name: 'Harbor', resource: { mediaType: 'text/plain', bytes: new TextEncoder().encode('one') }, author: author.ref, signer: author.signer });
   if (created.kind !== 'original') throw new Error('expected an Original');
   const did = created.original.did;
   const anchored = await sdk.anchor(did, { parent: created.original.checkpoint, author: author.ref, signer: author.signer, sat: btcoAlias(NETWORK, SAT) });

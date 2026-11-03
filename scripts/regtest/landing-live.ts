@@ -186,7 +186,7 @@ async function freshReader(did: string, zipPath: string) {
     did, packageFor: r.original, sat: alias, network: snapshot.network, index: evidence.index, indexesConsulted: 1,
     history: r.history.status, authorBinding: r.authorBinding.status, identity: r.identityEvidence.status, author: r.identityEvidence.author,
     anchoring: r.anchoring?.status, head: r.head, current: r.current, ownership: r.ownership,
-    resources: r.resources.versions.map((v) => ({ resource: v.resource, version: v.version, bytes: v.bytes, sha256: contents.bytes[v.digest] ? hex.encode(sha256(contents.bytes[v.digest])) : null })),
+    resources: r.resources.versions.map((v) => ({ version: v.version, bytes: v.bytes, onBitcoin: v.onBitcoin, sha256: contents.bytes[v.digest] ? hex.encode(sha256(contents.bytes[v.digest])) : null })),
     fromBitcoinAlone: { anchoring: alone.anchoring?.status, head: alone.head, history: alone.history.status, authorBinding: alone.authorBinding.status },
   };
   log('fresh-reader', result);

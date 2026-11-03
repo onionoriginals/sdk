@@ -27,7 +27,7 @@ describe("FileStore: durable local commit (P6.2)", () => {
     const dir = tempDir();
     try {
       const { sdk, signer, author, alice } = await withOriginal(dir);
-      const c = await sdk.create({ name: "x", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author, signer });
+      const c = await sdk.create({ name: "x", resource: { mediaType: "image/jpeg", bytes: bytes("one") }, author, signer });
       if (c.kind !== "original") throw new Error("expected an Original");
       const reopened = OriginalsSDK.create({ store: await FileStore.open(dir), authors: [alice.evidence()], clock: clock() });
       const view = await reopened.get(c.original.did);
@@ -80,10 +80,10 @@ describe("FileStore: durable local commit (P6.2)", () => {
       // Crash after the new log is written and synced, before it replaces the old one.
       let crash = false;
       const { sdk, signer, author, alice } = await withOriginal(dir, { beforeRename: () => { if (crash) throw new Error("power lost"); } });
-      const c = await sdk.create({ name: "x", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author, signer });
+      const c = await sdk.create({ name: "x", resource: { mediaType: "image/jpeg", bytes: bytes("one") }, author, signer });
       if (c.kind !== "original") throw new Error("expected an Original");
       crash = true;
-      await expect(sdk.edit(c.original.did, { parent: c.original.checkpoint, resources: [{ id: "photo", bytes: bytes("two") }], author, signer })).rejects.toThrow("power lost");
+      await expect(sdk.edit(c.original.did, { parent: c.original.checkpoint, resource: { bytes: bytes("two") }, author, signer })).rejects.toThrow("power lost");
 
       const scidDir = join(dir, "originals", c.original.did.slice("did:vh:".length));
       expect(readdirSync(scidDir).some((f) => f.includes(".tmp"))).toBe(true);
@@ -97,7 +97,7 @@ describe("FileStore: durable local commit (P6.2)", () => {
       expect(prior.resources.length).toBe(1);
 
       // The same edit, retried after recovery, commits fully.
-      const done = await reader.edit(c.original.did, { parent: prior.checkpoint, resources: [{ id: "photo", bytes: bytes("two") }], author, signer });
+      const done = await reader.edit(c.original.did, { parent: prior.checkpoint, resource: { bytes: bytes("two") }, author, signer });
       const later = OriginalsSDK.create({ store: await FileStore.open(dir), authors: [alice.evidence()], clock: clock(Date.parse("2026-10-18T12:20:00Z")) });
       expect((await later.get(c.original.did)).checkpoint).toBe(done.original.checkpoint);
     } finally {
@@ -109,7 +109,7 @@ describe("FileStore: durable local commit (P6.2)", () => {
     const dir = tempDir();
     try {
       const { sdk, signer, author, alice } = await withOriginal(dir);
-      const c = await sdk.create({ name: "x", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author, signer });
+      const c = await sdk.create({ name: "x", resource: { mediaType: "image/jpeg", bytes: bytes("one") }, author, signer });
       if (c.kind !== "original") throw new Error("expected an Original");
       const [digest] = readdirSync(join(dir, "resources"));
       writeFileSync(join(dir, "resources", digest), "tampered");
@@ -128,12 +128,12 @@ describe("FileStore: one writer per root (08b review C5)", () => {
     const dir = tempDir();
     try {
       const { sdk, signer, author, alice } = await withOriginal(dir);
-      const c = await sdk.create({ name: "x", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: bytes("one") }], author, signer });
+      const c = await sdk.create({ name: "x", resource: { mediaType: "image/jpeg", bytes: bytes("one") }, author, signer });
       if (c.kind !== "original") throw new Error("expected an Original");
       const other = OriginalsSDK.create({ store: await FileStore.open(dir), authors: [alice.evidence()], clock: clock(Date.parse("2026-10-18T12:05:00Z")) });
       const parent = c.original.checkpoint;
-      const d1 = await sdk.prepareEdit(c.original.did, { parent, resources: [{ id: "photo", bytes: bytes("mine") }], author });
-      const d2 = await other.prepareEdit(c.original.did, { parent, resources: [{ id: "photo", bytes: bytes("theirs") }], author });
+      const d1 = await sdk.prepareEdit(c.original.did, { parent, resource: { bytes: bytes("mine") }, author });
+      const d2 = await other.prepareEdit(c.original.did, { parent, resource: { bytes: bytes("theirs") }, author });
       const results = await Promise.allSettled([sdk.commit(d1, signer), other.commit(d2, signer)]);
       const committed = results.filter((r) => r.status === "fulfilled" && r.value.status === "committed");
       expect(committed).toHaveLength(1);

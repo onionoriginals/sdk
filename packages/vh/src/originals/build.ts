@@ -1,6 +1,6 @@
 /**
  * Building asset log entries. The builders apply the operation contract's
- * value rules (P4.1, P4.4, P4.6) and validate the result with the same checks
+ * value rules (P4.1, P4.4, P4.6; one resource per Original, originals-spec #53) and validate the result with the same checks
  * the verifier uses, so they never produce an entry the verifier rejects for
  * its state. Signing is the caller's: `sign` receives the complete unsigned
  * entry (P5.11 asks the signer to show it to the author first).
@@ -25,7 +25,8 @@ export interface PrepareCreateInput {
   versionTime: string;
   name: string;
   metadata?: JsonObject;
-  resources: ResourceDescriptor[];
+  /** The descriptor of the Original's one resource, its first version (P4.1). */
+  resource: ResourceDescriptor;
   author: AuthorRef;
   /** Editor grants from genesis (P5.15). Genesis is always an author entry (P5.16). */
   editors?: EditorGrant[];
@@ -42,23 +43,11 @@ export interface PrepareUpdateInput {
   /** Omitted keeps the metadata; null removes it (P4.6). */
   metadata?: JsonObject | null;
   /**
-   * New descriptors by id. One for an existing resource replaces it; one with
-   * a new id adds that resource, appended after the existing ones in the order
-   * given (P4.1, P14.5). Only an author entry may add a resource (P5.16).
+   * The resource's next version (P4.1): omitted keeps the current one. A
+   * descriptor with the current digest leaves the version unchanged (P4.4).
+   * An editor needs a grant with `resource: true` (P5.16).
    */
-  resources?: ResourceDescriptor[];
-  /**
-   * ResourceIDs to remove. At least one resource must remain, and no grant may
-   * still name a removed resource (P4.1, P5.15). Author entries only (P5.16).
-   * A removed resource's earlier versions stay in history.
-   */
-  remove?: string[];
-  /**
-   * Every resourceID the Original has used, from its verified history, so a
-   * reused id is refused before signing (P4.1). Without it only the parent's
-   * resources are known; the verifier rejects a reuse either way.
-   */
-  usedResourceIds?: Iterable<string>;
+  resource?: ResourceDescriptor;
   /**
    * The author reference. Required for an author entry. An editor entry
    * carries its parent's unchanged (P5.16): omit it, or give exactly that.
@@ -90,12 +79,13 @@ function stateOf(entry: UnsignedEntry): EntryState {
 /** The unsigned genesis entry of a new Original: `did:vh:{SCID}` until the SCID is computed. */
 export function prepareCreateOriginal(input: PrepareCreateInput): UnsignedEntry {
   if ((input as { editor?: unknown }).editor !== undefined) fail("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor entry cannot be the genesis entry; only an author entry may (P5.16)");
-  const resources = input.resources.map((r, i) => checkDescriptor(r, `resources[${i}]`));
+  if ((input as { resources?: unknown }).resources !== undefined) invalidInput("STATE_RESOURCE", "an Original has exactly one resource: give `resource`, not `resources` (P4.1)");
+  const resource = checkDescriptor(input.resource, "resource");
   const asset: AssetState = {
     name: input.name,
     ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
     status: "active",
-    resources,
+    resource,
     aliases: [],
     ...(input.editors !== undefined && input.editors.length > 0 ? { editors: input.editors } : {}),
   };
@@ -118,17 +108,11 @@ export async function createOriginal(input: CreateOriginalInput): Promise<LogEnt
 
 function nextAsset(previous: AssetState, input: Omit<PrepareUpdateInput, "versionTime" | "author">): AssetState {
   if (input.name === null) invalidInput("STATE_NAME", "the name cannot be null (P4.6)");
-  const given = input.resources ?? [];
-  const changes = new Map(given.map((r) => [r.id, r]));
-  if (changes.size !== given.length) invalidInput("STATE_RESOURCE", "a resource is given twice");
-  const remove = new Set(input.remove ?? []);
-  if (remove.size !== (input.remove ?? []).length) invalidInput("STATE_RESOURCE_SET", "a resource is removed twice");
-  for (const id of remove) {
-    if (!previous.resources.some((r) => r.id === id)) invalidInput("STATE_RESOURCE_SET", `resource ${id} is not in the resource set, so it cannot be removed (P4.1)`);
-    if (changes.has(id)) invalidInput("STATE_RESOURCE_SET", `resource ${id} cannot be both changed and removed`);
+  const legacy = input as { resources?: unknown; remove?: unknown };
+  if (legacy.resources !== undefined || legacy.remove !== undefined) {
+    invalidInput("STATE_RESOURCE", "an Original has exactly one resource, never added or removed: give its next version as `resource` (P4.1)");
   }
-  // Existing resources keep their place; new ids are appended in the order given (P4.1, P14.5).
-  const added = given.filter((r) => !previous.resources.some((p) => p.id === r.id));
+  const resource = input.resource === undefined ? previous.resource : checkDescriptor(input.resource, "resource");
   const { metadata: _old, editors: _editors, ...rest } = previous;
   const metadata = input.metadata === undefined ? previous.metadata : input.metadata;
   const editors = input.editors === undefined ? previous.editors : input.editors;
@@ -136,7 +120,7 @@ function nextAsset(previous: AssetState, input: Omit<PrepareUpdateInput, "versio
     ...rest,
     name: input.name ?? previous.name,
     ...(metadata !== null && metadata !== undefined ? { metadata } : {}),
-    resources: [...previous.resources.filter((r) => !remove.has(r.id)).map((r) => changes.get(r.id) ?? r), ...added],
+    resource,
     aliases: input.aliases ?? previous.aliases,
     ...(editors !== null && editors !== undefined && editors.length > 0 ? { editors } : {}),
   };
@@ -148,7 +132,6 @@ interface NextInput {
   editor?: EditorRef;
   aliases?: string[];
   editors?: EditorGrant[] | null;
-  usedResourceIds?: Iterable<string>;
 }
 
 function next(previous: UnsignedEntry, operation: "update" | "deactivate", asset: AssetState, input: NextInput): UnsignedEntry {
@@ -171,23 +154,13 @@ function next(previous: UnsignedEntry, operation: "update" | "deactivate", asset
     transitions: expectedTransitions(before.asset, asset),
   } as unknown as JsonObject;
   const scid = before.id.slice("did:vh:".length);
-  checkEntryState(state, {
-    scid, index: 1, previous: before, deactivatedParameter: operation === "deactivate",
-    ...(input.usedResourceIds !== undefined ? { usedResourceIds: input.usedResourceIds } : {}),
-  });
+  checkEntryState(state, { scid, index: 1, previous: before, deactivatedParameter: operation === "deactivate" });
   const parameters: JsonObject = operation === "deactivate" ? { deactivated: true } : {};
   return prepareNext(previous, { versionTime: input.versionTime, parameters, state });
 }
 
 /** An unsigned update entry after `previous`. */
 export function prepareUpdateOriginal(previous: UnsignedEntry, input: PrepareUpdateInput): UnsignedEntry {
-  if (input.editor !== undefined) {
-    // P4.1, P5.16: only an author entry adds or removes a resource, whatever the grant names.
-    const current = stateOf(previous).asset.resources;
-    const adds = (input.resources ?? []).find((r) => !current.some((c) => c.id === r.id));
-    if (adds) fail("outside-grant", "EDITOR_AUTHOR_ONLY", `an editor entry cannot add a resource (${adds.id}); only an author entry may (P4.1, P5.16)`);
-    if ((input.remove ?? []).length > 0) fail("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor entry cannot remove a resource; only an author entry may (P4.1, P5.16)");
-  }
   return next(previous, "update", nextAsset(stateOf(previous).asset, input), input);
 }
 

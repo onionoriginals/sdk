@@ -23,8 +23,8 @@ async function moved(moveKeys?: Parameters<WebvhAuthor["move"]>[1]) {
   const alice = await WebvhAuthor.create([{ fragment: "orig-1", signer: K1 }], { domain: "old.example.com" });
   const at = clock();
   const before = alice.ref("orig-1");
-  const genesis = await createOriginal({ versionTime: at(), name: "Harbor at dawn", resources: [photo(B1)], author: before, sign: alice.signer(K1, before) });
-  const cropped = await updateOriginal(genesis, { versionTime: at(), resources: [photo(B2)], author: before, sign: alice.signer(K1, before) });
+  const genesis = await createOriginal({ versionTime: at(), name: "Harbor at dawn", resource: photo(B1), author: before, sign: alice.signer(K1, before) });
+  const cropped = await updateOriginal(genesis, { versionTime: at(), resource: photo(B2), author: before, sign: alice.signer(K1, before) });
   const moveVersion = await alice.move("new.example.org", moveKeys ?? [{ fragment: "orig-1", signer: K1 }]);
   return { alice, at, before, moveVersion, log: [genesis, cropped] };
 }
@@ -46,7 +46,7 @@ describe("C12-132: a did:webvh author that moved under portability, then rotated
     const after = alice.ref("orig-2", rotated);
     expect(after).toEqual({ did: alice.did, verificationMethod: `${alice.location}#orig-2`, versionId: rotated });
     expect(after.verificationMethod.startsWith(`${alice.did}#`)).toBe(false);
-    const next = await updateOriginal(log[1], { versionTime: at(), resources: [photo(B3)], author: after, sign: alice.signer(K2, after) });
+    const next = await updateOriginal(log[1], { versionTime: at(), resource: photo(B3), author: after, sign: alice.signer(K2, after) });
     const r = await verify([...log, next], [alice.evidence()], {});
     expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
     expect(r.authorBinding.status).toBe("valid");
@@ -80,7 +80,7 @@ describe("C12-132: a did:webvh author that moved under portability, then rotated
     const rotated = await alice.rotate([{ fragment: "orig-2", signer: K2 }]);
     // The new key, named under the identity DID's old namespace at a version whose id is the new DID.
     const stale: AuthorRef = { did: alice.did, verificationMethod: `${alice.did}#orig-2`, versionId: rotated };
-    const next = await updateOriginal(log[1], { versionTime: at(), resources: [photo(B3)], author: stale, sign: alice.signer(K2, stale) });
+    const next = await updateOriginal(log[1], { versionTime: at(), resource: photo(B3), author: stale, sign: alice.signer(K2, stale) });
     failedWith(await verify([...log, next], [alice.evidence()]), 2, "AUTHOR_VM_FOREIGN", "author-binding");
   });
 });
@@ -92,7 +92,7 @@ describe("C12-135: a verification method after a move whose controller is the ol
     // As didwebvh-ts writes a move: the method moves to the new id, its controller does not.
     await alice.rotate([{ fragment: "orig-1", signer: K1, controller: oldDid }]);
     const ref = alice.ref("orig-1");
-    const next = await updateOriginal(log[1], { versionTime: at(), resources: [photo(B3)], author: ref, sign: alice.signer(K1, ref) });
+    const next = await updateOriginal(log[1], { versionTime: at(), resource: photo(B3), author: ref, sign: alice.signer(K1, ref) });
     failedWith(await verify([...log, next], [alice.evidence()]), 2, "AUTHOR_VM_CONTROLLER", "author-binding");
     // A method the moved document still lists under the old DID's id is held in another namespace.
     const doc = alice.document(alice.location, [], { alsoKnownAs: [oldDid] });
@@ -100,7 +100,7 @@ describe("C12-135: a verification method after a move whose controller is the ol
     doc.assertionMethod = [`${oldDid}#orig-1`];
     const v = await alice.appendState(doc);
     const legacy: AuthorRef = { did: oldDid, verificationMethod: `${oldDid}#orig-1`, versionId: v };
-    const again = await updateOriginal(log[1], { versionTime: at(), resources: [photo(B3)], author: legacy, sign: alice.signer(K1, legacy) });
+    const again = await updateOriginal(log[1], { versionTime: at(), resource: photo(B3), author: legacy, sign: alice.signer(K1, legacy) });
     failedWith(await verify([...log, again], [alice.evidence()]), 2, "AUTHOR_VM_FOREIGN", "author-binding");
   });
 });
@@ -110,7 +110,7 @@ describe("C12-136: a log with another SCID whose alsoKnownAs lists the author DI
     const { alice, at, log } = await moved();
     const mallory = await WebvhAuthor.create([{ fragment: "orig", signer: seeded(66) }], { domain: "new.example.org", alsoKnownAs: [alice.did] });
     const claim: AuthorRef = { did: alice.did, verificationMethod: `${mallory.location}#orig`, versionId: mallory.versionId };
-    const next = await updateOriginal(log[1], { versionTime: at(), resources: [photo(B3)], author: claim, sign: mallory.signer(seeded(66), claim) });
+    const next = await updateOriginal(log[1], { versionTime: at(), resource: photo(B3), author: claim, sign: mallory.signer(seeded(66), claim) });
     // Mallory's log offered as Alice's history does not verify as hers.
     const history = await verifyAuthorHistory(mallory.evidence(undefined, alice.did), { now: NOW });
     expect(history.versions).toEqual([]);
@@ -124,7 +124,7 @@ describe("C12-136: a log with another SCID whose alsoKnownAs lists the author DI
     failedWith(unknown, 2, "AUTHOR_VERSION_UNAVAILABLE", "incomplete-evidence");
     // Naming a version of Alice's own log, Mallory's method is in another DID's namespace.
     const named: AuthorRef = { ...claim, versionId: alice.versionId };
-    const bound = await updateOriginal(log[1], { versionTime: at(), resources: [photo(B3)], author: named, sign: mallory.signer(seeded(66), named) });
+    const bound = await updateOriginal(log[1], { versionTime: at(), resource: photo(B3), author: named, sign: mallory.signer(seeded(66), named) });
     failedWith(await verify([...log, bound], [alice.evidence(), mallory.evidence()]), 2, "AUTHOR_VM_FOREIGN", "author-binding");
   });
 
@@ -146,11 +146,11 @@ describe("C12-138: an author DID that changes DID method", () => {
     const key = seeded(77);
     const asVh = await VhAuthor.create([{ fragment: "orig", signer: key }]);
     // The did:vh claims to be Alice; a later entry naming it as author changes the author DID.
-    const renamed = await updateOriginal(log[1], { versionTime: at(), resources: [photo(B3)], author: asVh.ref("orig"), sign: asVh.signer(key, "orig") });
+    const renamed = await updateOriginal(log[1], { versionTime: at(), resource: photo(B3), author: asVh.ref("orig"), sign: asVh.signer(key, "orig") });
     failedWith(await verify([...log, renamed], [alice.evidence(), asVh.evidence()]), 2, "AUTHOR_DID_CHANGED");
     // Naming Alice but a key of the did:vh: not in any version of Alice's own log.
     const claim: AuthorRef = { did: alice.did, verificationMethod: `${asVh.did}#orig`, versionId: alice.versionId };
-    const borrowed = await updateOriginal(log[1], { versionTime: at(), resources: [photo(B3)], author: claim, sign: asVh.signer(key, "orig") });
+    const borrowed = await updateOriginal(log[1], { versionTime: at(), resource: photo(B3), author: claim, sign: asVh.signer(key, "orig") });
     failedWith(await verify([...log, borrowed], [alice.evidence(), asVh.evidence()]), 2, "AUTHOR_VM_FOREIGN", "author-binding");
     // And the did:vh's log offered as Alice's history is not hers.
     const offered = await verifyAuthorHistory({ did: alice.did, log: asVh.evidence().log }, { now: NOW });
@@ -168,7 +168,7 @@ describe("C12-134: author freshness after a move (P5.14, P7.8)", () => {
     const { alice, at, log } = await moved();
     const rotated = await alice.rotate([{ fragment: "orig-2", signer: K2 }]);
     const after = alice.ref("orig-2", rotated);
-    const next = await updateOriginal(log[1], { versionTime: at(), resources: [photo(B3)], author: after, sign: alice.signer(K2, after) });
+    const next = await updateOriginal(log[1], { versionTime: at(), resource: photo(B3), author: after, sign: alice.signer(K2, after) });
     const entries = [...log, next];
     // No retrieval: freshness is not established, and the Original is not currently authorized.
     const plain = await verify(entries, [alice.evidence()]);
@@ -205,7 +205,7 @@ describe("C12-134: author freshness after a move (P5.14, P7.8)", () => {
     const { alice, at, log } = await moved();
     const rotated = await alice.rotate([{ fragment: "orig-2", signer: K2 }], witnessList);
     const after = alice.ref("orig-2", rotated);
-    const next = await updateOriginal(log[1], { versionTime: at(), resources: [photo(B3)], author: after, sign: alice.signer(K2, after) });
+    const next = await updateOriginal(log[1], { versionTime: at(), resource: photo(B3), author: after, sign: alice.signer(K2, after) });
     const entries = [...log, next];
     const url = didWebvhLogUrl(alice.location);
     const witnessed = { ...alice.evidence(), witness: await approve(rotated), retrievedFrom: url, obtainedAt: OBTAINED, source: "fetched" as const };

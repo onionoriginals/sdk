@@ -100,27 +100,26 @@ export function aliasLogPath(aliasDid: string): string {
 }
 
 /**
- * Refuse hosted publication of a log any of whose resources is larger than a
- * hosted reader fetches: 64 MiB, `FETCH_LIMITS.maxResourceBytes` (P8.5; P14.13).
- * No reader could retrieve it, so it is refused before anything is published (limit-exceeded,
- * RESOURCE_OVER_FETCH_LIMIT, naming the resource). A local Original is never
- * fetched, so creating and editing one are not limited.
+ * Refuse hosted publication of a log any version of whose resource is larger
+ * than a hosted reader fetches: 64 MiB, `FETCH_LIMITS.maxResourceBytes` (P8.5;
+ * P14.13). No reader could retrieve it, so it is refused before anything is
+ * published (limit-exceeded, RESOURCE_OVER_FETCH_LIMIT, naming the version's
+ * digest). A local Original is never fetched, so creating and editing one are
+ * not limited. One resource per Original (P4.1; originals-spec #53).
  */
 export function assertHostable(log: string): void {
   for (const line of log.split("\n")) {
-    let resources: unknown;
+    let resource: unknown;
     try {
-      resources = (JSON.parse(line) as { state?: { asset?: { resources?: unknown } } }).state?.asset?.resources;
+      resource = (JSON.parse(line) as { state?: { asset?: { resource?: unknown } } }).state?.asset?.resource;
     } catch {
       continue; // Verification reports a malformed line.
     }
-    if (!Array.isArray(resources)) continue;
-    for (const r of resources as Array<{ id?: unknown; digest?: unknown; size?: unknown }>) {
-      if (typeof r?.size === "number" && r.size > FETCH_LIMITS.maxResourceBytes) {
-        throw new OriginalsError("limit-exceeded", "RESOURCE_OVER_FETCH_LIMIT", `resource ${String(r.id)} is ${r.size} bytes; a hosted reader fetches at most ${FETCH_LIMITS.maxResourceBytes}`, {
-          resource: r.id, digest: r.digest, size: r.size, limit: FETCH_LIMITS.maxResourceBytes,
-        });
-      }
+    const r = resource as { digest?: unknown; size?: unknown } | null | undefined;
+    if (typeof r?.size === "number" && r.size > FETCH_LIMITS.maxResourceBytes) {
+      throw new OriginalsError("limit-exceeded", "RESOURCE_OVER_FETCH_LIMIT", `resource version ${String(r.digest)} is ${r.size} bytes; a hosted reader fetches at most ${FETCH_LIMITS.maxResourceBytes}`, {
+        digest: r.digest, size: r.size, limit: FETCH_LIMITS.maxResourceBytes,
+      });
     }
   }
 }

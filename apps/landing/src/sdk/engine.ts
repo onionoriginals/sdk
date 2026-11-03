@@ -14,6 +14,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { MemoryStore, OriginalsSDK, satEvidence, btcoAlias, type EditInput, type HostedFetch, type OriginalView, type OriginalsSigner, type SharedHost, type SubmitResult, type OriginalsStore } from "@originals/sdk/originals";
 import type { OffChainEvidence } from "@originals/sdk/originals/bitcoin";
+import type { InscriptionNotice } from "@originals/sdk/originals";
 import type { BitcoinSigner, Utxo } from "@originals/sdk";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
@@ -22,7 +23,7 @@ import { OriginalsError } from "@originals/vh";
 import { didWebvhLogUrl } from "@originals/vh/webvh";
 import { FETCH_LIMITS } from "@originals/vh/fetch";
 import { base58AddressToEd25519Multikey } from "@originals/sdk";
-import { parseJson } from "@originals/vh/json";
+import { canonicalize, parseJson, type JsonObject } from "@originals/vh/json";
 import { ensureAuthorshipAccount, ensureIdentityAccount, fundingSignerAddress, type TurnkeyBitcoinClient } from "../auth/turnkey-session";
 import {
   AnchoringSubmitError, abandonRefused, guardedSign, httpAnchoringTransport, indexedDbOutbox, publishNextEntry, resendWaiting, signingGuard,
@@ -41,7 +42,7 @@ import { StampedAuthorEvidence } from "./author-evidence";
 import { createLocalAuthor } from "./local-author";
 import { MemoryPublicationRecords, hasPublicationRecords, higherPublication, type PublicationRecord, type PublicationRecords } from "./publication-records";
 import { btcNetwork, demoTier, type BtcNetworkFlag, type DemoTier } from "./network-flag";
-import { contentBytes, contentText, resourceView, type ResourceContent } from "./resource-view";
+import { contentBytes, resourceView, type ResourceContent } from "./resource-view";
 import { authorshipPublicKeyMultibase, turnkeyAuthorshipSigner } from "./turnkey-authorship-signer";
 
 export { short };
@@ -65,8 +66,12 @@ export interface HistoryEntry {
   operation: string;
   /** The author verification method that signed it. */
   authorKey: string;
-  /** Resource changes: id and new digest, or null for a removed resource (P4.1, P14.4). */
-  changes: Array<{ resource: string; to: string | null }>;
+  /**
+   * The resource change, if any: the previous digest (null at genesis) and the
+   * new one. An Original is one resource, so an entry has at most one (P4.1,
+   * P14.4; originals-spec #53).
+   */
+  changes: Array<{ from: string | null; to: string }>;
   name: string;
 }
 
@@ -92,16 +97,17 @@ export interface DemoAssetState {
   webvhResolved?: boolean;
   btcoDid?: string;
   author: string;
+  /** The Original's one resource, at its current version (P4.1). */
   resource: {
+    /** The file name the author gave it, kept in the asset state's metadata (`artwork.file`). */
     id: string;
     hash: string;
     contentType: string;
     content: ResourceContent;
     version: number;
   };
+  /** The asset state's metadata, as JSON text: title, style and the artwork's file name (P4.6). */
   metadata?: {
-    id: string;
-    hash: string;
     content: string;
   };
   credentials: number;
@@ -124,12 +130,20 @@ export interface DemoAssetState {
     status: AnchoringStatus | null;
     lastSent?: SubmitAnswer;
     offChain?: OffChainEvidence;
+    /** The SDK's statement for the last inscription prepared: what it made public and permanent (P9.18; C12-193). */
+    notice?: InscriptionNotice;
     /**
      * Entries committed in this browser after the head Bitcoin accepts, oldest
      * first: still to inscribe, one per block (P9.13). The server's status
      * describes its own copy and cannot see these until they are submitted.
      */
     unpublished: string[];
+    /**
+     * The resource version the next inscription carries as its body: the one
+     * the first unpublished entry names (P9.17), which the notice before
+     * signing describes (P9.18; C12-193). Absent when nothing is unpublished.
+     */
+    next?: { version: number; mediaType: string };
   };
   /**
    * Set when the store holds divergent valid branches of this Original: an
@@ -227,7 +241,7 @@ interface LogLine {
   state: {
     operation: string;
     author: { verificationMethod: string };
-    transitions: Array<{ resource: string; to: string | null }>;
+    transitions: Array<{ from: string | null; to: string }>;
     asset: { name: string; aliases?: string[] };
   };
 }
@@ -291,7 +305,7 @@ export class DemoEngine {
 
   private readonly networkFlag: BtcNetworkFlag;
   private readonly anchoringOpts: AnchoringOptions;
-  private anchoring: Omit<NonNullable<DemoAssetState["anchoring"]>, "unpublished"> | undefined = undefined;
+  private anchoring: Omit<NonNullable<DemoAssetState["anchoring"]>, "unpublished" | "next"> | undefined = undefined;
 
   constructor(opts?: {
     store?: OriginalsStore;
@@ -418,16 +432,16 @@ export class DemoEngine {
   async create(title: string, style: string, source: string | AssetSource): Promise<DemoAssetState> {
     const src = asSource(source);
     const artwork = contentBytes(src.content);
-    const metadata = new TextEncoder().encode(buildMetadata({
+    // Descriptive values go in the asset state's metadata, never in a second resource: an
+    // Original is exactly one resource (P4.1; originals-spec #53).
+    const metadata = buildMetadata({
       title, style, created: new Date().toISOString(), artworkHash: toHex(sha256(artwork)), artworkFile: src.filename,
-    }));
+    });
     const { ref, signer } = await this.author();
     const result = await this.sdk!.create({
       name: title,
-      resources: [
-        { id: src.filename, mediaType: src.contentType, bytes: artwork },
-        { id: "metadata.json", mediaType: "application/json", bytes: metadata },
-      ],
+      metadata,
+      resource: { mediaType: src.contentType, bytes: artwork },
       author: ref,
       signer,
     });
@@ -584,29 +598,23 @@ export class DemoEngine {
   private changeFor(title: string, style: string, source: string | AssetSource, ref: AuthorRef): EditInput | undefined {
     const current = this.snapshot();
     const src = asSource(source);
-    // The artwork keeps its resource id; only its bytes change (P4.1).
+    // An Original is one resource: new bytes are its next version, and the file keeps the
+    // name it was created with (P4.1; originals-spec #53).
     const artwork = contentBytes(src.content);
     const artworkHash = toHex(sha256(artwork));
-    const metadata = current.metadata
-      ? buildMetadata({ title, style, created: createdAtOf(current.metadata.content), artworkHash, artworkFile: current.resource.id })
-      : undefined;
+    const before = this.view!.state.metadata;
+    const metadata = buildMetadata({ title, style, created: createdAtOf(before), artworkHash, artworkFile: current.resource.id });
+    // The media type changes only with the bytes (P14.6), so the same bytes keep the resource as it is.
+    const resourceChanged = artworkHash !== current.resource.hash;
+    const metadataChanged = canonicalize(metadata) !== canonicalize(before ?? null);
     // Nothing changed: no entry. An empty signed entry would tell a reader
     // something changed when nothing did.
-    if (
-      artworkHash === current.resource.hash &&
-      src.contentType === current.resource.contentType &&
-      title === this.view!.state.name &&
-      (metadata === undefined || metadata === current.metadata?.content)
-    ) {
-      return undefined;
-    }
+    if (!resourceChanged && title === this.view!.state.name && !metadataChanged) return undefined;
     return {
       parent: this.view!.checkpoint,
       name: title,
-      resources: [
-        { id: current.resource.id, bytes: artwork, mediaType: src.contentType },
-        ...(metadata && current.metadata ? [{ id: current.metadata.id, bytes: new TextEncoder().encode(metadata) }] : []),
-      ],
+      ...(metadataChanged ? { metadata } : {}),
+      ...(resourceChanged ? { resource: { bytes: artwork, mediaType: src.contentType } } : {}),
       author: ref,
     };
   }
@@ -710,7 +718,11 @@ export class DemoEngine {
         this.view = head;
         const input = this.changeFor(title, style, source, ref);
         if (!input) throw new Error("Nothing to reconcile: the host's version already matches.");
-        return { name: input.name!, resources: input.resources! };
+        return {
+          name: input.name!,
+          ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+          ...(input.resource !== undefined ? { resource: input.resource } : {}),
+        };
       },
     });
     this.view = this.answered(result);
@@ -786,7 +798,7 @@ export class DemoEngine {
     const record = this.publication;
     if (!this.did || !this.view || record?.state !== "complete" || typeof index.recordOriginal !== "function") return;
     try {
-      await index.recordOriginal({ did: this.did, title: this.view.state.name, resourceHash: hexOfDigest(this.view.state.resources[0].digest), alias: record.alias.did });
+      await index.recordOriginal({ did: this.did, title: this.view.state.name, resourceHash: hexOfDigest(this.view.state.resource.digest), alias: record.alias.did });
     } catch (error) {
       throw AccountIndexError.from(error);
     }
@@ -945,7 +957,7 @@ export class DemoEngine {
 
   private async afterSend(transport: AnchoringTransport, result: PublishNextResult): Promise<DemoAssetState> {
     this.lastSubmission = { broadcast: result.sent.broadcast };
-    this.anchoring = { status: await this.readStatus(transport), lastSent: result.sent, offChain: result.offChain };
+    this.anchoring = { status: await this.readStatus(transport), lastSent: result.sent, offChain: result.offChain, ...(result.pair.notice ? { notice: result.pair.notice } : {}) };
     this.view = await this.sdk!.get(this.did!);
     await this.refresh();
     this.emit("asset:inscribed", `${result.resent ? "Resent" : "Sent"} ${short(result.sent.versionId)} for inscription (${result.sent.broadcast})`, {
@@ -989,6 +1001,25 @@ export class DemoEngine {
       if (error instanceof AnchoringSubmitError && error.status === 404) return null;
       throw error;
     });
+  }
+
+  private anchoringState(anchoring: NonNullable<typeof this.anchoring>): NonNullable<DemoAssetState["anchoring"]> {
+    const unpublished = this.unpublished(anchoring.status);
+    const next = unpublished.length > 0 ? this.versionAt(unpublished[0]) : undefined;
+    return { ...anchoring, unpublished, ...(next ? { next } : {}) };
+  }
+
+  /**
+   * The resource version in effect at an entry, derived from verified history (P4.4): the last one
+   * introduced at or before it. Its inscription carries that version as its body (P9.17).
+   */
+  private versionAt(versionId: string): { version: number; mediaType: string } | undefined {
+    const position = new Map(this.logEntries.map((e, k) => [e.versionId, k]));
+    const at = position.get(versionId);
+    if (at === undefined) return undefined;
+    const introduced = (this.view?.resources ?? []).filter((v) => (position.get(v.versionId) ?? Infinity) <= at);
+    const v = introduced[introduced.length - 1];
+    return v ? { version: v.version, mediaType: v.mediaType } : undefined;
   }
 
   /** After Bitcoin's accepted head; before the anchor is accepted, from the anchoring entry on (P9.17). */
@@ -1117,9 +1148,8 @@ export class DemoEngine {
     const view = this.view;
     if (!view || !this.did) throw new Error("No asset yet");
     const state = view.state;
-    const [primary = { id: "", digest: "", mediaType: "application/octet-stream" }, ...rest] = state.resources;
-    const meta = rest.find((r) => r.id === "metadata.json");
-    const versionOf = (id: string) => view.resources.filter((r) => r.resource === id).length;
+    const primary = state.resource;
+    const fileName = (state.metadata?.artwork as { file?: unknown } | undefined)?.file;
     const bytesOf = (digest: string) => this.bytes.get(digest) ?? new Uint8Array();
     // Only a listed alias: a `started` one published nothing, and its URL would 404 (P9.2).
     const alias = this.listedWebvhAlias();
@@ -1132,16 +1162,17 @@ export class DemoEngine {
       ...(publication === "complete" && this.publication?.indexed !== undefined ? { accountIndex: this.publication.indexed ? ("listed" as const) : ("not-listed" as const) } : {}),
       ...(alias ? { webvhDid: alias, webvhLogUrl: didWebvhLogUrl(alias) } : {}),
       ...(btco ? { btcoDid: btco } : {}),
-      ...(this.anchoring ? { anchoring: { ...this.anchoring, unpublished: this.unpublished(this.anchoring.status) } } : {}),
+      ...(this.anchoring ? { anchoring: this.anchoringState(this.anchoring) } : {}),
       author: view.report.identityEvidence.author ?? "",
       resource: {
-        id: primary.id,
+        id: typeof fileName === "string" ? fileName : "resource",
         hash: hexOfDigest(primary.digest),
         contentType: primary.mediaType,
         content: resourceView(bytesOf(primary.digest), primary.mediaType),
-        version: versionOf(primary.id),
+        // Derived from verified history (P4.4).
+        version: view.resources.length,
       },
-      metadata: meta ? { id: meta.id, hash: hexOfDigest(meta.digest), content: contentText(bytesOf(meta.digest)) } : undefined,
+      metadata: state.metadata ? { content: JSON.stringify(state.metadata, null, 2) } : undefined,
       credentials: 0,
       history: this.history(),
       ...(this.unsettledFork() ? { fork: this.unsettledFork() } : {}),
@@ -1159,7 +1190,7 @@ export class DemoEngine {
       versionTime: entry.versionTime,
       operation: entry.state.operation,
       authorKey: entry.state.author.verificationMethod,
-      changes: entry.state.transitions.map((t) => ({ resource: t.resource, to: t.to })),
+      changes: entry.state.transitions.map((t) => ({ from: t.from, to: t.to })),
       name: entry.state.asset.name,
     }));
   }
@@ -1220,22 +1251,14 @@ function asSource(source: string | AssetSource): AssetSource {
   return typeof source === "string" ? { content: source, contentType: "image/svg+xml", filename: "artwork.svg" } : source;
 }
 
-function buildMetadata(input: { title: string; style: string; created: string; artworkHash: string; artworkFile: string }): string {
-  return JSON.stringify(
-    { title: input.title, style: input.style, creator: "you", created: input.created, artwork: { file: input.artworkFile, sha256: input.artworkHash } },
-    null,
-    2,
-  );
+/** The asset state's metadata: the descriptive values a second resource used to carry (P4.1, P4.6). */
+function buildMetadata(input: { title: string; style: string; created: string; artworkHash: string; artworkFile: string }): JsonObject {
+  return { title: input.title, style: input.style, creator: "you", created: input.created, artwork: { file: input.artworkFile, sha256: input.artworkHash } };
 }
 
-function createdAtOf(metadataJson: string): string {
-  try {
-    const created = (JSON.parse(metadataJson) as { created?: unknown }).created;
-    if (typeof created === "string" && created) return created;
-  } catch {
-    // Fall through to now.
-  }
-  return new Date().toISOString();
+function createdAtOf(metadata: JsonObject | undefined): string {
+  const created = metadata?.created;
+  return typeof created === "string" && created ? created : new Date().toISOString();
 }
 
 function toHex(bytes: Uint8Array): string {

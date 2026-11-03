@@ -76,15 +76,33 @@ recognises an entry as anchoring when it first lists a did:btco alias.
 
 ### 3.2 What an inscription carries
 
-- **Content type:** `application/vnd.originals.vh+jsonl` (P9.17, P14.12;
-  decided by the owner on 21 October 2026, D6; originals-spec #50, merged).
-- **Content:** UTF-8 JSON Lines of complete log entries, exactly as in
-  `did.jsonl`. No ord metadata, no did:btco metadata (S11), no delegation, no
-  compression. The sat reader does not refuse a delegated or
+Decided by the owner on 1 November 2026 (originals-spec #53, replacing the
+JSON Lines body of 21 October 2026; P9.17, P14.12):
+
+- **Metadata (ord tag 5):** the CBOR encoding of a JSON array of complete
+  log entries, each the parsed JSON of one `did.jsonl` line, split into data
+  pushes of at most 520 bytes that a reader concatenates. The JSON-to-CBOR
+  mapping is ord's for `--json-metadata` (PROVISIONAL): maps with text keys in
+  the object's order, shortest-form integers, other numbers as the narrowest
+  exact float, `true`, `false`, `null` (originals-spec #54). A reader rejects
+  tags, byte strings, indefinite lengths, non-text or duplicate keys, integers
+  beyond 2^53 − 1 and floats that are NaN, infinite, negative zero or beyond
+  that bound; it accepts a float of any width, and checks each entry over its
+  JCS form, so key order, integer form and float width do not matter. Metadata that does not
+  decode to an array, such as a did:btco DID document, is not an Originals
+  inscription.
+- **Content type (ord tag 1):** the `mediaType` of the resource in the last
+  entry.
+- **Body:** the exact bytes of the resource version the last entry names,
+  with no content encoding, so the sat shows the Original's current version. A
+  verifier rejects a body whose size or digest, or a content type, differs
+  from that descriptor. The sat reader does not refuse a delegated or
   `content-encoding` inscription: it reports it observed but unsupported, and
-  the verifier ignores an Originals-typed one with the reason
-  `unsupported-encoding` (P9.12, P9.14, P9.17); the holder cannot make the
-  read fail.
+  the verifier ignores one with Originals metadata as `unsupported-encoding`
+  (P9.12, P9.14, P9.17); the holder cannot make the read fail.
+- **Size:** metadata and body together at most 350,000 bytes, so a large
+  resource leaves little room for the log; authors should anchor early
+  (P14.13).
 - **The anchoring inscription carries the whole log** (P9.17, replacing
   decision A): genesis through the anchoring entry, which is its last entry.
   Every later inscription carries exactly one new entry that extends the head
@@ -147,12 +165,13 @@ checks ord against Bitcoin Core and is bounded (PROVISIONAL defaults,
   is used as given (up to 1 hour). Each request has `requestTimeoutMs` (15 s;
   at most 10 minutes). Requests: 7 plus 5 per listed inscription unless
   `maxRequests` is set.
-- `bodies: 'all' | 'originals'`: `'originals'` fetches only
-  `application/vnd.originals.vh+jsonl` bodies of at most 350,000 bytes and
-  their metadata, and reports every other inscription `not-requested`;
-  `'all'` (the default) reads every body, as a did:btco read needs (P5.13).
-  `satEvidence` passes unread non-Originals inscriptions on, flagged, and
-  fails only on an unread Originals one.
+- `bodies: 'all' | 'originals'`: `'originals'` fetches the metadata of every
+  inscription of at most 350,000 bytes, and the body only of one whose
+  metadata is an array of entries, and reports every other inscription `not-requested` (PROVISIONAL;
+  originals-spec #53); `'all'` (the default) reads every body, as a did:btco
+  read needs (P5.13). `satEvidence` passes unread inscriptions on, flagged
+  with what it knows (`contentLength`, `metadataPresent`), and the verifier
+  fails only on one that could be an Originals inscription.
 
 Assembly:
 

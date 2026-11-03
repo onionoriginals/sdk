@@ -42,7 +42,7 @@ async function published() {
   const at = clock();
   const sign = alice.signer(KEY, "orig");
   const ref = alice.ref("orig");
-  const genesis = await createOriginal({ versionTime: at(), name: "Harbor at dawn", resources: [photo(B1)], author: ref, sign });
+  const genesis = await createOriginal({ versionTime: at(), name: "Harbor at dawn", resource: photo(B1), author: ref, sign });
   const alias = await aliasLog([genesis.state.id as string]);
   // Publication: one update that lists the alias (no witnesses, owner decision Q14).
   const publish = await updateOriginal(genesis, { versionTime: at(), aliases: [alias.did], author: ref, sign });
@@ -78,7 +78,7 @@ describe("publishing a did:webvh alias (P3.6, P9.8)", () => {
 
   test("C12-66: a did:webvh pointing to a did:vh that does not list it gives no Originals result", async () => {
     const { alice, at, sign, ref } = await published();
-    const other = await createOriginal({ versionTime: at(), name: "Not published", resources: [photo(B1)], author: ref, sign });
+    const other = await createOriginal({ versionTime: at(), name: "Not published", resource: photo(B1), author: ref, sign });
     const claims = await aliasLog([other.state.id as string], "claims.example");
     let caught: unknown;
     try {

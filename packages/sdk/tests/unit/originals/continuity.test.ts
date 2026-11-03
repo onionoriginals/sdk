@@ -28,10 +28,10 @@ async function journey() {
   const store = new MemoryStore();
   const sdk = OriginalsSDK.create({ store, authors: async (did) => (did === alice.did ? alice.evidence() : undefined), clock: clock() });
   const before = alice.ref("orig-1");
-  const created = await sdk.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: before, signer: alice.signer(before, K1) });
+  const created = await sdk.create({ name: "Harbor at dawn", resource: { mediaType: "image/jpeg", bytes: B1 }, author: before, signer: alice.signer(before, K1) });
   if (created.kind !== "original") throw new Error("expected an Original");
   const did = created.original.did;
-  const cropped = await sdk.edit(did, { parent: created.original.checkpoint, resources: [{ id: "photo", bytes: B2 }], author: before, signer: alice.signer(before, K1) });
+  const cropped = await sdk.edit(did, { parent: created.original.checkpoint, resource: { bytes: B2 }, author: before, signer: alice.signer(before, K1) });
   return { alice, store, sdk, did, before, v1: created.original.checkpoint, v2: cropped.original.checkpoint };
 }
 
@@ -64,7 +64,7 @@ describe("C12-132, C12-133: create, move the author, rotate, append, package, im
     // move's version orig-1 does not meet P5.3; the commit is refused and nothing changes.
     const moved = alice.ref("orig-1");
     expect(moved.verificationMethod.startsWith(`${alice.location}#`)).toBe(true);
-    const refused = await sdk.edit(did, { parent: v2, resources: [{ id: "photo", bytes: B3 }], author: moved, signer: alice.signer(moved, K1) }).catch((e: unknown) => e);
+    const refused = await sdk.edit(did, { parent: v2, resource: { bytes: B3 }, author: moved, signer: alice.signer(moved, K1) }).catch((e: unknown) => e);
     expect(refused).toBeInstanceOf(OriginalsError);
     expect((refused as OriginalsError).code).toBe("COMMIT_VERIFICATION_FAILED");
     const report = (refused as OriginalsError).details?.report as { history: { failure?: { code: string; category: string } } };
@@ -75,7 +75,7 @@ describe("C12-132, C12-133: create, move the author, rotate, append, package, im
     await alice.rotate([{ fragment: "orig-2", secret: K2 }]);
     const after = alice.ref("orig-2");
     expect(after.did).toBe(alice.did);
-    const appended = await sdk.edit(did, { parent: v2, resources: [{ id: "photo", bytes: B3 }], author: after, signer: alice.signer(after, K2) });
+    const appended = await sdk.edit(did, { parent: v2, resource: { bytes: B3 }, author: after, signer: alice.signer(after, K2) });
     expect(appended.status).toBe("committed");
     // The rotation removed orig-1, so the entries signed with it are historically authorized only (P7.9).
     expect(appended.original.report.reasons).toEqual(["not-anchored", "historically-authorized-only"]);
@@ -104,7 +104,7 @@ describe("C12-132, C12-133: create, move the author, rotate, append, package, im
     expect(imported.original.resources.map((r) => [r.version, r.digest, r.bytes])).toEqual(appended.original.resources.map((r) => [r.version, r.digest, r.bytes]));
 
     // The fresh SDK continues editing with the new key: authority comes from the key, not the import.
-    const continued = await fresh.edit(did, { parent: imported.original.checkpoint, resources: [{ id: "photo", bytes: B4 }], author: after, signer: alice.signer(after, K2) });
+    const continued = await fresh.edit(did, { parent: imported.original.checkpoint, resource: { bytes: B4 }, author: after, signer: alice.signer(after, K2) });
     expect(continued.status).toBe("committed");
     expect(continued.original.report.authorBinding.status).toBe("valid");
     expect(continued.original.resources.map((r) => r.digest)).toEqual([B1, B2, B3, B4].map(resourceDigest));
@@ -121,7 +121,7 @@ describe("C12-134: a fresh reader with no package of the moved author's log", ()
     await env.alice.move("new.example.org");
     await env.alice.rotate([{ fragment: "orig-2", secret: K2 }]);
     const after = env.alice.ref("orig-2");
-    const appended = await env.sdk.edit(env.did, { parent: env.v2, resources: [{ id: "photo", bytes: B3 }], author: after, signer: env.alice.signer(after, K2) });
+    const appended = await env.sdk.edit(env.did, { parent: env.v2, resource: { bytes: B3 }, author: after, signer: env.alice.signer(after, K2) });
     return { ...env, zip: withoutIdentity((await env.sdk.package(env.did)).bytes, env.alice.did), head: appended.original.checkpoint };
   }
 
@@ -189,7 +189,7 @@ describe("C12-134: a fresh reader with no package of the moved author's log", ()
     const alice = await WebvhIdentity.create("old.example.com", [{ fragment: "orig-1", secret: K1 }]);
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async (d) => (d === alice.did ? alice.evidence() : undefined), clock: clock() });
     const ref = alice.ref("orig-1");
-    const created = await sdk.create({ name: "Harbor", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: ref, signer: alice.signer(ref, K1) });
+    const created = await sdk.create({ name: "Harbor", resource: { mediaType: "image/jpeg", bytes: B1 }, author: ref, signer: alice.signer(ref, K1) });
     if (created.kind !== "original") throw new Error("expected an Original");
     await alice.move("new.example.org");
     await alice.witnessedBy(localSigner("Ed25519", seed(71)));
@@ -271,7 +271,7 @@ describe("C12-134: identity retrieval is bounded and follows only the identity's
     await env.alice.move("new.example.org");
     await env.alice.rotate([{ fragment: "orig-2", secret: K2 }]);
     const after = env.alice.ref("orig-2");
-    const appended = await env.sdk.edit(env.did, { parent: env.v2, resources: [{ id: "photo", bytes: B3 }], author: after, signer: env.alice.signer(after, K2) });
+    const appended = await env.sdk.edit(env.did, { parent: env.v2, resource: { bytes: B3 }, author: after, signer: env.alice.signer(after, K2) });
     return { ...env, after, head: appended.original.checkpoint };
   }
 

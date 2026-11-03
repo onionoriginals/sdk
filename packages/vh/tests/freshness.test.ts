@@ -20,8 +20,8 @@ async function harbor() {
   const at = clock();
   const sign = alice.signer(key, "orig");
   const ref = alice.ref("orig");
-  const genesis = await createOriginal({ versionTime: at(), name: "Harbor at dawn", resources: [photo(B1)], author: ref, sign });
-  const cropped = await updateOriginal(genesis, { versionTime: at(), resources: [photo(B2)], author: ref, sign });
+  const genesis = await createOriginal({ versionTime: at(), name: "Harbor at dawn", resource: photo(B1), author: ref, sign });
+  const cropped = await updateOriginal(genesis, { versionTime: at(), resource: photo(B2), author: ref, sign });
   return { alice, key, sign, ref, at, genesis, cropped };
 }
 

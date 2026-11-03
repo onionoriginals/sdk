@@ -85,8 +85,8 @@ async function shared(opts: { witnessed?: boolean; editor?: AuthorDidEvidence; s
   const evidence = [author.evidence, ...(opts.editor ? [opts.editor] : [])];
   const sdkFor = (clock: () => number) => OriginalsSDK.create({ store: new MemoryStore(), authors: evidence, clock });
   const a = sdkFor(() => (ta += 250));
-  const editors = opts.editor ? [{ did: opts.editor.did, name: false, metadata: false, resources: ['artwork.svg'] }] : undefined;
-  const c = await a.create({ name: 'Harbor at dawn', resources: [{ id: 'artwork.svg', mediaType: 'image/svg+xml', bytes: SVG }], author: author.ref, signer: author.signer, ...(editors ? { editors } : {}) });
+  const editors = opts.editor ? [{ did: opts.editor.did, name: false, metadata: false, resource: true }] : undefined;
+  const c = await a.create({ name: 'Harbor at dawn', resource: { mediaType: 'image/svg+xml', bytes: SVG }, author: author.ref, signer: author.signer, ...(editors ? { editors } : {}) });
   if (c.kind !== 'original') throw new Error('expected an Original');
   const did = c.original.did;
   const secret = ed.utils.randomSecretKey();
@@ -110,7 +110,7 @@ async function shared(opts: { witnessed?: boolean; editor?: AuthorDidEvidence; s
     }));
   const stranger = () => OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: () => LATER });
   const edit = async (sdk: OriginalsSDK, bytes: Uint8Array, signing: { ref: AuthorRef; signer: OriginalsSigner } = author) =>
-    sdk.sign(await sdk.prepareEdit(did, { parent: (await sdk.get(did)).checkpoint, resources: [{ id: 'artwork.svg', bytes }], author: signing.ref }), signing.signer);
+    sdk.sign(await sdk.prepareEdit(did, { parent: (await sdk.get(did)).checkpoint, resource: { bytes }, author: signing.ref }), signing.signer);
   return { h, author, a, b, did, parent, aliasDid, siteKey, hostA, hostB, logPath, hostedLines, post, stranger, edit };
 }
 
@@ -166,7 +166,7 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
       signer: author.signer,
       change: ({ head, refused: kept }) => {
         expect(head.checkpoint).toBe(theirs.checkpoint);
-        return { resources: [{ id: 'artwork.svg', bytes: kept!.draft.bytes.get(resourceDigest(MINE))! }] };
+        return { resource: { bytes: kept!.draft.bytes.get(resourceDigest(MINE))! } };
       },
     });
     expect(result.status).toBe('accepted');
@@ -180,7 +180,7 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     const r = await env.stranger().loadPublished(env.aliasDid, env.h.read);
     expect(r.verified, JSON.stringify(r.reasons)).toBe(true);
     expect(r.report.head).toBe(result.checkpoint);
-    expect(r.report.state?.resources[0].digest).toBe(resourceDigest(MINE));
+    expect(r.report.state?.resource.digest).toBe(resourceDigest(MINE));
   });
 
   test('C12-127: the host stores the submission unchanged; a changed or re-signed entry fails verification or is not by an authorized signer', async () => {
@@ -299,7 +299,7 @@ describe('shared-host saves on the landing (P6.7, P6.8)', () => {
     expect(env.hostedLines().length).toBe(4);
     const r = await env.stranger().loadPublished(env.aliasDid, env.h.read);
     expect(r.verified, JSON.stringify(r.reasons)).toBe(true);
-    expect(r.report.state?.resources[0].digest).toBe(resourceDigest(MINE));
+    expect(r.report.state?.resource.digest).toBe(resourceDigest(MINE));
     // A reader that knows the other branch still reports the fork, and nothing is current.
     expect((await reader.import((await env.a.package(env.did)).bytes)).status).toBe('imported');
     const view = await reader.get(env.did);
@@ -736,7 +736,7 @@ describe('who may submit: the namespace owner, or an account whose landing DID t
     const editor = await landingDid(COLLAB);
     const env = await shared({ editor: editor.evidence, start: Date.now() });
     const { a, b, did } = env;
-    const own = await b.sign(await b.prepareEdit(did, { parent: env.parent, resources: [{ id: 'artwork.svg', bytes: MINE }], editor: editor.ref }), editor.signer);
+    const own = await b.sign(await b.prepareEdit(did, { parent: env.parent, resource: { bytes: MINE }, editor: editor.ref }), editor.signer);
     // The host accepts the editor's save, but the answer never reaches the editor.
     const lost = await env.post({ original: did, entry: own.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [editor.evidence] }, COLLAB);
     expect(lost.status).toBe(200);
@@ -764,7 +764,7 @@ describe('who may submit: the namespace owner, or an account whose landing DID t
     if (revoke.status !== 'accepted') throw new Error('expected acceptance');
     const before = env.hostedLines();
     // An editor entry signed against the parent the grant was still in: refused as a caller, not a stale parent.
-    const stale = await b.sign(await b.prepareEdit(did, { parent: env.parent, resources: [{ id: 'artwork.svg', bytes: MINE }], editor: editor.ref }), editor.signer);
+    const stale = await b.sign(await b.prepareEdit(did, { parent: env.parent, resource: { bytes: MINE }, editor: editor.ref }), editor.signer);
     const refused = await env.post({ original: did, entry: stale.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [editor.evidence] }, COLLAB);
     expect(refused.status).toBe(403);
     expect(await refused.json()).toEqual({ error: 'caller_not_authorized' });
@@ -784,7 +784,7 @@ describe('who may submit: the namespace owner, or an account whose landing DID t
     const early = await a.submit(await env.edit(a, THEIRS), env.hostA);
     if (early.status !== 'accepted') throw new Error('expected acceptance');
     const earlyLine = env.hostedLines().at(-1) as string;
-    const grant = await a.submit(await a.sign(await a.prepareEdit(did, { parent: early.checkpoint, editors: [{ did: editor.evidence.did, name: false, metadata: false, resources: ['artwork.svg'] }], author: env.author.ref }), env.author.signer), env.hostA);
+    const grant = await a.submit(await a.sign(await a.prepareEdit(did, { parent: early.checkpoint, editors: [{ did: editor.evidence.did, name: false, metadata: false, resource: true }], author: env.author.ref }), env.author.signer), env.hostA);
     if (grant.status !== 'accepted') throw new Error('expected acceptance');
     const revoke = await a.submit(await a.sign(await a.prepareEdit(did, { parent: grant.checkpoint, editors: null, author: env.author.ref }), env.author.signer), env.hostA);
     if (revoke.status !== 'accepted') throw new Error('expected acceptance');
@@ -807,7 +807,7 @@ describe('who may submit: the namespace owner, or an account whose landing DID t
     const env = await shared({ editor: editor.evidence, start: Date.now() });
     const viaEditor = landingSharedHost({ sdk: env.a, aliasDid: env.aliasDid, transport: env.h.adapterFor(COLLAB), read: env.h.read });
     expect((await env.a.submit(await env.edit(env.a, THEIRS), viaEditor)).status).toBe('accepted');
-    const own = await env.a.sign(await env.a.prepareEdit(env.did, { parent: (await env.a.get(env.did)).checkpoint, resources: [{ id: 'artwork.svg', bytes: MINE }], editor: editor.ref }), editor.signer);
+    const own = await env.a.sign(await env.a.prepareEdit(env.did, { parent: (await env.a.get(env.did)).checkpoint, resource: { bytes: MINE }, editor: editor.ref }), editor.signer);
     expect((await env.a.submit(own, viaEditor)).status).toBe('accepted');
     expect(env.hostedLines().at(-1)).toBe(own.line);
     // The files stay the namespace owner's.

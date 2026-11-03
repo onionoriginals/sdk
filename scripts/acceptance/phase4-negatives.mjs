@@ -17,7 +17,8 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { OriginalsSDK, keySigner, readZip, writeZip } from "@originals/sdk/originals";
 import { FileStore } from "@originals/sdk/originals/fs";
-import { assert, assertEqual, findSecrets, fromHex, Phase, readBytes, sha256Hex, utf8 } from "./lib/phase.mjs";
+import { assert, assertEqual, findSecrets, fromHex, Phase, readBytes, sha256Hex } from "./lib/phase.mjs";
+import { png } from "./lib/png.mjs";
 
 const phase = new Phase("4-negatives");
 const { dirs } = phase.input;
@@ -28,7 +29,7 @@ const pkgB = readBytes(join(dirs.artifacts, "original-B.zip"));
 const expected = JSON.parse(readFileSync(join(dirs.artifacts, "expected-A.json"), "utf8"));
 const did = expected.original;
 const v1 = expected.versions[0];
-const lostDigest = v1.resources.find((r) => r.id === "artwork.png").digest;
+const lostDigest = v1.resource.digest;
 const store = async (name) => FileStore.open(join(dirs.storeC, name));
 const reader = (s) => OriginalsSDK.create({ ...(s ? { store: s } : {}), authors: [] });
 const parts = (r) => ({ history: r.history.status, authorBinding: r.authorBinding.status, identity: r.identityEvidence.status, resources: r.resources.status, assetFreshness: r.assetFreshness.status, fork: r.fork ? { version: r.fork.version, branches: r.fork.branches.map((b) => b.versionId) } : null, validAsOf: r.validAsOf?.checkpoint ?? null, current: r.current });
@@ -47,7 +48,7 @@ await phase.check("missing-bytes-store", "a store that lost a historical resourc
   // still valid as of its checkpoint (P7.10), and no resource reason is given.
   assertEqual([view.current, view.validAsOf?.checkpoint, view.report.reasons], [false, expected.checkpoint, ["not-anchored"]], "valid as of its checkpoint with missing bytes (content availability is reported separately)");
   const pkg = await sdk.package(did);
-  assertEqual([pkg.manifest.completeness, pkg.manifest.missing], ["partial", [{ kind: "resource", resource: "artwork.png", version: 1, digest: lostDigest, versionId: v1.versionId }]], "manifest");
+  assertEqual([pkg.manifest.completeness, pkg.manifest.missing], ["partial", [{ kind: "resource", version: 1, digest: lostDigest, versionId: v1.versionId }]], "manifest");
   writeFileSync(join(dirs.artifacts, "original-A-partial.zip"), pkg.bytes);
   const loaded = await reader().load(pkg.bytes);
   const r = loaded.report;
@@ -92,7 +93,7 @@ await phase.check("divergent-local", "client C, signing from an earlier checkpoi
   const ref = { did: expected.author, verificationMethod: custody.authorship.verificationMethod, versionId: imported.report.identityEvidence.latestVersionId };
   // Branch X is later in time and longer than client B's branch: neither may decide anything.
   const x1 = await sdk.edit(did, { parent: expected.checkpoint, name: "Harbor at dawn (client C)", author: ref, signer });
-  const x2 = await sdk.edit(did, { parent: x1.original.checkpoint, resources: [{ id: "notes.md", bytes: utf8("client C notes") }], author: ref, signer });
+  const x2 = await sdk.edit(did, { parent: x1.original.checkpoint, resource: { bytes: png() }, author: ref, signer });
   assertEqual([x2.original.validAsOf?.checkpoint, x2.original.report.reasons], [x2.original.checkpoint, ["not-anchored"]], "client C's own branch is valid as of its head before the fork is known");
   const pkgX = await sdk.package(did);
   assertEqual(findSecrets(pkgX.bytes, { authorship: fromHex(custody.authorship.secretKeyHex) }), [], "secrets in package X");

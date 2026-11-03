@@ -5,9 +5,11 @@
  * The journey, each step asserted:
  *  1. A local Original is anchored to a sat its writer holds. The SDK verifies
  *     the log and the author's identity evidence through the anchoring entry,
- *     tells the author what Bitcoin will not hold, and inscribes the whole
- *     stored log from genesis through the anchoring entry (P9.17, P9.18): ord
- *     returns exactly those stored lines. Broadcast but unmined, it does not
+ *     tells the author what becomes public and permanent and what Bitcoin will
+ *     not hold, and inscribes the whole stored log from genesis through the
+ *     anchoring entry as the inscription's metadata, with the current resource
+ *     version as its body (P9.17, P9.18, P14.12; originals-spec #53): ord
+ *     returns exactly those entries and those bytes. Broadcast but unmined, it does not
  *     count (P9.4) and is labelled pending Bitcoin acceptance; mined, the
  *     Original verifies as anchored and current, with provisional ownership
  *     of the reveal output (P9.11, P9.16).
@@ -44,8 +46,19 @@
  *     for that evidence and prepares nothing, and a result current with them
  *     carries the notices. A reader with the newer version accepts the earlier
  *     edit; the later one no longer extends the head.
+ * 11. Read budgets on a real sat (P9.12, P9.17, P14.12): the holder adds two
+ *     ordinary images to the second Original's sat, one with a collection's
+ *     map metadata and one with none. A full read whose content budget cannot
+ *     hold any body still verifies the Original: the images are judged by
+ *     their metadata and ignored, and the Originals inscriptions are read from
+ *     the Originals pool. An Originals read survives the host's JSON codec and
+ *     the landing's decoder with the images' metadata intact. A read whose
+ *     Originals pool cannot hold the first inscription stops asking for
+ *     metadata and is an explicit incomplete result, never a wrong one.
  *  9. Fresh readers: each Original verifies from its sat alone, with no copy
- *     of the log, plus the off-chain signer DID histories (P9.17, P9.18); and
+ *     of the log, plus the off-chain signer DID histories (P9.17, P9.18); the
+ *     inscribed versions come from the sat, and only versions before the
+ *     anchoring entry's are unavailable; and
  *     a recipient of the sat verifies the sender's handoff (resource bytes and
  *     DID histories) against the sat with an empty store.
  *
@@ -62,7 +75,11 @@ import { RegtestProvider } from '../../packages/sdk/src/adapters/providers/Regte
 import type { InscriptionRecoveryRecord, InscriptionRecoveryStore } from '../../packages/sdk/src/bitcoin/inscription-recovery';
 import type { BitcoinSigner } from '../../packages/sdk/src/types/common';
 import type { Utxo } from '../../packages/sdk/src/types/bitcoin';
-import { verifyOriginal, type AuthorDidEvidence } from '@originals/vh/originals';
+import { decodeCbor, encodeCbor, verifyOriginal, type AuthorDidEvidence } from '@originals/vh/originals';
+import { prepareInscriptionOnSat, submitPreparedInscriptionOnSat } from '../../packages/sdk/src/bitcoin/inscribe-on-sat';
+import type { SatSnapshot } from '../../packages/sdk/src/bitcoin/sat-snapshot-types';
+import { encodeSatSnapshot } from '../../packages/host/src/sat-snapshot-codec';
+import { decodeSatSnapshot } from '../../apps/landing/src/sdk/http-ordinals-provider';
 import { InscriptionClock, MemoryStore, OriginalsSDK, btcoAlias, keySigner, satEvidence } from '../../packages/sdk/src/originals/index';
 import { catchUp, prepareEntryInscription, readAnchored, resumeEntryInscription, submitEntryInscription, transferHandoff, verifyHandoff, type CatchUpStep } from '../../packages/sdk/src/originals/bitcoin-writer';
 import type { OriginalView } from '../../packages/sdk/src/originals/index';
@@ -160,10 +177,14 @@ try {
     return { snapshot, evidence: await satEvidence(snapshot, { clock, ownerConfirmations, index: ORD }) };
   };
   const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+  /** The entries an inscription's metadata carries, as stored lines (P14.12). */
+  const carried = (metadata: Uint8Array | null | undefined) =>
+    metadata ? (decodeCbor(metadata) as unknown[]).map((e) => `${JSON.stringify(e)}\n`).join('') : null;
 
   step('1: anchor');
   // 1. Create locally, anchor to a sat this wallet holds, inscribe the anchoring entry.
-  const created = await sdk.create({ name: 'Harbor at dawn', resources: [{ id: 'photo', mediaType: 'image/jpeg', bytes: new TextEncoder().encode('regtest photo') }], author, signer });
+  const photo = new TextEncoder().encode('regtest photo');
+  const created = await sdk.create({ name: 'Harbor at dawn', resource: { mediaType: 'image/jpeg', bytes: photo }, author, signer });
   assert.equal(created.kind, 'original');
   if (created.kind !== 'original') throw new Error('unreachable');
   const did = created.original.did;
@@ -178,9 +199,13 @@ try {
   // The anchoring inscription carries the whole stored log through the anchoring entry (P9.17).
   const lines1 = await storedLines(did);
   assert.deepEqual(anchorPair.carries, [created.original.checkpoint, anchored.original.checkpoint]);
-  // What Bitcoin will not hold: the photo's bytes and the author's did:vh history (P9.18).
+  // What becomes public and permanent (P9.18, C12-193), and what Bitcoin will not hold: the author's
+  // did:vh history. Version 1 of the photo is the anchoring inscription's body, so it is on Bitcoin.
+  assert.equal(anchorPair.notice.permanent, true);
+  assert.equal(anchorPair.notice.activeContent, false);
+  assert.deepEqual(anchorPair.notice.entries, anchorPair.carries);
   assert.deepEqual(anchorPair.offChain.identities, [{ did: authorDid, role: 'author', held: true }]);
-  assert.deepEqual(anchorPair.offChain.resources.map((r) => [r.resource, r.version, r.held]), [['photo', 1, true]]);
+  assert.deepEqual(anchorPair.offChain.resources, []);
   assert.equal(anchorPair.offChain.replication, 'not-guaranteed');
   // Checked send: still next, no other pair in flight, verified through the entry again (P9.18).
   const sent = await submitEntryInscription({ sdk, did, pair: anchorPair, provider, clock, index: ORD, recoveryStore });
@@ -195,17 +220,16 @@ try {
   assert.equal(v1.publication, 'anchored', 'confirmed, the Original verifies as anchored (P9.18)');
   const onOrd = (await readSat(satDid)).snapshot.publications.find((p) => p.id === anchorPair.prepared.inscriptionId);
   assert.ok(onOrd?.body.status === 'complete');
-  const anchorBody = decode(onOrd.body.bytes);
-  assert.equal(anchorBody, `${lines1.slice(0, 2).join('\n')}\n`, 'ord returns the exact stored lines, genesis through the anchoring entry');
-  assert.equal(onOrd.body.mediaType, 'application/vnd.originals.vh+jsonl');
-  assert.equal(onOrd.body.metadata ?? null, null, 'no metadata on an Originals inscription (P9.17)');
+  assert.equal(carried(onOrd.body.metadata), `${lines1.slice(0, 2).join('\n')}\n`, 'ord returns the stored entries, genesis through the anchoring entry, as the metadata (P14.12)');
+  assert.deepEqual(onOrd.body.bytes, photo, 'the body is the current resource version (P9.17)');
+  assert.equal(onOrd.body.mediaType, 'image/jpeg', 'under that version\'s media type (P9.17)');
   assert.equal(v1.head, anchored.original.checkpoint);
   assert.equal(v1.report.ordering, 'anchored');
   assert.equal(v1.report.ownership?.output, `${anchorPair.prepared.revealTxId}:0`);
   assert.equal(v1.current, true, JSON.stringify(v1.report.reasons));
   evidence.anchor = {
     did, sat: satDid, commitTxId: anchorPair.prepared.commitTxId, revealTxId: anchorPair.prepared.revealTxId, inscription: anchorPair.prepared.inscriptionId,
-    carries: anchorPair.carries, bodyBytes: onOrd.body.bytes.length, bodyIsStoredLines: true,
+    carries: anchorPair.carries, metadataBytes: onOrd.body.metadata?.length ?? 0, bodyBytes: onOrd.body.bytes.length, metadataIsStoredEntries: true, bodyIsCurrentVersion: true, notice: anchorPair.notice,
     publication: [pending.publication, v1.publication], height: v1.report.anchoring?.anchor?.height, ownership: v1.report.ownership,
     offChain: anchorPair.offChain,
   };
@@ -364,17 +388,17 @@ try {
   // 8. A second Original with an editor. Bob replaces the photo before the anchor; Alice anchors
   //    and edits, and Bob edits again, all before anything is published.
   const bytes = (text: string) => new TextEncoder().encode(text);
-  const grant = { did: bob.did, name: false, metadata: false, resources: ['photo'] };
-  const lighthouse = await sdk.create({ name: 'Lighthouse', resources: [{ id: 'photo', mediaType: 'image/jpeg', bytes: bytes('regtest lighthouse') }], editors: [grant], author, signer });
+  const grant = { did: bob.did, name: false, metadata: false, resource: true };
+  const lighthouse = await sdk.create({ name: 'Lighthouse', resource: { mediaType: 'image/jpeg', bytes: bytes('regtest lighthouse') }, editors: [grant], author, signer });
   if (lighthouse.kind !== 'original') throw new Error('expected an Original');
   const did2 = lighthouse.original.did;
   const asBob = { editor: bob.ref, signer: bob.signer };
-  const bobBefore = await sdk.edit(did2, { parent: lighthouse.original.checkpoint, resources: [{ id: 'photo', bytes: bytes('regtest lighthouse, Bob\'s crop') }], ...asBob });
+  const bobBefore = await sdk.edit(did2, { parent: lighthouse.original.checkpoint, resource: { bytes: bytes('regtest lighthouse, Bob\'s crop') }, ...asBob });
   const sat2Utxo = await fundUtxo(0.001);
   const sat2 = btcoAlias('regtest', await provider.getFirstSatOfOutput!(sat2Utxo));
   const anchored2 = await sdk.anchor(did2, { parent: bobBefore.original.checkpoint, author, signer, sat: sat2 });
   const early = await sdk.edit(did2, { parent: anchored2.original.checkpoint, name: 'Lighthouse, edited before publishing', author, signer });
-  const bobAfter = await sdk.edit(did2, { parent: early.original.checkpoint, resources: [{ id: 'photo', bytes: bytes('regtest lighthouse, Bob\'s second crop') }], ...asBob });
+  const bobAfter = await sdk.edit(did2, { parent: early.original.checkpoint, resource: { bytes: bytes('regtest lighthouse, Bob\'s second crop') }, ...asBob });
   const lines2 = await storedLines(did2);
   assert.equal(lines2.length, 5);
   const first2 = await expectStep(did2, 'prepare', anchored2.original.checkpoint);
@@ -400,7 +424,8 @@ try {
   await env.mine();
   const anchorOnOrd = (await readSat(sat2)).snapshot.publications.find((p) => p.id === anchor2Pair.prepared.inscriptionId);
   assert.ok(anchorOnOrd?.body.status === 'complete');
-  assert.equal(decode(anchorOnOrd.body.bytes), `${lines2.slice(0, 3).join('\n')}\n`, 'ord returns the exact stored lines, genesis through the anchoring entry, Bob\'s entry inside');
+  assert.equal(carried(anchorOnOrd.body.metadata), `${lines2.slice(0, 3).join('\n')}\n`, 'ord returns the stored entries, genesis through the anchoring entry, Bob\'s entry inside');
+  assert.equal(decode(anchorOnOrd.body.bytes), 'regtest lighthouse, Bob\'s crop', 'the body is the version the anchoring entry names: Bob\'s crop (P9.17)');
   const second2 = await expectStep(did2, 'prepare', early.original.checkpoint);
   assert.equal(second2.pending.accepted, anchored2.original.checkpoint);
   assert.equal(second2.pending.publication, 'anchored');
@@ -458,6 +483,10 @@ try {
   const aliceV2 = await alice.nextVersion();
   const elsewhere = new MemoryStore();
   await elsewhere.commit(did, { expectedHead: null, log: await sdk.committedLog(did) });
+  // Every inscription carries the resource version its entry names as its body, a name-only edit
+  // included (P9.17; C12-194), so the second writer needs the current version's bytes too.
+  const current = v5.state.resource.digest;
+  await elsewhere.putResource(current, (await sdk.resourceBytes(current))!);
   const informed = OriginalsSDK.create({ store: elsewhere, authors: [aliceV2.evidence, bob.evidence] });
   const named = await informed.edit(did, { parent: v5.checkpoint, name: 'Names Alice\'s version 2', author: { ...author, versionId: aliceV2.versionId }, signer });
   const firstPair = await prepareEntryInscription({ sdk: informed, did, fundingUtxos: [await holdingOf(v5), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
@@ -515,12 +544,18 @@ try {
   assert.equal(alone1.history.status, 'valid');
   assert.equal(alone1.authorBinding.status, 'valid');
   assert.equal(alone1.identityEvidence.status, 'complete');
-  assert.equal(alone1.resources.status, 'partial', 'resource bytes are not on Bitcoin: unavailable, not a failure (P9.18)');
+  // Every version of the first Original is an inscription's body: the sat shows them all (P9.17, P9.18; C12-190).
+  assert.equal(alone1.resources.status, 'available', 'the inscribed versions are read from the sat');
+  assert.ok(alone1.resources.versions.every((v) => v.onBitcoin && v.bytes === 'verified'));
   const alone2 = await fromBitcoin(sat2, [alice.evidence, bob.evidence]);
   assert.equal(alone2.anchoring?.status, 'anchored');
   assert.equal(alone2.head, bobAfter.original.checkpoint);
   assert.equal(alone2.identityEvidence.status, 'complete');
   assert.deepEqual(alone2.identityEvidence.editors.map((e) => e.did), [bob.did]);
+  // Version 1 predates the anchoring entry's and was never inscribed: unavailable, not a failure (P9.18; C12-97).
+  assert.equal(alone2.resources.status, 'partial');
+  assert.deepEqual(alone2.resources.missing.map((v) => v.version), [1]);
+  assert.deepEqual(alone2.resources.versions.map((v) => [v.version, v.onBitcoin, v.bytes]), [[1, false, 'missing'], [2, true, 'verified'], [3, true, 'verified']]);
   const withoutBob = await fromBitcoin(sat2, [alice.evidence]);
   assert.equal(withoutBob.identityEvidence.status, 'incomplete', 'without the editor\'s did:vh history, identity evidence is incomplete (P9.18)');
   assert.equal(withoutBob.current, false);
@@ -537,13 +572,72 @@ try {
   evidence.freshReaders = {
     fromBitcoinAlone: [
       { sat: satDid, head: alone1.head, copy: alone1.anchoring?.copy, history: alone1.history.status, identity: alone1.identityEvidence.status, resources: alone1.resources.status, accepted: alone1.anchoring?.accepted.length },
-      { sat: sat2, head: alone2.head, copy: alone2.anchoring?.copy, history: alone2.history.status, identity: alone2.identityEvidence.status, editors: alone2.identityEvidence.editors.map((e) => e.did) },
+      { sat: sat2, head: alone2.head, copy: alone2.anchoring?.copy, history: alone2.history.status, identity: alone2.identityEvidence.status, editors: alone2.identityEvidence.editors.map((e) => e.did), resources: alone2.resources.status, missing: alone2.resources.missing.map((v) => v.version) },
     ],
     withoutEditorHistory: { identity: withoutBob.identityEvidence.status, current: withoutBob.current },
     handoff: {
       completeness: handoff.package.manifest.completeness, identities: handoff.offChain.identities, resources: handoff.offChain.resources.length,
       recipient: { anchoring: received.report.anchoring?.status, head: received.report.head, identity: received.report.identityEvidence.status, resources: received.report.resources.status, reasons: received.reasons },
     },
+  };
+
+  step('11: read budgets on a real sat');
+  // 11. The holder adds ordinary inscriptions to the Lighthouse sat: images, not Originals inscriptions.
+  const sat2Number = sat2.split(':').at(-1)!;
+  const collection = encodeCbor({ collection: 'regtest harbour prints', edition: 1 });
+  const junk: Array<{ id: string; metadata: Uint8Array | null }> = [];
+  for (const metadata of [collection, null]) {
+    const holder = await holdingOf(await readAnchored(sdk, did2, { provider, clock, index: ORD }));
+    const image = crypto.getRandomValues(new Uint8Array(20_000));
+    const prepared = await prepareInscriptionOnSat({
+      fundingUtxos: [holder, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider,
+      buildContent: () => Promise.resolve({ content: image, contentType: 'image/png', ...(metadata ? { metadata } : {}) }),
+    });
+    assert.equal((await submitPreparedInscriptionOnSat({ prepared, provider, recoveryStore })).broadcast, 'reveal_broadcast');
+    await env.mine();
+    junk.push({ id: prepared.inscriptionId, metadata });
+  }
+  const verifiedFrom = async (snapshot: SatSnapshot) => {
+    const satpoint = snapshot.ownership.satpoint!;
+    const ownerConfirmations = (await provider.getTransactionStatus(satpoint.split(':')[0])).confirmations ?? 0;
+    return verifyOriginal({ bitcoin: [await satEvidence(snapshot, { clock, ownerConfirmations, index: ORD })], authors: [alice.evidence, bob.evidence], now: Date.now() });
+  };
+  const bodyOf = (snapshot: SatSnapshot, id: string) => snapshot.publications.find((p) => p.id === id)!.body;
+  const originalsInscriptions = [anchor2Pair, early2Pair, bob2Pair].map((pair) => pair.prepared.inscriptionId);
+
+  // A full read whose content budget holds no body: metadata decides for each inscription past it.
+  const noContent = new RegtestProvider({ ...env, snapshotBudget: { maxContentBytes: 1 } });
+  const full = await noContent.getSatSnapshot!(sat2Number);
+  assert.equal(full.bodies, 'all');
+  assert.deepEqual(bodyOf(full, junk[0].id), { status: 'unavailable', reason: 'not-requested', mediaType: 'image/png', contentLength: 20_000, metadata: collection }, 'the collection image is judged by its metadata, its body not read');
+  assert.deepEqual(bodyOf(full, junk[1].id), { status: 'unavailable', reason: 'not-requested', mediaType: 'image/png', contentLength: 20_000, metadata: null }, 'the bare image carries no metadata');
+  for (const id of originalsInscriptions) assert.equal(bodyOf(full, id).status, 'complete', `the Originals inscription ${id} is read from the Originals pool`);
+  const fullRead = await verifiedFrom(full);
+  assert.equal(fullRead.anchoring?.status, 'anchored');
+  assert.equal(fullRead.head, bobAfter.original.checkpoint);
+  assert.deepEqual(fullRead.anchoring?.ignored.filter((i) => junk.some((j) => j.id === i.inscription)).map((i) => i.reason), ['not-an-originals-inscription', 'not-an-originals-inscription']);
+
+  // An Originals read through the host's JSON codec and the landing's decoder: the images' metadata arrives as bytes.
+  const originalsRead = await provider.getSatSnapshot!(sat2Number, { bodies: 'originals' });
+  const overTheWire = decodeSatSnapshot(JSON.parse(JSON.stringify(encodeSatSnapshot(originalsRead))));
+  assert.deepEqual((bodyOf(overTheWire, junk[0].id) as { metadata?: unknown }).metadata, collection, 'the metadata survives the codec as bytes');
+  const wireRead = await verifiedFrom(overTheWire);
+  assert.equal(wireRead.anchoring?.status, 'anchored');
+  assert.equal(wireRead.head, bobAfter.original.checkpoint);
+
+  // A read whose Originals pool cannot hold the first inscription: it stops asking for metadata, and the
+  // read is an explicit incomplete result (P9.17).
+  const starved = new RegtestProvider({ ...env, snapshotBudget: { maxOriginalsBytes: 1, concurrency: 1 } });
+  const starvedRead = await starved.getSatSnapshot!(sat2Number, { bodies: 'originals' });
+  const unknown = starvedRead.publications.filter((p) => p.body.status === 'unavailable' && 'reason' in p.body && p.body.reason === 'over-budget' && !('metadataPresent' in p.body));
+  assert.ok(unknown.length >= 1, 'past the spent pool, metadata is not asked for and is reported unknown');
+  const incomplete = await verifiedFrom(starvedRead).then(() => 'verified', (error: unknown) => (error as { code?: string }).code ?? String(error));
+  assert.equal(incomplete, 'SAT_READ_INCOMPLETE', 'a starved read is incomplete, never a wrong one');
+  evidence.readBudgets = {
+    sat: sat2, ordinaryInscriptions: junk.map((j) => ({ inscription: j.id, metadata: j.metadata ? 'collection map' : 'none', bytes: 20_000 })),
+    fullReadNoContentBudget: { head: fullRead.head, anchoring: fullRead.anchoring?.status, ordinary: junk.map((j) => (bodyOf(full, j.id) as { reason?: string }).reason) },
+    throughCodec: { head: wireRead.head, anchoring: wireRead.anchoring?.status },
+    starvedOriginalsPool: { unknownMetadata: unknown.length, result: incomplete },
   };
 
   evidence.result = 'passed';

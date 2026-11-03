@@ -12,14 +12,20 @@
  * - the accepted head: the last entry Bitcoin shows on the anchoring sat
  *   under the 1-confirmation policy (decision D), read by `readAnchored`.
  *
- * What is inscribed (P9.17): the anchoring inscription carries the stored log
- * from genesis through the anchoring entry, exact stored lines in order, the
- * anchoring entry last; every later inscription carries exactly one entry,
- * the successor of the head Bitcoin accepts. Media type
- * `application/vnd.originals.vh+jsonl`, no metadata, at most 350,000 bytes
- * (`ORIGINALS_INSCRIPTION_MAX_BYTES`; P14.12, decided, D6; originals-spec #50, merged). Entries committed after
- * the anchoring entry before the anchor is accepted wait, and then go one per
- * later block.
+ * What is inscribed (P9.17, P14.12; owner decision of 1 November 2026,
+ * originals-spec #53): the anchoring inscription's metadata carries the stored
+ * log from genesis through the anchoring entry, in order, the anchoring entry
+ * last; every later inscription's metadata carries exactly one entry, the
+ * successor of the head Bitcoin accepts. The metadata is the CBOR encoding of
+ * a JSON array of those entries, each parsed from its exact stored line
+ * (PROVISIONAL mapping, ord's `--json-metadata`), split into data pushes of at
+ * most 520 bytes. The body is the exact stored bytes of the resource version
+ * the last entry names, under that version's media type, with no content
+ * encoding, so the sat shows the Original's current version; an entry that
+ * changes only the name or metadata inscribes the current version again.
+ * Metadata and body together are at most 350,000 bytes
+ * (`ORIGINALS_INSCRIPTION_MAX_BYTES`). Entries committed after the anchoring
+ * entry before the anchor is accepted wait, and then go one per later block.
  *
  * - `nextPendingEntry` compares the heads: the entries from the next one
  *   Bitcoin can accept to the committed head. That is the anchoring entry
@@ -30,8 +36,12 @@
  *   Before building, it verifies the stored log through that entry and the
  *   identity evidence of every signer of it, author and editors, and refuses
  *   otherwise (ANCHORING_NOT_VERIFIED for the anchoring inscription, P9.18;
- *   ENTRY_NOT_VERIFIED after it). Resource availability does not gate it
- *   (P7.4). It returns `offChain`: what Bitcoin will not hold (P9.18). The
+ *   ENTRY_NOT_VERIFIED after it). Availability of other versions does not
+ *   gate it (P7.4), but the version it inscribes must be stored
+ *   (RESOURCE_BYTES_MISSING). It returns `notice`, which the caller shows the
+ *   author before submitting: the inscribed version, and the log with its name
+ *   and metadata, become public and permanent, with a warning for active
+ *   content (P9.18), and `offChain`: what Bitcoin will not hold. The
  *   first funding UTXO must hold the sat at offset 0: the anchoring sat for
  *   the anchoring inscription (P9.10), and the output now holding it for every
  *   later entry, which is how only the sat's holder can extend an anchored
@@ -70,22 +80,25 @@
  *   are missing evidence, and catch-up waits for Bitcoin.
  * - `transferHandoff` and `verifyHandoff`: when the anchoring sat is
  *   transferred, the sender exports, through the head Bitcoin accepts, the
- *   resource bytes and off-chain signer DID histories it holds, and the
+ *   resource versions and off-chain signer DID histories it holds, and the
  *   recipient verifies them against the sat it received (P9.18). Nothing
  *   guarantees their replication.
  */
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
-import { parseWitness } from "micro-ordinals";
+import { parseInscriptions } from "micro-ordinals";
 import { OriginalsError } from "@originals/vh";
 import {
   ORIGINALS_INSCRIPTION_MAX_BYTES,
-  ORIGINALS_INSCRIPTION_TYPE,
+  resourceDigest,
   anchoringIndex,
   parseBtcoAlias,
   type OriginalsReport,
+  type ResourceDescriptor,
   type SatEvidence,
 } from "@originals/vh/originals";
+import { rawMetadataPerEnvelope } from "../bitcoin/ordinals-tags.js";
+import { descriptorOfLine, inscriptionMetadata, inscriptionNotice, type InscriptionNotice } from "./inscription.js";
 import type { OrdinalsProvider } from "../adapters/types.js";
 import { prepareInscriptionOnSat, type InscribeOnSatParams, type PreparedInscriptionOnSat } from "../bitcoin/inscribe-on-sat.js";
 import {
@@ -144,25 +157,62 @@ async function storedLog(sdk: OriginalsSDK, did: string): Promise<StoredLog> {
   return parseLines(did, await sdk.committedLog(did));
 }
 
-const encoder = new TextEncoder();
-
 /**
- * The body of the inscription that publishes the entry at `index` (P9.17):
- * the stored lines from genesis through the anchoring entry for the anchor,
- * otherwise that one stored line. Exact stored bytes, each line ending in LF.
+ * What the inscription publishing the entry at `index` carries, without its
+ * body (P9.17, P14.12): the CBOR metadata of the stored lines from genesis
+ * through the anchoring entry for the anchor, otherwise of that one line; the
+ * resource descriptor of the last of them, whose version is the body and
+ * whose media type is the content type.
  */
-function bodyFor(log: StoredLog, index: number): Uint8Array {
-  const lines = index === log.anchor ? log.lines.slice(0, log.anchor + 1) : [log.lines[index]];
-  return encoder.encode(`${lines.join("\n")}\n`);
+interface Planned {
+  lines: string[];
+  metadata: Uint8Array;
+  resource: ResourceDescriptor;
+  /** Metadata and body together (P9.17). */
+  size: number;
 }
 
-function checkSize(log: StoredLog, index: number, body: Uint8Array): void {
-  if (body.length <= ORIGINALS_INSCRIPTION_MAX_BYTES) return;
-  const details = { size: body.length, limit: ORIGINALS_INSCRIPTION_MAX_BYTES, versionId: log.ids[index] };
-  if (index === log.anchor) {
-    refuse("limit-exceeded", "ANCHORING_LOG_TOO_LARGE", `the log through the anchoring entry is ${body.length} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, details);
+function planFor(log: StoredLog, index: number): Planned {
+  const lines = index === log.anchor ? log.lines.slice(0, log.anchor + 1) : [log.lines[index]];
+  const metadata = inscriptionMetadata(lines);
+  let resource: ResourceDescriptor;
+  try {
+    resource = descriptorOfLine(lines[lines.length - 1]);
+  } catch {
+    refuse("invalid-evidence", "STORED_LOG_UNREADABLE", `entry ${log.ids[index]} names no resource descriptor`);
   }
-  refuse("limit-exceeded", "INSCRIPTION_TOO_LARGE", `entry ${log.ids[index]} is ${body.length} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, details);
+  return { lines, metadata, resource, size: metadata.length + resource.size };
+}
+
+/** The inscription's full contents: the plan and the stored bytes of the version it names (P9.17). */
+async function contentsFor(sdk: OriginalsSDK, log: StoredLog, index: number, plan: Planned = planFor(log, index)): Promise<Planned & { body: Uint8Array }> {
+  const body = await sdk.resourceBytes(plan.resource.digest);
+  if (!body) {
+    refuse("incomplete-evidence", "RESOURCE_BYTES_MISSING", `the inscription of ${log.ids[index]} carries resource version ${plan.resource.digest} as its body, and this SDK does not hold those bytes (P9.17)`, { digest: plan.resource.digest, versionId: log.ids[index] });
+  }
+  return { ...plan, body };
+}
+
+function checkSize(log: StoredLog, index: number, plan: Planned): void {
+  if (plan.size <= ORIGINALS_INSCRIPTION_MAX_BYTES) return;
+  const details = { size: plan.size, limit: ORIGINALS_INSCRIPTION_MAX_BYTES, versionId: log.ids[index] };
+  if (index === log.anchor) {
+    refuse("limit-exceeded", "ANCHORING_LOG_TOO_LARGE", `the log through the anchoring entry and the version it names are ${plan.size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, details);
+  }
+  refuse("limit-exceeded", "INSCRIPTION_TOO_LARGE", `entry ${log.ids[index]} and the version it names are ${plan.size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, details);
+}
+
+/** The digests of the versions the inscriptions through `index` carry as bodies: from the anchoring entry on (P9.17). */
+function inscribedDigests(log: StoredLog, index: number): Set<string> {
+  const out = new Set<string>();
+  for (let k = log.anchor; k <= index && k < log.lines.length; k++) {
+    try {
+      out.add(descriptorOfLine(log.lines[k]).digest);
+    } catch {
+      // An unreadable line is refused where it is planned.
+    }
+  }
+  return out;
 }
 
 /** Whether the anchoring sat shows the anchor, has it in flight, or neither (P9.18). */
@@ -257,9 +307,10 @@ export async function nextPendingEntry(sdk: OriginalsSDK, did: string, options: 
 }
 
 /**
- * What Bitcoin will not hold for an Original, through one entry (P9.18): the
- * resource bytes, of which inscriptions carry only the descriptors (P9.4,
- * P9.17), and the DID histories of its did:vh and did:webvh signers. A
+ * What Bitcoin will not hold for an Original, through one entry (P9.18;
+ * originals-spec #53): the resource versions no inscription carries as its
+ * body, such as those before the anchoring entry's, and the DID histories of
+ * its did:vh and did:webvh signers. A
  * did:btco signer's history is on Bitcoin (P5.13) and listed in `onBitcoin`.
  * This profile does not guarantee their replication or availability: keep
  * them, publish them, or give them to the sat's next holder
@@ -269,8 +320,12 @@ export interface OffChainEvidence {
   original: string;
   /** The entry the notice runs through: the log from genesis to it. */
   through: string;
-  /** Every resource version the log through `through` commits to; `held` when this SDK has the bytes and they match. */
-  resources: Array<{ resource: string; version: number; digest: string; mediaType: string; size: number; versionId: string; held: boolean }>;
+  /**
+   * The versions of the resource the log through `through` commits to that no
+   * inscription through it carries (P9.17, P9.18); `held` when this SDK has
+   * the bytes and they match.
+   */
+  resources: Array<{ version: number; digest: string; mediaType: string; size: number; versionId: string; held: boolean }>;
   /** Off-chain signer DIDs (did:vh, did:webvh), author first; `held` when this SDK has complete history for it. */
   identities: Array<{ did: string; role: "author" | "editor"; held: boolean }>;
   /** did:btco signer DIDs, whose histories Bitcoin carries. */
@@ -278,7 +333,7 @@ export interface OffChainEvidence {
   replication: "not-guaranteed";
 }
 
-function offChainOf(did: string, through: string, report: OriginalsReport): OffChainEvidence {
+function offChainOf(did: string, through: string, report: OriginalsReport, inscribed: ReadonlySet<string>): OffChainEvidence {
   const id = report.identityEvidence;
   const signers = [
     ...(id.author ? [{ did: id.author, role: "author" as const, held: id.latestVersionId !== null && !id.failure }] : []),
@@ -287,8 +342,8 @@ function offChainOf(did: string, through: string, report: OriginalsReport): OffC
   return {
     original: did,
     through,
-    resources: report.resources.versions.map((v) => ({
-      resource: v.resource, version: v.version, digest: v.digest, mediaType: v.mediaType, size: v.size, versionId: v.versionId, held: v.bytes === "verified",
+    resources: report.resources.versions.filter((v) => !inscribed.has(v.digest)).map((v) => ({
+      version: v.version, digest: v.digest, mediaType: v.mediaType, size: v.size, versionId: v.versionId, held: v.bytes === "verified",
     })),
     identities: signers.filter((s) => !s.did.startsWith("did:btco:")),
     onBitcoin: signers.filter((s) => s.did.startsWith("did:btco:")).map(({ did: d, role }) => ({ did: d, role })),
@@ -332,7 +387,7 @@ async function verifyThrough(sdk: OriginalsSDK, did: string, log: StoredLog, ind
     const category = problems.every((p) => p === "identity-evidence-incomplete") ? "incomplete-evidence" : r.history.failure?.category ?? "invalid-evidence";
     refuse(category, code, `${did} does not verify through ${what}; not inscribed (P9.18): ${problems.join(", ")}`, { problems, report: r });
   }
-  return offChainOf(did, versionId, r);
+  return offChainOf(did, versionId, r, inscribedDigests(log, index));
 }
 
 export type EntryInscriptionParams = Omit<InscribeOnSatParams, "buildContent" | "recoveryStore"> & {
@@ -377,6 +432,13 @@ export interface PreparedEntryInscription {
   sat: string;
   /** Committed entries after this one, still to publish. */
   remaining: number;
+  /**
+   * What to tell the author before submitting (P9.18; C12-193): the version
+   * the body carries, and the log with its name and metadata, become public
+   * and permanent on Bitcoin, never removed by a later entry (P8.3), with a
+   * warning when that version is active content (P9.7).
+   */
+  notice: InscriptionNotice;
   /** What Bitcoin will not hold, through `versionId` (P9.18). */
   offChain: OffChainEvidence;
   /** `checked` with a recovery store; `skipped` when `recoveryStore: null` was passed (P9.6). */
@@ -400,8 +462,9 @@ export async function prepareEntryInscription(params: EntryInscriptionParams): P
   if (NETWORK[log.sat.network] !== params.network) {
     refuse("invalid-evidence", "NETWORK_MISMATCH", `${log.sat.did} is a ${log.sat.network} sat; the writer is on ${params.network}`);
   }
-  // A log over the limit through the anchoring entry can never be anchored (P9.17).
-  checkSize(log, log.anchor, bodyFor(log, log.anchor));
+  // A log and current version over the limit through the anchoring entry can never be anchored (P9.17).
+  const anchorPlan = planFor(log, log.anchor);
+  checkSize(log, log.anchor, anchorPlan);
   const { pending, found, disagreement } = await observe(sdk, did, log, { provider: params.provider, clock, index: satIndex, ...(indexes ? { indexes } : {}), ...(recoveryStore ? { recoveryStore } : {}), ...(recoveryIds ? { recoveryIds } : {}) });
   refuseDisagreement(did, disagreement);
   const target = versionId ?? pending.next;
@@ -419,9 +482,10 @@ export async function prepareEntryInscription(params: EntryInscriptionParams): P
     const ids = inFlight.map((c) => c.record.recoveryId);
     refuse("stale-parent", "PAIR_IN_FLIGHT", `a recorded pair for ${target} can still land (${ids.join(", ")}); resume it, or name it in \`replaces\` to prepare a replacement (P9.6)`, { recoveryIds: ids });
   }
-  // The stored lines, verbatim: the signed bytes Bitcoin will carry (P9.6, P9.17).
-  const content = bodyFor(log, index);
-  checkSize(log, index, content);
+  // The stored lines, as signed, and the stored bytes of the version they name (P9.6, P9.17).
+  const plan = index === log.anchor ? anchorPlan : planFor(log, index);
+  checkSize(log, index, plan);
+  const contents = await contentsFor(sdk, log, index, plan);
   const offChain = await verifyThrough(sdk, did, log, index);
   const prepared = await prepareInscriptionOnSat({
     ...rest,
@@ -429,12 +493,13 @@ export async function prepareEntryInscription(params: EntryInscriptionParams): P
       if (satoshi !== log.sat.sat) {
         refuse("invalid-evidence", "WRONG_SAT", `the first funding UTXO holds sat ${satoshi}, not the anchoring sat ${log.sat.sat}`);
       }
-      // No metadata: an Originals inscription that carries any is rejected (P9.17).
-      return Promise.resolve({ content, contentType: ORIGINALS_INSCRIPTION_TYPE });
+      // Pre-encoded CBOR, written as metadata pushes of at most 520 bytes (P14.12).
+      return Promise.resolve({ content: contents.body, contentType: contents.resource.mediaType, metadata: contents.metadata });
     },
   });
   const carries = index === log.anchor ? log.ids.slice(0, index + 1) : [target];
-  return { versionId: target, carries, sat: log.sat.did, remaining: pending.remaining - 1, offChain, inFlightGuard: recoveryStore ? "checked" : "skipped", replaces: [...replaces], prepared };
+  const notice = inscriptionNotice(carries, contents.resource);
+  return { versionId: target, carries, sat: log.sat.did, remaining: pending.remaining - 1, notice, offChain, inFlightGuard: recoveryStore ? "checked" : "skipped", replaces: [...replaces], prepared };
 }
 
 export interface SubmitEntryParams extends ReadAnchoredOptions {
@@ -470,9 +535,12 @@ export async function submitEntryInscription(params: SubmitEntryParams): Promise
   const log = await storedLog(sdk, did);
   const index = log.ids.indexOf(pair.versionId);
   if (index < 0) refuse("invalid-evidence", "ENTRY_NOT_STORED", `${pair.versionId} is not in the stored log of ${did}`);
-  const body = inscribedBytes(pair.prepared);
-  if (!body || !sameBytes(body, bodyFor(log, index)) || pair.prepared.satoshi !== log.sat.sat) {
-    refuse("invalid-evidence", "PAIR_BODY_MISMATCH", `the pair does not inscribe the stored bytes of ${pair.versionId} on ${log.sat.did}`);
+  const inscribed = inscribedOf(pair.prepared);
+  // The reveal's body is checked against the descriptor (size and digest), so a submit needs no
+  // stored copy of the bytes: the pair already carries them (P9.6, P9.17).
+  const expected = planFor(log, index);
+  if (!inscribed || !sameInscription(inscribed, expected) || pair.prepared.satoshi !== log.sat.sat) {
+    refuse("invalid-evidence", "PAIR_BODY_MISMATCH", `the pair does not inscribe the stored entries of ${pair.versionId} and the version they name on ${log.sat.did}`);
   }
   const { pending, found, disagreement, holding } = await observe(sdk, did, log, { ...read, provider, recoveryStore });
   refuseDisagreement(did, disagreement);
@@ -590,20 +658,43 @@ export type CatchUpStep =
    */
   | { action: "refused"; versionId: string; recoveryId: string; commit: CommitSeen; ifRevealed: "ignored-by-bitcoin" | "unverified"; error: OriginalsError; pending: PendingEntries };
 
-/** The bytes a prepared reveal inscribes, if it inscribes one Originals inscription without metadata. */
-function inscribedBytes(prepared: PreparedInscriptionOnSat): Uint8Array | undefined {
+interface Inscribed {
+  metadata: Uint8Array;
+  contentType: string | undefined;
+  body: Uint8Array;
+}
+
+/**
+ * What a prepared reveal inscribes, if it inscribes exactly one inscription,
+ * with its metadata concatenated from its data pushes (P14.12) and no content
+ * encoding (P9.17).
+ */
+function inscribedOf(prepared: PreparedInscriptionOnSat): Inscribed | undefined {
   try {
     const reveal = btc.Transaction.fromRaw(hex.decode(prepared.revealTxHex), { allowUnknownInputs: true, allowUnknownOutputs: true });
     const witness = reveal.getInput(0).finalScriptWitness;
-    const inscriptions = witness ? parseWitness(witness) : undefined;
-    if (inscriptions?.length !== 1 || inscriptions[0].tags.contentType !== ORIGINALS_INSCRIPTION_TYPE || inscriptions[0].tags.metadata !== undefined) return undefined;
-    return inscriptions[0].body;
+    if (!witness || witness.length !== 3) return undefined;
+    const script = btc.Script.decode(witness[1]);
+    const inscriptions = parseInscriptions(script, true);
+    if (inscriptions?.length !== 1 || inscriptions[0].tags.contentEncoding !== undefined) return undefined;
+    const metadata = rawMetadataPerEnvelope(script, 1)[0];
+    if (!metadata) return undefined;
+    return { metadata, contentType: inscriptions[0].tags.contentType, body: inscriptions[0].body };
   } catch {
     return undefined;
   }
 }
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/** Whether a reveal inscribes exactly these entries and the version they name (P9.6, P9.17). */
+function sameInscription(i: Inscribed, expected: { metadata: Uint8Array; resource: ResourceDescriptor; body?: Uint8Array }): boolean {
+  if (!sameBytes(i.metadata, expected.metadata) || i.contentType !== expected.resource.mediaType) return false;
+  // Without the bytes at hand, the body is checked against the descriptor it must be (P9.17, P4.3).
+  return expected.body !== undefined
+    ? sameBytes(i.body, expected.body)
+    : i.body.length === expected.resource.size && resourceDigest(i.body) === expected.resource.digest;
+}
 
 /** Where the provider sees a transaction: `unknown` when it cannot say (no mempool view, or an error). */
 type Seen = "confirmed" | "mempool" | "absent" | "unknown";
@@ -688,7 +779,7 @@ async function loadRecord(store: InscriptionRecoveryStore, id: string): Promise<
  * from the sat read itself (not from verified ownership, which is null before
  * the anchor is accepted).
  */
-async function recorded(log: StoredLog, view: OriginalView, holding: string | undefined, content: Uint8Array, provider: ReadAnchoredOptions["provider"], store: InscriptionRecoveryStore, ids: string[]): Promise<Recorded> {
+async function recorded(log: StoredLog, view: OriginalView, holding: string | undefined, planned: Planned, provider: ReadAnchoredOptions["provider"], store: InscriptionRecoveryStore, ids: string[]): Promise<Recorded> {
   const ignored = new Set((view.report.anchoring?.ignored ?? []).filter((i) => !NOT_SETTLED.has(i.reason)).map((i) => i.inscription));
   const unverifiable = new Map((view.report.anchoring?.unverifiable ?? []).map((u) => [u.inscription, { signer: u.signer, signerVersionId: u.signerVersionId }]));
   const waiting = new Map((view.report.anchoring?.ignored ?? []).flatMap((i) => (i.reason === "waiting-for-earlier-unverifiable" && i.waitingOn ? [[i.inscription, i.waitingOn] as const] : [])));
@@ -703,8 +794,9 @@ async function recorded(log: StoredLog, view: OriginalView, holding: string | un
     const record = loaded;
     const { prepared } = record;
     if (prepared.satoshi !== log.sat.sat || prepared.network !== NETWORK[log.sat.network]) continue;
-    const body = inscribedBytes(prepared);
-    if (!body || !sameBytes(body, content)) continue;
+    // The same entries, content type and body: a pair for this entry (P9.6). One with another body is not.
+    const inscribed = inscribedOf(prepared);
+    if (!inscribed || !sameInscription(inscribed, planned)) continue;
     const reveal = await seen(provider, prepared.revealTxId);
     if (reveal === "confirmed") {
       // Confirmed: Bitcoin either ignored it for good (a replacement is needed) or has not placed it yet.
@@ -775,7 +867,7 @@ async function observe(sdk: OriginalsSDK, did: string, log: StoredLog, options: 
   const view = await sdk.get(did, { bitcoin: evidence });
   const base = pendingFrom(did, log, view, "not-anchored");
   const found = base.next !== null && recoveryStore && ids
-    ? await recorded(log, view, holding, bodyFor(log, log.ids.indexOf(base.next)), read.provider, recoveryStore, ids)
+    ? await recorded(log, view, holding, planFor(log, log.ids.indexOf(base.next)), read.provider, recoveryStore, ids)
     : undefined;
   const disagreement = disagreementOf(view, holders);
   return {
@@ -967,6 +1059,8 @@ export async function transferHandoff(sdk: OriginalsSDK, did: string, options?: 
   // Called without options (from JavaScript, or with none at all): a structured refusal, not a TypeError.
   if (options === undefined || options === null || typeof options !== "object") refuse("incomplete-evidence", "SAT_READ_REQUIRED", SAT_READ_REQUIRED);
   let checkpoint: string | undefined;
+  // The head Bitcoin accepts, when the sat was read: only versions through it are on Bitcoin (P9.18).
+  let accepted: string | null = null;
   if ("checkpoint" in options) checkpoint = options.checkpoint;
   else if (options.through !== "committed") {
     if (!("provider" in options) || !options.provider) {
@@ -977,10 +1071,16 @@ export async function transferHandoff(sdk: OriginalsSDK, did: string, options?: 
       refuse("incomplete-evidence", "NOT_ANCHORED_ON_BITCOIN", `Bitcoin does not show ${did}'s anchor on ${pending.sat} (${pending.view.report.anchoring?.status ?? "unverified"}): there is no accepted head to hand over`);
     }
     checkpoint = pending.accepted;
+    accepted = pending.accepted;
   }
   const pkg = await sdk.package(did, checkpoint === undefined ? {} : { checkpoint });
   const loaded = await sdk.load(pkg.bytes);
-  return { package: pkg, offChain: offChainOf(did, pkg.manifest.checkpoint, loaded.report) };
+  const log = await storedLog(sdk, did);
+  // P9.18: a version counts as on Bitcoin only when an accepted inscription carries it. Through the
+  // committed head or an exact checkpoint no sat is read, so nothing is assumed inscribed and every
+  // version is listed as off chain: a locally committed version Bitcoin does not show is handed over.
+  const onBitcoin = accepted === null ? new Set<string>() : inscribedDigests(log, Math.min(log.ids.indexOf(accepted), log.ids.indexOf(pkg.manifest.checkpoint)));
+  return { package: pkg, offChain: offChainOf(did, pkg.manifest.checkpoint, loaded.report, onBitcoin) };
 }
 
 /**

@@ -33,12 +33,12 @@ async function published() {
   const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
   const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: clock() });
   const signer = alice.signer("orig", KEY);
-  const c = await sdk.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: alice.ref("orig"), signer });
+  const c = await sdk.create({ name: "Harbor at dawn", resource: { mediaType: "image/jpeg", bytes: B1 }, author: alice.ref("orig"), signer });
   if (c.kind !== "original") throw new Error("expected an Original");
   const did = c.original.did;
   const alias = await aliasFor(did);
   const p = await sdk.publish(did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, alias });
-  const e = await sdk.edit(did, { parent: p.original.checkpoint, resources: [{ id: "photo", bytes: B2 }], author: alice.ref("orig"), signer });
+  const e = await sdk.edit(did, { parent: p.original.checkpoint, resource: { bytes: B2 }, author: alice.ref("orig"), signer });
   const files = await hostedFiles(sdk, did, alias);
   return { alice, sdk, signer, did, alias, files, published: p.original, head: e.original.checkpoint };
 }
@@ -65,7 +65,7 @@ describe("publishing (P3.6, P9.8)", () => {
 
   test("an alias that does not point back to the Original cannot be published", async () => {
     const { sdk, alice, signer } = await published();
-    const c = await sdk.create({ name: "Other", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: alice.ref("orig"), signer });
+    const c = await sdk.create({ name: "Other", resource: { mediaType: "image/jpeg", bytes: B1 }, author: alice.ref("orig"), signer });
     if (c.kind !== "original") throw new Error("expected an Original");
     const wrong = await aliasFor("did:vh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ");
     await expect(sdk.publish(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, alias: wrong })).rejects.toMatchObject({ code: "ALIAS_NOT_CONFIRMED" });
@@ -114,7 +114,7 @@ describe("the public reader verifies one exact snapshot (P9.1)", () => {
   test("C12-66: a did:webvh that points at an Original whose state does not list it gives no result", async () => {
     const { sdk, alice, signer } = await published();
     // Another Original, never published: an attacker's did:webvh claims it and hosts its real evidence.
-    const c = await sdk.create({ name: "Never published", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: alice.ref("orig"), signer });
+    const c = await sdk.create({ name: "Never published", resource: { mediaType: "image/jpeg", bytes: B1 }, author: alice.ref("orig"), signer });
     if (c.kind !== "original") throw new Error("expected an Original");
     const claim = await aliasFor(c.original.did, "evil.example");
     const files = await hostedFiles(sdk, c.original.did, claim);
@@ -234,21 +234,27 @@ function forgeLog(files: Map<string, Uint8Array>, extra: (template: Record<strin
   return out;
 }
 
-function withResources(template: Record<string, any>, resources: unknown[]): Record<string, unknown> {
-  return { ...template, state: { ...template.state, asset: { ...template.state.asset, resources } } };
+function withResource(template: Record<string, any>, resource: unknown): Record<string, unknown> {
+  return { ...template, state: { ...template.state, asset: { ...template.state.asset, resource } } };
 }
 
-/** An Original published with `count` resources of `size` bytes each. */
+/** An Original published with `count` versions of its one resource, `size` bytes each (P4.1; originals-spec #53). */
 async function publishedWith(count: number, size: number) {
   const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
   const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: clock() });
   const signer = alice.signer("orig", KEY);
-  const resources = Array.from({ length: count }, (_, i) => ({ id: `r${i}`, mediaType: "application/octet-stream", bytes: new Uint8Array(size).fill(i + 1) }));
-  const c = await sdk.create({ name: "Contact sheet", resources, author: alice.ref("orig"), signer });
+  const versions = Array.from({ length: count }, (_, i) => new Uint8Array(size).fill(i + 1));
+  const c = await sdk.create({ name: "Contact sheet", resource: { mediaType: "application/octet-stream", bytes: versions[0] }, author: alice.ref("orig"), signer });
   if (c.kind !== "original") throw new Error("expected an Original");
+  let head = c.original.checkpoint;
+  for (const v of versions.slice(1)) {
+    const e = await sdk.edit(c.original.did, { parent: head, resource: { bytes: v }, author: alice.ref("orig"), signer });
+    if (e.status !== "committed") throw new Error("expected a commit");
+    head = e.original.checkpoint;
+  }
   const alias = await aliasFor(c.original.did);
-  await sdk.publish(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, alias });
-  return { alias, files: await hostedFiles(sdk, c.original.did, alias), digests: resources.map((r) => resourceDigest(r.bytes)) };
+  await sdk.publish(c.original.did, { parent: head, author: alice.ref("orig"), signer, alias });
+  return { alias, files: await hostedFiles(sdk, c.original.did, alias), digests: versions.map((v) => resourceDigest(v)) };
 }
 
 const RESOURCE = /^originals\/resources\//;
@@ -257,9 +263,9 @@ const FAN_OUT = /^originals\/(?:signers\/|resources\/)/;
 describe("loadPublished has a whole-operation retrieval budget (#970)", () => {
   test("an oversized request plan is refused before any resource is requested", async () => {
     const { alias, files } = await published();
-    // 20 forged entries of 64 distinct, well-formed digests: 1,280 resource requests.
-    const forged = forgeLog(files, (t) => Array.from({ length: 20 }, (_, i) =>
-      withResources(t, Array.from({ length: 64 }, (_, j) => ({ ...t.state.asset.resources[0], id: `r${j}`, digest: resourceDigest(bytes(`${i}/${j}`)) })))));
+    // 1,280 forged entries, each naming a distinct, well-formed digest: 1,280 resource requests.
+    const forged = forgeLog(files, (t) => Array.from({ length: 1_280 }, (_, i) =>
+      withResource(t, { ...t.state.asset.resource, digest: resourceDigest(bytes(`${i}`)) })));
     const host = instrumented(forged, didWebvhFilesUrl(alias.did));
     const error = await rejection(stranger().loadPublished(alias.did, host.fetch));
     expect(error.category).toBe("limit-exceeded");
@@ -307,7 +313,7 @@ describe("loadPublished has a whole-operation retrieval budget (#970)", () => {
 
   test("a resource descriptor whose digest is not a digest stops all derived requests", async () => {
     const { alias, files } = await published();
-    const forged = forgeLog(files, (t) => [withResources(t, [{ ...t.state.asset.resources[0], digest: "not-a-digest" }])]);
+    const forged = forgeLog(files, (t) => [withResource(t, { ...t.state.asset.resource, digest: "not-a-digest" })]);
     const host = instrumented(forged, didWebvhFilesUrl(alias.did));
     const error = await rejection(stranger().loadPublished(alias.did, host.fetch));
     expect(error.category).toBe("invalid-evidence");
@@ -321,7 +327,7 @@ describe("loadPublished has a whole-operation retrieval budget (#970)", () => {
     test(`many individually small responses stop at the aggregate byte limit (${cooperative ? "a host that honours maxBytes" : "a host that ignores it"})`, async () => {
       const { alias, files, digests } = await publishedWith(6, 1_000);
       const base = didWebvhFilesUrl(alias.did);
-      // Everything but the resources, then room for two and a half resources.
+      // Everything but the resource versions, then room for two and a half of them.
       const fixed = [...files].filter(([path]) => !RESOURCE.test(path)).reduce((n, [, data]) => n + data.length, 0);
       const host = instrumented(files, base, { cooperative });
       const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")), retrievalLimits: { maxTotalBytes: fixed + 2_500 } });
@@ -343,7 +349,7 @@ describe("loadPublished has a whole-operation retrieval budget (#970)", () => {
     const reader = (maxRequests: number) =>
       OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")), retrievalLimits: { maxRequests } });
     // Alias witness (404), alias log, manifest, asset log; then the author's log and witness (404),
-    // and two resources: 8 requests, 2 of which fail. There is no asset witness file (P9.8).
+    // and two resource versions: 8 requests, 2 of which fail. There is no asset witness file (P9.8).
     const enough = instrumented(files, base);
     const r = await reader(8).loadPublished(alias.did, enough.fetch);
     expect(r.verified, JSON.stringify(r.reasons)).toBe(true);
@@ -505,7 +511,7 @@ describe("hosted files carry the newest verified author evidence (#965 review C2
     const at = clock();
     const a = OriginalsSDK.create({ store: new MemoryStore(), authors: [v1], clock: at });
     const signer = alice.signer("orig", KEY);
-    const c = await a.create({ name: "Harbor at dawn", resources: [{ id: "photo", mediaType: "image/jpeg", bytes: B1 }], author: alice.ref("orig"), signer });
+    const c = await a.create({ name: "Harbor at dawn", resource: { mediaType: "image/jpeg", bytes: B1 }, author: alice.ref("orig"), signer });
     if (c.kind !== "original") throw new Error("expected an Original");
     const did = c.original.did;
     // The author rotates to v2 elsewhere and edits there; the publisher imports that package.
@@ -513,7 +519,7 @@ describe("hosted files carry the newest verified author evidence (#965 review C2
     const v2 = alice.evidence();
     const b = OriginalsSDK.create({ store: new MemoryStore(), authors: [v2], clock: at });
     await b.import((await a.package(did)).bytes);
-    const e = await b.edit(did, { parent: c.original.checkpoint, resources: [{ id: "photo", bytes: B2 }], author: alice.ref("next"), signer: alice.signer("next", K2) });
+    const e = await b.edit(did, { parent: c.original.checkpoint, resource: { bytes: B2 }, author: alice.ref("next"), signer: alice.signer("next", K2) });
     expect((await a.import((await b.package(did)).bytes)).status).toBe("imported");
     const alias = await aliasFor(did);
     const p = await a.publish(did, { parent: e.original.checkpoint, author: alice.ref("next"), signer: alice.signer("next", K2), alias });
@@ -553,32 +559,32 @@ describe("identity retrieval in loadPublished stays inside its budget (08b revie
 describe("a resource over the 64 MiB fetch cap is never published (P8.5; P14.13)", () => {
   const big = () => new Uint8Array(RETRIEVAL_LIMITS.maxResourceBytes + 1);
 
-  test("it can be created and edited locally, but publication and a shared host refuse it, naming the resource", async () => {
+  test("it can be created and edited locally, but publication and a shared host refuse it, naming the version", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: clock() });
     const signer = alice.signer("orig", KEY);
     // Local: a package is never fetched, so the cap does not apply to it.
-    const c = await sdk.create({ name: "Harbor, full size", resources: [{ id: "master", mediaType: "image/tiff", bytes: big() }], author: alice.ref("orig"), signer });
+    const c = await sdk.create({ name: "Harbor, full size", resource: { mediaType: "image/tiff", bytes: big() }, author: alice.ref("orig"), signer });
     if (c.kind !== "original") throw new Error("expected an Original");
     const alias = await aliasFor(c.original.did);
     const refused = sdk.publish(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, alias });
-    await expect(refused).rejects.toMatchObject({ category: "limit-exceeded", code: "RESOURCE_OVER_FETCH_LIMIT", details: { resource: "master", size: RETRIEVAL_LIMITS.maxResourceBytes + 1, limit: RETRIEVAL_LIMITS.maxResourceBytes } });
+    await expect(refused).rejects.toMatchObject({ category: "limit-exceeded", code: "RESOURCE_OVER_FETCH_LIMIT", details: { digest: c.original.resources[0].digest, size: RETRIEVAL_LIMITS.maxResourceBytes + 1, limit: RETRIEVAL_LIMITS.maxResourceBytes } });
     expect((await sdk.get(c.original.did)).head).toBe(c.original.checkpoint);
     // A shared host serves what it accepts: the candidate is refused before it is sent.
     let sent = 0;
     const shared = { submit: async () => { sent++; throw new Error("not reached"); }, accepted: async () => { throw new Error("not reached"); } };
     const draft = await sdk.prepareEdit(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), name: "Harbor, full size, renamed" });
     const candidate = await sdk.sign(draft, signer);
-    await expect(sdk.submit(candidate, shared)).rejects.toMatchObject({ category: "limit-exceeded", code: "RESOURCE_OVER_FETCH_LIMIT", details: { resource: "master" } });
+    await expect(sdk.submit(candidate, shared)).rejects.toMatchObject({ category: "limit-exceeded", code: "RESOURCE_OVER_FETCH_LIMIT", details: { digest: c.original.resources[0].digest } });
     expect(sent).toBe(0);
     expect(await sdk.pending(c.original.did)).toBeUndefined();
   });
 
-  test("an Original published before a large resource was added has no hosted files", async () => {
+  test("an Original published before a large version of its resource has no hosted files", async () => {
     const { sdk, did, alias, alice, signer, head } = await published();
-    const e = await sdk.edit(did, { parent: head, resources: [{ id: "photo", bytes: big() }], author: alice.ref("orig"), signer });
+    const e = await sdk.edit(did, { parent: head, resource: { bytes: big() }, author: alice.ref("orig"), signer });
     expect(e.status).toBe("committed");
-    await expect(hostedFiles(sdk, did, alias)).rejects.toMatchObject({ category: "limit-exceeded", code: "RESOURCE_OVER_FETCH_LIMIT", details: { resource: "photo" } });
+    await expect(hostedFiles(sdk, did, alias)).rejects.toMatchObject({ category: "limit-exceeded", code: "RESOURCE_OVER_FETCH_LIMIT", details: { digest: resourceDigest(big()) } });
     // An earlier checkpoint, from before it, is still hosted.
     expect((await hostedFiles(sdk, did, alias, { checkpoint: head })).size).toBeGreaterThan(0);
   });

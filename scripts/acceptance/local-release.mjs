@@ -164,7 +164,7 @@ const all = (...refs) => refs.every(([p, id]) => check(p, id));
 const everyPhaseOffline = phases.every((p) => check(p.name, "network-blocked"));
 const gates = {
   "A1-964-integrated": preflight.filter((p) => p.id.startsWith("964")).every((p) => p.status === "PASS"),
-  "A2-create-revise-export": all(["1-author-a", "create"], ["1-author-a", "revise-text"], ["1-author-a", "revise-binary"], ["1-author-a", "resource-add"], ["1-author-a", "resource-remove"], ["1-author-a", "resource-set-refusals"], ["1-author-a", "export-package"]),
+  "A2-create-revise-export": all(["1-author-a", "create"], ["1-author-a", "revise"], ["1-author-a", "revise-again"], ["1-author-a", "unchanged-bytes"], ["1-author-a", "resource-refusals"], ["1-author-a", "export-package"]),
   "A3-offline-fresh-reader": everyPhaseOffline && all(["2-offline-reader", "no-authority"], ["2-offline-reader", "same-original"], ["2-offline-reader", "checkpoint"], ["2-offline-reader", "historical-versions"], ["2-offline-reader", "byte-digests"], ["2-offline-reader", "verified-vs-current"]),
   "A4-import-authority-continue": all(["3-author-b", "import"], ["3-author-b", "import-confers-no-authority"], ["3-author-b", "no-key-exported"], ["3-author-b", "continue-editing"]),
   "A5-negatives": all(["3-author-b", "stale-parent"], ["3-author-b", "stale-digest"], ["4-negatives", "missing-bytes-store"], ["4-negatives", "missing-bytes-archive"], ["4-negatives", "stale-prefix"], ["4-negatives", "divergent-local"], ["4-negatives", "divergent-reader"]),

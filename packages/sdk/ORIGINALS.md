@@ -18,8 +18,12 @@ This contract replaces the CEL 3 guide, deleted with the CEL 3 code in plan
 
 - An Original is `did:vh:<SCID>`. Its asset log is a did:vh log under the
   `originals:1.0` extension (PROVISIONAL method value). Each entry holds the
-  full asset state: name, metadata, lifecycle status, resource descriptors and
-  aliases.
+  full asset state: name, metadata, lifecycle status, the resource descriptor,
+  aliases and editor grants.
+- An Original is exactly one resource, which can have many versions (P4.1;
+  owner decision of 1 November 2026, originals-spec #53). The resource is
+  never added, removed or replaced by another: new bytes are its next
+  version. Descriptive values such as a title or style belong in `metadata`.
 - The author is a DID fixed at genesis. The baseline profile lists did:vh,
   did:webvh and did:btco. Every entry carries exactly one proof, by an
   `assertionMethod` key of the author DID at the author DID version the entry
@@ -48,7 +52,7 @@ const sdk = OriginalsSDK.create({
 const signer = keySigner({ keyType: "Ed25519", secretKey, verificationMethod: `${authorDid}#orig` });
 const author = { did: authorDid, verificationMethod: `${authorDid}#orig`, versionId: authorVersionId };
 
-const created = await sdk.create({ name, metadata, resources: [{ id: "photo", mediaType: "image/jpeg", bytes }], author, signer });
+const created = await sdk.create({ name, metadata, resource: { mediaType: "image/jpeg", bytes }, author, signer });
 // created.kind === "original" | "draft" (no signer: an unsigned draft, never history, P6.3)
 // entry timestamps carry milliseconds (VH-Log PR 8; plan 011, Q8)
 
@@ -56,8 +60,7 @@ const edited = await sdk.edit(did, {
   parent: original.checkpoint,   // required; a moved parent is a StaleParent conflict (P4.5)
   name,                          // omitted keeps the value; null is rejected (P4.6)
   metadata,                      // omitted keeps the value; null removes it (P4.6)
-  resources: [{ id: "photo", bytes, expectedDigest }], // a new id adds a resource (P4.1)
-  remove: ["sketch"],            // author only; at least one resource remains (P4.1)
+  resource: { bytes, mediaType, expectedDigest }, // the next version; omitted keeps the current one (P4.1)
   author, signer,
 });
 await sdk.deactivate(did, { parent, author, signer }); // terminal (P6.5)
@@ -111,27 +114,23 @@ on; it never reports an unanchored Original as current (P7.10). The
   serialization (PROVISIONAL). A commit of a larger entry fails with
   `limit-exceeded` (`COMMIT_VERIFICATION_FAILED`), and a verifier reports the
   log `limit-exceeded` at that entry (`ENTRY_TOO_LARGE`).
-- **Resource set (P4.1, P5.16, P14.4, P14.5; originals-spec #49).** Genesis
-  names at least one resource. The author's `edit` adds a resource by giving
-  bytes and a `mediaType` for a new id, appended after the existing resources
-  in the order given, and removes resources with `remove: [id]`, as long as one
-  remains. A resourceID is never used again in the Original, even after its
-  resource is removed (`STATE_RESOURCE_REUSED`); there is no rename. A removed
-  resource must also leave every grant, so pass `editors` without it
-  (`STATE_EDITORS` otherwise), and an added resource is in no grant until the
-  author grants it. The adding entry may itself grant it, and the grant takes
-  effect from the next entry (P5.15, P5.17; originals-spec #51, merged at master `19d3e82a0`). An editor never adds or removes a resource
-  (`outside-grant`, `EDITOR_AUTHOR_ONLY`), even one its grant names. A removed
-  resource's earlier versions stay in `resources`, in evidence packages and in
-  hosted snapshots, and stay checked (P8.3). The entry's transitions give
-  `from: null` for an added resource and `to: null` for a removed one: first
-  the resulting resources in order, then the removed ones in their previous
-  order. BREAKING for TypeScript: `Transition.to` is `string | null`.
+- **One resource (P4.1, P4.4, P14.4–P14.6; originals-spec #53).** `create`
+  takes `resource: { mediaType, bytes }`, its version 1. `edit` takes
+  `resource: { bytes, mediaType?, expectedDigest? }`, the next version:
+  `mediaType` defaults to the current one, and an `expectedDigest` other than
+  the current version's is a conflict (`stale-parent`, `STALE_DIGEST`, P4.5).
+  The asset state's `resource` is exactly `{ mediaType, size, digest }`;
+  `mediaType` and `size` change only with `digest` (`STATE_RESOURCE`). A
+  verifier rejects a state with no resource, a list of resources or a
+  `resources` member (`STATE_MEMBERS` or `STATE_RESOURCE`). An entry's
+  `transitions` is `[{ from: null, to }]` at genesis, `[{ from, to }]` when
+  the digest changes and `[]` otherwise, a deactivation included
+  (`STATE_TRANSITIONS`). Earlier versions stay in `resources.versions`, in
+  evidence packages and in hosted snapshots, and stay checked (P8.3).
 - **Limits (P7.7, P14.13; decided by the owner, originals-spec #50, merged).**
-  `ORIGINALS_LIMITS`: 10,000 entries, 65,536 bytes per entry, 256 resources at
-  any one time (removing one makes room for another), 32 editor grants and
-  1,000 versions of one signer DID. Exceeding one is `limit-exceeded`
-  (`STATE_TOO_MANY_RESOURCES` for resources).
+  `ORIGINALS_LIMITS`: 10,000 entries, 65,536 bytes per entry, 32 editor
+  grants and 1,000 versions of one signer DID. There is no resource limit:
+  an Original has one resource. Exceeding one is `limit-exceeded`.
 - **Exact members (P14.1, P14.4, P14.8).** An entry's `parameters` are
   exactly `method` and `scid` at genesis, exactly `{"deactivated": true}` for
   a deactivation, and `{}` for every other entry; anything else (`ttl`,
@@ -144,20 +143,23 @@ on; it never reports an unanchored Original as current (P7.10). The
   rejected.
 - **Form (P14.2, P14.3).** `versionTime` ends in `Z` (`+00:00` is
   `VERSION_TIME_FORMAT`), with at most three fractional digits. Each line of
-  an asset log, and of an Originals inscription body, is compact JSON ending
-  in a single LF: a missing final LF, CRLF or whitespace between tokens is
-  `LOG_LINE_FORMAT` for the log (an inscription is `undecodable`). This is
-  the asset log's rule only: did:vh and did:webvh signer and alias logs keep
+  an asset log is compact JSON ending in a single LF: a missing final LF,
+  CRLF or whitespace between tokens is `LOG_LINE_FORMAT`. Entries carried in
+  inscription metadata are not lines, so this rule does not apply to them
+  (P14.12). This is the asset log's rule only: did:vh and did:webvh signer and alias logs keep
   their own method's rules. No number in an entry has an exact decimal value,
   as written, of magnitude greater than 2^53 − 1 (`1e16`, `9007199254740993.0`,
   `9007199254740991.4`; `9007199254740991.0` is accepted), and none is a
   negative zero (`-0`, `-0.0`, `-0e0`, `-1e-400`); text is judged as written,
   an entry given parsed by its value (`JSON_UNSAFE_NUMBER`, P14.3).
 - **Versions (P4.4).** Resource versions are derived from history. A caller's
-  counter is rejected, and an unchanged digest does not advance a version. A
-  resource added after genesis starts at version 1.
+  counter is rejected, and an unchanged digest does not advance a version.
+  Genesis is version 1. A `ResourceVersion` is `{ version, digest, mediaType,
+  size, versionId, bytes, onBitcoin }`; `onBitcoin` is true when the bytes
+  were read from an inscription's body on the anchoring sat (P9.17, P9.18).
 - **Signing (P5.11).** The signer receives the unsigned entry, the proof options,
-  a summary of the Original, the operation and the resource changes, with
+  a summary of the Original, the operation and the resource change (at most
+  one transition: the first version, a new version, or none), with
   `summary.signer` naming whose key signs (the author, or the editor of an
   editor entry), and `display`, the text `describeEntry(summary)` renders for
   that person (PROVISIONAL wording). `keySigner` refuses anything that is not
@@ -175,7 +177,7 @@ on; it never reports an unanchored Original as current (P7.10). The
 | `authorBinding` | valid · failed (per entry) |
 | `identityEvidence` | complete · incomplete, with the latest author DID versionId used, whether it is deactivated (P6.5), and its freshness: established (the log was obtained at the DID's location and its own witnesses approve its latest version) · not-established · stale against the retained versionId (P7.8), with `obtained`: where (`location`, the URL it was retrieved from, or null), when (`obtainedAt`), from what `source`, as of which `latestVersionId`, and whether that version is `witnessed`. `editors` lists the same for each editor DID relied on (P7.8, P5.18); `status` is incomplete when any signer's evidence is |
 | `assetFreshness` | not-established · stale against the retained versionId · anchored (the sat's log, as of the read's tip, P9.13), with every compared copy of the asset log (P7.6) |
-| `resources` | available · partial (resource and checkpoint missing) · digest failure. Content availability is reported here and nowhere else: missing bytes, current or historical, leave the log verified and are never a verification failure (P7.3, P7.4, P9.18); bytes that are supplied are always checked, and a mismatch fails |
+| `resources` | available · partial (the resource version and checkpoint missing) · digest failure, over every version of the Original's one resource. Content availability is reported here and nowhere else: missing bytes, current or historical, leave the log verified and are never a verification failure (P7.3, P7.4, P9.18); bytes that are supplied, or read from an accepted inscription's body, are always checked, and a mismatch fails |
 | `ordering` | claimed · anchored (P7.6). Asset logs have no witnesses (Q14), so an unanchored Original's ordering is claimed only |
 | `fork` | the version at which known branches diverge and each branch's entry there. A fork not on Bitcoin is an unresolved conflict with no current branch (owner decision Q5); only an anchor settles one (P9.16) |
 | `anchors` | every anchoring entry (phase 4) |
@@ -204,8 +206,8 @@ The package is an uncompressed ZIP containing `originals-evidence.json` (the
 manifest), `asset/did.jsonl` through the checkpoint, the DID histories of
 every signer (the author and each editor that signed an entry, P7.1) under
 `signers/<hex sha256 of the DID>/` (`did.jsonl`, and `did-witness.json` where
-that DID's method has witnesses; `signerPath(did)`), and the resource bytes
-under `resources/<digest>`. There is no asset witness file: asset logs have
+that DID's method has witnesses; `signerPath(did)`), and the bytes of each
+version of the resource included under `resources/<digest>`. There is no asset witness file: asset logs have
 no witnesses (P9.8, D3; decided). The `signers/` layout is PROVISIONAL (P14.10,
 section 14). BREAKING: the directory was `authors/` and an
 `asset/did-witness.json` was written; neither is written or read any more,
@@ -214,8 +216,8 @@ and a package or hosted snapshot carrying them is rejected
 package of an earlier checkpoint is never reported as the latest state (P7.6).
 The manifest names the Original, the profile and the target checkpoint, and
 declares the package complete or partial, listing any missing items. Each
-has exactly the members of its kind (P14.10): `{ kind: "resource", resource,
-version, digest, versionId }` or `{ kind: "identity", did, role: "author" |
+has exactly the members of its kind (P14.10): `{ kind: "resource", version,
+digest, versionId }` or `{ kind: "identity", did, role: "author" |
 "editor" }`, with `role` required; anything else is `EVIDENCE_MANIFEST`. The
 landing host lists a signer DID history it does not hold as an identity
 item, so a hosted snapshot is complete only when no resource version and no
@@ -308,27 +310,29 @@ countersign them:
 ```ts
 // PROVISIONAL member names (D4). Absent means no editors.
 const editors = [
-  { did: bobDid, name: false, metadata: false, resources: ["photo"] },
-  { did: carolDid, name: false, metadata: true, resources: [] },
+  { did: bobDid, name: false, metadata: false, resource: true },
+  { did: carolDid, name: false, metadata: true, resource: false },
 ];
-await sdk.create({ name, resources, author, signer, editors });
+await sdk.create({ name, resource, author, signer, editors });
 await sdk.edit(did, { parent, editors: [...], author, signer });   // the author grants, narrows or revokes
 await sdk.edit(did, { parent, editors: null, author, signer });    // removes every grant
-await sdk.edit(did, { parent, resources: [{ id: "photo", bytes }], editor: bobRef, signer: bobSigner });
+await sdk.edit(did, { parent, resource: { bytes }, editor: bobRef, signer: bobSigner });
 ```
 
 - A grant names one editor DID, unique in the list, using a method P5.8
   lists (did:vh, did:webvh, did:btco), never the author DID or a DID of the
   author's identity (for a did:webvh author, any did:webvh with its SCID).
-  `resources` are resourceIDs of the Original's current resource set. At most
+  A grant is exactly `{ did, name, metadata, resource }`, the last three
+  booleans; `resource: true` allows new versions of the Original's one
+  resource (P5.15, P14.5; originals-spec #53). At most
   `ORIGINALS_LIMITS.editors` (32) grants (P7.7). An empty list is
   not used: no editors means no `editors` member (PROVISIONAL).
 - An editor entry carries `editor: { did, verificationMethod, versionId }` in
   its signed state. It is checked against the grant in its parent's state, so
   a grant, a change to it and a revocation take effect from the next entry
   (P5.17). Its author reference is its parent's, its operation is update, its
-  parameters are empty, and only the name, metadata and resources the grant
-  allows change. Only author entries add or remove resources, change grants,
+  parameters are empty, and only the name, metadata and resource the grant
+  allows change. Only author entries change grants,
   aliases, lifecycle or parameters, start an Original, anchor it or deactivate
   it. A change outside
   the grant is refused before anything is signed (`outside-grant`); an editor
@@ -468,12 +472,12 @@ await sdk.publish(did, { parent, author, signer, alias }); // alias: { did, log,
 const files = await hostedFiles(sdk, did, alias);           // Map<path, bytes> under the alias's #files base
 ```
 
-A resource larger than a hosted reader fetches (`FETCH_LIMITS.maxResourceBytes`,
+A resource version larger than a hosted reader fetches (`FETCH_LIMITS.maxResourceBytes`,
 64 MiB; P8.5, P14.13) can be created and edited locally, since
 a local package is never fetched, but it is never published: `publish`,
 `hostedFiles` and a shared-host `submit` refuse a log that lists one, at any
-version, with `limit-exceeded` `RESOURCE_OVER_FETCH_LIMIT` naming the resource
-(`details.resource`, `digest`, `size`, `limit`), before anything is written or
+version, with `limit-exceeded` `RESOURCE_OVER_FETCH_LIMIT` naming the version
+(`details.digest`, `size`, `limit`), before anything is written or
 sent. `assertHostable(log)` runs the same check.
 
 An alias counts only in both directions: the asset state lists it and its
@@ -517,7 +521,7 @@ The manifest is checked first. The asset log is unverified, so before anything
 it asks for is requested, every line must carry a well-formed author reference
 and asset state (else `SNAPSHOT_LOG_INVALID`, in the category of the rule it
 breaks) and be at most 65,536 UTF-8 bytes (`ENTRY_TOO_LARGE`, P7.7), and the
-whole plan (each signer's log and witness, each resource) must fit the
+whole plan (each signer's log and witness, each resource version) must fit the
 request and file limits. Each request gets
 `{ maxBytes, timeoutMs, signal }`: the smaller of its own cap and what is left
 of the budget. A fetcher that ignores them is still bounded, because the SDK
@@ -545,7 +549,7 @@ not prevent forks published elsewhere (P6.6). The SDK talks to it through a
 the host's.
 
 ```ts
-const draft = await sdk.prepareEdit(did, { parent, resources, author });
+const draft = await sdk.prepareEdit(did, { parent, resource, author });
 const candidate = await sdk.sign(draft, signer); // verified against the exact parent; not history yet
 const saved = await sdk.submit(candidate, host);
 // saved.status: "accepted" | "already-accepted" -> committed locally; saved.hostHead, saved.behind
@@ -554,7 +558,7 @@ const kept = await sdk.refused(did);             // each with its signed entry a
 await sdk.sync(did, host);                       // fetch and verify the host's accepted log
 await sdk.reconcile(did, {
   host, refused: kept[0].versionId, author, signer,
-  change: ({ head, refused }) => ({ resources: [...] }), // the caller's reconciled change; required
+  change: ({ head, refused }) => ({ resource: { bytes } }), // the caller's reconciled change (name, metadata, resource); required
 });
 ```
 
@@ -663,19 +667,21 @@ layer, once, terminally, to one sat (P9.10):
 
 ```ts
 await sdk.anchor(did, { parent, author, signer, sat: "did:btco:reg:5000000000" }); // the anchoring entry
-// (refused with ANCHORING_LOG_TOO_LARGE, nothing committed, if the log through it would exceed 350,000 bytes)
+// (refused with ANCHORING_LOG_TOO_LARGE, nothing committed, if the log through it, as CBOR metadata, and the
+// current version together would exceed 350,000 bytes)
 // Publish the next committed entry on the anchoring sat (`@originals/sdk/originals/bitcoin`, kept out
 // of the browser-first entry). The first funding UTXO must hold the sat at offset 0. Until Bitcoin shows
-// the anchor, the inscription is the whole stored log from genesis through the anchoring entry; then one
-// entry, the one after Bitcoin's head. `versionId` names it explicitly; it is refused unless it is next
-// (HEAD_NOT_NEXT). Every read names the index serving it (`index`, P9.11); `indexes` adds independent
+// the anchor, the inscription's metadata is the whole stored log from genesis through the anchoring entry; then
+// one entry, the one after Bitcoin's head. Its body is the resource version the last entry names.
+// `versionId` names the entry explicitly; it is refused unless it is next (HEAD_NOT_NEXT). Every read names the index serving it (`index`, P9.11); `indexes` adds independent
 // ones, whose reads are compared (P9.10 SHOULD: an index you run, or two independent ones):
 const read = { provider, clock, index: "ord@node-a", indexes: [{ provider: other, index: "ord@node-b" }] };
 // recoveryStore is required: a pair for the same entry that can still land refuses a second one
 // (PAIR_IN_FLIGHT) unless `replaces: [recoveryId]` says it is a deliberate replacement (P9.6).
 // `recoveryStore: null` skips that check deliberately (pair.inFlightGuard: "skipped").
 const pair = await prepareEntryInscription({ sdk, did, fundingUtxos: [satUtxo, feeUtxo], satSigner, changeAddress, feeRate, network, ...read, recoveryStore });
-pair.carries;   // the versionIds in the body: genesis..anchoring entry, or the one entry
+pair.carries;   // the versionIds in the metadata: genesis..anchoring entry, or the one entry
+pair.notice;    // show the author before sending (P9.18): { version, entries, permanent: true, activeContent, text }
 pair.offChain;  // what Bitcoin will not hold: { resources, identities (did:vh/did:webvh signers), onBitcoin, replication: "not-guaranteed" }
 // Send it: re-reads the sat and verifies through the entry again (still next, no other pair in flight, the indexes
 // agree, the sat still in the pair's funding input; P9.6, P9.10, P9.18), then persists before each broadcast.
@@ -767,16 +773,49 @@ received.report.ownership?.output;                           // compare with the
   signed spending transactions: keep the directory private. The regtest
   restart journey kills a writer between commit and reveal and resumes the
   identical pair in a fresh process (#975).
-- **What is inscribed (P9.17).** Until Bitcoin shows the anchor, the next
-  inscription is the whole stored log from genesis through the anchoring
-  entry: the exact stored lines, in order, the anchoring entry last
-  (`pair.carries`). After the anchor, each inscription is exactly one entry,
-  the successor of Bitcoin's accepted head. Entries committed after the
+- **What is inscribed (P9.17, P14.12; owner decision of 1 November 2026,
+  originals-spec #53).** An Originals inscription has three parts:
+  - **Metadata** (ord tag 5): the CBOR encoding of a JSON array of the
+    entries it carries, each parsed from its exact stored line, split into
+    data pushes of at most 520 bytes. The JSON-to-CBOR mapping is ord's for
+    `--json-metadata` and is PROVISIONAL: objects are maps with text keys in
+    the object's order, integers in shortest form.
+  - **Content type** (ord tag 1): the `mediaType` of the resource in the last
+    entry.
+  - **Body**: the exact stored bytes of the resource version the last entry's
+    descriptor names, with no content encoding.
+
+  Until Bitcoin shows the anchor, the next inscription's metadata is the
+  whole stored log from genesis through the anchoring entry, in order, the
+  anchoring entry last (`pair.carries`), and its body is the current
+  version. After the anchor, each inscription carries exactly one entry, the
+  successor of Bitcoin's accepted head, with the version that entry names as
+  its body. An entry that changes only the name or metadata inscribes the
+  current version again, so the sat's newest accepted inscription always
+  shows the Original's current version. Entries committed after the
   anchoring entry before the anchor is accepted are not in the anchoring
-  inscription; they go one per later block once it is accepted. No metadata.
-  A body over 350,000 bytes is refused (`ANCHORING_LOG_TOO_LARGE` for the
-  anchoring inscription, also by `sdk.anchor` before it commits; a single
-  later entry over it is `INSCRIPTION_TOO_LARGE`).
+  inscription; they go one per later block once it is accepted. Metadata and
+  body together are at most 350,000 bytes. An Original whose log through the
+  anchoring entry and current version exceed that is refused
+  (`ANCHORING_LOG_TOO_LARGE`, also by `sdk.anchor` before it commits). After
+  anchoring, an entry whose inscription would exceed it is refused when it is
+  signed and when it is prepared (`INSCRIPTION_TOO_LARGE`), so it never
+  blocks later publications. A large resource leaves little room for the
+  log: anchor early. The writer needs the bytes it inscribes; if this SDK
+  does not hold the version the entry names, the pair is refused
+  (`incomplete-evidence`, `RESOURCE_BYTES_MISSING`). Non-integer numbers in
+  metadata, such as `4.5`, are inscribed as the narrowest exact CBOR float,
+  as ord writes them; a reader accepts any width and rejects NaN, infinities,
+  negative zero and magnitudes above 2^53 − 1 (P14.3, P14.12;
+  originals-spec #54).
+- **Told before inscribing (P9.18).** `pair.notice` is what the caller shows
+  the author before sending: the resource version the inscription carries,
+  and the log with its name and metadata, become public and permanent on
+  Bitcoin, and no later entry can remove them (P8.3). For active content it
+  adds that Bitcoin explorers may render the version outside this profile's
+  isolation rules (P9.7; `activeContent: true`). The active types are
+  PROVISIONAL: HTML, XHTML, SVG and other `image/*+xml`, JavaScript and
+  ECMAScript, XML, PDF and WASM (`isActiveContent`).
 - **Verified before inscribing (P9.18).** `prepareEntryInscription` packages
   the stored log through the entry it publishes and verifies it as a fresh
   reader would: history, author binding, the identity evidence of every signer
@@ -795,8 +834,10 @@ received.report.ownership?.output;                           // compare with the
   read still shows the sat in the pair's funding input (`SAT_MOVED`, or
   `SAT_HOLDER_UNKNOWN` when neither the read nor the funding output shows it;
   ord names no holder for a sat without an inscription, so the funding output
-  is asked for its first sat), the pair inscribes the
-  stored bytes (`PAIR_BODY_MISMATCH`) and the log still verifies through it.
+  is asked for its first sat), the pair inscribes the stored entries as its
+  metadata and the stored version under its media type as its body, with no
+  content encoding (`PAIR_BODY_MISMATCH`), and the log still verifies
+  through it.
   `submitPreparedInscriptionOnSat` and `resumeInscriptionOnSat` skip all of
   that: send a pair promptly through them only right after preparing it, or
   to force a rebroadcast deliberately.
@@ -804,7 +845,7 @@ received.report.ownership?.output;                           // compare with the
   anchor's checks depend on its position (P5.13, P9.15, P9.16), so the result
   is labelled `publication: "pending-bitcoin-acceptance"` on `readAnchored`,
   `nextPendingEntry` and every `catchUp` step, as long as the recovery store
-  holds a pair of the anchoring body that can still land and that the node
+  holds a pair of the anchoring inscription that can still land and that the node
   shows: its commit or reveal confirmed (a confirmed reveal not yet indexed
   included), or in its mempool where the provider reports `inMempool`
   (`RegtestProvider` does; `QuickNodeProvider` reports mempool entries). A
@@ -818,9 +859,11 @@ received.report.ownership?.output;                           // compare with the
   anchored. Without a recovery store the label cannot see the pair and reads
   `not-anchored`; `unverified` means Bitcoin evidence is missing or
   disputed.
-- **What Bitcoin will not hold (P9.18).** `pair.offChain` lists every resource
-  version the log through the entry commits to (inscriptions carry only their
-  descriptors) and every did:vh or did:webvh signer DID, author and editors,
+- **What Bitcoin will not hold (P9.18).** `pair.offChain` lists every version
+  of the resource the log through the entry commits to that no inscription
+  through it carries, such as those before the anchoring entry's (`{ version,
+  digest, mediaType, size, versionId, held }`), and every did:vh or did:webvh
+  signer DID, author and editors,
   whose history a reader needs (did:btco signers are on Bitcoin and listed in
   `onBitcoin`). Each says whether this SDK holds it. The profile does not
   replicate them or guarantee their availability: keep them, publish them on
@@ -830,12 +873,14 @@ received.report.ownership?.output;                           // compare with the
 - **Transfer handoff (P9.18).** Selling or giving the Original is moving the
   sat; it needs nothing from the author. `transferHandoff(sdk, did, read)`
   returns an evidence package (the log, the off-chain signer DID histories and
-  the resource bytes this SDK holds; did:btco histories are listed as missing,
+  the resource versions this SDK holds; did:btco histories are listed as missing,
   being on Bitcoin) with its `offChain` notice, for the sender to give the
   recipient. By default it runs through the head Bitcoin accepts, read from
   the sat: entries committed locally but not inscribed are not the
   recipient's Original (P9.12). `{ through: "committed" }` includes them, for
   a recipient who will inscribe them; `{ checkpoint }` names an exact entry.
+  Neither reads the sat, so `offChain` then lists every version as off
+  chain; only through the accepted head are the inscribed versions left out.
   Before the anchor is on Bitcoin there is no accepted head
   (`NOT_ANCHORED_ON_BITCOIN`). Called without options it refuses
   (`SAT_READ_REQUIRED`) rather than guess which head to hand over. The recipient's SDK should verify it rather
@@ -856,21 +901,36 @@ received.report.ownership?.output;                           // compare with the
   no leading zeros, below the total supply). From then on the alias never changes, and no did:webvh alias may be
   added, replaced or re-added; the one listed at anchoring may stay or go
   (P9.10, D7).
-- The anchoring inscription carries the whole log, genesis through the
-  anchoring entry; every later inscription exactly one entry, as
-  `application/vnd.originals.vh+jsonl`, with no metadata and at most 350,000
-  bytes (P9.17, P14.12; owner decisions, D6; originals-spec #50, merged). So the sat alone verifies the
-  log: a stored or packaged copy is only compared (`anchoring.copy`), and one
-  that differs is ignored. Entries before the anchoring entry are checked
-  against the versions they name, with claimed ordering (P9.15). The writer
-  inscribes exactly that (see "What is inscribed" above).
+- The anchoring inscription's metadata carries the whole log, genesis
+  through the anchoring entry; every later inscription's exactly one entry
+  (P9.17, P14.12; owner decisions, D6; originals-spec #53). So the sat alone
+  verifies the log: a stored or packaged copy is only compared
+  (`anchoring.copy`), and one that differs is ignored. Entries before the
+  anchoring entry are checked against the versions they name, with claimed
+  ordering (P9.15). The writer inscribes exactly that (see "What is
+  inscribed" above).
+- A reader recognises an Originals inscription by its metadata (P14.12): one
+  whose metadata does not decode to a JSON array, such as a did:btco DID
+  document or none at all, is not an Originals inscription and is ignored for
+  the Original (`not-an-originals-inscription`). Metadata that is not one
+  well-formed CBOR item, or holds a tag, a byte string, a float, an
+  indefinite-length item, a non-text or duplicate map key or an integer
+  beyond 2^53 − 1, is `undecodable`; integers need not be in shortest form.
+  Each entry is checked over its JCS form, so key order in the CBOR map does
+  not matter, and the asset log line rules do not apply (P14.3); its size is
+  its JCS length in UTF-8 (P14.13). Over 350,000 bytes of metadata and body
+  is `too-large`. The body must be the version the last entry's descriptor
+  names: a different digest or size is `body-not-the-resource` (P4.3), a
+  different content type `content-type-mismatch`, and a delegated or
+  content-encoded body `unsupported-encoding` (P9.17).
 - Placement rests on the index (P9.10): an inscription counts for a sat only
   when every index read supplied reports it on that sat number on that
   network. Indexes that disagree leave it `disputed`
   (`bitcoin-placement-disputed`), and with it everything after it on the
   sat, and disagreement on the holder gives no owner
   (`ownership-indexes-disagree`). A disputed inscription that no index
-  reports as an Originals inscription (by media type) cannot be an entry: it
+  reports as an Originals inscription (by its metadata, or with metadata not
+  read) cannot be an entry: it
   is ignored as `placement-disputed` and holds back nothing after it. On a
   did:btco DID's sat every disputed inscription holds back what follows.
   Without an anchor the report's head is the copy's last entry before its
@@ -888,9 +948,16 @@ received.report.ownership?.output;                           // compare with the
   checks itself. The store keeps the anchor it reported (`getRetainedAnchor`,
   optional), so an earlier one learned later is reported in
   `anchoring.change` with the owner change (`anchor-changed`), once.
-- Resource bytes are not on Bitcoin and not needed for the log: an anchored
-  Original without them is reported `resources.status: "partial"` and stays
-  current (P7.3, P7.4, P9.18); supplied bytes are still checked.
+- The versions inscribed on the anchoring sat are on Bitcoin: the bodies of
+  the anchor and of each accepted inscription are read from the sat and
+  checked against their descriptors, so a reader with Bitcoin alone has the
+  current version (`onBitcoin: true`, P9.17, P9.18). Versions never inscribed,
+  such as those before the anchoring entry's, are not needed for the log: an
+  anchored Original without them is reported `resources.status: "partial"`
+  and stays current (P7.3, P7.4, P9.18); supplied bytes are still checked.
+- Originals written under the earlier inscription encoding (a JSON Lines
+  body), among them the mainnet acceptance Original of 1 November 2026, are
+  not converted and no longer verify (D1, D7).
 - The clock checks each inscription's block hash: it rewinds past a
   reorganisation and refuses a block no longer on the chain
   (`BLOCK_NOT_ON_CHAIN`), even one it read before the reorganisation. Before
@@ -908,13 +975,20 @@ received.report.ownership?.output;                           // compare with the
   rejects a delegated or encoded Originals one (`unsupported-encoding`;
   P9.14, P9.17). An Originals inscription the reader did not read fails the
   read (`SAT_READ_INCOMPLETE`, missing evidence, P9.17), unless what the
-  index reports already rejects it: a length over 350,000 bytes
-  (`too-large`) or metadata (`carries-metadata`). For an Original's asset
-  read, pass `getSatSnapshot(sat, { bodies: 'originals' })`: only
-  `application/vnd.originals.vh+jsonl` bodies of at most 350,000 bytes and
-  their metadata are fetched, and every other inscription is reported
+  index reports already decides it: a body over 350,000 bytes (`too-large`)
+  or metadata read that is absent or not an array of entries
+  (`not-an-originals-inscription`) or malformed (`undecodable`). Metadata
+  that is not well-formed CBOR, invalid UTF-8 included, is `undecodable`,
+  never a thrown error. An inscription with no content-type tag has no media
+  type, so it never matches a resource's. For an
+  Original's asset read, pass `getSatSnapshot(sat, { bodies: 'originals' })`:
+  the metadata of every inscription whose body is at most 350,000 bytes is
+  fetched, and the body only when that metadata is an array of entries, from the
+  `maxOriginalsBytes` budget; every other inscription is reported
   `not-requested`, so the holder's other inscriptions cost no body reads (the
-  Bitcoin writer's sat reads do this). The
+  Bitcoin writer's sat reads do this; PROVISIONAL). The reader receives the
+  metadata's data pushes concatenated, as ord returns them, and decodes the
+  whole (P14.12). The
   default, `bodies: 'all'`, reads every body and its metadata, as a did:btco
   read needs (P5.13). The reader's budget (`snapshotBudget` on
   `RegtestProvider` and `QuickNodeProvider`): `maxRequests` defaults to 7 + 5

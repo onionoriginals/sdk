@@ -30,8 +30,8 @@ async function harbor() {
   const at = clock();
   const sign = alice.signer(key, "orig");
   const ref = alice.ref("orig");
-  const genesis = await createOriginal({ versionTime: at(), name: "Harbor at dawn", resources: [photo(B1)], author: ref, sign });
-  const cropped = await updateOriginal(genesis, { versionTime: at(), resources: [photo(B2)], author: ref, sign });
+  const genesis = await createOriginal({ versionTime: at(), name: "Harbor at dawn", resource: photo(B1), author: ref, sign });
+  const cropped = await updateOriginal(genesis, { versionTime: at(), resource: photo(B2), author: ref, sign });
   const renamed = await updateOriginal(cropped, { versionTime: at(), metadata: { caption: "Corrected caption" }, author: ref, sign });
   return { alice, key, sign, ref, at, log: [genesis, cropped, renamed] };
 }
@@ -64,9 +64,9 @@ describe("C12-01: create, edit and verify in a fresh reader", () => {
     expect(r.state?.name).toBe("Harbor at dawn");
     expect(r.state?.metadata).toEqual({ caption: "Corrected caption" });
     // The metadata-only correction leaves photo at version 2 (P4.4).
-    expect(r.resources.versions.map((v) => [v.resource, v.version, v.versionId, v.bytes])).toEqual([
-      ["photo", 1, log[0].versionId, "verified"],
-      ["photo", 2, log[1].versionId, "verified"],
+    expect(r.resources.versions.map((v) => [v.version, v.versionId, v.bytes, v.onBitcoin])).toEqual([
+      [1, log[0].versionId, "verified", false],
+      [2, log[1].versionId, "verified", false],
     ]);
     expect(r.resources.status).toBe("available");
     expect(r.ordering).toBe("claimed");
@@ -110,7 +110,7 @@ describe("resources", () => {
     const { alice, log } = await harbor();
     const r = await report(log, [alice], { bytes: allBytes(B2) });
     expect(r.resources.status).toBe("partial");
-    expect(r.resources.missing.map((v) => [v.resource, v.version, v.versionId])).toEqual([["photo", 1, log[0].versionId]]);
+    expect(r.resources.missing.map((v) => [v.version, v.versionId])).toEqual([[1, log[0].versionId]]);
     expect(r.resources.versions[1].bytes).toBe("verified");
     expect(r.history.status).toBe("valid");
     // P7.3, P7.4, P9.18: the log verifies without its bytes. Unavailable content is reported
@@ -134,22 +134,23 @@ describe("resources", () => {
     expect(bad.current).toBe(false);
   });
 
-  test("C12-19: an update that leaves a digest unchanged does not advance that resource", async () => {
+  test("C12-19: an update that leaves the resource's digest unchanged does not advance its version; transitions is empty (P4.4, P14.4)", async () => {
     const { alice, log, ref, sign, at } = await harbor();
-    const same = await updateOriginal(log[2], { versionTime: at(), resources: [photo(B2)], author: ref, sign });
+    const same = await updateOriginal(log[2], { versionTime: at(), resource: photo(B2), author: ref, sign });
     expect(same.state.transitions).toEqual([]);
     const r = await report([...log, same], [alice]);
-    expect(r.resources.versions.length).toBe(2);
+    expect(r.history.status).toBe("valid");
+    expect(r.resources.versions.map((v) => v.version)).toEqual([1, 2]);
     // A transition that claims an unchanged digest is rejected.
-    const forged = await resign(log[2], { ...log[2].state, transitions: [{ resource: "photo", from: photo(B2).digest, to: photo(B2).digest }] }, sign);
+    const forged = await resign(log[2], { ...log[2].state, transitions: [{ from: photo(B2).digest, to: photo(B2).digest }] }, sign);
     failedWith(await report([...log, forged], [alice]), 3, "STATE_TRANSITIONS");
   });
 
   test("C12-11: there is no version counter to supply; a descriptor with one is rejected", async () => {
     const { alice, log, sign } = await harbor();
     const asset = log[2].state.asset as JsonObject;
-    const counted = await resign(log[2], { ...log[2].state, transitions: [], asset: { ...asset, resources: [{ ...photo(B2), version: 7 }] } }, sign);
-    failedWith(await report([...log, counted], [alice]), 3, "STATE_MEMBERS");
+    const counted = await resign(log[2], { ...log[2].state, transitions: [], asset: { ...asset, resource: { ...photo(B2), version: 7 } } }, sign);
+    failedWith(await report([...log, counted], [alice]), 3, "STATE_RESOURCE");
   });
 
   test("C12-80: a digest outside the SHA-256 set is an unsupported profile", async () => {
@@ -158,7 +159,7 @@ describe("resources", () => {
     const sha512ish = multibaseEncode(new Uint8Array([0x13, 0x40, ...new Uint8Array(64)]));
     const entry = await createOriginal({
       versionTime: "2026-10-18T12:00:00.000Z", name: "x", author: alice.ref("orig"), sign: alice.signer(key, "orig"),
-      resources: [{ id: "photo", mediaType: "image/jpeg", size: 1, digest: sha512ish }],
+      resource: { mediaType: "image/jpeg", size: 1, digest: sha512ish },
     }).catch((e: unknown) => e);
     expect(entry).toBeInstanceOf(OriginalsError);
     expect((entry as OriginalsError).category).toBe("unsupported-profile");
@@ -258,7 +259,7 @@ describe("history and identity", () => {
   test("C12-72: bip340-jcs-2025 author keys work; any other cryptosuite is rejected", async () => {
     const schnorr = seeded(22, "secp256k1");
     const bob = await VhAuthor.create([{ fragment: "btc", signer: schnorr }]);
-    const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Map", resources: [photo(B1)], author: bob.ref("btc"), sign: bob.signer(schnorr, "btc") });
+    const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Map", resource: photo(B1), author: bob.ref("btc"), sign: bob.signer(schnorr, "btc") });
     const r = await verifyOriginal({ log: [genesis], authors: [bob.evidence()], now: NOW, bytes: allBytes(B1) });
     expect(r.reasons).toEqual(["not-anchored"]);
     const other = structuredClone(genesis);
@@ -314,11 +315,11 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
       { fragment: "other", signer: ctl, controller: "did:example:someone-else" },
     ]);
     const at = clock();
-    const genesis = (fragment: string, signer = key) => createOriginal({ versionTime: at(), name: "x", resources: [photo(B1)], author: alice.ref(fragment), sign: alice.signer(signer, fragment) });
+    const genesis = (fragment: string, signer = key) => createOriginal({ versionTime: at(), name: "x", resource: photo(B1), author: alice.ref(fragment), sign: alice.signer(signer, fragment) });
     failedWith(await report([await genesis("login", auth)], [alice]), 0, "AUTHOR_VM_RELATIONSHIP", "author-binding");
     failedWith(await report([await genesis("other", ctl)], [alice]), 0, "AUTHOR_VM_CONTROLLER", "author-binding");
     const foreign = await createOriginal({
-      versionTime: at(), name: "x", resources: [photo(B1)], sign: signWith(key, { cryptosuite: "eddsa-jcs-2022", verificationMethod: "did:example:elsewhere#orig" }),
+      versionTime: at(), name: "x", resource: photo(B1), sign: signWith(key, { cryptosuite: "eddsa-jcs-2022", verificationMethod: "did:example:elsewhere#orig" }),
       author: { did: alice.did, verificationMethod: "did:example:elsewhere#orig", versionId: alice.versionId },
     });
     failedWith(await report([foreign], [alice]), 0, "AUTHOR_VM_FOREIGN", "author-binding");
@@ -331,14 +332,14 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
     (doc.verificationMethod as JsonObject[])[0] = { id: `${alice.did}#orig`, type: "JsonWebKey", controller: alice.did, publicKeyJwk: { kty: "OKP", crv: "Ed25519", x: "AAAA" } };
     const v = await appendEntry(alice.entries[0], { versionTime: "2026-10-18T09:30:00Z", parameters: {}, state: doc, sign: signWith(alice.update, { cryptosuite: "eddsa-jcs-2022", verificationMethod: `did:key:${alice.update.publicKeyMultibase}#${alice.update.publicKeyMultibase}` }) });
     alice.entries.push(v);
-    const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "x", resources: [photo(B1)], author: alice.ref("orig"), sign: alice.signer(key, "orig") });
+    const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "x", resource: photo(B1), author: alice.ref("orig"), sign: alice.signer(key, "orig") });
     failedWith(await report([genesis], [alice]), 0, "AUTHOR_VM_TYPE", "author-binding");
   });
 
   test("C12-24: an update key of the author DID's own log cannot sign Originals (P5.3, P5.11)", async () => {
     const alice = await VhAuthor.create([]);
     await alice.rotate([{ fragment: "update", signer: alice.update }]);
-    const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "x", resources: [photo(B1)], author: alice.ref("update"), sign: alice.signer(alice.update, "update") });
+    const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "x", resource: photo(B1), author: alice.ref("update"), sign: alice.signer(alice.update, "update") });
     failedWith(await report([genesis], [alice]), 0, "AUTHOR_KEY_IS_UPDATE_KEY", "author-binding");
   });
 
@@ -356,7 +357,7 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
     const v2 = await alice.rotate([{ fragment: "orig", signer: key }]);
     const at = clock();
     const sign = alice.signer(key, "orig");
-    const genesis = await createOriginal({ versionTime: at(), name: "x", resources: [photo(B1)], author: alice.ref("orig", v2), sign });
+    const genesis = await createOriginal({ versionTime: at(), name: "x", resource: photo(B1), author: alice.ref("orig", v2), sign });
     const older = await updateOriginal(genesis, { versionTime: at(), name: "y", author: alice.ref("orig", v1), sign });
     failedWith(await report([genesis, older], [alice]), 1, "AUTHOR_VERSION_REGRESSED");
   });
@@ -365,7 +366,7 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
     const key = seeded(21);
     const mk = key.publicKeyMultibase;
     const genesis = await createOriginal({
-      versionTime: "2026-10-18T12:00:00.000Z", name: "x", resources: [photo(B1)],
+      versionTime: "2026-10-18T12:00:00.000Z", name: "x", resource: photo(B1),
       author: { did: `did:key:${mk}`, verificationMethod: `did:key:${mk}#${mk}`, versionId: "1" },
       sign: signWith(key, { cryptosuite: "eddsa-jcs-2022", verificationMethod: `did:key:${mk}#${mk}` }),
     });
@@ -401,7 +402,7 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
       versionTime: "2026-10-18T09:30:00Z", parameters: {}, state: doc,
       sign: signWith(alice.update, { cryptosuite: "eddsa-jcs-2022", verificationMethod: `did:key:${alice.update.publicKeyMultibase}#${alice.update.publicKeyMultibase}` }),
     }));
-    const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "x", resources: [photo(B1)], author: alice.ref("emb"), sign: alice.signer(key, "emb") });
+    const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "x", resource: photo(B1), author: alice.ref("emb"), sign: alice.signer(key, "emb") });
     const r = await report([genesis], [alice], {});
     expect(r.reasons).toEqual(["not-anchored"]);
   });
@@ -420,7 +421,7 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
     const key = seeded(21); // the fixture's assertionMethod key
     const vm = ((fx.logA[3].state.verificationMethod as JsonObject[])[0].id) as string;
     const ref: AuthorRef = { did: fx.did, verificationMethod: vm, versionId: fx.logA[3].versionId };
-    const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", resources: [photo(B1)], author: ref, sign: signWith(key, { cryptosuite: "eddsa-jcs-2022", verificationMethod: vm }) });
+    const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", resource: photo(B1), author: ref, sign: signWith(key, { cryptosuite: "eddsa-jcs-2022", verificationMethod: vm }) });
     const evidence = { did: fx.did, log: serializeLog(fx.logA), witness: fx.witnessA };
     const r = await verifyOriginal({ log: [genesis], authors: [evidence], now: NOW, bytes: allBytes(B1) });
     expect(r.reasons).toEqual(["not-anchored"]);
@@ -439,7 +440,7 @@ describe("the derived DID document and generic resolvers (P3.5, P3.8)", () => {
       "@context": ["https://www.w3.org/ns/did/v1"],
       id: did,
       controller: alice.did,
-      service: [{ id: `${did}#files`, type: "OriginalsFiles", serviceEndpoint: { photo: { mediaType: "image/jpeg", size: bytes(B2).length, digest: resourceDigest(bytes(B2)) } } }],
+      service: [{ id: `${did}#files`, type: "OriginalsFiles", serviceEndpoint: { mediaType: "image/jpeg", size: bytes(B2).length, digest: resourceDigest(bytes(B2)) } }],
     });
     const history = await verifyAuthorHistory(alice.evidence(), { now: NOW });
     const resolved = await resolveDidVh(did, { didLog: serializeLog(log), extensions: [originalsExtension([history])], now: NOW });
@@ -510,7 +511,7 @@ describe("section 14: exact members (P14.1, P14.4, P14.8)", () => {
   test("P14.1: genesis parameters are exactly method and scid", async () => {
     const { alice, key, sign, ref } = await harbor();
     const genesisWith = async (extra: JsonObject) => {
-      const base = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", resources: [photo(B1)], author: ref, sign });
+      const base = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", resource: photo(B1), author: ref, sign });
       const state = { ...base.state, id: "did:vh:{SCID}" };
       return createLog({ versionTime: "2026-10-18T12:00:00.000Z", parameters: { method: ORIGINALS_METHOD, scid: "{SCID}", ...extra }, state, sign });
     };
@@ -642,9 +643,9 @@ describe("creating needs a well-formed entry", () => {
     const key = seeded(21);
     const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
     const base = { versionTime: "2026-10-18T12:00:00.000Z", author: alice.ref("orig"), sign: alice.signer(key, "orig") };
-    await expect(createOriginal({ ...base, name: "", resources: [photo(B1)] })).rejects.toThrow(OriginalsError);
-    await expect(createOriginal({ ...base, name: "x", resources: [photo(B1), photo(B2)] })).rejects.toThrow(OriginalsError);
-    await expect(createOriginal({ ...base, name: "x", resources: [{ ...photo(B1), mediaType: "not a type" }] })).rejects.toThrow(OriginalsError);
+    await expect(createOriginal({ ...base, name: "", resource: photo(B1) })).rejects.toThrow(OriginalsError);
+    await expect(createOriginal({ ...base, name: "x", resource: [photo(B1), photo(B2)] as never })).rejects.toThrow(OriginalsError);
+    await expect(createOriginal({ ...base, name: "x", resource: { ...photo(B1), mediaType: "not a type" } })).rejects.toThrow(OriginalsError);
     await expect(createLog({ versionTime: base.versionTime, parameters: { method: ORIGINALS_METHOD, scid: "{SCID}" }, state: {}, sign: base.sign })).resolves.toBeDefined();
   });
 });
@@ -658,7 +659,7 @@ describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7;
     const wide = "é".repeat(30_000); // 60,000 UTF-8 bytes, 30,000 UTF-16 code units
     let pad = 0;
     for (let i = 0; i < 40; i++) {
-      const entry = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", metadata: { wide, pad: "a".repeat(pad) }, resources: [photo(B1)], author: ref, sign: alice.signer(key, "orig") });
+      const entry = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", metadata: { wide, pad: "a".repeat(pad) }, resource: photo(B1), author: ref, sign: alice.signer(key, "orig") });
       const line = serializeLog([entry]).slice(0, -1);
       const size = new TextEncoder().encode(line).length;
       if (size === target) return { alice, line, codeUnits: line.length };
@@ -688,7 +689,7 @@ describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7;
     const nums = Array.from({ length: 200 }, () => 1.5e-6);
     let pad = 0;
     for (let i = 0; i < 40; i++) {
-      const entry = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", metadata: { nums, pad: "a".repeat(pad) }, resources: [photo(B1)], author: alice.ref("orig"), sign: alice.signer(key, "orig") });
+      const entry = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", metadata: { nums, pad: "a".repeat(pad) }, resource: photo(B1), author: alice.ref("orig"), sign: alice.signer(key, "orig") });
       const line = serializeLog([entry]).slice(0, -1).replaceAll("0.0000015", "1.5e-6");
       const size = new TextEncoder().encode(line).length;
       if (size !== 65_536) {

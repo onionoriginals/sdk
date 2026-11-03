@@ -9,7 +9,7 @@
  *   signers/<sha256(did) hex>/did-witness.json
  *                                         that DID's witness file, where its method
  *                                         has witnesses
- *   resources/<digest>                    resource bytes, named by digest
+ *   resources/<digest>                    the bytes of each version of the resource included, named by digest
  *
  * PROVISIONAL (P14.10, section 14): the `signers/` layout. Signer histories are
  * under `signers/`, because editors are signers too, and there is no asset
@@ -29,7 +29,8 @@ export const MANIFEST = "originals-evidence.json";
 
 /** An item a partial package lacks, with exactly these members (P14.10). */
 export type MissingItem =
-  | { kind: "resource"; resource: string; version: number; digest: string; versionId: string }
+  /** A version of the Original's one resource whose bytes are not packaged (P14.10; originals-spec #53). */
+  | { kind: "resource"; version: number; digest: string; versionId: string }
   /** A signer DID history the package lacks (P7.1, P7.4): the author's, or an editor's. */
   | { kind: "identity"; did: string; role: "author" | "editor" };
 
@@ -37,10 +38,10 @@ export type MissingItem =
 function checkMissingItem(item: JsonValue): void {
   const exactly = (keys: string[]) => isJsonObject(item) && Object.keys(item).length === keys.length && keys.every((k) => k in item);
   const ok = isJsonObject(item) && (item.kind === "resource"
-    ? exactly(["kind", "resource", "version", "digest", "versionId"]) && typeof item.resource === "string" && Number.isSafeInteger(item.version) && (item.version as number) >= 1 &&
+    ? exactly(["kind", "version", "digest", "versionId"]) && Number.isSafeInteger(item.version) && (item.version as number) >= 1 &&
       typeof item.digest === "string" && typeof item.versionId === "string"
     : item.kind === "identity" && exactly(["kind", "did", "role"]) && typeof item.did === "string" && (item.role === "author" || item.role === "editor"));
-  if (!ok) evidenceError("EVIDENCE_MANIFEST", "a missing item is exactly { kind: \"resource\", resource, version, digest, versionId } or { kind: \"identity\", did, role: \"author\" | \"editor\" } (P14.10)");
+  if (!ok) evidenceError("EVIDENCE_MANIFEST", "a missing item is exactly { kind: \"resource\", version, digest, versionId } or { kind: \"identity\", did, role: \"author\" | \"editor\" } (P14.10)");
 }
 
 export interface EvidenceManifest {

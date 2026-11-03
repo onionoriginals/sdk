@@ -55,7 +55,7 @@ import { hex } from '@scure/base';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { signToken, getAuthCookieConfig } from '@originals/auth/server';
-import { verifyOriginal, parseBtcoAlias } from '@originals/vh/originals';
+import { verifyOriginal, parseBtcoAlias, readInscribedEntries } from '@originals/vh/originals';
 import { RegtestProvider } from '@originals/sdk';
 import { OriginalsSDK, readEvidence, satEvidence } from '../../packages/sdk/src/originals/index';
 import { FileStore } from '../../packages/sdk/src/originals/fs-store';
@@ -279,8 +279,11 @@ async function main() {
     await env.mine(1);
     // A fresh reader of the sat: the pending pair does not advance the accepted head (P9.4).
     const satRead = await provider.getSatSnapshot(sat.sat, { bodies: 'originals' });
-    const lastInscribed = new TextDecoder().decode(satRead.publications.at(-1)!.body.status === 'complete' ? (satRead.publications.at(-1)!.body as { bytes: Uint8Array }).bytes : new Uint8Array());
-    assert.equal((JSON.parse(lastInscribed) as { versionId: string }).versionId, firstEdit);
+    // The entries are the inscription's CBOR metadata; its body is the resource version (P9.17, P14.12).
+    const lastBody = satRead.publications.at(-1)!.body;
+    const lastInscribed = readInscribedEntries(lastBody.status === 'complete' ? lastBody.metadata : null);
+    assert.equal(lastInscribed.kind, 'entries');
+    assert.equal(lastInscribed.kind === 'entries' ? lastInscribed.entries.at(-1)!.versionId : null, firstEdit);
     record('killed-between-commit-and-reveal', { entry: secondEdit, recoveryId: pending.recoveryId, recordState: pending.broadcast, killedExit: killedWith, signal: landing.signalCode ?? 'SIGKILL', commitMined: true, revealSent: false, acceptedHeadStill: firstEdit });
 
     proxy.release();
@@ -347,15 +350,20 @@ async function main() {
     assert.equal(r.ownership?.output, `${pending.prepared.revealTxId}:0`);
     const contents = readEvidence(zip);
     const artwork = generateArtwork('Harbor at dusk', 'Orbits', 9).svg;
-    const versions = r.resources.versions.map((v) => ({ resource: v.resource, version: v.version, bytes: v.bytes, sha256: contents.bytes[v.digest] ? hex.encode(sha256(contents.bytes[v.digest])) : null }));
-    const latestArt = versions.filter((v) => v.resource === 'artwork.svg').at(-1)!;
+    const versions = r.resources.versions.map((v) => ({ version: v.version, bytes: v.bytes, onBitcoin: v.onBitcoin, sha256: contents.bytes[v.digest] ? hex.encode(sha256(contents.bytes[v.digest])) : null }));
+    // One resource per Original (P4.1, originals-spec #53): its latest version is the artwork.
+    const latestArt = versions.at(-1)!;
     assert.equal(latestArt.sha256, hex.encode(sha256(new TextEncoder().encode(artwork))));
     const alone = await verifyOriginal({ bitcoin: [evidence], authors: contents.authors.map(({ retrievedFrom: _, ...a }) => a), now: Date.now() });
     assert.equal(alone.anchoring?.status, 'anchored');
     assert.equal(alone.head, secondEdit);
+    // P9.17, P9.18 (C12-190): read from Bitcoin alone, the current version is the newest accepted inscription's body.
+    const aloneCurrent = alone.resources.versions.at(-1)!;
+    assert.equal(aloneCurrent.bytes, 'verified');
+    assert.equal(aloneCurrent.onBitcoin, true);
     record('fresh-reader', {
       network: snapshot.network, index: evidence.index, indexesConsulted: 1, history: r.history.status, authorBinding: r.authorBinding.status,
-      identity: r.identityEvidence.status, head: r.head, current: r.current, ownership: r.ownership, resources: versions, fromBitcoinAlone: { copy: alone.anchoring?.copy, head: alone.head },
+      identity: r.identityEvidence.status, head: r.head, current: r.current, ownership: r.ownership, resources: versions, fromBitcoinAlone: { copy: alone.anchoring?.copy, head: alone.head, currentVersion: { version: aloneCurrent.version, bytes: aloneCurrent.bytes, onBitcoin: aloneCurrent.onBitcoin } },
     });
 
     const receipt = {

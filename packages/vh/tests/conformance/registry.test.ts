@@ -12,6 +12,7 @@ interface Row { id: string; position: number; test: string; phases: number[]; st
 const registry = JSON.parse(readFileSync(new URL("../../../../specs/originals-conformance.json", import.meta.url), "utf8")) as {
   spec: { openProposals: Array<{ pr: number; head: string; rows: number[] }> };
   rows: Row[];
+  retired: Array<{ id: string; at: string; reason: string }>;
 };
 
 function testFiles(dir: string): string[] {
@@ -38,16 +39,28 @@ for (const root of roots) {
 }
 
 describe("section 12 conformance registry", () => {
-  // The pinned table (originals-spec master b599fd14b, with #50, #51 and #52 merged) has 189 rows.
-  // Ids are stable across re-pins, so they need not equal table positions; each row records its
-  // position in the pinned table. A row from an open spec pull request would carry `proposal`.
-  test("registers all 189 pinned rows with unique ids, in table order", () => {
-    expect(registry.rows.length).toBe(189);
+  // The pinned table (originals-spec master 45ed1dc, with #53 merged: one resource per Original, and
+  // #54: non-integer metadata numbers as CBOR floats) has 192 rows. Ids are stable across re-pins, so they need not equal table positions; each row records
+  // its position in the pinned table. A row from an open spec pull request would carry `proposal`.
+  test("registers all 192 pinned rows with unique ids, in table order", () => {
+    expect(registry.rows.length).toBe(192);
     const pinned = registry.rows.filter((r) => r.proposal === undefined);
-    expect(pinned.length).toBe(189);
+    expect(pinned.length).toBe(192);
     expect(registry.rows.map((r) => r.position)).toEqual(registry.rows.map((_, i) => i + 1));
-    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(189);
+    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(192);
     for (const r of registry.rows) expect(r.id).toMatch(/^C12-\d{2,3}$/);
+  });
+
+  // #53 removed the rows about adding, removing and reusing resources and the 256-resource limit.
+  test("a retired id names its commit and reason, is never reused, and no test cites it", () => {
+    const live = new Set(registry.rows.map((r) => r.id));
+    expect(registry.retired.map((r) => r.id).sort()).toEqual(["C12-154", "C12-155", "C12-156", "C12-157", "C12-158", "C12-160", "C12-171"]);
+    for (const r of registry.retired) {
+      expect(live.has(r.id), `${r.id} is retired but registered`).toBe(false);
+      expect(r.at, r.id).toMatch(/^[0-9a-f]{7,9}$/);
+      expect(r.reason.length, r.id).toBeGreaterThan(0);
+      expect(cited.has(r.id), `${r.id} is retired but cited by ${[...(cited.get(r.id) ?? [])].join(", ")}`).toBe(false);
+    }
   });
 
   test("each open proposal lists its rows, in its table's order", () => {

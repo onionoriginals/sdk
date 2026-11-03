@@ -52,6 +52,7 @@ export interface SatInscription {
   confirmations: number;
   /** The greatest block timestamp of its block and the block's ancestors, epoch ms (P9.15). */
   inscriptionTime: number;
+  /** Its content type (ord tag 1); the empty string when it has none, which matches no resource's mediaType (P14.12). */
   mediaType: string;
   content: Uint8Array;
   /**

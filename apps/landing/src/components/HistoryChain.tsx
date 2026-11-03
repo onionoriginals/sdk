@@ -25,14 +25,10 @@ function digest(value: string): string {
 
 /** One-line plain-English gloss of what the signed entry records. */
 export function summarize(entry: HistoryEntry): string {
-  if (entry.operation === 'create') {
-    const count = entry.changes.length;
-    return `Started a signed history for ${count} ${count === 1 ? 'file' : 'files'}`;
-  }
+  // One file per Original: an entry changes it, or does not (P4.1, P14.4; originals-spec #53).
+  if (entry.operation === 'create') return 'Started a signed history for this file';
   if (entry.operation === 'deactivate') return 'Ended this Original; no further changes are accepted';
-  if (entry.changes.length > 0) {
-    return `Revises ${truncate(entry.changes.map((c) => c.resource).join(', '), 40)} — linked to the previous version`;
-  }
+  if (entry.changes.length > 0) return 'A new version of the file — linked to the previous version';
   return `Renamed or re-described as “${truncate(entry.name, 40)}”`;
 }
 

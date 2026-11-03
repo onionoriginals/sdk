@@ -20,7 +20,7 @@ const B3 = "harbor at dawn, wide";
 const allBytes = Object.fromEntries([B1, B2, B3].map((t) => [resourceDigest(bytes(t)), bytes(t)]));
 const KA = seeded(21);
 const KB = seeded(31);
-const grant = (did: string, g: Partial<Omit<EditorGrant, "did">> = {}): EditorGrant => ({ did, name: false, metadata: false, resources: [], ...g });
+const grant = (did: string, g: Partial<Omit<EditorGrant, "did">> = {}): EditorGrant => ({ did, name: false, metadata: false, resource: false, ...g });
 const FETCHED = new Date(NOW - 2_000).toISOString();
 
 async function harbor() {
@@ -29,8 +29,8 @@ async function harbor() {
   const at = clock();
   const ref = alice.ref("orig");
   const sign = alice.signer(KA, "orig");
-  const genesis = await createOriginal({ versionTime: at(), name: "Harbor at dawn", resources: [photo(B1)], author: ref, sign, editors: [grant(bob.did, { resources: ["photo"] })] });
-  const cropped = await updateOriginal(genesis, { versionTime: at(), resources: [photo(B2)], author: ref, sign });
+  const genesis = await createOriginal({ versionTime: at(), name: "Harbor at dawn", resource: photo(B1), author: ref, sign, editors: [grant(bob.did, { resource: true })] });
+  const cropped = await updateOriginal(genesis, { versionTime: at(), resource: photo(B2), author: ref, sign });
   const asBob = { editor: bob.ref("edit"), sign: bob.signer(KB, "edit") };
   return { alice, bob, at, ref, sign, genesis, cropped, asBob };
 }
@@ -41,7 +41,7 @@ const verify = (log: LogEntry[], dids: VhAuthor[], extra: Partial<Parameters<typ
 describe("P7.10: an unanchored Original is never current", () => {
   test("C12-145: complete evidence and signer DID histories fetched moments ago: valid as of its checkpoint, with each signer's versionId and fetch time; never current", async () => {
     const { alice, bob, at, genesis, cropped, asBob } = await harbor();
-    const byBob = await updateOriginal(cropped, { versionTime: at(), resources: [photo(B3)], ...asBob });
+    const byBob = await updateOriginal(cropped, { versionTime: at(), resource: photo(B3), ...asBob });
     const r = await verify([genesis, cropped, byBob], [alice, bob]);
     expect(r.history.status).toBe("valid");
     expect(r.identityEvidence.status).toBe("complete");
@@ -137,7 +137,7 @@ describe("P7.9: historically authorized only", () => {
   test("C12-121, C12-122 (unanchored): an editor entry by a removed key, by a deactivated editor DID, or after the author DID's deactivation (P5.18)", async () => {
     {
       const { alice, bob, at, genesis, asBob } = await harbor();
-      const byBob = await updateOriginal(genesis, { versionTime: at(), resources: [photo(B2)], ...asBob });
+      const byBob = await updateOriginal(genesis, { versionTime: at(), resource: photo(B2), ...asBob });
       await bob.rotate([{ fragment: "edit-2", signer: seeded(35) }]);
       const r = await verify([genesis, byBob], [alice, bob]);
       expect(r.validAsOf?.checkpoint).toBe(byBob.versionId);
@@ -145,7 +145,7 @@ describe("P7.9: historically authorized only", () => {
     }
     {
       const { alice, bob, at, genesis, asBob } = await harbor();
-      const byBob = await updateOriginal(genesis, { versionTime: at(), resources: [photo(B2)], ...asBob });
+      const byBob = await updateOriginal(genesis, { versionTime: at(), resource: photo(B2), ...asBob });
       await bob.deactivate();
       const r = await verify([genesis, byBob], [alice, bob]);
       expect(r.historicallyAuthorizedOnly).toEqual([{ versionId: byBob.versionId, did: bob.did, role: "editor", reason: "signer-did-deactivated" }]);
@@ -153,7 +153,7 @@ describe("P7.9: historically authorized only", () => {
     }
     {
       const { alice, bob, at, genesis, asBob } = await harbor();
-      const byBob = await updateOriginal(genesis, { versionTime: at(), resources: [photo(B2)], ...asBob });
+      const byBob = await updateOriginal(genesis, { versionTime: at(), resource: photo(B2), ...asBob });
       await alice.deactivate();
       const r = await verify([genesis, byBob], [alice, bob]);
       expect(r.historicallyAuthorizedOnly.map((h) => [h.role, h.reason])).toEqual([["author", "author-did-deactivated"], ["editor", "author-did-deactivated"]]);

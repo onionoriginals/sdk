@@ -6,7 +6,7 @@ Status: **approved by the owner on 2026-10-18**, with the recommendations for Q1
 
 | Dependency | Pin | Notes |
 |---|---|---|
-| Originals Protocol | `aviarytech/originals-spec@b599fd14b` (`master`, with #50–#52) | Editor's Draft 0.1 with #34–#36 (Q5, Q6, Q15; #42 and #43 inside), #45 (editors, shared-host saves, identity continuity), #46 (an unanchored Original is never current), #47 (the newest known signer DID version), #48 (section 14 wire format) and #49 (the author adds and removes resources) merged; #50 (Bitcoin values and limits decided, 256 resources), #51 (the SDK's open questions of 23 October 2026) and #52 (which section 14 values are decided) merged. §12 has 189 rows; IDs are kept and the mapping is in `specs/README.md` |
+| Originals Protocol | `aviarytech/originals-spec@45ed1dc` (`master`, with #50–#54) | Editor's Draft 0.1 with #34–#36 (Q5, Q6, Q15; #42 and #43 inside), #45 (editors, shared-host saves, identity continuity), #46 (an unanchored Original is never current), #47 (the newest known signer DID version), #48 (section 14 wire format) and #49 (the author adds and removes resources) merged; #50 (Bitcoin values and limits decided, 256 resources), #51 (the SDK's open questions of 23 October 2026), #52 (which section 14 values are decided) and #53 (one resource per Original, with many versions, replacing #49's resource sets; each inscription's body is the resource version and its metadata the entries, in CBOR) and #54 (non-integer metadata numbers as CBOR floats) merged. §12 has 192 rows, seven retired; IDs are kept and the mapping is in `specs/README.md` |
 | VH-Log | `swcurran/VH-Log@f2f9fda2d8dae26b717ab54163169350c7182233` + PR 1 `a3e3627e`, PR 2 `0d5eb134`, PR 3 `3bcd0acb`, PR 8 `3770b574`, PR 9 `5552a668`, PR 10 `1867a2b1`, PR 11 `2fe380dbf` (keys and editors from a controller) | PRs treated as merged |
 | did:vh | `swcurran/didvh@e0b7cbad27d7b2274057251f85687e133329b5a9` + PR 3 `b3e7a56d` | extension mechanism treated as merged |
 | did:webvh (experimental, on VH-Log) | `decentralized-identity/didwebvh` PR 302, merge `deef9cf1` (`spec-exp/`) | Merged 2026-10-18; keeps method value `did:webvh:1.0` |
@@ -93,14 +93,14 @@ const view = await sdk.load(pkg);                                   // read-only
       "name": "Harbor at dawn",
       "metadata": { … },                        // absent ⇔ removed (P4.6)
       "status": "active",                       // "deactivated" ⇔ parameters.deactivated (P6.5)
-      "resources": [ { "id": "photo", "mediaType": "image/jpeg", "size": 123456,
-                       "digest": "zQm…" } ],     // multibase base58btc of a sha2-256 multihash
+      "resource": { "mediaType": "image/jpeg", "size": 123456,
+                    "digest": "zQm…" },          // the one resource (P4.1); multibase base58btc of a sha2-256 multihash
       "aliases": [],                            // ≤1 did:webvh, ≤1 did:btco
       "editors": [ { "did": "did:webvh:…bob", "name": false, "metadata": false,
-                     "resources": ["photo"] } ]  // optional, 1–32 grants (P5.15)
+                     "resource": true } ]        // optional, 1–32 grants (P5.15)
     },
     // "editor": { "did", "verificationMethod", "versionId" } in an editor entry (P5.16)
-    "transitions": [ { "resource": "photo", "from": "zQmH1…", "to": "zQmH2…" } ]
+    "transitions": [ { "from": "zQmH1…", "to": "zQmH2…" } ]  // at most one (P14.4)
   },
   "proof": [ { "type": "DataIntegrityProof", "cryptosuite": "eddsa-jcs-2022",
                "verificationMethod": "did:webvh:…#orig-1",
@@ -109,19 +109,18 @@ const view = await sdk.load(pkg);                                   // read-only
 ```
 
 Rules this implies:
-- `transitions` MUST list exactly the resources whose digest changed against the parent's asset state, and is empty at genesis except `from: null`. An unchanged digest does not advance a version (P4.4).
+- An Original is exactly one resource, from genesis for its whole history; a change to its bytes is its next version, and no entry adds a second resource or removes it (P4.1; owner decision, 1 November 2026, originals-spec #53). `transitions` is `[{from: null, to}]` at genesis, `[{from, to}]` in an entry that changes the digest, and `[]` otherwise, a deactivation included (P14.4). An unchanged digest does not advance the version (P4.4).
 - There are no publish or migrate operations. Publication is an update that lists a did:webvh alias (P3.6); anchoring is an update that adds the sat's `did:btco:` alias, once and terminally (P9.10).
-- Editors (P5.15–P5.18): the author grants editor DIDs the right to change the name, the metadata or named resources (`editors` above). An editor entry carries `editor` and is signed by the editor's own key, checked against the grant in its parent's state; only author entries change grants, aliases, lifecycle or parameters, anchor or deactivate. A grant never names the author's identity, the Original's own did:vh or any of its aliases.
+- Editors (P5.15–P5.18): the author grants editor DIDs the right to change the name, the metadata or the resource (`editors` above; `resource: true` allows new versions). An editor entry carries `editor` and is signed by the editor's own key, checked against the grant in its parent's state; only author entries change grants, aliases, lifecycle or parameters, anchor or deactivate. A grant never names the author's identity, the Original's own did:vh or any of its aliases.
 - Shared-host saves (P6.7, P6.8): a host accepting entries from several signers compares the submitted parent with its head atomically, answers `accepted`, `already-accepted` (a byte-identical retry) or `stale-parent`, and never changes a submission; the SDK keeps a refused candidate, and `reconcile` has the caller sign a new candidate against the new head. It is serialization at one host, not consensus: forks published elsewhere stay unresolved (P6.6).
 - `"originals:1.0"` implies `vh-log:1.0`. It permits SHA-256 only, and both `eddsa-jcs-2022` and `bip340-jcs-2025` for entry proofs. Asset logs use no witnesses (Q14); S3's witness-proof suite applies only if that is ever revisited. It uses the PR 11 controller-keys rule and the PR 2 authoritative-source rule. It uses PR 8 to permit up to three fractional digits (milliseconds), with no minimum interval. Compact encoding (PR 10) is defined in Phase 4. There are no fork declarations: only Bitcoin settles a fork (Q5).
 - Files: `did.jsonl`, as did:vh requires at a `src` location (no `did-witness.json`, Q14).
 - Further PROVISIONAL rules, as implemented in PR 3:
-  - Resource ids are 1–64 characters from `A-Z a-z 0-9 . _ -`. Existing resources keep their order; an author entry appends added resources and may remove resources while one remains, an editor entry neither adds nor removes, and a resourceID is never used again in the Original (P4.1, P5.16, P14.5; originals-spec #49).
+  - The descriptor is exactly `{mediaType, size, digest}`, with no resource id (P14.6).
   - Media types are RFC 6838 `type/subtype`, without parameters. `size` is the exact byte length.
   - A descriptor's `mediaType` or `size` changes only together with its digest.
   - A deactivation changes no resource.
-  - `transitions` lists resources in resource order.
-  - The derived document's `#files` service has type `OriginalsFiles`, and its `serviceEndpoint` maps each resource id to its current descriptor.
+  - The derived document's `#files` service has type `OriginalsFiles`, and its `serviceEndpoint` is the resource's descriptor at that version (P14.9).
   - `alsoKnownAs` is omitted while there are no aliases.
 
 ### 2.2 Author keys and witness declaration in the author DID (D2, D3) — owner decision: ordinary DID constructs
@@ -148,7 +147,7 @@ The owner chose an **uncompressed ZIP**, written and read by the SDK's own stric
 originals-evidence.json   exactly { format: "originals-evidence/0.1", profile: "originals:1.0",
                             original: "did:vh:…", checkpoint: "7-Qm…", head: "9-Qm…",
                             completeness: "complete"|"partial",
-                            missing: [ {kind:"resource", resource, version, digest, versionId}
+                            missing: [ {kind:"resource", version, digest, versionId}
                                      | {kind:"identity", did, role:"author"|"editor"} ] }
 asset/did.jsonl
 signers/<hex sha256(did)>/did.jsonl (+ did-witness.json where that DID's method has witnesses)
@@ -159,16 +158,22 @@ resources/<digest>
 
 ### 2.4 Limits (P7.7)
 
-The limits (P14.13), decided by the owner on 21 October 2026 (D6; originals-spec #50, merged), are 10,000 entries, 65,536 bytes per entry measured as the UTF-8 length of its stored line without the line feed, 256 resources at one time, 32 editor grants, 1,000 signer-DID versions, a 16 MiB fetched log file, a 64 MiB fetched resource and 15 s per fetch (the fetch caps are configurable). Exceeding a limit produces a last-valid-prefix result labelled `limit-exceeded`.
+The limits (P14.13), decided by the owner on 21 October 2026 (D6; originals-spec #50, merged), are 10,000 entries, 65,536 bytes per entry measured as the UTF-8 length of its stored line without the line feed (an entry in inscription metadata: its JCS form), 32 editor grants, 1,000 signer-DID versions, a 16 MiB fetched log file, a 64 MiB fetched resource and 15 s per fetch (the fetch caps are configurable). Exceeding a limit produces a last-valid-prefix result labelled `limit-exceeded`. There is no resource limit: an Original is one resource (originals-spec #53).
 
 ### 2.5 Bitcoin representation (D6)
 
 Proposed and accepted (owner decision Q15): see [plan 012](012-bitcoin-representation.md).
 In short: the anchoring entry is an ordinary update that adds the sat's
-did:btco alias; every inscription on the anchoring sat carries one complete
-entry as `application/vnd.originals.vh+jsonl`, with no did:btco metadata; the
-history before the anchor comes from a copy and chains to it; Bitcoin is the
-authoritative source from the anchor on; inscriptions count at 1 confirmation
+did:btco alias; the anchoring inscription carries the log from genesis
+through the anchoring entry and every later one exactly one entry, as the CBOR
+of a JSON array of entries in its metadata (ord tag 5, split into pushes of at
+most 520 bytes); its body is the exact bytes of the resource version its last
+entry names, under that version's media type, with no content encoding, so
+the sat shows the current version; metadata and body together are at most
+350,000 bytes (P9.17, P14.12; owner decision, 1 November 2026, originals-spec
+#53; the JSON-to-CBOR mapping is ord's, PROVISIONAL). Before inscribing, the
+SDK tells the author what becomes public and permanent and warns about active
+content (P9.18). Bitcoin is the authoritative source from the anchor on; inscriptions count at 1 confirmation
 with their depth reported; did:btco author DIDs follow the method spec v0.2.0.
 Spec findings S10–S12 are in plan 012 section 2.
 
@@ -198,6 +203,7 @@ Each PR is test-first and driven by the §12 matrix. Every §12 row gets a stabl
 | **10** | 4 | SDK writer: `prepareEntryInscription` on the anchoring sat through the sat inscription builder and recovery store, `readAnchored`, durable boundary and retries (P9.4–P9.6) | **Real Core 31.1 / ord 0.29.0 regtest** journey (`scripts/regtest/originals-anchor.ts`): anchor, reinscribe, wrong sat, reorg, crash and resume, uninscribed entry; no mainnet/testnet spending |
 | **10b** | 4 | Landing: anchoring behind `bitcoinAnchoring` (off; `ORIGINALS_BITCOIN_ANCHORING` and `VITE_ORIGINALS_BITCOIN_ANCHORING`). The browser signs the anchoring entry (author key) and the commit (deposit key, the sat's holder) and prepares the pair (P9.18). `POST /api/btc/originals/submit` runs the inscribe route's money checks, then accepts an inscribed input 0 only when every inscription on it is on the Original's own sat (fee inputs carry none), and sends through `submitEntryInscription` with a per-Original `fileRecoveryStore`. The block sweep resumes recorded pairs, re-verified, and never prepares. The browser reads inscription times from the server's clock. Cancel, session expiry and a lost answer are handled (outbox, identical resend). Mainnet reads use one index, PROVISIONAL (owner decision, 22 October 2026). The live Turnkey and mainnet stages are `docs/regtest/originals-live-acceptance.md` (signet skipped: no QuickNode signet ord) | Landing regtest journey (`scripts/regtest/landing-anchor.ts`, Core 31.1 / ord 0.29.0): anchor, reinscribe, server SIGKILL between commit and reveal and identical resume, reorg, fresh reader. Live Turnkey (#975 stage A) and the owner's mainnet receipt (stage C) are owner-run |
 | **10c** | 4 | Private landing library (`/me`), account-scoped IndexedDB SDK store and unsigned drafts; authenticated discovery/export of durable anchoring and hosted evidence even without summary records and with publication gates off. Reopening/import uses SDK verification and keeps the saved copy separate from a fresh Bitcoin read (P7.5, P7.8, P9.17). Uncertain signed pairs survive refresh and later refusals until exact acknowledgement (P9.6); legacy outbox adoption checks verified author and deposit account. Re-auth signing still resolves the current browser client per signature | Local-key browser reload/account-isolation assertions; real Core/ord server-library reopen and signer-free identical-pair retry; committed Stage A ZIP reopened in a fresh consumer. See `docs/regtest/originals-library-975-2026-10-24.md`. No new production Turnkey run; public-host/mainnet gates remain pending |
+| **11** | 1, 2, 4 | Re-pin to originals-spec master `45ed1dc` (#53, #54): one resource per Original with many versions (P4.1, P4.4); grants `{did, name, metadata, resource}` (P5.15); at most one transition (P14.4); `#files` is the descriptor (P14.9); the manifest's missing resource item has no `resource` (P14.10); inscriptions carry the entries as CBOR metadata and the resource version as their body under its media type, metadata and body together at most 350,000 bytes (P9.17, P14.12); the SDK's notice before inscribing (P9.18); no resource limit (P14.13); non-integer metadata numbers inscribed as the narrowest exact CBOR float (P14.12, #54). The landing creates an Original from one file. Originals written under the earlier encoding are not converted (D1, D7) | §12 rows C12-16, C12-19, C12-37, C12-97, C12-111, C12-112, C12-114, C12-142, C12-159, C12-173 (reworded) and C12-190 to C12-199 (new); C12-154 to C12-158, C12-160 and C12-171 retired. Real Core/ord regtest journeys `scripts/regtest/originals-anchor.ts` and `landing-anchor.ts` on the new format |
 
 Each PR is registered with `link_pull_request` and nothing gets merged without your go-ahead.
 
@@ -250,6 +256,9 @@ a trusted publisher can be registered for it.
   - *Decision:* asset logs do not use witnesses. Unanchored Originals have claimed ordering only; Bitcoin anchoring gives proven ordering and a single history. Author DIDs keep their own method's witnesses.
   - *Accepted consequences:* a stolen author key can create a branch before its removal (never current after removal, P7.9; an unresolved fork until anchoring, Q5); the first valid anchor wins (P9.16), so a key thief holding a sat can win that race; a host can serve an old prefix to a first-time reader (retained versionIds protect repeat readers, P7.8).
   - *Spec edits needed:* P9.8 (drop the hosted-witness requirement and witness obligations); P9.9 (drop the witness list; an asset log entry that sets a non-empty witness parameter MUST be rejected); P9.10 (drop the witnessed-migrate branch); P9.16 (every anchor is unwitnessed); P5.10 and P6.5 (drop the witness-refusal clauses); P7.6 (drop the activation clause); section 2, D3 and section 11 (ordering is claimed off-chain, proven on anchoring); section 12 (rows C12-35, 36, 39, 42, 53, 54, 55, 56 and 71 moot; a new row for a refused witness parameter). Sent to the spec thread on 2026-10-19.
+- **S13 — resolved in the spec (originals-spec #54, merged; now pinned): non-integer numbers in asset metadata, found in the review of #1026.**
+  - *Issue:* P14.5 let `metadata` hold any JSON number, but P14.12's mapping named integers only and rejected every float, so an Original with a metadata value such as `4.5` verified and published and could never be anchored.
+  - *Resolution:* P14.12 maps a non-integer number to the narrowest of half, single and double precision that holds it exactly, as ord's `--json-metadata` writes it (ciborium 0.2.2), and a reader accepts any width, rejecting a float that is not finite, is negative zero or is outside P14.3's bound. Entries are checked over JCS, so a float's width changes neither hashes nor proofs. Section 12 rows C12-198 and C12-199.
 
 ## 5. bip340-jcs-2025: build vs. depend
 

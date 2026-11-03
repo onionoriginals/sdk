@@ -15,20 +15,17 @@ import type { SatSnapshot } from '@originals/sdk';
 export function encodeSatSnapshot(snapshot: SatSnapshot): unknown {
   return {
     ...snapshot,
-    publications: snapshot.publications.map((publication) => ({
-      ...publication,
-      body:
-        publication.body.status === 'complete'
-          ? {
-              ...publication.body,
-              bytes: base64.encode(publication.body.bytes),
-              metadata:
-                publication.body.metadata === null
-                  ? null
-                  : base64.encode(publication.body.metadata),
-            }
-          : publication.body,
-    })),
+    publications: snapshot.publications.map((publication) => {
+      const body = publication.body;
+      // Any body can carry its own metadata: a complete one, a delegated or encoded one, and one not
+      // requested because its metadata shows it is no Originals inscription (P14.12). Every one is
+      // encoded, so the reader sees bytes, never a JSON object of indices (P9.12).
+      const metadata = 'metadata' in body && body.metadata instanceof Uint8Array ? { metadata: base64.encode(body.metadata) } : {};
+      return {
+        ...publication,
+        body: body.status === 'complete' ? { ...body, bytes: base64.encode(body.bytes), ...metadata } : { ...body, ...metadata },
+      };
+    }),
   };
 }
 
@@ -37,14 +34,14 @@ export function encodeSatSnapshot(snapshot: SatSnapshot): unknown {
  * publication's body and metadata — the figure to bound BEFORE encoding and
  * serializing a snapshot for an unauthenticated caller, so a permitted large
  * publication can never turn one public request into an oversized response
- * or a large intermediate allocation.
+ * or a large intermediate allocation. Metadata kept on an unread body counts too.
  */
 export function snapshotContentBytes(snapshot: SatSnapshot): number {
   let total = 0;
   for (const publication of snapshot.publications) {
-    if (publication.body.status !== 'complete') continue;
-    total += publication.body.bytes.length;
-    total += publication.body.metadata?.length ?? 0;
+    const body = publication.body;
+    if (body.status === 'complete') total += body.bytes.length;
+    if ('metadata' in body && body.metadata instanceof Uint8Array) total += body.metadata.length;
   }
   return total;
 }
