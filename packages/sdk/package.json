@@ -89,7 +89,7 @@
     "@scure/base": "^2.2.0",
     "@scure/btc-signer": "^2.2.0",
     "b58": "^4.0.3",
-    "bitcoinjs-lib": "^7.0.2",
+    "bitcoinjs-lib": "^7.0.5",
     "cborg": "^6.1.1",
     "didwebvh-ts": "^3.0.0",
     "fflate": "^0.8.3",

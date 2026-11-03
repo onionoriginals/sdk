@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "@originals/monorepo",
@@ -8,8 +9,8 @@
         "@commitlint/cli": "^21.2.2",
         "@commitlint/config-conventional": "^21.2.2",
         "railway": "3.11.0",
-        "turbo": "^2.3.3"
-      }
+        "turbo": "^2.3.3",
+      },
     },
     "apps/landing": {
       "name": "@originals/landing",
@@ -32,7 +33,7 @@
         "didwebvh-ts": "^3.0.0",
         "qrcode-generator": "2.0.4",
         "react": "^19.2.7",
-        "react-dom": "^19.2.7"
+        "react-dom": "^19.2.7",
       },
       "devDependencies": {
         "@turnkey/sdk-server": "^8.3.0",
@@ -46,8 +47,8 @@
         "path-browserify": "^1.0.1",
         "playwright-core": "^1.49.0",
         "typescript": "^7.0.2",
-        "vite": "^8.1.6"
-      }
+        "vite": "^8.1.6",
+      },
     },
     "packages/auth": {
       "name": "@originals/auth",
@@ -58,7 +59,7 @@
         "@originals/sdk": "^6.0.0",
         "@turnkey/crypto": "^2.10.0",
         "@turnkey/sdk-server": "^8.3.0",
-        "jsonwebtoken": "^9.0.2"
+        "jsonwebtoken": "^9.0.2",
       },
       "devDependencies": {
         "@eslint/js": "^9.0.0",
@@ -70,14 +71,14 @@
         "bun-types": "^1.3.1",
         "eslint": "^10.6.0",
         "typescript": "^6.0.3",
-        "typescript-eslint": "^8.62.0"
+        "typescript-eslint": "^8.62.0",
       },
       "peerDependencies": {
-        "express": ">=4.0.0"
+        "express": ">=4.0.0",
       },
       "optionalPeers": [
-        "express"
-      ]
+        "express",
+      ],
     },
     "packages/host": {
       "name": "@originals/host",
@@ -86,7 +87,7 @@
         "@noble/hashes": "^2.0.1",
         "@originals/sdk": "^6.0.0",
         "@originals/vh": "^0.4.0",
-        "@scure/base": "^2.2.0"
+        "@scure/base": "^2.2.0",
       },
       "devDependencies": {
         "@eslint/js": "^9.0.0",
@@ -98,14 +99,14 @@
         "eslint": "^10.6.0",
         "prettier": "^3.0.0",
         "typescript": "^6.0.3",
-        "typescript-eslint": "^8.0.0"
-      }
+        "typescript-eslint": "^8.0.0",
+      },
     },
     "packages/sdk": {
       "name": "@originals/sdk",
       "version": "6.0.0",
       "bin": {
-        "originals": "./dist/originals/cli.js"
+        "originals": "./dist/originals/cli.js",
       },
       "dependencies": {
         "@noble/curves": "^2.2.0",
@@ -116,13 +117,13 @@
         "@scure/base": "^2.2.0",
         "@scure/btc-signer": "^2.2.0",
         "b58": "^4.0.3",
-        "bitcoinjs-lib": "^7.0.2",
+        "bitcoinjs-lib": "^7.0.5",
         "cborg": "^6.1.1",
         "didwebvh-ts": "^3.0.0",
         "fflate": "^0.8.3",
         "jsonld": "^9.0.0",
         "micro-ordinals": "^0.2.2",
-        "uuid": "^14.0.1"
+        "uuid": "^14.0.1",
       },
       "devDependencies": {
         "@eslint/js": "^9.0.0",
@@ -134,8 +135,8 @@
         "eslint": "^10.6.0",
         "prettier": "^3.0.0",
         "typescript": "^6.0.3",
-        "typescript-eslint": "^8.0.0"
-      }
+        "typescript-eslint": "^8.0.0",
+      },
     },
     "packages/vh": {
       "name": "@originals/vh",
@@ -143,7 +144,7 @@
       "dependencies": {
         "@noble/curves": "^2.2.0",
         "@noble/hashes": "^2.0.1",
-        "@scure/base": "^2.2.0"
+        "@scure/base": "^2.2.0",
       },
       "devDependencies": {
         "@eslint/js": "^9.0.0",
@@ -155,9 +156,9 @@
         "eslint": "^10.6.0",
         "prettier": "^3.0.0",
         "typescript": "^6.0.3",
-        "typescript-eslint": "^8.0.0"
-      }
-    }
+        "typescript-eslint": "^8.0.0",
+      },
+    },
   },
   "overrides": {
     "brace-expansion": "^5.0.8",
@@ -621,7 +622,7 @@
 
     "bip174": ["bip174@3.0.1", "", { "dependencies": { "uint8array-tools": "^0.0.10", "varuint-bitcoin": "^2.0.1" } }, "sha512-avOnOoLOwdjw1MebWKh3bHqWOH558Q9VpqmRKUv2S63vjw0pnX7Y+yRihxIibgP55twhc7+YfC0IAH43IF5FqQ=="],
 
-    "bitcoinjs-lib": ["bitcoinjs-lib@7.0.2", "", { "dependencies": { "@noble/hashes": "^1.2.0", "bech32": "^2.0.0", "bip174": "^3.0.0", "bs58check": "^4.0.0", "uint8array-tools": "^0.0.9", "valibot": "^1.2.0", "varuint-bitcoin": "^2.0.0" } }, "sha512-ugLk9SR+2gvhpNA7kqQL1eVDKyBNo/rbr+df72nrZj4OOdZvQRHDVtyogPGXAU2MLQimLL7EbUdz95QGh6Th5Q=="],
+    "bitcoinjs-lib": ["bitcoinjs-lib@7.0.5", "", { "dependencies": { "@noble/hashes": "^1.2.0", "bech32": "^2.0.0", "bip174": "^3.0.1", "bs58check": "^4.0.0", "uint8array-tools": "^0.0.10", "valibot": "^1.2.0", "varuint-bitcoin": "^2.0.1" } }, "sha512-xH24P1ile3QtyChzX1ITitcgpfZgDzG986gy1glbGXFsvcSnRX0P6p4m3nuTQfJ+j97va8py0leEK7xG8oxMqQ=="],
 
     "borsh": ["borsh@2.0.0", "", {}, "sha512-kc9+BgR3zz9+cjbwM8ODoUB4fs3X3I5A/HtX7LZKxCLaMrEeDFoBpnhZY//DTS1VZBSs6S5v46RZRbZjRFspEg=="],
 
@@ -975,7 +976,7 @@
 
     "typescript-eslint": ["typescript-eslint@8.63.0", "", { "dependencies": { "@typescript-eslint/eslint-plugin": "8.63.0", "@typescript-eslint/parser": "8.63.0", "@typescript-eslint/typescript-estree": "8.63.0", "@typescript-eslint/utils": "8.63.0" }, "peerDependencies": { "eslint": "^8.57.0 || ^9.0.0 || ^10.0.0", "typescript": ">=4.8.4 <6.1.0" } }, "sha512-xgwXyzG4sK9ALkBxbyGkTMMOS+imnW65iPhxCQMK83KhxyoDNW7l+IDqEf9vMdoUidHpOoS967RCq4eMiTexwQ=="],
 
-    "uint8array-tools": ["uint8array-tools@0.0.9", "", {}, "sha512-9vqDWmoSXOoi+K14zNaf6LBV51Q8MayF0/IiQs3GlygIKUYtog603e6virExkjjFosfJUBI4LhbQK1iq8IG11A=="],
+    "uint8array-tools": ["uint8array-tools@0.0.10", "", {}, "sha512-sSbrZqlr04w4p8KKpHw0ME/R4JzQaadum+BWhMlk2M7LrDyXWTfJOco3d1jNMdQNxgk5DDm88R3IWYH0nR+tzQ=="],
 
     "undici": ["undici@6.29.1", "", {}, "sha512-EvRlUt/QqAEvXdQeRMYUfwOQsfzpDztykrG2owGEE/rBOBoYv9uF39ZzsNDh4lTFHhTr2XOZjKkYgueD12ZmGA=="],
 
@@ -1063,8 +1064,6 @@
 
     "@turnkey/sdk-server/@turnkey/sdk-types": ["@turnkey/sdk-types@1.7.0", "", {}, "sha512-QJjXMZIXsQKuUoQLa98t9sOjimOBd9uNsKJNZXzE+udaCB/l9e0h6BspqDS6oBHmeDqKM8m8Kius7uGZn3sAzw=="],
 
-    "bip174/uint8array-tools": ["uint8array-tools@0.0.10", "", {}, "sha512-sSbrZqlr04w4p8KKpHw0ME/R4JzQaadum+BWhMlk2M7LrDyXWTfJOco3d1jNMdQNxgk5DDm88R3IWYH0nR+tzQ=="],
-
     "bitcoinjs-lib/@noble/hashes": ["@noble/hashes@1.8.0", "", {}, "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="],
 
     "bs58/base-x": ["base-x@5.0.1", "", {}, "sha512-M7uio8Zt++eg3jPj+rHMfCC+IuygQHHCOU+IYsVtik6FWjuYpVt/+MRKcgsAMHh8mMFAwnB+Bs+mTrFiXjMzKg=="],
@@ -1094,8 +1093,6 @@
     "string-width/strip-ansi": ["strip-ansi@7.2.0", "", { "dependencies": { "ansi-regex": "^6.2.2" } }, "sha512-yDPMNjp4WyfYBkHnjIRLfca1i6KMyGCtsVgoKe/z1+6vukgaENdgGBZt+ZmKPc4gavvEZ5OgHfHdrazhgNyG7w=="],
 
     "tsyringe/tslib": ["tslib@1.14.1", "", {}, "sha512-Xni35NKzjgMrwevysHTCArtLDpPvye8zV/0E4EyYn43P7/7qvQwPh9BGkHewbMulVntbigmcT7rdX3BNo9wRJg=="],
-
-    "varuint-bitcoin/uint8array-tools": ["uint8array-tools@0.0.10", "", {}, "sha512-sSbrZqlr04w4p8KKpHw0ME/R4JzQaadum+BWhMlk2M7LrDyXWTfJOco3d1jNMdQNxgk5DDm88R3IWYH0nR+tzQ=="],
 
     "viem/@noble/curves": ["@noble/curves@1.9.1", "", { "dependencies": { "@noble/hashes": "1.8.0" } }, "sha512-k11yZxZg+t+gWvBbIswW0yoJlu8cHOC7dhunwOzoWH/mXGBiYyR4YY6hAEK/3EUs4UpB8la1RfdRpeGsFHkWsA=="],
 
