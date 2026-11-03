@@ -43,10 +43,10 @@
     "access": "public"
   },
   "dependencies": {
-    "@noble/hashes": "^2.0.1",
+    "@noble/hashes": "^2.4.0",
     "@originals/sdk": "^6.0.0",
     "@originals/vh": "^0.4.0",
-    "@scure/base": "^2.2.0"
+    "@scure/base": "^2.4.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
