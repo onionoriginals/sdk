@@ -191,12 +191,14 @@ export function decodeSatSnapshot(value: unknown): SatSnapshot {
   for (const publication of snapshot.publications) {
     if (!publication || !publication.body)
       throw new Error("Invalid publication");
-    if (publication.body.status === "complete") {
-      publication.body.bytes = bytes(publication.body.bytes);
-      publication.body.metadata =
-        publication.body.metadata === null
-          ? null
-          : bytes(publication.body.metadata);
+    const body = publication.body as { status: string; bytes?: unknown; metadata?: unknown };
+    if (body.status === "complete") {
+      body.bytes = bytes(body.bytes);
+      body.metadata = body.metadata === null ? null : bytes(body.metadata);
+    } else if (body.metadata !== undefined && body.metadata !== null) {
+      // An unread body's own metadata: a delegated or encoded inscription's, or one not requested
+      // because its metadata shows it is no Originals inscription (P14.12).
+      body.metadata = bytes(body.metadata);
     }
   }
   return snapshot;

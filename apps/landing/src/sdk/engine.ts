@@ -138,6 +138,12 @@ export interface DemoAssetState {
      * describes its own copy and cannot see these until they are submitted.
      */
     unpublished: string[];
+    /**
+     * The resource version the next inscription carries as its body: the one
+     * the first unpublished entry names (P9.17), which the notice before
+     * signing describes (P9.18; C12-193). Absent when nothing is unpublished.
+     */
+    next?: { version: number; mediaType: string };
   };
   /**
    * Set when the store holds divergent valid branches of this Original: an
@@ -299,7 +305,7 @@ export class DemoEngine {
 
   private readonly networkFlag: BtcNetworkFlag;
   private readonly anchoringOpts: AnchoringOptions;
-  private anchoring: Omit<NonNullable<DemoAssetState["anchoring"]>, "unpublished"> | undefined = undefined;
+  private anchoring: Omit<NonNullable<DemoAssetState["anchoring"]>, "unpublished" | "next"> | undefined = undefined;
 
   constructor(opts?: {
     store?: OriginalsStore;
@@ -997,6 +1003,25 @@ export class DemoEngine {
     });
   }
 
+  private anchoringState(anchoring: NonNullable<typeof this.anchoring>): NonNullable<DemoAssetState["anchoring"]> {
+    const unpublished = this.unpublished(anchoring.status);
+    const next = unpublished.length > 0 ? this.versionAt(unpublished[0]) : undefined;
+    return { ...anchoring, unpublished, ...(next ? { next } : {}) };
+  }
+
+  /**
+   * The resource version in effect at an entry, derived from verified history (P4.4): the last one
+   * introduced at or before it. Its inscription carries that version as its body (P9.17).
+   */
+  private versionAt(versionId: string): { version: number; mediaType: string } | undefined {
+    const position = new Map(this.logEntries.map((e, k) => [e.versionId, k]));
+    const at = position.get(versionId);
+    if (at === undefined) return undefined;
+    const introduced = (this.view?.resources ?? []).filter((v) => (position.get(v.versionId) ?? Infinity) <= at);
+    const v = introduced[introduced.length - 1];
+    return v ? { version: v.version, mediaType: v.mediaType } : undefined;
+  }
+
   /** After Bitcoin's accepted head; before the anchor is accepted, from the anchoring entry on (P9.17). */
   private unpublished(status: AnchoringStatus | null): string[] {
     const ids = this.logEntries.map((e) => e.versionId);
@@ -1137,7 +1162,7 @@ export class DemoEngine {
       ...(publication === "complete" && this.publication?.indexed !== undefined ? { accountIndex: this.publication.indexed ? ("listed" as const) : ("not-listed" as const) } : {}),
       ...(alias ? { webvhDid: alias, webvhLogUrl: didWebvhLogUrl(alias) } : {}),
       ...(btco ? { btcoDid: btco } : {}),
-      ...(this.anchoring ? { anchoring: { ...this.anchoring, unpublished: this.unpublished(this.anchoring.status) } } : {}),
+      ...(this.anchoring ? { anchoring: this.anchoringState(this.anchoring) } : {}),
       author: view.report.identityEvidence.author ?? "",
       resource: {
         id: typeof fileName === "string" ? fileName : "resource",

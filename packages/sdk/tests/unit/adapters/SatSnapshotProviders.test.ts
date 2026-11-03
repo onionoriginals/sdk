@@ -335,10 +335,11 @@ describe('sat snapshot budgets (M1)', () => {
     const snapshot = await readSatSnapshot(reader, '123', 'regtest', { maxInscriptions: 20 });
     expect(snapshot.publications).toHaveLength(30);
     expect(snapshot.publications.slice(0, 20).every((p) => p.body.status === 'complete')).toBe(true);
-    expect(snapshot.publications.slice(20).map((p) => p.body)).toEqual(Array(10).fill({ status: 'unavailable', reason: 'over-budget', mediaType: 'text/plain', contentLength: 1 }));
+    // Their metadata is still read (P14.12): none carries any, so none is an Originals inscription and no body is needed.
+    expect(snapshot.publications.slice(20).map((p) => p.body)).toEqual(Array(10).fill({ status: 'unavailable', reason: 'not-requested', mediaType: 'text/plain', contentLength: 1, metadata: null }));
     expect(calls.filter((c) => c === 'inscription')).toHaveLength(30);
     expect(calls.filter((c) => c === 'content')).toHaveLength(20);
-    expect(calls.filter((c) => c === 'metadata')).toHaveLength(20);
+    expect(calls.filter((c) => c === 'metadata')).toHaveLength(30);
   });
   test("#966 r5 finding 1: in an Originals read only inscriptions with metadata count against maxInscriptions; an unread one fails verification closed, others do not (P14.12)", async () => {
     const clock = { at: async () => 1_700_000_000 };
@@ -373,7 +374,8 @@ describe('sat snapshot budgets (M1)', () => {
     const snapshot = await readSatSnapshot(batch, '123', 'regtest', {}, { bodies: 'originals' });
     expect(snapshot.publications).toHaveLength(10_001);
     const all = await readSatSnapshot(batch, '123', 'regtest');
-    expect(all.publications[10_000].body).toEqual({ status: 'unavailable', reason: 'over-budget', mediaType: 'text/plain', contentLength: 0 });
+    expect(all.publications[10_000].body).toEqual({ status: 'unavailable', reason: 'not-requested', mediaType: 'text/plain', contentLength: 0, metadata: null });
+    await expect(satEvidence(all, { clock: { at: async () => 1_700_000_000 }, ownerConfirmations: 1, index: 'ord' })).resolves.toBeDefined();
   }, 60_000);
   test('a body past the content-byte budget is observed unread; later bodies that fit are still read', async () => {
     const sizes = [600, 700, 100];
@@ -382,8 +384,25 @@ describe('sat snapshot budgets (M1)', () => {
     const content = async (id: string) => (calls.push('content'), new Uint8Array(sizes[ids.indexOf(id)]));
     const snapshot = await readSatSnapshot({ ...reader, content }, '123', 'regtest', { maxContentBytes: 1000 });
     expect(snapshot.publications.map((p) => p.body.status)).toEqual(['complete', 'unavailable', 'complete']);
-    expect(snapshot.publications[1].body).toEqual({ status: 'unavailable', reason: 'over-budget', mediaType: 'text/plain', contentLength: 700 });
+    expect(snapshot.publications[1].body).toEqual({ status: 'unavailable', reason: 'not-requested', mediaType: 'text/plain', contentLength: 700, metadata: null });
     expect(calls.filter((c) => c === 'content')).toHaveLength(2);
+  });
+  test("past the content-byte budget of a full read, metadata decides: ordinary inscriptions are ignored and an Originals one is read from the Originals pool (P9.17, P14.12)", async () => {
+    const clock = { at: async () => 1_700_000_000 };
+    // 40 images of 100,000 bytes (and a byte of metadata each) against a 1 MB content budget; the later ones carry a collection's map metadata.
+    const images = floodReader(40, { info: () => ({ content_type: 'image/png', content_length: 100_000 }), metadata: () => 'a0' });
+    const snapshot = await readSatSnapshot(images.reader, '123', 'regtest', { maxContentBytes: 1_000_010 });
+    expect(snapshot.publications.slice(0, 10).every((p) => p.body.status === 'complete')).toBe(true);
+    expect(snapshot.publications[10].body).toEqual({ status: 'unavailable', reason: 'not-requested', mediaType: 'image/png', contentLength: 100_000, metadata: new Uint8Array([0xa0]) });
+    expect(images.calls.filter((c) => c === 'content')).toHaveLength(10);
+    const evidence = await satEvidence(snapshot, { clock, ownerConfirmations: 1, index: 'ord' });
+    const verified = await verifyOriginal({ authors: [], bitcoin: [evidence] }).catch((e: unknown) => e);
+    expect(verified).not.toMatchObject({ code: 'SAT_READ_INCOMPLETE' });
+    // One whose metadata is an array of entries is read in full, past the spent content budget.
+    const entry = floodReader(12, { info: () => ({ content_type: 'image/png', content_length: 100_000 }), metadata: (k) => (k === 11 ? ENTRIES : null) });
+    const read = await readSatSnapshot(entry.reader, '123', 'regtest', { maxContentBytes: 1_000_000 });
+    expect(read.publications[10].body).toMatchObject({ status: 'unavailable', reason: 'not-requested', metadata: null });
+    expect(read.publications[11].body).toMatchObject({ status: 'complete', mediaType: 'image/png', metadata: new Uint8Array([0x81, 0xa0]) });
   });
   test('errors at the seam carry a category', async () => {
     const { reader } = memoryReader(1);
@@ -478,6 +497,20 @@ describe("the sat's holder cannot exhaust a read (P9.12, P9.17)", () => {
     expect(snapshot.publications[0].body).toEqual({ status: 'unavailable', reason: 'not-requested', mediaType: 'image/jpeg', contentLength: 300_000, metadata: new Uint8Array([0xa0]) });
     expect(snapshot.publications[1].body).toMatchObject({ status: 'unavailable', reason: 'not-requested', metadata: new Uint8Array([0xff]) });
     expect(snapshot.publications[2].body.status).toBe('complete');
+  });
+
+  test("the metadata an Originals read fetches is charged to maxOriginalsBytes as it arrives, so junk metadata cannot make a read download without bound (P9.12)", async () => {
+    // A 1,000-character CBOR text string: not an array of entries, so no body is read for it (P14.12).
+    const junk = '7903e8' + '61'.repeat(1_000);
+    const { reader, calls } = floodReader(50, { metadata: () => junk });
+    const snapshot = await readSatSnapshot(reader, '123', 'regtest', { maxOriginalsBytes: 10_000, concurrency: 1 }, { bodies: 'originals' });
+    const asked = calls.filter((c) => c === 'metadata').length;
+    expect(asked).toBeLessThanOrEqual(11);
+    expect(calls.filter((c) => c === 'content')).toHaveLength(0);
+    // Past the pool its metadata is unknown, never taken as none: the verifier fails closed there (P9.17).
+    expect(snapshot.publications[49].body).toEqual({ status: 'unavailable', reason: 'over-budget', mediaType: 'text/plain', contentLength: 1 });
+    const evidence = await satEvidence(snapshot, { clock: { at: async () => 1_700_000_000 }, ownerConfirmations: 1, index: 'ord' });
+    await expect(verifyOriginal({ authors: [], bitcoin: [evidence] })).rejects.toMatchObject({ code: 'SAT_READ_INCOMPLETE' });
   });
 
   test('an inscription with no content-type tag is reported with no media type, never application/octet-stream (P14.12)', async () => {

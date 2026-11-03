@@ -50,8 +50,10 @@ export interface SatSnapshotBudget {
    * 10,000, at most 100,000), in listing order; with `bodies: 'originals'`
    * only the inscriptions carrying metadata whose bodies it would read count. Past it the sat is
    * still enumerated and each inscription's index record read, but its body
-   * and metadata are not: it is reported observed but unread (`{ status:
-   * 'unavailable', reason: 'over-budget' }`), so the holder of a sat, who has
+   * is not: one of at most 350,000 bytes has its metadata read from
+   * `maxOriginalsBytes`, as in an Originals read, and the rest are reported
+   * observed but unread (`{ status: 'unavailable', reason: 'over-budget' }`),
+   * so the holder of a sat, who has
    * no authority over it (P9.12), cannot make every read of it fail by
    * reinscribing it. Whether an unread one matters is the consumer's call:
    * `satEvidence` fails closed on an unread Originals inscription (P9.17).
@@ -67,19 +69,27 @@ export interface SatSnapshotBudget {
   maxListedInscriptions?: number;
   /**
    * Body and metadata bytes read in one observation (default 32 MiB, at most
-   * 512 MiB), for every inscription a `bodies: 'all'` read fetches. A
+   * 512 MiB), for every inscription a `bodies: 'all'` read fetches in full. A
    * `bodies: 'originals'` read uses `maxOriginalsBytes` instead. A body or metadata
    * that would pass it, or that passes the transport's response cap, is
    * reported observed but unread (`{ status: 'unavailable', reason:
-   * 'over-budget' }`) and the read goes on.
+   * 'over-budget' }`) and the read goes on; one of at most 350,000 bytes whose
+   * body would pass it is judged by its metadata instead, from
+   * `maxOriginalsBytes` (P9.17, P14.12), so other bodies on the sat cannot spend
+   * what an Originals inscription is read from.
    */
   maxContentBytes?: number;
   /**
-   * Metadata and body bytes a `bodies: 'originals'` read fetches in one
-   * observation (default 64 MiB, at most 1 GiB): the metadata of every
-   * inscription of at most 350,000 bytes, and the bodies of those that carry
-   * metadata, which could be Originals inscriptions (P9.17, P14.12;
-   * originals-spec #53). PROVISIONAL.
+   * Metadata and body bytes read in one observation to tell Originals
+   * inscriptions apart (default 64 MiB, at most 1 GiB): in a `bodies:
+   * 'originals'` read, the metadata of every inscription of at most 350,000
+   * bytes, charged as it arrives whatever it holds, and the bodies of those
+   * whose metadata is an array of entries (P9.17, P14.12; originals-spec #53);
+   * in a `bodies: 'all'` read, the same for each inscription past
+   * `maxContentBytes` or `maxInscriptions`. Once it is spent, metadata is not
+   * asked for: the inscription is reported over budget with its metadata
+   * unknown. Reads in flight can pass it by at most `concurrency` responses,
+   * each within the transport's cap. PROVISIONAL.
    *
    * PROVISIONAL bound (#966 r5, finding 2): inscriptions with metadata the
    * holder adds are read from this pool too, because an unread one could be an
@@ -362,12 +372,17 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
       return { probe: { observation, info, mediaType, length } };
     }
     const pool = 'other' as 'originals' | 'other';
-    // Past maxInscriptions reads, or the byte budget: observed but unread (P9.12). The consumer decides
-    // whether it could matter: satEvidence fails closed on an unread Originals inscription (P9.17).
-    if (reads >= limits.maxInscriptions || used[pool] + length > cap[pool]) return unread({ status: 'unavailable', reason: 'over-budget', mediaType, contentLength: length });
+    if (reads >= limits.maxInscriptions || used[pool] + length > cap[pool]) {
+      // Past maxInscriptions reads, or the byte budget: any inscription within 350,000 bytes could be an
+      // Originals inscription whatever its media type (P9.17, P14.12), so its metadata decides, from the
+      // Originals pool, as in an Originals read; other bodies on the sat cannot spend that pool (P9.12).
+      if (length <= ORIGINALS_INSCRIPTION_MAX_BYTES) return { probe: { observation, info, mediaType, length } };
+      // Larger: observed but unread. Its length alone rules it out as an Originals inscription (P9.17).
+      return unread({ status: 'unavailable', reason: 'over-budget', mediaType, contentLength: length });
+    }
     reads++;
     used[pool] += length;
-    return { read: { observation, info, mediaType, length, pool } };
+    return { read: { observation, info, mediaType, length, pool, metadata: undefined as Uint8Array | undefined } };
   });
 
   // 3. The chosen bodies and their metadata, a bounded number at a time.
@@ -382,18 +397,32 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
     if (metadataHex !== null && typeof metadataHex !== 'string') throw incomplete('SAT_SNAPSHOT_METADATA_UNAVAILABLE', 'Raw metadata bytes unavailable');
     return { metadataHex };
   };
-  // 3a. An Originals read: the metadata of each probed inscription, then, in listing order, the body
-  // of each that carries metadata, within the budget (P14.12; originals-spec #53).
-  const probed = await pool(plan, limits.concurrency, async (step) => ('probe' in step && step.probe ? readMetadata(step.probe.observation.id) : undefined), error => limits.fail(error));
-  const probedMetadata = new Map<number, Uint8Array>();
+  // 3a. The metadata of each probed inscription, then, in listing order, the body of each whose metadata
+  // is an array of entries, within the Originals pool (P14.12; originals-spec #53). Every probed metadata
+  // byte is charged to that pool as it arrives, whatever the metadata turns out to be, so a holder's junk
+  // metadata cannot make one read download without bound (P9.12). Once the pool is spent, metadata is not
+  // asked for: the inscription is reported over budget with its metadata unknown, an explicit
+  // incomplete read for the verifier (P9.17), never a wrong one. Reads in flight can pass the pool by at
+  // most `concurrency` responses, each within the transport's cap. PROVISIONAL.
+  const probed = await pool(plan, limits.concurrency, async (step) => {
+    if (!('probe' in step) || !step.probe) return undefined;
+    if (used.originals >= cap.originals) return { budgetSpent: true as const };
+    const got = await readMetadata(step.probe.observation.id);
+    if ('metadataHex' in got && got.metadataHex !== null) used.originals += got.metadataHex.length / 2;
+    return got;
+  }, error => limits.fail(error));
   plan.forEach((step, k) => {
     if (!('probe' in step) || !step.probe) return;
     const { observation, info, mediaType, length } = step.probe;
-    const got = probed[k] as { metadataHex: string | null } | { metadataTooLarge: true };
-    const over = (): { publication: Publication } =>
-      ({ publication: { ...observation, body: { status: 'unavailable', reason: 'over-budget', mediaType, contentLength: length, metadataPresent: true as const } } });
+    const got = probed[k] as { metadataHex: string | null } | { metadataTooLarge: true } | { budgetSpent: true };
+    const over = (metadataPresent: boolean): { publication: Publication } =>
+      ({ publication: { ...observation, body: { status: 'unavailable', reason: 'over-budget', mediaType, contentLength: length, ...(metadataPresent ? { metadataPresent: true as const } : {}) } } });
+    if ('budgetSpent' in got) {
+      plan[k] = over(false);
+      return;
+    }
     if ('metadataTooLarge' in got) {
-      plan[k] = over();
+      plan[k] = over(true);
       return;
     }
     if (got.metadataHex === null) {
@@ -409,14 +438,14 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
       plan[k] = { publication: { ...observation, body: { status: 'unavailable', reason: 'not-requested', mediaType, contentLength: length, metadata: decoded } } };
       return;
     }
-    if (reads >= limits.maxInscriptions || used.originals + decoded.length + length > cap.originals) {
-      plan[k] = over();
+    // Its metadata is already charged (above); the body is charged here, in listing order.
+    if (reads >= limits.maxInscriptions || used.originals + length > cap.originals) {
+      plan[k] = over(true);
       return;
     }
     reads++;
-    used.originals += decoded.length + length;
-    probedMetadata.set(k, decoded);
-    plan[k] = { read: { observation, info, mediaType, length, pool: 'originals' as const } };
+    used.originals += length;
+    plan[k] = { read: { observation, info, mediaType, length, pool: 'originals' as const, metadata: decoded } };
   });
 
   const fetched = await pool(plan, limits.concurrency, async (step) => {
@@ -433,8 +462,8 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
     // Null explicitly reports a bodyless inscription. Never accept delegated/effective bytes as its own body.
     if ((content === null && info.content_length !== null) || (content?.length ?? 0) !== length)
       throw incomplete('SAT_SNAPSHOT_CONTENT_UNAVAILABLE', 'Listed inscription content is unavailable or has a different byte length');
-    // An Originals read has its metadata already, counted with the body (3a).
-    const known = probedMetadata.get(plan.indexOf(step));
+    // A probed inscription has its metadata already, counted when it was read (3a).
+    const known = step.read.metadata;
     return { content, ...(known ? { metadataBytes: known } : await readMetadata(id)) };
   }, error => limits.fail(error));
 

@@ -103,11 +103,19 @@ export { isActiveContent };
  * What the author is told before an inscription is signed (P9.18; C12-193):
  * the version it carries and the log, with the name and metadata, become
  * public and permanent; and, for active content, that explorers may render it.
+ * `carries` is the version the inscription's body holds: for a later
+ * inscription, the one its entry names, which need not be the head's (P9.17).
+ * Without it, the current version, as the anchoring inscription carries.
  */
-export function inscriptionNoticePreview(asset: Pick<DemoAssetState, 'resource'>): { permanent: string; activeContent: string | null } {
+export function inscriptionNoticePreview(
+  asset: Pick<DemoAssetState, 'resource'>,
+  carries?: { version: number; mediaType: string },
+): { permanent: string; activeContent: string | null } {
+  const version = carries?.version ?? asset.resource.version;
+  const mediaType = carries?.mediaType ?? asset.resource.contentType;
   return {
-    permanent: demo.anchoring.permanent(asset.resource.id, asset.resource.version),
-    activeContent: isActiveContent(asset.resource.contentType) ? demo.anchoring.activeContent(asset.resource.contentType) : null,
+    permanent: demo.anchoring.permanent(asset.resource.id, version),
+    activeContent: isActiveContent(mediaType) ? demo.anchoring.activeContent(mediaType) : null,
   };
 }
 

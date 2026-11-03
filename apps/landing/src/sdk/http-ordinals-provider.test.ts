@@ -96,4 +96,15 @@ describe('CEL 3 sat snapshot transport', () => {
       expect(() => decodeSatSnapshot({ publications: [{ body: { status: 'complete', bytes: bad, metadata: null } }] })).toThrow();
     }
   });
+
+  test('decodes the metadata an unread body keeps, so an inscription shown not to be an Originals one is ignored, not missing (P14.12, P9.12)', async () => {
+    const { decodeSatSnapshot } = await import('./http-ordinals-provider');
+    const decoded = decodeSatSnapshot({ publications: [
+      { body: { status: 'unavailable', reason: 'not-requested', mediaType: 'image/png', contentLength: 9, metadata: 'oQD/' } },
+      { body: { status: 'unavailable', reason: 'not-requested', mediaType: 'image/png', contentLength: 9, metadata: null } },
+      { body: { status: 'unsupported', reason: 'delegated', mediaType: null, metadata: 'oQD/' } },
+    ] });
+    expect(decoded.publications.map((p) => (p.body as { metadata?: unknown }).metadata)).toEqual([Uint8Array.from([161, 0, 255]), null, Uint8Array.from([161, 0, 255])]);
+    expect(() => decodeSatSnapshot({ publications: [{ body: { status: 'unavailable', reason: 'not-requested', mediaType: null, contentLength: 0, metadata: { 0: 161 } } }] })).toThrow();
+  });
 });

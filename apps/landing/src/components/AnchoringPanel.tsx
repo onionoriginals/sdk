@@ -10,8 +10,8 @@ import type { DemoAssetState } from '../sdk/engine';
 import { anchoringView, inscriptionNoticePreview, offChainPreview } from './anchoring-view';
 
 /** P9.18 (C12-193): before any inscription is signed, what becomes public and permanent. */
-function InscriptionNotice({ asset }: { asset: DemoAssetState }) {
-  const notice = inscriptionNoticePreview(asset);
+function InscriptionNotice({ asset, carries }: { asset: DemoAssetState; carries?: { version: number; mediaType: string } }) {
+  const notice = inscriptionNoticePreview(asset, carries);
   return (
     <>
       <p className="demo-inscribe-note" data-testid="inscription-permanent">{notice.permanent}</p>
@@ -113,7 +113,8 @@ export function AnchoringPanel(props: {
         </>
       )}
       {view.unpublishedNote && <p className="demo-inscribe-note" data-testid="anchoring-unpublished">{view.unpublishedNote}</p>}
-      {view.canInscribeNext && !props.pendingHandOff && <InscriptionNotice asset={asset} />}
+      {/* The version the next inscription carries is the one its entry names, not the head's (P9.17, P9.18). */}
+      {view.canInscribeNext && !props.pendingHandOff && <InscriptionNotice asset={asset} carries={asset.anchoring?.next} />}
       {view.canInscribeNext && !props.pendingHandOff && (
         <button type="button" className="btn btn-primary demo-step-btn" disabled={busy} data-busy={busy || undefined} onClick={props.onInscribeNext}>
           {busy ? copy.inscribeNextPending : copy.inscribeNext}
