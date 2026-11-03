@@ -1,5 +1,13 @@
 # @originals/auth
 
+## 4.0.3
+
+### Patch Changes
+
+- Updated dependencies [bfda41c]
+- Updated dependencies [7aeaf54]
+  - @originals/sdk@6.0.0
+
 ## 4.0.2
 
 ### Patch Changes
