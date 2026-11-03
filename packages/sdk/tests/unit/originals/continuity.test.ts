@@ -125,7 +125,7 @@ describe("C12-132: a didwebvh-ts 3 move carries each method's controller to the 
     const state = alice.log[alice.log.length - 1].state as { verificationMethod: Array<{ id: string; controller: string }> };
     expect(state.verificationMethod.map((m) => m.controller)).toEqual([alice.location]);
     const moved = alice.ref("orig-1");
-    const appended = await sdk.edit(did, { parent: v2, resources: [{ id: "photo", bytes: B3 }], author: moved, signer: alice.signer(moved, K1) });
+    const appended = await sdk.edit(did, { parent: v2, resource: { bytes: B3 }, author: moved, signer: alice.signer(moved, K1) });
     expect(appended.status).toBe("committed");
     expect(appended.original.report.authorBinding.status).toBe("valid");
     expect(appended.original.report.identityEvidence).toMatchObject({ author: alice.did, latestVersionId: alice.versionId });
