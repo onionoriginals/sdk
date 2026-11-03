@@ -65,7 +65,7 @@
     "@originals/sdk": "^6.0.0",
     "jsonwebtoken": "^9.0.2",
     "@noble/hashes": "^2.0.1",
-    "@noble/ed25519": "^3.1.0"
+    "@noble/ed25519": "^3.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
