@@ -71,7 +71,7 @@ describe('#714 — Ed25519-only updateKeys guard on createDIDOriginal/updateDIDO
         verifier: signer as any,
         updateKeys: [updateKeyPair.publicKey],
         verificationMethods: [
-          { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: signingKeyPair.publicKey },
+          { id: '#key-0', type: 'Multikey', publicKeyMultibase: signingKeyPair.publicKey },
         ],
       }),
     ).rejects.toThrow(/Ed25519/);
@@ -88,7 +88,7 @@ describe('#714 — Ed25519-only updateKeys guard on createDIDOriginal/updateDIDO
           verifier: signer as any,
           updateKeys: [updateKeyPair.publicKey],
           verificationMethods: [
-            { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: signingKeyPair.publicKey },
+            { id: '#key-0', type: 'Multikey', publicKeyMultibase: signingKeyPair.publicKey },
           ],
         }),
       'WEBVH_UPDATE_KEY_NOT_ED25519',
@@ -104,7 +104,7 @@ describe('#714 — Ed25519-only updateKeys guard on createDIDOriginal/updateDIDO
       verifier: signer as any,
       updateKeys: [`did:key:${updateKeyPair.publicKey}`],
       verificationMethods: [
-        { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: signingKeyPair.publicKey },
+        { id: '#key-0', type: 'Multikey', publicKeyMultibase: signingKeyPair.publicKey },
       ],
     });
     expect(result.did).toMatch(/^did:webvh:/);
@@ -119,7 +119,7 @@ describe('#714 — Ed25519-only updateKeys guard on createDIDOriginal/updateDIDO
       verifier: signer as any,
       updateKeys: [ed25519UpdateKey.publicKey],
       verificationMethods: [
-        { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: signingKeyPair.publicKey },
+        { id: '#key-0', type: 'Multikey', publicKeyMultibase: signingKeyPair.publicKey },
       ],
     });
 
@@ -152,7 +152,7 @@ describe('#719 — signer-as-verifier fallback requires verify() capability', ()
           signer: signOnlySigner as any,
           updateKeys: [signingKeyPair.publicKey],
           verificationMethods: [
-            { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: signingKeyPair.publicKey },
+            { id: '#key-0', type: 'Multikey', publicKeyMultibase: signingKeyPair.publicKey },
           ],
         }),
       'WEBVH_VERIFIER_REQUIRED',
@@ -168,7 +168,7 @@ describe('#719 — signer-as-verifier fallback requires verify() capability', ()
       verifier: signer as any,
       updateKeys: [signingKeyPair.publicKey],
       verificationMethods: [
-        { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: signingKeyPair.publicKey },
+        { id: '#key-0', type: 'Multikey', publicKeyMultibase: signingKeyPair.publicKey },
       ],
     });
 
@@ -196,7 +196,7 @@ describe('#719 — signer-as-verifier fallback requires verify() capability', ()
       // no explicit verifier: signer implements verify(), fallback should work
       updateKeys: [signingKeyPair.publicKey],
       verificationMethods: [
-        { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: signingKeyPair.publicKey },
+        { id: '#key-0', type: 'Multikey', publicKeyMultibase: signingKeyPair.publicKey },
       ],
     });
     expect(result.did).toMatch(/^did:webvh:/);

@@ -96,7 +96,7 @@ function collectCarriedVerificationMethods(didDoc: DIDDocument): CarriedVerifica
  * configured webvhNetwork tier deliberately does NOT supply a default here.
  *
  * A non-blank domain is canonicalized by `canonicalizeWebVHDomain`
- * (identity policy: a DNS host, punycode host or `localhost`, `URL#host` spelling), which
+ * (identity policy: a fully qualified DNS or punycode host, `URL#host` spelling), which
  * throws a `StructuredError` `INVALID_DOMAIN` otherwise.
  */
 export function requireWebVHDomain(domain: string | undefined): string {
@@ -104,7 +104,7 @@ export function requireWebVHDomain(domain: string | undefined): string {
     throw new StructuredError(
       'WEBVH_DOMAIN_REQUIRED',
       'A did:webvh domain is required: pass an explicit `domain` (e.g. "example.com" or ' +
-      '"localhost:3000"). The SDK no longer defaults to a *.originals.build host — those ' +
+      '"example.com:8443"). The SDK no longer defaults to a *.originals.build host — those ' +
       'networks are not served, and a did:webvh domain is permanent once published.'
     );
   }
@@ -512,17 +512,27 @@ export class DIDManager {
         } else if (did.startsWith('did:webvh:')) {
           try {
             const mod = await import('didwebvh-ts') as {
-              resolveDID?: (did: string, options?: { verifier?: ExternalVerifier }) => Promise<{ doc?: Record<string, unknown> }>;
+              resolveDID?: (did: string, options?: { verifier?: ExternalVerifier }) => Promise<{
+                didDocument?: Record<string, unknown> | null;
+                didResolutionMetadata?: { error?: string; message?: string };
+              }>;
             };
             if (mod && typeof mod.resolveDID === 'function') {
-              // didwebvh-ts requires a verifier to validate the DID log's
-              // signatures during resolution; the first log entry is always
-              // verified, so omitting it makes resolveDID throw internally and
-              // every valid did:webvh resolve to null. Ed25519Verifier is the
-              // SDK's spec-compliant verifier for these logs.
+              // Ed25519Verifier is the SDK's spec-compliant verifier for these
+              // logs; passing it keeps verification on the SDK's own Ed25519
+              // implementation rather than the library default.
               const resolved = await mod.resolveDID(did, { verifier: new Ed25519Verifier() });
-              if (resolved && resolved.doc) {
-                result = resolved.doc as unknown as DIDDocument;
+              // didwebvh-ts 3 returns a DID Resolution result instead of
+              // throwing, and may carry a document alongside an error (e.g. an
+              // earlier valid version when a later entry fails). Only an
+              // error-free result counts as resolved.
+              const error = resolved?.didResolutionMetadata?.error;
+              if (error) {
+                if (this.config.enableLogging) {
+                  console.warn(`Failed to resolve did:webvh: ${error}`, resolved.didResolutionMetadata?.message);
+                }
+              } else if (resolved?.didDocument) {
+                result = resolved.didDocument as unknown as DIDDocument;
               }
             }
           } catch (err) {

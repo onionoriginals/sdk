@@ -5,6 +5,7 @@ import { Ed25519Signer } from '../crypto/Signer.js';
 import { DIDDocument, KeyPair, ExternalSigner, ExternalVerifier, VerificationMethod as DidDocVerificationMethod } from '../types/index.js';
 import { StructuredError } from '../utils/telemetry.js';
 import { canonicalWebVHPaths, isWebVHPathSegment } from './webvh-names.js';
+import { buildWebVHCreateDocument, buildWebVHUpdateDocument, type WebVHDocumentFields } from './webvh-document.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { base58 } from '@scure/base';
 /**
@@ -106,6 +107,17 @@ export function assertEd25519WebVHUpdateKeys(updateKeys: readonly string[] | und
       );
     }
   }
+}
+
+/**
+ * The `didDocument` argument for a didwebvh-ts 3 `updateDID` call: the
+ * previous state merged with `fields` under the 2.8.0 rules, or nothing when
+ * no document field changes (the library then carries the state forward).
+ */
+function updateDocumentArgs(currentLog: DIDLog, fields: WebVHDocumentFields): { didDocument?: Record<string, unknown> } {
+  const previousState = currentLog[currentLog.length - 1]?.state ?? {};
+  const didDocument = buildWebVHUpdateDocument(previousState, fields);
+  return didDocument ? { didDocument } : {};
 }
 
 // Type definitions for didwebvh-ts (to avoid module resolution issues)
@@ -512,30 +524,26 @@ export class WebVHManager {
     }
     const signingVmId = verificationMethods[0]?.id ?? '#key-0';
 
-    // Create the DID using didwebvh-ts
+    // Create the DID using didwebvh-ts. Version 3 takes the complete genesis
+    // document and an `address`; buildWebVHCreateDocument applies the 2.8.0
+    // construction rules to the same fields this method always passed.
     const createArgs: Record<string, unknown> = {
-      domain,
+      address: domain,
       signer,
       verifier,
       updateKeys,
-      verificationMethods,
-      context: [
-        'https://www.w3.org/ns/did/v1',
-        'https://w3id.org/security/multikey/v1'
-      ],
       paths: canonicalPaths,
       portable,
-      authentication: [signingVmId],
-      assertionMethod: [signingVmId],
+      didDocument: buildWebVHCreateDocument({
+        verificationMethods,
+        authentication: [signingVmId],
+        assertionMethod: [signingVmId],
+        ...(alsoKnownAs && alsoKnownAs.length > 0 ? { alsoKnownAs } : {}),
+        ...(services && services.length > 0 ? { services } : {}),
+      }),
     };
     if (nextKeyHashes) {
       createArgs.nextKeyHashes = nextKeyHashes;
-    }
-    if (alsoKnownAs && alsoKnownAs.length > 0) {
-      createArgs.alsoKnownAs = alsoKnownAs;
-    }
-    if (services && services.length > 0) {
-      createArgs.services = services;
     }
     const result = await createDID(createArgs);
 
@@ -790,13 +798,11 @@ export class WebVHManager {
       id: did, // Ensure ID doesn't change
     };
 
-    // didwebvh-ts's updateDID never reads a `doc` option: it deep-clones the
-    // last entry's state and only overlays the named options it consumes
-    // (verificationMethods, services, authentication, assertionMethod,
-    // keyAgreement, alsoKnownAs, context). Passing the merged document as
-    // `doc` made every update a signed no-op re-stating the previous state
-    // (issue #338) — translate the merged document into those named options
-    // instead.
+    // Translate the merged document into the SDK's document fields, which
+    // buildWebVHUpdateDocument merges onto the previous state with the
+    // didwebvh-ts 2.8.0 rules this API has always applied. (2.8.0 ignored a
+    // `doc` option, so passing the merged document made every update a signed
+    // no-op, issue #338.)
     const namedOptions = this.deriveUpdateOptions(updatedDoc, updates);
 
     // Update the DID using didwebvh-ts
@@ -804,7 +810,7 @@ export class WebVHManager {
       log: currentLog,
       signer,
       verifier: verifier || undefined,
-      ...namedOptions,
+      ...updateDocumentArgs(currentLog, namedOptions),
     });
 
     // Validate the returned DID document
@@ -1010,16 +1016,15 @@ export class WebVHManager {
   }
 
   /**
-   * Translate the merged document + requested updates into the named options
-   * didwebvh-ts's updateDID actually consumes (verified against
-   * didwebvh-ts@2.8.0): `verificationMethods`, `services`, `authentication`,
-   * `assertionMethod`, `keyAgreement`, `alsoKnownAs`, `context`. Fields the
-   * library cannot express are rejected loudly — silently dropping them is
+   * Translate the merged document + requested updates into the document
+   * fields buildWebVHUpdateDocument applies (the option set didwebvh-ts
+   * 2.8.0's updateDID consumed): `verificationMethods`, `services`,
+   * `authentication`, `assertionMethod`, `keyAgreement`, `alsoKnownAs`,
+   * `context`. Other fields are rejected loudly — silently dropping them is
    * exactly the failure mode of issue #338. Fields the update does not touch
-   * are omitted so they ride the library's own carry-forward of the previous
-   * state, untouched.
+   * are omitted so the previous state carries them forward, untouched.
    */
-  private deriveUpdateOptions(mergedDoc: DIDDocument, updates: Partial<DIDDocument>): Record<string, unknown> {
+  private deriveUpdateOptions(mergedDoc: DIDDocument, updates: Partial<DIDDocument>): WebVHDocumentFields {
     const SUPPORTED_UPDATE_FIELDS = new Set([
       '@context', 'id', 'verificationMethod', 'service', 'authentication',
       'assertionMethod', 'keyAgreement', 'capabilityInvocation',
@@ -1029,8 +1034,8 @@ export class WebVHManager {
       if (!SUPPORTED_UPDATE_FIELDS.has(key)) {
         throw new StructuredError(
           'WEBVH_UNSUPPORTED_UPDATE_FIELD',
-          `updateDIDWebVH cannot apply updates to "${key}": didwebvh-ts updateDID has no ` +
-          'corresponding option, so the change would be silently discarded.'
+          `updateDIDWebVH cannot apply updates to "${key}": updateDIDWebVH has no ` +
+          'corresponding document field, so the change would be silently discarded.'
         );
       }
     }
@@ -1047,7 +1052,7 @@ export class WebVHManager {
       );
     }
 
-    const options: Record<string, unknown> = {};
+    const options: WebVHDocumentFields = {};
 
     if ('@context' in updates) {
       options.context = mergedDoc['@context'];
@@ -1238,7 +1243,7 @@ export class WebVHManager {
       signer,
       verifier: signer,
       updateKeys: [newKeyPair.publicKey],
-      ...documentOptions,
+      ...updateDocumentArgs(currentLog, documentOptions),
     });
 
     if (!this.isDIDDocument(result.doc)) {
@@ -1343,7 +1348,7 @@ export class WebVHManager {
       verifier: signer,
       updateKeys: [activeKeyPair.publicKey],
       nextKeyHashes,
-      ...documentOptions,
+      ...updateDocumentArgs(currentLog, documentOptions),
     });
 
     if (!this.isDIDDocument(result.doc)) {

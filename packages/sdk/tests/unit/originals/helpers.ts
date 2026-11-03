@@ -77,12 +77,13 @@ export function clock(start = Date.parse("2026-10-18T12:00:00Z")) {
 }
 
 /**
- * A did:webvh author DID written by didwebvh-ts (did:webvh 1.0), so a move is
+ * A did:webvh author DID written by didwebvh-ts 3 (did:webvh 1.0), so a move is
  * a real did:webvh portability move (P5.14): `portable` at genesis, then an
  * update to another domain, which didwebvh-ts records with the prior DID in
- * `alsoKnownAs`. Its verification methods keep relative ids, and a move keeps
- * each method's `controller`, as didwebvh-ts writes them. `did` is the
- * identity DID, the DID at genesis.
+ * `alsoKnownAs`. Its verification methods keep relative ids. didwebvh-ts 3
+ * rewrites a method's `controller` that names the prior DID to the new one on
+ * a move (2.8.0 kept it); `keepController` writes the prior shape explicitly.
+ * `did` is the identity DID, the DID at genesis.
  */
 export class WebvhIdentity {
   readonly update: ProofSigner = localSigner("Ed25519", seed(92));
@@ -105,16 +106,29 @@ export class WebvhIdentity {
 
   private readonly verifier = { verify: (signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array) => Promise.resolve(ed25519.verify(signature, message, publicKey)) };
 
-  private methods(keys: Array<{ fragment: string; secret: Uint8Array }>) {
-    return keys.map((k) => ({ id: `#${k.fragment}`, type: "Multikey", publicKeyMultibase: localSigner("Ed25519", k.secret).publicKeyMultibase, purpose: "assertionMethod" as const }));
+  /**
+   * The assertion keys as a complete document for didwebvh-ts 3, which takes
+   * the whole DID document; `{DID}` is the DID the entry is written at.
+   */
+  private document(keys: Array<{ fragment: string; secret: Uint8Array }>, base: Record<string, unknown> = {}) {
+    const verificationMethod = keys.map((k) => ({ id: `#${k.fragment}`, type: "Multikey", controller: "{DID}", publicKeyMultibase: localSigner("Ed25519", k.secret).publicKeyMultibase }));
+    return {
+      "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/multikey/v1"],
+      ...base,
+      id: "{DID}",
+      controller: "{DID}",
+      verificationMethod,
+      authentication: [],
+      assertionMethod: verificationMethod.map((m) => m.id),
+    };
   }
 
   static async create(domain: string, keys: Array<{ fragment: string; secret: Uint8Array }>): Promise<WebvhIdentity> {
     const a = new WebvhIdentity();
     const created = await W.createDID({
-      domain, signer: a.updateSigner(), verifier: a.verifier, updateKeys: [a.update.publicKeyMultibase], portable: true,
-      verificationMethods: a.methods(keys), created: a.time(),
-    } as never);
+      address: domain, signer: a.updateSigner(), verifier: a.verifier, updateKeys: [a.update.publicKeyMultibase], portable: true,
+      didDocument: a.document(keys) as never, created: a.time(),
+    });
     a.log = created.log as unknown as Array<Record<string, unknown>>;
     a.did = created.did;
     return a;
@@ -122,14 +136,24 @@ export class WebvhIdentity {
 
   /** Move to another domain under did:webvh portability. */
   async move(domain: string): Promise<string> {
-    const r = await W.updateDID({ log: this.log as never, signer: this.updateSigner(), verifier: this.verifier, domain, updated: this.time() } as never);
+    const r = await W.updateDID({ log: this.log as never, signer: this.updateSigner(), verifier: this.verifier, address: domain, updated: this.time() });
+    this.log = r.log as unknown as Array<Record<string, unknown>>;
+    return this.versionId;
+  }
+
+  /** Name `did` as every method's controller in a new version (the shape 2.8.0 wrote on a move). */
+  async keepController(did: string): Promise<string> {
+    const state = this.log[this.log.length - 1].state as { verificationMethod: Array<Record<string, unknown>> };
+    const didDocument = { ...state, verificationMethod: state.verificationMethod.map((m) => ({ ...m, controller: did })) };
+    const r = await W.updateDID({ log: this.log as never, signer: this.updateSigner(), verifier: this.verifier, didDocument: didDocument as never, updated: this.time() });
     this.log = r.log as unknown as Array<Record<string, unknown>>;
     return this.versionId;
   }
 
   /** Replace the assertion keys (rotation, P5.10). */
   async rotate(keys: Array<{ fragment: string; secret: Uint8Array }>): Promise<string> {
-    const r = await W.updateDID({ log: this.log as never, signer: this.updateSigner(), verifier: this.verifier, verificationMethods: this.methods(keys), updated: this.time() } as never);
+    const state = this.log[this.log.length - 1].state as Record<string, unknown>;
+    const r = await W.updateDID({ log: this.log as never, signer: this.updateSigner(), verifier: this.verifier, didDocument: this.document(keys, state) as never, updated: this.time() });
     this.log = r.log as unknown as Array<Record<string, unknown>>;
     return this.versionId;
   }

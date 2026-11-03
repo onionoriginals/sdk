@@ -12,6 +12,7 @@ import {
   assertEd25519WebVHUpdateKeys,
   requireWebVHPaths,
 } from "./WebVHManager.js";
+import { buildWebVHCreateDocument, buildWebVHUpdateDocument } from "./webvh-document.js";
 
 // Type for DID log (from didwebvh-ts)
 interface DIDLogEntry {
@@ -316,35 +317,29 @@ export async function createDIDOriginal(
   const updateKeys = options.updateKeys.map(normalizeUpdateKey);
   assertEd25519WebVHUpdateKeys(updateKeys);
 
-  // Create the DID using didwebvh-ts
+  // didwebvh-ts 3 takes the complete genesis document and an `address`
+  // (2.x assembled the document from these option fields and took `domain`).
   const createOptions: Record<string, unknown> = {
-    domain,
+    address: domain,
     signer: options.signer,
     verifier: resolveVerifier(options.signer, options.verifier),
     paths,
     updateKeys,
-    verificationMethods: options.verificationMethods,
-    context: options.context || [
-      "https://www.w3.org/ns/did/v1",
-      "https://w3id.org/security/multikey/v1",
-    ],
+    didDocument: buildWebVHCreateDocument({
+      verificationMethods: options.verificationMethods,
+      context: options.context,
+      alsoKnownAs: options.alsoKnownAs,
+      services: options.services,
+      authentication: options.authentication,
+      assertionMethod: options.assertionMethod,
+      keyAgreement: options.keyAgreement,
+    }),
   };
-  if (options.controller !== undefined)
-    createOptions.controller = options.controller;
-  if (options.alsoKnownAs !== undefined)
-    createOptions.alsoKnownAs = options.alsoKnownAs;
   if (options.portable !== undefined) createOptions.portable = options.portable;
   if (options.nextKeyHashes !== undefined)
     createOptions.nextKeyHashes = options.nextKeyHashes;
-  if (options.authentication !== undefined)
-    createOptions.authentication = options.authentication;
-  if (options.assertionMethod !== undefined)
-    createOptions.assertionMethod = options.assertionMethod;
-  if (options.keyAgreement !== undefined)
-    createOptions.keyAgreement = options.keyAgreement;
-  if (options.services !== undefined) createOptions.services = options.services;
   const result = await createDID(
-    createOptions as Parameters<typeof createDID>[0],
+    createOptions as unknown as Parameters<typeof createDID>[0],
   );
 
   return {
@@ -436,26 +431,27 @@ export async function updateDIDOriginal(
     assertEd25519WebVHUpdateKeys(updateKeys);
     updateOptions.updateKeys = updateKeys;
   }
-  if (options.verificationMethods !== undefined)
-    updateOptions.verificationMethods = options.verificationMethods;
-  if (options.services !== undefined) updateOptions.services = options.services;
-  if (options.controller !== undefined)
-    updateOptions.controller = options.controller;
-  if (options.context !== undefined) updateOptions.context = options.context;
-  if (options.alsoKnownAs !== undefined)
-    updateOptions.alsoKnownAs = options.alsoKnownAs;
   if (options.portable !== undefined) updateOptions.portable = options.portable;
   if (options.nextKeyHashes !== undefined)
     updateOptions.nextKeyHashes = options.nextKeyHashes;
-  if (options.authentication !== undefined)
-    updateOptions.authentication = options.authentication;
-  if (options.assertionMethod !== undefined)
-    updateOptions.assertionMethod = options.assertionMethod;
-  if (options.keyAgreement !== undefined)
-    updateOptions.keyAgreement = options.keyAgreement;
+  // didwebvh-ts 3 takes the complete next document; omitted when no document
+  // field changes, so the library carries the previous state forward.
+  const lastState = options.log[options.log.length - 1]?.state ?? {};
+  const didDocument = buildWebVHUpdateDocument(lastState, {
+    verificationMethods: options.verificationMethods,
+    services: options.services,
+    controller: options.controller,
+    context: options.context,
+    alsoKnownAs: options.alsoKnownAs,
+    authentication: options.authentication,
+    assertionMethod: options.assertionMethod,
+    keyAgreement: options.keyAgreement,
+  });
+  if (didDocument !== undefined) updateOptions.didDocument = didDocument;
   // Reuse the already-validated/canonical domain computed above (#792) —
-  // do not call requireWebVHDomain a second time here.
-  if (domain !== undefined) updateOptions.domain = domain;
+  // do not call requireWebVHDomain a second time here. didwebvh-ts 3 names
+  // the new location `address`.
+  if (domain !== undefined) updateOptions.address = domain;
 
   // Update the DID using didwebvh-ts
   const result = await updateDID(updateOptions);

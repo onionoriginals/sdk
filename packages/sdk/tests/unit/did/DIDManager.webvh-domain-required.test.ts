@@ -127,13 +127,15 @@ describe('createDIDWebVH applies the WebVH domain canonicalizer', () => {
     expect(result.did).toMatch(/:example\.com$/);
   }, 15000);
 
-  test('createDIDWebVH and migrateToDIDWebVH accept localhost[:port] for identity dev', async () => {
+  // did:webvh 1.0 names a fully qualified domain. @originals/vh never parsed
+  // a localhost did:webvh, and didwebvh-ts 3 no longer mints one, so the SDK
+  // refuses it at its own seam rather than failing inside the library.
+  test('createDIDWebVH and migrateToDIDWebVH reject localhost[:port] with INVALID_DOMAIN', async () => {
     const manager = new DIDManager({ ...baseConfig });
-    expect((await manager.createDIDWebVH({ domain: 'localhost' })).did).toMatch(/:localhost$/);
-    expect((await manager.createDIDWebVH({ domain: 'LOCALHOST:3000' })).did).toMatch(/:localhost%3A3000$/);
-    const webDoc = (await manager.migrateToDIDWebVH(sourceDoc(), 'localhost:8080')).didDocument;
-    expect(webDoc.id).toContain(':localhost%3A8080:');
-  }, 15000);
+    expect(await codeOf(() => manager.createDIDWebVH({ domain: 'localhost' }))).toBe('INVALID_DOMAIN');
+    expect(await codeOf(() => manager.createDIDWebVH({ domain: 'LOCALHOST:3000' }))).toBe('INVALID_DOMAIN');
+    expect(await codeOf(() => manager.migrateToDIDWebVH(sourceDoc(), 'localhost:8080'))).toBe('INVALID_DOMAIN');
+  });
 
   test('createDIDWebVH accepts a punycode host for an identity DID', async () => {
     const manager = new DIDManager({ ...baseConfig });

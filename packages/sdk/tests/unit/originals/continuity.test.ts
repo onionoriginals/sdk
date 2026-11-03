@@ -60,8 +60,11 @@ describe("C12-132, C12-133: create, move the author, rotate, append, package, im
     expect(alice.location).not.toBe(alice.did);
     expect(alice.location.split(":")[2]).toBe(alice.did.split(":")[2]);
 
-    // C12-135: didwebvh-ts keeps orig-1's controller as the old DID across the move, so at the
-    // move's version orig-1 does not meet P5.3; the commit is refused and nothing changes.
+    // C12-135: a version after the move whose orig-1 still names the old DID as controller.
+    // didwebvh-ts 3 rewrites the controller on the move itself (2.8.0 kept the old DID), so
+    // that version is written explicitly. orig-1 does not meet P5.3 there; the commit is
+    // refused and nothing changes.
+    await alice.keepController(alice.did);
     const moved = alice.ref("orig-1");
     expect(moved.verificationMethod.startsWith(`${alice.location}#`)).toBe(true);
     const refused = await sdk.edit(did, { parent: v2, resource: { bytes: B3 }, author: moved, signer: alice.signer(moved, K1) }).catch((e: unknown) => e);
@@ -112,6 +115,20 @@ describe("C12-132, C12-133: create, move the author, rotate, append, package, im
     const old = alice.ref("orig-1", alice.log[0].versionId as string);
     const stale = await fresh.edit(did, { parent: continued.original.checkpoint, name: "renamed", author: old, signer: alice.signer(old, K1) }).catch((e: unknown) => e);
     expect(stale).toBeInstanceOf(OriginalsError);
+  });
+});
+
+describe("C12-132: a didwebvh-ts 3 move carries each method's controller to the new DID", () => {
+  test("orig-1 at the move's version names the moved DID as controller and signs a new entry (P5.3, P5.14)", async () => {
+    const { alice, sdk, did, v2 } = await journey();
+    await alice.move("new.example.org");
+    const state = alice.log[alice.log.length - 1].state as { verificationMethod: Array<{ id: string; controller: string }> };
+    expect(state.verificationMethod.map((m) => m.controller)).toEqual([alice.location]);
+    const moved = alice.ref("orig-1");
+    const appended = await sdk.edit(did, { parent: v2, resources: [{ id: "photo", bytes: B3 }], author: moved, signer: alice.signer(moved, K1) });
+    expect(appended.status).toBe("committed");
+    expect(appended.original.report.authorBinding.status).toBe("valid");
+    expect(appended.original.report.identityEvidence).toMatchObject({ author: alice.did, latestVersionId: alice.versionId });
   });
 });
 
