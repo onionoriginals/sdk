@@ -11,7 +11,7 @@ options. `createDIDOriginal`, `updateDIDOriginal` and the `WebVHManager`
 create, update, rotate and recover methods keep their options and build that
 document with the 2.8.0 rules, so a new DID's genesis entry is unchanged.
 
-Rejected inputs (these DIDs could not be verified by `@originals/vh` before):
+Inputs now rejected:
 
 - A did:webvh domain must be a fully qualified DNS name. `localhost[:port]`
   and other single-label hosts are rejected with `INVALID_DOMAIN`.
