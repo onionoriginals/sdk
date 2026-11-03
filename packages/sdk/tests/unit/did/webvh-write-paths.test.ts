@@ -30,11 +30,16 @@ async function resolveFromLog(log: unknown): Promise<DIDDocument> {
     resolveDIDFromLog: (
       log: unknown,
       options?: Record<string, unknown>
-    ) => Promise<{ did: string; doc: Record<string, unknown> | null }>;
+    ) => Promise<{
+      didDocument: Record<string, unknown> | null;
+      didResolutionMetadata: { error?: string; message?: string };
+    }>;
   };
+  // didwebvh-ts 3 returns a DID Resolution result rather than throwing.
   const resolved = await mod.resolveDIDFromLog(log, { verifier: new Ed25519Verifier() });
-  expect(resolved.doc).toBeTruthy();
-  return resolved.doc as unknown as DIDDocument;
+  expect(resolved.didResolutionMetadata.error).toBeUndefined();
+  expect(resolved.didDocument).toBeTruthy();
+  return resolved.didDocument as unknown as DIDDocument;
 }
 
 /** Relationship entries as string references (embedded VMs → their id). */

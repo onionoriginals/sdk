@@ -55,6 +55,22 @@ describe("did:webvh resolution", () => {
     expect(services.find((s) => s.id === `${fixture.did}#whois`)?.serviceEndpoint).toBe("https://example.com/whois.vp");
   });
 
+  test("resolves didwebvh-ts 3.0.0 output, with witnesses and the implicit services", async () => {
+    const fixture3 = parseJson(readFileSync(new URL("./fixtures/didwebvh-ts-3.0.0.json", import.meta.url), "utf8")) as unknown as typeof fixture;
+    const result = await resolve(fixture3.did, { didLog: serializeLog(fixture3.logA), didWitness: fixture3.witnessA });
+    expect(result.didResolutionMetadata.error).toBeUndefined();
+    expect(result.didDocumentMetadata.versionId).toBe(fixture3.logA[3].versionId);
+    expect(result.didDocument?.alsoKnownAs).toEqual(["https://example.com/alice"]);
+    const services = result.didDocument?.service as JsonObject[];
+    expect(services.find((s) => s.id === `${fixture3.did}#files`)?.serviceEndpoint).toBe("https://example.com/");
+    expect(services.find((s) => s.id === `${fixture3.did}#whois`)?.serviceEndpoint).toBe("https://example.com/whois.vp");
+    const deactivated = (fixture3.logC[0].state as JsonObject).id as string;
+    // deactivateDID takes no timestamp in 3.x, so resolve as of a day after the entry was written.
+    const gone = await resolve(deactivated, { didLog: fixture3.logC, now: Date.parse(fixture3.logC[1].versionTime) + 86_400_000 });
+    expect(gone.didDocument).toBeNull();
+    expect(gone.didDocumentMetadata.deactivated).toBe(true);
+  });
+
   test("a deactivated did:webvh returns no document", async () => {
     const did = (fixture.logC[0].state as JsonObject).id as string;
     const result = await resolve(did, { didLog: fixture.logC });

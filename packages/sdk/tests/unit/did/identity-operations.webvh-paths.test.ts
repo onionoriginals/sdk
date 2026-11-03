@@ -43,7 +43,7 @@ async function create(paths: unknown) {
     verifier: s.signer as any,
     updateKeys: [s.vmId],
     verificationMethods: [
-      { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: s.keyPair.publicKey },
+      { id: '#key-0', type: 'Multikey', publicKeyMultibase: s.keyPair.publicKey },
     ],
     paths: paths as string[],
   });

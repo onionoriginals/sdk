@@ -166,7 +166,7 @@ describe('WebVHManager — pre-rotation key rotation chain', () => {
     // This is the definitive cross-check that computeNextKeyHash() matches
     // didwebvh-ts's own deriveNextKeyHash(): resolveDIDFromLog runs
     // newKeysAreInNextKeys() during resolution, which derives the hash of each
-    // updateKey with the LIBRARY's algorithm and throws if it isn't present in
+    // updateKey with the LIBRARY's algorithm and rejects the log if it isn't present in
     // the previous entry's committed nextKeyHashes. If our committed hashes were
     // computed with a different preimage/encoding, resolution would reject the
     // chain — so a clean resolve proves an external verifier accepts it.
@@ -186,10 +186,16 @@ describe('WebVHManager — pre-rotation key rotation chain', () => {
     }
 
     const mod = (await import('didwebvh-ts')) as unknown as {
-      resolveDIDFromLog: (log: unknown, options: { verifier: unknown }) => Promise<{ doc: { id: string } }>;
+      resolveDIDFromLog: (log: unknown, options: { verifier: unknown }) => Promise<{
+        didDocument: { id: string } | null;
+        didResolutionMetadata: { error?: string; message?: string };
+      }>;
     };
+    // didwebvh-ts 3 reports a rejected chain in didResolutionMetadata instead
+    // of throwing, so a clean resolve means no error AND the expected document.
     const res = await mod.resolveDIDFromLog(log, { verifier: new Ed25519Verifier() });
-    expect(res.doc.id).toBe(created.did);
+    expect(res.didResolutionMetadata.error).toBeUndefined();
+    expect(res.didDocument?.id).toBe(created.did);
   }, 60000);
 
   test('each rotation entry commits the next key hash correctly', async () => {

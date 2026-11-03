@@ -416,8 +416,8 @@ describe("author binding (P5.2, P5.3, P5.8, P5.11)", () => {
     expect(r.reasons).toContain("author-did-deactivated");
   });
 
-  test("a did:webvh author from didwebvh-ts signs Originals with its assertionMethod key", async () => {
-    const fx = parseJson(readFileSync(new URL("./fixtures/didwebvh-ts-2.8.0.json", import.meta.url), "utf8")) as unknown as { did: string; logA: LogEntry[]; witnessA: unknown[] };
+  test.each(["2.8.0", "3.0.0"])("a did:webvh author from didwebvh-ts %s signs Originals with its assertionMethod key", async (version) => {
+    const fx = parseJson(readFileSync(new URL(`./fixtures/didwebvh-ts-${version}.json`, import.meta.url), "utf8")) as unknown as { did: string; logA: LogEntry[]; witnessA: unknown[] };
     const key = seeded(21); // the fixture's assertionMethod key
     const vm = ((fx.logA[3].state.verificationMethod as JsonObject[])[0].id) as string;
     const ref: AuthorRef = { did: fx.did, verificationMethod: vm, versionId: fx.logA[3].versionId };

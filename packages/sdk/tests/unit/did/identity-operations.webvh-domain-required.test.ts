@@ -67,7 +67,7 @@ describe('#678 — createDIDOriginal refuses to guess/mint at a blank domain', (
           verifier: signer as any,
           updateKeys: [keyPair.publicKey],
           verificationMethods: [
-            { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: keyPair.publicKey },
+            { id: '#key-0', type: 'Multikey', publicKeyMultibase: keyPair.publicKey },
           ],
         }),
       );
@@ -83,7 +83,7 @@ describe('#678 — createDIDOriginal refuses to guess/mint at a blank domain', (
       verifier: signer as any,
       updateKeys: [keyPair.publicKey],
       verificationMethods: [
-        { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: keyPair.publicKey },
+        { id: '#key-0', type: 'Multikey', publicKeyMultibase: keyPair.publicKey },
       ],
     });
     expect(result.did).toMatch(/^did:webvh:/);
@@ -101,7 +101,7 @@ describe('#678 — createDIDOriginal refuses to guess/mint at a blank domain', (
       verifier: signer as any,
       updateKeys: [keyPair.publicKey],
       verificationMethods: [
-        { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: keyPair.publicKey },
+        { id: '#key-0', type: 'Multikey', publicKeyMultibase: keyPair.publicKey },
       ],
     });
     expect(result.did).toMatch(/:example\.com$/);
@@ -123,7 +123,7 @@ describe('createDIDOriginal/updateDIDOriginal apply the WebVH domain canonicaliz
         verifier: counting as any,
         updateKeys: [keyPair.publicKey],
         verificationMethods: [
-          { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: keyPair.publicKey },
+          { id: '#key-0', type: 'Multikey', publicKeyMultibase: keyPair.publicKey },
         ],
       });
     } catch (err) {
@@ -144,7 +144,7 @@ describe('createDIDOriginal/updateDIDOriginal apply the WebVH domain canonicaliz
       updateKeys: [keyPair.publicKey],
       portable: true,
       verificationMethods: [
-        { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: keyPair.publicKey },
+        { id: '#key-0', type: 'Multikey', publicKeyMultibase: keyPair.publicKey },
       ],
     });
     const updated = await updateDIDOriginal({
@@ -170,7 +170,7 @@ describe('#678 — updateDIDOriginal refuses to guess/mint or silently drop a do
         verifier: signer as any,
         updateKeys: [keyPair.publicKey],
         verificationMethods: [
-          { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: keyPair.publicKey },
+          { id: '#key-0', type: 'Multikey', publicKeyMultibase: keyPair.publicKey },
         ],
       });
       await expectDomainRequired(() =>
@@ -195,7 +195,7 @@ describe('#678 — updateDIDOriginal refuses to guess/mint or silently drop a do
       updateKeys: [keyPair.publicKey],
       portable: true,
       verificationMethods: [
-        { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: keyPair.publicKey },
+        { id: '#key-0', type: 'Multikey', publicKeyMultibase: keyPair.publicKey },
       ],
     });
     const updated = await updateDIDOriginal({
@@ -221,7 +221,7 @@ describe('#678 — updateDIDOriginal refuses to guess/mint or silently drop a do
       updateKeys: [keyPair.publicKey],
       portable: true,
       verificationMethods: [
-        { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: keyPair.publicKey },
+        { id: '#key-0', type: 'Multikey', publicKeyMultibase: keyPair.publicKey },
       ],
     });
     const updated = await updateDIDOriginal({
@@ -244,7 +244,7 @@ describe('#678 — updateDIDOriginal refuses to guess/mint or silently drop a do
       verifier: signer as any,
       updateKeys: [keyPair.publicKey],
       verificationMethods: [
-        { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: keyPair.publicKey },
+        { id: '#key-0', type: 'Multikey', publicKeyMultibase: keyPair.publicKey },
       ],
     });
     const updated = await updateDIDOriginal({
@@ -282,7 +282,7 @@ describe('#792 — updateDIDOriginal validates domain before resolving the verif
         verifier: verifyingSigner as any,
         updateKeys: [keyPair.publicKey],
         verificationMethods: [
-          { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: keyPair.publicKey },
+          { id: '#key-0', type: 'Multikey', publicKeyMultibase: keyPair.publicKey },
         ],
       });
       const { signer: signOnlySigner } = await makeSignOnlySigner();
@@ -309,7 +309,7 @@ describe('#792 — updateDIDOriginal validates domain before resolving the verif
       verifier: verifyingSigner as any,
       updateKeys: [keyPair.publicKey],
       verificationMethods: [
-        { id: '#key-0', type: 'Multikey', controller: '', publicKeyMultibase: keyPair.publicKey },
+        { id: '#key-0', type: 'Multikey', publicKeyMultibase: keyPair.publicKey },
       ],
     });
     const { signer: signOnlySigner } = await makeSignOnlySigner();

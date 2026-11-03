@@ -58,6 +58,39 @@ function failedAt(result: LogVerification, index: number, code: string) {
   expect(result.entries.length).toBe(index);
 }
 
+const fixture3 = parseJson(
+  readFileSync(new URL("./fixtures/didwebvh-ts-3.0.0.json", import.meta.url), "utf8"),
+) as unknown as { logA: LogEntry[]; witnessA: JsonObject[]; logC: LogEntry[]; keys: { witnesses: string[] } };
+
+describe("VH-Log engine against didwebvh-ts 3.0.0 output", () => {
+  test("verifies pre-rotation, rotation, witness activation and a witnessed update", async () => {
+    const result = await verify(fixture3.logA, fixture3.witnessA);
+    expect(result.failure).toBeUndefined();
+    expect(result.entries.map((e) => e.versionNumber)).toEqual([1, 2, 3, 4]);
+    expect(result.scid).toBe(fixture3.logA[0].parameters.scid as string);
+    expect(result.entries.map((e) => e.witnessed)).toEqual([false, false, true, true]);
+    // 3.x omits an unchanged witness parameter (2.8.0 wrote witness {} on every update),
+    // so the list activated by entry 3 is still in force after entry 4.
+    expect(fixture3.logA[3].parameters.witness).toBeUndefined();
+    expect(result.active.witness).toEqual({ threshold: 2, witnesses: fixture3.keys.witnesses.map((id) => ({ id })) });
+    expect(result.deactivated).toBe(false);
+  });
+
+  test("an entry without a threshold of witness proofs ends the valid prefix", async () => {
+    failedAt(await verify(fixture3.logA, []), 2, "WITNESS_THRESHOLD");
+    const [w3] = fixture3.witnessA as unknown as Array<{ versionId: string; proof: DataIntegrityProof[] }>;
+    failedAt(await verify(fixture3.logA, [{ versionId: w3.versionId, proof: [w3.proof[0]] }]), 2, "WITNESS_THRESHOLD");
+  });
+
+  test("a deactivated log is reported deactivated", async () => {
+    // deactivateDID takes no timestamp in 3.x, so verify as of a day after the entry was written.
+    const now = Date.parse(fixture3.logC[1].versionTime) + 86_400_000;
+    const result = await verify(fixture3.logC, [], webvhLike, { now });
+    expect(result.failure).toBeUndefined();
+    expect(result.deactivated).toBe(true);
+  });
+});
+
 describe("VH-Log engine against didwebvh-ts 2.8.0 output", () => {
   test("verifies pre-rotation, rotation, witness activation and witness removal", async () => {
     const result = await verify(fixture.logA);

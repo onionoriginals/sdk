@@ -135,13 +135,13 @@ describe('DIDManager', () => {
 
   test('migrateToDIDWebVH percent-encodes a domain port so it stays one authority segment', async () => {
     const peer: DIDDocument = { '@context': ['https://www.w3.org/ns/did/v1'], id: 'did:peer:abc123' };
-    const web = (await sdk.did.migrateToDIDWebVH(peer, 'localhost:8080')).didDocument;
+    const web = (await sdk.did.migrateToDIDWebVH(peer, 'example.com:8080')).didDocument;
     // The port colon must be percent-encoded (%3A), otherwise splitting the DID
     // on ':' would parse `8080` as a path segment.
     const parts = web.id.split(':');
     // did / webvh / <scid> / <authority> / <slug> — exactly one authority segment.
     expect(parts.length).toBe(5);
-    expect(decodeURIComponent(parts[3])).toBe('localhost:8080');
+    expect(decodeURIComponent(parts[3])).toBe('example.com:8080');
     // saveDIDLog decodes didParts[3] as the authority; the slug (not the port)
     // must be the only path segment.
     expect(parts.slice(4)).toEqual(['abc123']);

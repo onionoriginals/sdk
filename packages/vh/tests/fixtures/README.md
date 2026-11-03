@@ -9,6 +9,7 @@ one from this package's own output would defeat the purpose, so don't.
 | `bip340-jcs-2025.didbtcr2.json` | `generators/gen-bip340.mjs` run against `@did-btcr2/cryptosuite@10.0.1`, installed in a scratch directory outside the repository |
 | `vh-interop/` | `brianorwhatever/vh@f5176785`, `vectors/`, unmodified (see `vh-interop/PIN.md`) |
 | `didwebvh-ts-2.8.0.json` | `generators/gen-webvh.mjs` run against `didwebvh-ts@2.8.0`. SCIDs, entry hashes, `eddsa-jcs-2022` hashing, pre-rotation and witness proofs all come from that library; the script supplies only seeded Ed25519 keys |
+| `didwebvh-ts-3.0.0.json` | `generators/gen-webvh-3.mjs` run against `didwebvh-ts@3.0.0`: the same scenario through the 3.x API, where the caller supplies the complete DID document. Update entries omit an unchanged `witness` parameter, which 2.8.0 wrote as `{}` |
 
 Each generator takes the directory holding the library's `node_modules` as its
 argument, for example `node gen-webvh.mjs /path/to/checkout`. All keys are

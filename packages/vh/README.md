@@ -46,7 +46,8 @@ Tests use independently produced fixtures, never vectors this code generated:
 - `bip340-jcs-2025` proofs from `@did-btcr2/cryptosuite@10.0.1`, covering keys
   with both y parities;
 - did:webvh 1.0 logs from `didwebvh-ts@2.8.0`, covering pre-rotation, rotation,
-  witness activation, witness removal and deactivation.
+  witness activation, witness removal and deactivation, and the same scenario
+  from `didwebvh-ts@3.0.0`, whose updates keep the active witnesses.
 
 The interop profile differs from Originals in places. A strict parse rejects
 duplicate keys and lossy integers, and a specialisation rejects unknown

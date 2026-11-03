@@ -103,7 +103,9 @@ function assertWebVHDnsHost(host: string, code: string, allowPunycode = false): 
 /**
  * Trim, lowercase and validate an authoring-input WebVH host[:port]; returns
  * the WHATWG `URL#host` spelling (default :443 dropped, port leading zeros
- * removed). `identity` admits `localhost` and punycode hosts.
+ * removed). `identity` admits punycode hosts. Neither policy admits
+ * `localhost` or another single-label host: did:webvh 1.0 names a fully
+ * qualified domain, which `@originals/vh` and didwebvh-ts >= 3 both enforce.
  */
 export function canonicalizeWebVHDomain(
   domain: string,
@@ -119,7 +121,6 @@ export function canonicalizeWebVHDomain(
     `Invalid WebVH domain: ${JSON.stringify(domain)} is not host[:port] with a port of 1-65535`,
   );
   const host = match[1];
-  if (!(options.identity && host === 'localhost'))
-    assertWebVHDnsHost(host, 'INVALID_DOMAIN', options.identity);
+  assertWebVHDnsHost(host, 'INVALID_DOMAIN', options.identity);
   return port === 443 ? host : `${host}:${port}`;
 }

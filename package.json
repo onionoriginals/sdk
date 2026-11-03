@@ -58,8 +58,7 @@
     "shell-quote": "^1.11.0",
     "launch-editor": "^2.14.2",
     "undici": "^6.29.1",
-    "minimatch": "^11.0.4",
-    "glob": "^14.0.3"
+    "minimatch": "^11.0.4"
   },
   "engines": {
     "node": ">=20.10.0"
