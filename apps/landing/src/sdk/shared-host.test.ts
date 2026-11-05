@@ -440,7 +440,7 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     return { ...env, v2, c, hostC, didPath };
   }
 
-  test('C12-127: an entry signed with a key the latest author DID state removed is refused, never published (P7.9)', async () => {
+  test('C12-41: an entry signed with a key the latest author DID state removed is refused at the host, never published (P7.9)', async () => {
     const env = await rotated(false);
     // The author saves legitimately with key 1; the host now holds the v2 author DID log.
     expect((await env.c.submit(await env.edit(env.c, THEIRS, env.author.second), env.hostC)).status).toBe('accepted');
@@ -454,7 +454,7 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     expect(env.hostedLines()).toEqual(before);
   });
 
-  test('C12-127: an entry by an author whose DID the host knows is deactivated is refused (P6.5)', async () => {
+  test('C12-48: an entry by an author whose DID the host knows is deactivated is refused at the host (P6.5, P7.9)', async () => {
     const env = await rotated(true);
     // The owner uploads the deactivated author DID log, which extends the stored one.
     expect((await env.h.fetchAs(SUB)(new Request(`http://app.local/api/originals/host/${encodeURIComponent(env.didPath)}`, { method: 'PUT', body: env.v2.log as string }))).status).toBe(200);

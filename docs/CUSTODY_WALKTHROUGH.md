@@ -452,14 +452,16 @@ P6.8 sentence saying that a candidate a host refuses because its entry is
 historically authorized only (P7.9) is kept with its draft, labelled refused
 with the reason, and is no longer pending. In the SDK, add a refused outcome
 with a reason to `HostAnswer`, and map the landing's 422 to it in
-`landingSharedHost`.
+`landingSharedHost`. The spec half is proposed in
+[aviarytech/originals-spec#55](https://github.com/aviarytech/originals-spec/pull/55)
+(draft, for an owner decision). The SDK half waits on it (spec first) and is tracked in #1036.
 
 **F2. No section 12 row covers a host refusing a historically-authorized-only
-submission.** C12-41 covers the verifier's report. The landing test
-`apps/landing/src/sdk/shared-host.test.ts` cites C12-127 for the host
-refusal, but C12-127 is "Host changes or re-signs a submitted entry". Step 4
-cites C12-41 for both. A spec row for the host behaviour would go with the F1
-spec change.
+submission.** C12-41 covers the verifier's report, so step 4 cites it for
+both. originals-spec#55 proposes a row for the host behaviour. The landing
+test `apps/landing/src/sdk/shared-host.test.ts` used to cite C12-127 ("Host
+changes or re-signs a submitted entry") for these refusals. It now cites
+C12-41 and C12-48.
 
 **Side note (not part of the issue).** Step 2's refusal of the identity key
 has category `invalid-evidence`, code `COMMIT_VERIFICATION_FAILED`, while the
