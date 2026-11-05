@@ -213,7 +213,7 @@ Each PR is registered with `link_pull_request` and nothing gets merged without y
 `@originals/sdk` depends on it from PR 4 on. Releasing still needs the owner's
 approval. Before the first release that includes `@originals/vh`, the owner
 must also confirm npm trusted publishing for the new package
-(`docs/RELEASE_TOKEN_ROTATION.md`). npm may need the package to exist before
+(`docs/NPM_TRUSTED_PUBLISHING.md`). npm may need the package to exist before
 a trusted publisher can be registered for it.
 
 ## 4. Spec findings (rule ID → issue → proposed fix)

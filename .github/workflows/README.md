@@ -23,14 +23,8 @@ package (`@originals/vh`, `@originals/sdk`, `@originals/auth`) — org
 `publish` job's first step refuses to run until the repository variable
 `NPM_TRUSTED_PUBLISHING_READY` is `true`, since there's no read-only way for
 CI to confirm that registration itself. See
-[`docs/RELEASE_TOKEN_ROTATION.md`](../../docs/RELEASE_TOKEN_ROTATION.md) for
-the full setup and current migration status.
-
-#### `NPM_TOKEN` (fallback only, not read by the automated publish step)
-An npm granular access token kept configured as a manual/emergency fallback
-until OIDC trusted publishing has been proven on a real release. The `release.yml`
-publish step deliberately does not reference it, so it cannot silently mask an
-OIDC misconfiguration. See `docs/RELEASE_TOKEN_ROTATION.md` for rotation steps.
+[`docs/NPM_TRUSTED_PUBLISHING.md`](../../docs/NPM_TRUSTED_PUBLISHING.md) for
+the full setup. There is no stored npm token.
 
 #### `CHANGESETS_TOKEN` (optional but recommended)
 A PAT (or GitHub App token) used to push the "Version Packages" PR branch. Pushes
