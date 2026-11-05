@@ -1,6 +1,6 @@
 /** Integration coverage for the process-owned single-writer lock. */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync, utimesSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { acquireInstanceLock, LOCK_FILENAME, MultipleInstanceError } from '../src/instance-lock.js';
@@ -21,11 +21,12 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-async function startHolder() {
+async function startHolder(options = '{}') {
   const child = Bun.spawn([process.execPath, '-e', `
     import { acquireInstanceLock, releaseOnExit } from ${JSON.stringify(modulePath)};
+    import { writeFileSync, existsSync } from 'node:fs';
     const lock = await acquireInstanceLock(${JSON.stringify(dir)});
-    releaseOnExit(lock);
+    releaseOnExit(lock, ${options});
     console.log('LOCKED');
     process.stdin.resume();
   `], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
@@ -88,5 +89,28 @@ describe('instance lock', () => {
       child.kill('SIGCONT');
     }
     await expect(acquireInstanceLock(dir)).rejects.toBeInstanceOf(MultipleInstanceError);
+  });
+
+  test('graceful shutdown runs close first, then releases ownership', async () => {
+    const marker = join(dir, 'closed');
+    // close() records whether the lock was still held when it ran.
+    const child = await startHolder(`{ close: async () => {
+      const { acquireInstanceLock: a } = await import(${JSON.stringify(modulePath)});
+      let held = false; try { await (await a(${JSON.stringify(dir)})).release(); } catch { held = true; }
+      writeFileSync(${JSON.stringify(marker)}, String(held));
+    } }`);
+    child.kill('SIGTERM');
+    expect(await child.exited).toBe(0);
+    expect(readFileSync(marker, 'utf8')).toBe('true');
+    const successor = await acquireInstanceLock(dir);
+    await successor.release();
+  });
+
+  test('a close that never finishes is bounded, and ownership is still released', async () => {
+    const child = await startHolder(`{ close: () => new Promise(() => {}), timeoutMs: 50 }`);
+    child.kill('SIGTERM');
+    expect(await child.exited).toBe(0);
+    const successor = await acquireInstanceLock(dir);
+    await successor.release();
   });
 });
