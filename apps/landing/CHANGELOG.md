@@ -1,5 +1,55 @@
 # @originals/landing
 
+## 0.5.1
+
+### Patch Changes
+
+- 1e7dbf1: Update dependencies from the open Dependabot PRs (#1013–#1019, #1021, #1031):
+  `@noble/ed25519` 3.2.0, `@noble/secp256k1` 3.2.0, `@scure/btc-signer` 2.4.1,
+  `bitcoinjs-lib` 7.0.5, `cborg` 6.2.1, `micro-ordinals` 0.4.0, `uuid` 14.0.3,
+  `@turnkey/sdk-server` 8.8.0, and `react`/`react-dom` 19.3.1 with their types.
+
+  TypeScript stays on 6.0.3 because typescript-eslint 8.72.1 supports only
+  `typescript <6.1.0`. The lockfile holds `@turnkey/sdk-server` at 8.8.0: 8.9.0
+  sends a `CREATE_SUB_ORGANIZATION_V8` activity but reads
+  `createSubOrganizationResultV9`, so it finds no sub-organization ID in a V8
+  result (`turnkey-client` test "reads the new sub-org ID from the installed SDK
+  V8 response").
+
+- 5814ad8: Upgrade `didwebvh-ts` to 3.0.0. Its dependencies no longer include `glob`, so
+  `bun audit --prod` no longer reports GHSA-3g3m-2fjr-6pw4 through it.
+
+  didwebvh-ts 3 takes the complete DID document instead of assembling one from
+  options. `createDIDOriginal`, `updateDIDOriginal` and the `WebVHManager`
+  create, update, rotate and recover methods keep their options and build that
+  document with the 2.8.0 rules, so a new DID's genesis entry is unchanged.
+
+  Inputs now rejected:
+
+  - A did:webvh domain must be a fully qualified DNS name. `localhost[:port]`
+    and other single-label hosts are rejected with `INVALID_DOMAIN`.
+    didwebvh-ts 3 no longer mints such a DID, and `@originals/vh` never
+    verified one.
+  - A verification method's `controller` must be a non-empty DID or omitted
+    (the DID then controls it). An empty or blank `controller` is rejected with
+    `WEBVH_VERIFICATION_METHOD_CONTROLLER_INVALID`; 2.8.0 published it verbatim.
+
+  Behaviour changes in written logs:
+
+  - An update that does not change witnesses omits the `witness` parameter, so
+    the active witnesses stay in force. 2.8.0 wrote `witness: {}` on every
+    update, which turned witnessing off.
+  - Moving a portable DID rewrites the controller of each verification method
+    that names the old DID to the new DID. 2.8.0 left the old DID there.
+  - `DIDManager.resolveDID` reads didwebvh-ts 3's DID Resolution result and
+    treats any `didResolutionMetadata.error` as unresolved, even when a document
+    accompanies it.
+
+- Updated dependencies [1e7dbf1]
+- Updated dependencies [5814ad8]
+  - @originals/sdk@6.1.0
+  - @originals/auth@4.0.4
+
 ## 0.5.0
 
 ### Minor Changes
