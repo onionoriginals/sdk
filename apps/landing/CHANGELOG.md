@@ -1,5 +1,12 @@
 # @originals/landing
 
+## 0.5.2
+
+### Patch Changes
+
+- Updated dependencies [b5a95d0]
+  - @originals/host@0.4.0
+
 ## 0.5.1
 
 ### Patch Changes

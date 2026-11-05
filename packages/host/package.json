@@ -1,6 +1,6 @@
 {
   "name": "@originals/host",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Protocol-side server for Originals hosting: did:webvh hosted layout, durable per-user Originals store and routes, shared-host saves, the JSON-LD context route, and Bitcoin inscription tracking, anchoring and reconciliation. Bun runtime.",
   "type": "module",
   "main": "./dist/index.js",
