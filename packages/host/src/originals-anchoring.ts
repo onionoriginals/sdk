@@ -25,6 +25,12 @@
  *   re-verifies them (P9.18). It never prepares a pair: that needs the
  *   holder's signature, so it is the browser's next step.
  *
+ * - `close` waits for each Original's queued work, then closes every store
+ *   this process opened, which removes their `.lock` files. Call it before the
+ *   process exits (see `releaseOnExit`'s `close` option): a FileStore lock
+ *   left behind names this host, and the next container on a shared volume
+ *   has another hostname, so it could never break that lock itself.
+ *
  * Layout: `<dataDir>/originals-anchoring/<sub>/<sha256(did)>/` holds `did`,
  * `store/` (a FileStore) and `recovery/` (a fileRecoveryStore). Recovery
  * records hold signed spending transactions: the data directory is private.
@@ -174,13 +180,34 @@ function wellFormedPair(pair: unknown): pair is PreparedEntryInscription {
 
 interface Held {
   sdk: OriginalsSDK;
+  store: FileStore;
   recoveryStore: ReturnType<typeof fileRecoveryStore>;
 }
+
+/**
+ * The refusal for a store that could not be opened, such as STORE_LOCKED: a
+ * 503 the browser keeps its pair through and resends. The store's message
+ * names server paths and the account's sub, so only the code leaves the server.
+ */
+function unopened(error: unknown, fallback: string): AnchoringRefusal {
+  console.warn(`[landing] originals anchoring: ${fallback}: the store could not be opened:`, error);
+  const code = error instanceof OriginalsError ? error.code : undefined;
+  return {
+    ok: false, httpStatus: 503, error: fallback, ...(code ? { code } : {}), category: 'unavailable-bytes',
+    message: 'This Original\u2019s record on the server can\u2019t be opened right now; nothing was sent. Try again in a moment.',
+  };
+}
+
+const CLOSED: AnchoringRefusal = {
+  ok: false, httpStatus: 503, error: 'shutting_down', category: 'unavailable-bytes',
+  message: 'This server is shutting down; nothing was sent. Try again in a moment.',
+};
 
 export function createOriginalsAnchoring(deps: OriginalsAnchoringDeps) {
   const root = join(deps.dataDir, 'originals-anchoring');
   const held = new Map<string, Promise<Held>>();
   const locks = new Map<string, Promise<unknown>>();
+  let closing: Promise<void> | null = null;
   const read = { provider: deps.provider, clock: deps.clock, index: deps.index, ...(deps.indexes ? { indexes: deps.indexes } : {}) };
   const indexesUsed = [deps.index, ...(deps.indexes ?? []).map((i) => i.index)];
 
@@ -191,20 +218,33 @@ export function createOriginalsAnchoring(deps: OriginalsAnchoringDeps) {
 
   /** One copy of the log and one recovery store per Original, opened once per process. */
   function open(dir: string, did: string): Promise<Held> {
+    if (closing) return Promise.reject(new OriginalsError('unavailable-bytes', 'SHUTTING_DOWN', 'the anchoring stores are closing'));
     let h = held.get(dir);
     if (!h) {
       h = (async () => {
         await mkdir(join(dir, 'recovery'), { recursive: true });
         await writeFile(join(dir, 'did'), did);
         // No author list: the author's DID history comes in the evidence package and is kept with it.
-        const sdk = OriginalsSDK.create({ store: await FileStore.open(join(dir, 'store')), authors: [] });
-        return { sdk, recoveryStore: fileRecoveryStore(join(dir, 'recovery')) };
+        const store = await FileStore.open(join(dir, 'store'));
+        const sdk = OriginalsSDK.create({ store, authors: [] });
+        return { sdk, store, recoveryStore: fileRecoveryStore(join(dir, 'recovery')) };
       })();
       h.catch(() => held.delete(dir));
       held.set(dir, h);
     }
     return h;
   }
+
+  /** `open`, or the refusal a route answers with when the store cannot be opened. */
+  async function opened(dir: string, did: string, fallback: string): Promise<Held | AnchoringRefusal> {
+    if (closing) return CLOSED;
+    try {
+      return await open(dir, did);
+    } catch (error) {
+      return closing ? CLOSED : unopened(error, fallback);
+    }
+  }
+  const isRefusal = (h: Held | AnchoringRefusal): h is AnchoringRefusal => 'ok' in h;
 
   /** One writer per Original at a time: submit and sweep never race to broadcast. */
   function exclusive<T>(dir: string, fn: () => Promise<T>): Promise<T> {
@@ -232,7 +272,9 @@ export function createOriginalsAnchoring(deps: OriginalsAnchoringDeps) {
     if (!wellFormedPair(pair)) return { ok: false, httpStatus: 400, error: 'bad_request', message: 'A prepared inscription pair is required.' };
     const dir = dirOf(sub, did);
     return exclusive(dir, async () => {
-      const { sdk, recoveryStore } = await open(dir, did);
+      const h = await opened(dir, did, 'submit_unavailable');
+      if (isRefusal(h)) return h;
+      const { sdk, recoveryStore } = h;
 
       // The author's copy, verified, kept unless it would roll back or replace ours (P7.5).
       let imported;
@@ -308,7 +350,10 @@ export function createOriginalsAnchoring(deps: OriginalsAnchoringDeps) {
     if (typeof did !== 'string' || !DID_RE.test(did) || !wellFormedPair(pair)) return null;
     const dir = dirOf(sub, did);
     if (!(await known(dir))) return null;
-    return exclusive(dir, async () => answerRecorded((await open(dir, did)).recoveryStore, pair));
+    return exclusive(dir, async () => {
+      const h = await opened(dir, did, 'submit_unavailable');
+      return isRefusal(h) ? h : answerRecorded(h.recoveryStore, pair);
+    });
   }
 
   function summarize(did: string, step: CatchUpStep): AnchoringStatus {
@@ -349,7 +394,9 @@ export function createOriginalsAnchoring(deps: OriginalsAnchoringDeps) {
     const dir = dirOf(sub, did);
     if (!(await known(dir))) return { ok: false, httpStatus: 404, error: 'not_submitted', message: 'This server holds no anchoring of that Original for this account.' };
     return exclusive(dir, async () => {
-      const { sdk, recoveryStore } = await open(dir, did);
+      const h = await opened(dir, did, 'status_unavailable');
+      if (isRefusal(h)) return h;
+      const { sdk, recoveryStore } = h;
       try {
         return summarize(did, await catchUp({ sdk, did, ...read, recoveryStore }));
       } catch (error) {
@@ -385,10 +432,12 @@ export function createOriginalsAnchoring(deps: OriginalsAnchoringDeps) {
     let examined = 0, resumed = 0, failed = 0;
     for (let k = 0; k < Math.min(budget, all.length); k++) {
       const [sub, did, dir] = all[(cursor + k) % all.length];
+      if (closing) break;
       examined++;
       await exclusive(dir, async () => {
-        const { sdk, recoveryStore } = await open(dir, did);
         try {
+          // Inside the try: one store that cannot be opened is one failure, not the end of the pass.
+          const { sdk, recoveryStore } = await open(dir, did);
           const step = await catchUp({ sdk, did, ...read, recoveryStore });
           if (step.action !== 'resume') return;
           const sent = await resumeEntryInscription({ sdk, did, ...read, provider: deps.provider, recoveryStore, recoveryId: step.recoveryId });
@@ -417,7 +466,25 @@ export function createOriginalsAnchoring(deps: OriginalsAnchoringDeps) {
     return [await satEvidence(snapshot, { clock: deps.clock, index: deps.index, ownerConfirmations: 0 })];
   }
 
-  return { submit, recorded, status, sweep, bitcoinEvidence };
+  /**
+   * Close every store this process opened, after the work already queued on
+   * each Original finishes; later calls are refused (503 `shutting_down`).
+   * Closing a FileStore removes its `.lock`. Idempotent.
+   */
+  function close(): Promise<void> {
+    closing ??= (async () => {
+      await Promise.all([...locks.values()]);
+      const opening = [...held.values()];
+      held.clear();
+      const results = await Promise.allSettled(opening.map(async (h) => (await h).store.close()));
+      for (const r of results) {
+        if (r.status === 'rejected') console.warn('[landing] originals anchoring: a store did not close:', r.reason);
+      }
+    })();
+    return closing;
+  }
+
+  return { submit, recorded, status, sweep, bitcoinEvidence, close };
 }
 
 export type OriginalsAnchoring = ReturnType<typeof createOriginalsAnchoring>;

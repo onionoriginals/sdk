@@ -75,11 +75,41 @@ export async function acquireInstanceLock(
   };
 }
 
-/** Release on graceful termination; OS file locks also cover SIGKILL/crashes. */
-export function releaseOnExit(lock: InstanceLock): void {
+export interface ReleaseOnExitOptions {
+  /**
+   * Run before the instance lock is released, e.g. the anchoring module's
+   * `close`: a FileStore left open keeps its `.lock`, and a later container
+   * (another hostname) on the same volume cannot break it.
+   */
+  close?: () => unknown;
+  /** How long `close` may take before the lock is released anyway. Default 5s. */
+  timeoutMs?: number;
+}
+
+/**
+ * Release on graceful termination; OS file locks also cover SIGKILL/crashes.
+ * The instance lock is released LAST, after `close`, so no other writer can
+ * start while this one's stores are still closing.
+ */
+export function releaseOnExit(lock: InstanceLock, options: ReleaseOnExitOptions = {}): void {
+  const timeoutMs = options.timeoutMs ?? 5_000;
+  let exiting: Promise<void> | null = null;
+  const closeBounded = () =>
+    new Promise<void>((resolve) => {
+      if (!options.close) return resolve();
+      const timer = setTimeout(() => {
+        console.warn('[landing] closing stores timed out; releasing the instance lock anyway');
+        resolve();
+      }, timeoutMs);
+      Promise.resolve()
+        .then(options.close)
+        .catch((error) => console.warn('[landing] closing stores failed:', error))
+        .finally(() => { clearTimeout(timer); resolve(); });
+    });
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
     process.once(signal, () => {
-      void lock.release().finally(() => process.exit(0));
+      exiting ??= closeBounded().finally(() => lock.release());
+      void exiting.finally(() => process.exit(0));
     });
   }
 }

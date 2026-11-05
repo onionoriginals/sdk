@@ -18,6 +18,7 @@ export * from './originals-library.js';
 export * from './originals-routes.js';
 export * from './shared-saves.js';
 export * from './instance-lock.js';
+export * from './store-locks.js';
 export * from './inscriptions-store.js';
 export * from './sat-snapshot-codec.js';
 export * from './block-headers.js';
