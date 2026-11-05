@@ -41,7 +41,6 @@ is.
 ## Credentials
 
 Publishing authenticates to npm via OIDC trusted publishing (the workflow's
-`id-token: write` permission), not a stored token. `NPM_TOKEN` remains
-configured only as an emergency fallback. See
-[RELEASE_TOKEN_ROTATION.md](./RELEASE_TOKEN_ROTATION.md) for the required
-npm-side trusted-publisher setup and the status of the migration.
+`id-token: write` permission), not a stored token. There is no `NPM_TOKEN`
+to rotate. See [NPM_TRUSTED_PUBLISHING.md](./NPM_TRUSTED_PUBLISHING.md) for the
+npm-side trusted-publisher setup.

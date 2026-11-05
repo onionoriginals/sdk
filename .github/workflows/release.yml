@@ -153,11 +153,11 @@ jobs:
       # unset until someone has completed and verified all three
       # registrations, so a Version PR merge before that's done fails loudly
       # here instead of reaching npm partially unauthenticated. See
-      # "Trusted publisher setup" in docs/RELEASE_TOKEN_ROTATION.md.
+      # "Trusted publisher setup" in docs/NPM_TRUSTED_PUBLISHING.md.
       - name: Confirm npm trusted publishing is registered for all packages
         if: vars.NPM_TRUSTED_PUBLISHING_READY != 'true'
         run: |
-          echo "::error title=OIDC trusted publishing not confirmed ready::The NPM_TRUSTED_PUBLISHING_READY repository variable is not 'true'. Register a GitHub Actions trusted publisher on npmjs.com for @originals/vh, @originals/sdk, and @originals/auth (org onionoriginals, repo sdk, workflow release.yml, no Environment; see docs/RELEASE_TOKEN_ROTATION.md), then run: gh variable set NPM_TRUSTED_PUBLISHING_READY --repo onionoriginals/sdk --body true. Stopping before an unauthenticated publish attempt."
+          echo "::error title=OIDC trusted publishing not confirmed ready::The NPM_TRUSTED_PUBLISHING_READY repository variable is not 'true'. Register a GitHub Actions trusted publisher on npmjs.com for @originals/vh, @originals/sdk, and @originals/auth (org onionoriginals, repo sdk, workflow release.yml, no Environment; see docs/NPM_TRUSTED_PUBLISHING.md), then run: gh variable set NPM_TRUSTED_PUBLISHING_READY --repo onionoriginals/sdk --body true. Stopping before an unauthenticated publish attempt."
           exit 1
 
       - name: Checkout
@@ -217,7 +217,7 @@ jobs:
       # publishing, using the workflow's `id-token: write` permission and the
       # `registry-url` setup-node wrote above. This requires a trusted publisher
       # registered on npmjs.com for each package (org onionoriginals, repo sdk,
-      # workflow release.yml, no Environment) — see docs/RELEASE_TOKEN_ROTATION.md.
+      # workflow release.yml, no Environment) — see docs/NPM_TRUSTED_PUBLISHING.md.
       # `npm whoami` cannot preflight this: it only exercises the long-lived
       # token path, and the OIDC exchange happens only during publish/stage, so
       # there is deliberately no separate preflight step. Provenance is
@@ -229,7 +229,7 @@ jobs:
       # `changeset publish` can publish those and fail on the rest. That is
       # recoverable, not corrupting: finish registering the remaining
       # package(s) and re-run this job — idempotency (above) means it
-      # publishes only what is still missing. See docs/RELEASE_TOKEN_ROTATION.md.
+      # publishes only what is still missing. See docs/NPM_TRUSTED_PUBLISHING.md.
       - name: Publish to npm, push tags, and create GitHub releases
         uses: changesets/action@v2
         with:
