@@ -13,7 +13,7 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { schnorr, secp256k1 } from "@noble/curves/secp256k1.js";
 import { sha256, sha512 } from "@noble/hashes/sha2.js";
-import { base58 } from "@scure/base";
+import { base58, hex } from "@scure/base";
 import { OriginalsError, fail } from "../errors.js";
 import { canonicalBytes, isJsonObject, type JsonObject, type JsonValue } from "../json/index.js";
 
@@ -329,14 +329,45 @@ export function verifyProof(document: JsonObject, proof: DataIntegrityProof, pub
     throw error;
   }
   if (signature.length !== 64) return false;
-  const data = proofHashData(unsecured, options);
+  return checkSignature(key, proofHashData(unsecured, options), signature);
+}
+
+/**
+ * Checked signatures, by their exact inputs: key type, public key, signed
+ * bytes and signature. A signature check is a pure function of those, so a
+ * result found here is the result checking again would give; only the time
+ * is saved. Verifying a log again (every `get`, `prepareEdit`, `sign`,
+ * `import`) re-checks every entry's proof, which this makes nearly free.
+ * Bounded; the oldest result is dropped first.
+ */
+const signatureChecks = new Map<string, boolean>();
+export const SIGNATURE_CACHE_ENTRIES = 8192;
+
+/** Forget every cached signature check (tests, or to bound memory sooner). */
+export function clearSignatureCache(): void {
+  signatureChecks.clear();
+}
+
+/**
+ * Check a signature over exact bytes: Ed25519 under the vh-log-interop-0
+ * acceptance rules (`verifyEd25519`), or BIP340 with the key's x coordinate.
+ * The result is cached by its exact inputs (see above).
+ */
+export function checkSignature(key: DecodedMultikey, data: Uint8Array, signature: Uint8Array): boolean {
+  const id = `${key.type}:${hex.encode(key.publicKey)}:${hex.encode(data)}:${hex.encode(signature)}`;
+  const known = signatureChecks.get(id);
+  if (known !== undefined) return known;
+  let ok: boolean;
   try {
-    return key.type === "Ed25519"
+    ok = key.type === "Ed25519"
       ? verifyEd25519(key.publicKey, data, signature)
       : schnorr.verify(signature, data, key.publicKey.slice(1));
   } catch {
-    return false;
+    ok = false;
   }
+  if (signatureChecks.size >= SIGNATURE_CACHE_ENTRIES) signatureChecks.delete(signatureChecks.keys().next().value!);
+  signatureChecks.set(id, ok);
+  return ok;
 }
 
 /** A signer holding raw secret key bytes. For tests and local custody only. */
