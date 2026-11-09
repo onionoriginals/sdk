@@ -15,6 +15,7 @@
     "landing:check": "turbo run build --filter='./packages/*' && cd apps/landing && bun run typecheck && bun run typecheck:server && bun test && bun run build && bun run check:chunks",
     "verify:esm": "node scripts/verify-esm.mjs",
     "verify:browser": "node scripts/check-browser-safety.mjs",
+    "verify:browser-bundle": "node scripts/check-browser-bundle.mjs",
     "test": "turbo run test --filter='./packages/*'",
     "typecheck": "turbo run typecheck --filter='./packages/*'",
     "typecheck:railway": "bun run --cwd packages/sdk tsc -p ../../.railway/tsconfig.json",
