@@ -102,6 +102,18 @@ describe("package(did, { omitResources })", () => {
     }
     expect(((await sdk.package(did, { other: 1 } as never).catch((x) => x)) as OriginalsError).code).toBe("INPUT_INVALID");
   });
+
+  test("refuses option objects that are not plain, typed options (INPUT_INVALID, not a TypeError)", async () => {
+    const { sdk, did } = await drawing();
+    const bad = [null, "x", [], Object.create({ other: 1 }), { checkpoint: 1 }, { omitResources: { throughVersion: null } }, { omitResources: { digests: [null, 123] } }, { omitResources: null }];
+    for (const options of bad) {
+      const e = await sdk.package(did, options as never).catch((x) => x);
+      expect(e).toBeInstanceOf(OriginalsError);
+      expect((e as OriginalsError).code).toBe("INPUT_INVALID");
+      expect((e as OriginalsError).category).toBe("invalid-evidence");
+    }
+    expect((await sdk.package(did, undefined)).manifest.completeness).toBe("complete");
+  });
 });
 
 describe("import(zip, { requireResources, original })", () => {
@@ -162,5 +174,104 @@ describe("import(zip, { requireResources, original })", () => {
     expect(e.code).toBe("IMPORT_REJECTED");
     expect((await reader(alice).import(pkg.bytes, { original: did })).status).toBe("imported");
     expect(((await reader(alice).import(pkg.bytes, { strict: true } as never).catch((x) => x)) as OriginalsError).code).toBe("INPUT_INVALID");
+  });
+
+  test("refuses option objects that are not plain, typed options, before anything is stored", async () => {
+    const { sdk, alice, did } = await drawing();
+    const partial = (await sdk.package(did, { omitResources: { throughVersion: 4 } })).bytes;
+    // A string "true" must never silently disable the guard; an inherited key is still an unknown field.
+    const bad = [null, "x", [], Object.create({ unknown: 1 }), { requireResources: "true" }, { requireResources: 1 }, { original: 7 }];
+    for (const options of bad) {
+      const store = new MemoryStore();
+      const e = await reader(alice, store).import(partial, options as never).catch((x) => x);
+      expect(e).toBeInstanceOf(OriginalsError);
+      expect((e as OriginalsError).code).toBe("INPUT_INVALID");
+      expect((e as OriginalsError).category).toBe("invalid-evidence");
+      expect(await store.get(did)).toBeUndefined();
+    }
+    expect((await reader(alice).import(partial, { requireResources: undefined })).status).toBe("imported");
+  });
+});
+
+describe("import(zip, { requireResources }) covers the whole imported log (P4.3, P7.4)", () => {
+  /** A package with its manifest's checkpoint set to `checkpoint` and its bytes edited. */
+  function tampered(zip: Uint8Array, checkpoint: string, edit: (bytes: Record<string, Uint8Array>) => void): Uint8Array {
+    const contents = readEvidence(zip);
+    contents.manifest.checkpoint = checkpoint;
+    edit(contents.bytes);
+    return writeEvidence(contents);
+  }
+
+  test("C12-10: a manifest naming an earlier checkpoint cannot hide a later version's missing bytes", async () => {
+    const { sdk, alice, did, view } = await drawing();
+    const full = (await sdk.package(did)).bytes;
+    const pkg = tampered(full, view.resources[0].versionId, (b) => delete b[view.resources[3].digest]);
+    const store = new MemoryStore();
+    const e = (await reader(alice, store).import(pkg, { requireResources: true }).catch((x) => x)) as OriginalsError;
+    expect(e).toBeInstanceOf(OriginalsError);
+    expect(e.code).toBe("RESOURCES_NOT_HELD");
+    expect(e.category).toBe("unavailable-bytes");
+    expect(e.details?.missing).toEqual([{ version: 4, digest: view.resources[3].digest, versionId: view.resources[3].versionId }]);
+    expect(await store.get(did)).toBeUndefined();
+  });
+
+  test("C12-10: a manifest naming an unknown checkpoint cannot hide missing bytes either", async () => {
+    const { sdk, alice, did, view } = await drawing();
+    const full = (await sdk.package(did)).bytes;
+    const pkg = tampered(full, "nonexistent", (b) => delete b[view.resources[3].digest]);
+    const store = new MemoryStore();
+    const e = (await reader(alice, store).import(pkg, { requireResources: true }).catch((x) => x)) as OriginalsError;
+    expect(e.code).toBe("RESOURCES_NOT_HELD");
+    expect((e.details?.missing as Array<{ version: number }>).map((m) => m.version)).toEqual([4]);
+    expect(await store.get(did)).toBeUndefined();
+  });
+
+  test("C12-10: corrupt bytes for a version after the manifest's checkpoint are RESOURCE_DIGEST_MISMATCH, and never stored", async () => {
+    const { sdk, alice, did, view } = await drawing();
+    const full = (await sdk.package(did)).bytes;
+    const pkg = tampered(full, view.resources[0].versionId, (b) => (b[view.resources[3].digest] = bytes("CORRUPT")));
+    const store = new MemoryStore();
+    const e = (await reader(alice, store).import(pkg, { requireResources: true }).catch((x) => x)) as OriginalsError;
+    expect(e.code).toBe("RESOURCE_DIGEST_MISMATCH");
+    expect(e.category).toBe("invalid-evidence");
+    expect(await store.get(did)).toBeUndefined();
+    expect(await store.getResource(view.resources[3].digest)).toBeUndefined();
+  });
+
+  test("without requireResources, such a package imports as before (main's behaviour), its bad bytes never stored", async () => {
+    const { sdk, alice, did, view } = await drawing();
+    const full = (await sdk.package(did)).bytes;
+    const pkg = tampered(full, view.resources[0].versionId, (b) => (b[view.resources[3].digest] = bytes("CORRUPT")));
+    const store = new MemoryStore();
+    const result = await reader(alice, store).import(pkg);
+    expect(result.status).toBe("imported");
+    expect(await store.getResource(view.resources[3].digest)).toBeUndefined();
+  });
+});
+
+describe("import keeps verified bytes when its history is already held (P7.3)", () => {
+  test("C12-10: re-importing the complete package after a partial one stores its bytes: already-current, now verified", async () => {
+    const { sdk, alice, did, view } = await drawing();
+    const store = new MemoryStore();
+    const s = reader(alice, store);
+    await s.import((await sdk.package(did, { omitResources: { throughVersion: 4 } })).bytes);
+    expect((await s.get(did)).resources.map((r) => r.bytes)).toEqual(["missing", "missing", "missing", "missing"]);
+    const retry = await s.import((await sdk.package(did)).bytes, { requireResources: true });
+    expect(retry.status).toBe("already-current");
+    expect(retry.original.resources.map((r) => r.bytes)).toEqual(["verified", "verified", "verified", "verified"]);
+    expect(await s.resourceBytes(view.resources[3].digest)).toEqual(V[3]);
+  });
+
+  test("C12-10: an older prefix (kept-newer-local) still supplies the bytes it carries, and never under a wrong digest", async () => {
+    const { sdk, alice, did, view } = await drawing();
+    const store = new MemoryStore();
+    const s = reader(alice, store);
+    await s.import((await sdk.package(did, { omitResources: { throughVersion: 4 } })).bytes);
+    const older = readEvidence((await sdk.package(did, { checkpoint: view.resources[1].versionId })).bytes);
+    older.bytes[view.resources[1].digest] = bytes("CORRUPT");
+    const result = await s.import(writeEvidence(older));
+    expect(result.status).toBe("kept-newer-local");
+    expect(result.original.resources.map((r) => r.bytes)).toEqual(["verified", "missing", "missing", "missing"]);
+    expect(await store.getResource(view.resources[1].digest)).toBeUndefined();
   });
 });

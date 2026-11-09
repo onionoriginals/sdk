@@ -14,10 +14,18 @@ Partial evidence packages for incremental uploads, built in.
   of 290 ms.
 - `import(zip, { requireResources: true })` accepts a partial package only
   when this store already holds every version it leaves out, each matching
-  its digest. It refuses packaged bytes that do not match. Both checks run
-  before anything is stored: `RESOURCES_NOT_HELD` (`unavailable-bytes`, with
-  `details.missing`) and `RESOURCE_DIGEST_MISMATCH` (`invalid-evidence`).
+  its digest. It refuses packaged bytes that do not match. Both checks cover
+  every resource version of the imported log, whatever checkpoint the
+  manifest names, and run before anything is stored: `RESOURCES_NOT_HELD`
+  (`unavailable-bytes`, with `details.missing`) and
+  `RESOURCE_DIGEST_MISMATCH` (`invalid-evidence`).
+- `import` of a history this store already holds (`already-current`) or a
+  prefix of it (`kept-newer-local`) now keeps the packaged bytes the held log
+  names, each only under its matching digest. This is content availability
+  only; no verification outcome changes (P7.3).
 - `import(zip, { original })` refuses a package for another Original
   (`IMPORT_REJECTED`).
 - Leaving bytes out changes nothing else that verifies (P7.3).
-- `package` and `import` now reject unknown option names (`INPUT_INVALID`).
+- `package` and `import` reject an options value that is not an object,
+  unknown option names (own or inherited) and mistyped values such as
+  `requireResources: "true"` (`INPUT_INVALID`).

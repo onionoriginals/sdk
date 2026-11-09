@@ -596,18 +596,48 @@ function digestsOf(log: string): string[] {
   return [...digests];
 }
 
+/**
+ * An options object: absent is `{}`; anything else must be a plain object
+ * whose keys, own or inherited, are all `allowed` (INPUT_INVALID).
+ */
+function optionsObject<T extends object>(value: T | undefined, allowed: string[], where: string): T {
+  if (value === undefined) return {} as T;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) sdkError("invalid-evidence", "INPUT_INVALID", `${where} is an object`);
+  // for...in also sees inherited enumerable keys, which a plain own-key check would let through.
+  for (const key in value) {
+    if (!allowed.includes(key)) sdkError("invalid-evidence", "INPUT_INVALID", `${where} has an unknown field ${key}`);
+  }
+  return value;
+}
+
 /** Whether a resource version is to be left out of a package, from `omitResources`. */
 function omittedResources(omit: OmitResources | undefined): (v: ResourceVersion) => boolean {
   if (omit === undefined) return () => false;
-  if (typeof omit !== "object" || omit === null) sdkError("invalid-evidence", "INPUT_INVALID", "omitResources is { throughVersion?, digests? }");
-  exactKeys(omit, ["throughVersion", "digests"], "omitResources");
-  const through = omit.throughVersion ?? 0;
+  optionsObject(omit, ["throughVersion", "digests"], "omitResources");
+  const through = omit.throughVersion === undefined ? 0 : omit.throughVersion;
   if (!Number.isSafeInteger(through) || through < 0) sdkError("invalid-evidence", "INPUT_INVALID", "omitResources.throughVersion is a version number, 0 or more");
   if (omit.digests !== undefined && (typeof omit.digests !== "object" || omit.digests === null || typeof omit.digests[Symbol.iterator] !== "function")) {
     sdkError("invalid-evidence", "INPUT_INVALID", "omitResources.digests is an iterable of digests");
   }
   const digests = new Set(omit.digests ?? []);
+  for (const d of digests) if (typeof d !== "string") sdkError("invalid-evidence", "INPUT_INVALID", "omitResources.digests is an iterable of digest strings");
   return (v) => v.version <= through || digests.has(v.digest);
+}
+
+/**
+ * Every resource version a log introduces, genesis first, as verification
+ * numbers them (P4.4): one per entry whose transitions change the resource.
+ * The caller has verified the log to its last entry.
+ */
+function logResourceVersions(log: string): Array<{ version: number; digest: string; size: number; versionId: string }> {
+  const out: Array<{ version: number; digest: string; size: number; versionId: string }> = [];
+  for (const line of lines(log)) {
+    const entry = parseJson(line) as { versionId: string; state: { transitions: unknown[]; asset: { resource: { digest: string; size: number } } } };
+    if (entry.state.transitions.length === 0) continue;
+    const { digest, size } = entry.state.asset.resource;
+    out.push({ version: out.length + 1, digest, size, versionId: entry.versionId });
+  }
+  return out;
 }
 
 export class OriginalsSDK {
@@ -1360,8 +1390,9 @@ export class OriginalsSDK {
    * An evidence package for the head or an exact checkpoint (P7.1). With
    * `omitResources`, a partial package without those versions' bytes.
    */
-  async package(did: string, options: PackageOptions = {}): Promise<EvidencePackage> {
-    exactKeys(options, ["checkpoint", "omitResources"], "package options");
+  async package(did: string, options?: PackageOptions): Promise<EvidencePackage> {
+    options = optionsObject(options, ["checkpoint", "omitResources"], "package options");
+    if (options.checkpoint !== undefined && typeof options.checkpoint !== "string") sdkError("invalid-evidence", "INPUT_INVALID", "package options.checkpoint is a versionId");
     const omit = omittedResources(options.omitResources);
     const log = await this.stored(did);
     const view = await this.get(did, options.checkpoint !== undefined ? { checkpoint: options.checkpoint } : {});
@@ -1549,8 +1580,10 @@ export class OriginalsSDK {
    * reported as a fork. Author evidence is stored only when it is at least as
    * new as what this store has verified (P7.8).
    */
-  async import(zip: Uint8Array, options: ImportOptions = {}): Promise<ImportResult> {
-    exactKeys(options, ["original", "requireResources"], "import options");
+  async import(zip: Uint8Array, options?: ImportOptions): Promise<ImportResult> {
+    options = optionsObject(options, ["original", "requireResources"], "import options");
+    if (options.original !== undefined && typeof options.original !== "string") sdkError("invalid-evidence", "INPUT_INVALID", "import options.original is a DID");
+    if (options.requireResources !== undefined && typeof options.requireResources !== "boolean") sdkError("invalid-evidence", "INPUT_INVALID", "import options.requireResources is a boolean");
     return this.importContents(readEvidence(zip, this.options.archiveLimits), options.original, "package", options.requireResources === true);
   }
 
@@ -1569,15 +1602,18 @@ export class OriginalsSDK {
       sdkError("invalid-evidence", "IMPORT_REJECTED", "the package's log does not verify to its last entry", { report: r });
     }
     const did = r.original;
-    if (requireResources) await this.requireHeld(r);
+    if (requireResources) await this.requireHeld(contents, r);
     const incoming = versionIds(contents.log);
     const local = (await this.store.get(did))?.log;
     const result = async (status: ImportResult["status"]): Promise<ImportResult> => ({ status, original: await this.get(did) });
     if (local) {
       const have = versionIds(local);
       const sharesPrefix = (a: string[], b: string[]) => a.every((id, i) => b[i] === id);
-      if (have.length === incoming.length && sharesPrefix(incoming, have)) return result("already-current");
-      if (incoming.length < have.length && sharesPrefix(incoming, have)) return result("kept-newer-local");
+      // Nothing new to store but content: keep supplied bytes the held log names, each matching its digest (P7.3).
+      if (incoming.length <= have.length && sharesPrefix(incoming, have)) {
+        await this.keepBytes(contents, local);
+        return result(incoming.length === have.length ? "already-current" : "kept-newer-local");
+      }
       if (!sharesPrefix(have, incoming)) {
         await this.keepEvidence(contents, r, from);
         await this.store.putBranch(did, contents.log);
@@ -1596,18 +1632,36 @@ export class OriginalsSDK {
     return result("imported");
   }
 
-  /** Every resource version is in the package, matching, or already held here, matching (P4.3). */
-  private async requireHeld(r: OriginalsReport): Promise<void> {
-    const mismatched = r.resources.versions.filter((v) => v.bytes === "mismatch");
+  /**
+   * Every resource version the imported log introduces, not only those up to
+   * the manifest's checkpoint, is in the package, matching, or already held
+   * here, matching (P4.3, P7.4): the whole log is stored, so a manifest that
+   * names an earlier or unknown checkpoint cannot narrow the check.
+   */
+  private async requireHeld(contents: EvidenceContents, r: OriginalsReport): Promise<void> {
+    const versions = logResourceVersions(contents.log);
+    const supplied = (digest: string) => (Object.prototype.hasOwnProperty.call(contents.bytes, digest) ? contents.bytes[digest] : undefined);
+    const mismatched = versions.filter((v) => {
+      const data = supplied(v.digest);
+      return data !== undefined && !(data.length === v.size && resourceDigest(data) === v.digest);
+    });
     if (mismatched.length > 0) {
       sdkError("invalid-evidence", "RESOURCE_DIGEST_MISMATCH", `the packaged bytes of version ${mismatched[0].version} do not match its digest`, { report: r });
     }
     const missing: Array<{ version: number; digest: string; versionId: string }> = [];
-    for (const v of r.resources.versions) {
-      if (v.bytes !== "verified" && !(await this.resourceBytes(v.digest))) missing.push({ version: v.version, digest: v.digest, versionId: v.versionId });
+    for (const v of versions) {
+      if (supplied(v.digest) === undefined && !(await this.resourceBytes(v.digest))) missing.push({ version: v.version, digest: v.digest, versionId: v.versionId });
     }
     if (missing.length > 0) {
       sdkError("unavailable-bytes", "RESOURCES_NOT_HELD", `the package leaves out ${missing.length} resource version(s) this store does not hold, starting with version ${missing[0].version}`, { missing, report: r });
+    }
+  }
+
+  /** Store supplied bytes that `log` names, each only under its own digest. */
+  private async keepBytes(contents: EvidenceContents, log: string): Promise<void> {
+    const named = new Set(digestsOf(log));
+    for (const [digest, bytes] of Object.entries(contents.bytes)) {
+      if (named.has(digest) && resourceDigest(bytes) === digest) await this.store.putResource(digest, bytes);
     }
   }
 

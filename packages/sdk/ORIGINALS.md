@@ -88,9 +88,13 @@ identity evidence verify as before, and the left-out versions are reported
 as unavailable content, never a failure (P7.3). On the receiving side,
 `import(zip, { requireResources: true })` accepts a partial package only when
 the store already holds every left-out version, each matching its digest,
-and refuses packaged bytes that do not match; both are checked before
-anything is stored (`RESOURCES_NOT_HELD`, unavailable-bytes, with
-`details.missing`; `RESOURCE_DIGEST_MISMATCH`, invalid-evidence).
+and refuses packaged bytes that do not match; both cover every resource
+version of the imported log, whatever checkpoint the manifest names, and are
+checked before anything is stored (`RESOURCES_NOT_HELD`, unavailable-bytes,
+with `details.missing`; `RESOURCE_DIGEST_MISMATCH`, invalid-evidence). An
+import whose history is already held (`already-current`, `kept-newer-local`)
+still keeps the packaged bytes the held log names, so sending the complete
+package again fills in what a partial one left out.
 `import(zip, { original })` refuses a package for any other Original
 (`IMPORT_REJECTED`). The import verifies the package itself and its
 result's `original.report` is the verified report, so a separate `load` is
