@@ -603,7 +603,7 @@ function omittedResources(omit: OmitResources | undefined): (v: ResourceVersion)
   exactKeys(omit, ["throughVersion", "digests"], "omitResources");
   const through = omit.throughVersion ?? 0;
   if (!Number.isSafeInteger(through) || through < 0) sdkError("invalid-evidence", "INPUT_INVALID", "omitResources.throughVersion is a version number, 0 or more");
-  if (omit.digests !== undefined && (typeof omit.digests !== "object" || omit.digests === null || typeof (omit.digests as Iterable<string>)[Symbol.iterator] !== "function")) {
+  if (omit.digests !== undefined && (typeof omit.digests !== "object" || omit.digests === null || typeof omit.digests[Symbol.iterator] !== "function")) {
     sdkError("invalid-evidence", "INPUT_INVALID", "omitResources.digests is an iterable of digests");
   }
   const digests = new Set(omit.digests ?? []);
