@@ -110,6 +110,19 @@ describe("MemoryStore keeps bytes nothing outside it can change", () => {
     expect(await store.checkedResource(d)).toBe(V[0].length);
   });
 
+  test("C12-02: the held bytes are runtime-private: no own or reflected property reaches them", async () => {
+    const store = new MemoryStore();
+    const d = resourceDigest(V[0]);
+    await store.putResource(d, V[0]);
+    // A TypeScript `private` map would be reachable here as `store.resources`; a `#field` is not.
+    const reachable = Reflect.ownKeys(store).map((k) => (store as unknown as Record<PropertyKey, unknown>)[k]);
+    for (const value of reachable) {
+      if (value instanceof Map) for (const v of value.values()) expect(v instanceof Uint8Array && resourceDigest(v) === d).toBe(false);
+    }
+    expect((store as unknown as { resources?: unknown }).resources).toBeUndefined();
+    expect((store as unknown as { checked?: unknown }).checked).toBeUndefined();
+  });
+
   test("C12-02, C12-10: a report from checked bytes equals one from the held bytes, after the caller's Buffer changes", async () => {
     const store = new MemoryStore();
     const { alice, did } = await threeVersions(store);

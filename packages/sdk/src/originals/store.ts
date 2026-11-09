@@ -141,7 +141,8 @@ export function staleHead(did: string, expected: string | null, actual: string |
 /** An in-memory store. Commits are atomic because they are synchronous. */
 export class MemoryStore implements OriginalsStore {
   private readonly originals = new Map<string, StoredOriginal>();
-  private readonly resources = new Map<string, Uint8Array>();
+  /** Runtime-private (not only to TypeScript): nothing outside the store reaches the held bytes. */
+  readonly #resources = new Map<string, Uint8Array>();
   private readonly authors = new Map<string, AuthorDidEvidence>();
   private readonly retained = new Map<string, string>();
   private readonly anchors = new Map<string, RetainedAnchor>();
@@ -163,24 +164,26 @@ export class MemoryStore implements OriginalsStore {
   /**
    * Digests whose held bytes matched them when put, with their size. The
    * bytes are private copies (`new Uint8Array`, a real copy even of a Node
-   * Buffer, whose own `slice` would share the caller's memory) and are only
-   * ever handed out as copies, so nothing outside the store can change them.
+   * Buffer, whose own `slice` would share the caller's memory), held in a
+   * runtime-private field (`#resources`, which JavaScript cannot reach the way
+   * it can a TypeScript `private`) and only ever handed out as copies, so
+   * nothing outside the store can change them.
    */
-  private readonly checked = new Map<string, number>();
+  readonly #checked = new Map<string, number>();
 
   async putResource(digest: string, bytes: Uint8Array): Promise<void> {
-    if (this.resources.has(digest)) return;
+    if (this.#resources.has(digest)) return;
     const copy = new Uint8Array(bytes);
-    this.resources.set(digest, copy);
-    if ((await resourceDigestAsync(copy)) === digest && this.resources.get(digest) === copy) this.checked.set(digest, copy.length);
+    this.#resources.set(digest, copy);
+    if ((await resourceDigestAsync(copy)) === digest && this.#resources.get(digest) === copy) this.#checked.set(digest, copy.length);
   }
 
   checkedResource(digest: string): Promise<number | undefined> {
-    return Promise.resolve(this.checked.get(digest));
+    return Promise.resolve(this.#checked.get(digest));
   }
 
   getResource(digest: string): Promise<Uint8Array | undefined> {
-    const bytes = this.resources.get(digest);
+    const bytes = this.#resources.get(digest);
     return Promise.resolve(bytes === undefined ? undefined : new Uint8Array(bytes));
   }
 
@@ -254,8 +257,8 @@ export class MemoryStore implements OriginalsStore {
 
   /** Forget stored bytes, as a store that lost them would. */
   deleteResource(digest: string): void {
-    this.resources.delete(digest);
-    this.checked.delete(digest);
+    this.#resources.delete(digest);
+    this.#checked.delete(digest);
   }
 
   list(): Promise<string[]> {
