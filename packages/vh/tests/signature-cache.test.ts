@@ -9,12 +9,16 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { hex } from "@scure/base";
-import { SIGNATURE_CACHE_ENTRIES, SIGNATURE_CACHE_MAX_DATA, checkSignature, clearSignatureCache, signatureCacheSize, verifyEd25519, verifyProof, type DataIntegrityProof } from "../src/crypto/index.js";
+import { SIGNATURE_CACHE_ENTRIES, SIGNATURE_CACHE_MAX_DATA, checkSignature, clearSignatureCache, verifyEd25519, verifyProof, type DataIntegrityProof } from "../src/crypto/index.js";
+import { heldIds } from "../src/crypto/signature-cache.js";
 import type { JsonObject } from "../src/json/index.js";
 import { createOriginal, resourceDigest, updateOriginal, verifyOriginal } from "../src/originals/index.js";
 import { NOW, VhAuthor, bytes, clock, seeded } from "./helpers/originals.js";
 
 const corpus = (name: string) => JSON.parse(readFileSync(new URL(`./fixtures/vh-interop/ed25519/${name}`, import.meta.url), "utf8")) as unknown;
+
+const signatureCacheSize = () => heldIds().length;
+const idOf = (key: Uint8Array, msg: Uint8Array, sig: Uint8Array) => `Ed25519:${hex.encode(key)}:${hex.encode(msg)}:${hex.encode(sig)}`;
 
 interface Vector { key: Uint8Array; msg: Uint8Array; sig: Uint8Array; expected: boolean }
 
@@ -81,22 +85,36 @@ describe("checkSignature", () => {
     expect(run()).toEqual(cold);
   });
 
-  test("is bounded: the oldest results are dropped, and a dropped one is checked again correctly", () => {
+  test("is bounded: the oldest result is dropped first, and a dropped one is checked again correctly", () => {
     const v = vectors.find((x) => x.expected && x.msg.length <= SIGNATURE_CACHE_MAX_DATA)!;
-    expect(checkSignature({ type: "Ed25519", publicKey: v.key }, v.msg, v.sig)).toBe(true);
-    expect(signatureCacheSize()).toBe(1);
-    expect(checkSignature({ type: "Ed25519", publicKey: v.key }, v.msg, v.sig)).toBe(true);
-    expect(signatureCacheSize()).toBe(1); // a hit adds nothing
-    // Fill the cache past its bound with distinct checks that fail fast (a 63-byte signature).
-    for (let i = 0; i < SIGNATURE_CACHE_ENTRIES + 10; i++) {
+    const first = idOf(v.key, v.msg, v.sig);
+    const filler = (i: number) => {
       const msg = new Uint8Array(8);
       new DataView(msg.buffer).setUint32(0, i);
-      expect(checkSignature({ type: "Ed25519", publicKey: v.key }, msg, v.sig.subarray(0, 63))).toBe(false);
-      expect(signatureCacheSize()).toBe(Math.min(i + 2, SIGNATURE_CACHE_ENTRIES));
-    }
-    // The first check was dropped: checking it again is a miss that evicts one more and is still right.
+      return msg;
+    };
     expect(checkSignature({ type: "Ed25519", publicKey: v.key }, v.msg, v.sig)).toBe(true);
+    expect(heldIds()).toEqual([first]);
+    expect(checkSignature({ type: "Ed25519", publicKey: v.key }, v.msg, v.sig)).toBe(true);
+    expect(heldIds()).toEqual([first]); // a hit adds nothing
+    // Fill the cache to its bound with distinct checks that fail fast (a 63-byte signature).
+    const short = v.sig.subarray(0, 63);
+    for (let i = 0; i < SIGNATURE_CACHE_ENTRIES - 1; i++) {
+      expect(checkSignature({ type: "Ed25519", publicKey: v.key }, filler(i), short)).toBe(false);
+    }
     expect(signatureCacheSize()).toBe(SIGNATURE_CACHE_ENTRIES);
+    expect(heldIds()[0]).toBe(first);
+    // One more: the oldest, `first`, is the one dropped; the newest stays.
+    const newest = idOf(v.key, filler(SIGNATURE_CACHE_ENTRIES), short);
+    expect(checkSignature({ type: "Ed25519", publicKey: v.key }, filler(SIGNATURE_CACHE_ENTRIES), short)).toBe(false);
+    expect(signatureCacheSize()).toBe(SIGNATURE_CACHE_ENTRIES);
+    expect(heldIds()).not.toContain(first);
+    expect(heldIds()[0]).toBe(idOf(v.key, filler(0), short));
+    expect(heldIds().at(-1)).toBe(newest);
+    // Checking `first` again is a miss: it is computed again (still true), held as the newest, and drops the next oldest.
+    expect(checkSignature({ type: "Ed25519", publicKey: v.key }, v.msg, v.sig)).toBe(true);
+    expect(heldIds().at(-1)).toBe(first);
+    expect(heldIds()).not.toContain(idOf(v.key, filler(0), short));
     clearSignatureCache();
     expect(signatureCacheSize()).toBe(0);
   });

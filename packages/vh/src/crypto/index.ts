@@ -16,6 +16,7 @@ import { sha256, sha512 } from "@noble/hashes/sha2.js";
 import { base58, hex } from "@scure/base";
 import { OriginalsError, fail } from "../errors.js";
 import { canonicalBytes, isJsonObject, type JsonObject, type JsonValue } from "../json/index.js";
+import * as signatureCache from "./signature-cache.js";
 
 // ---------------------------------------------------------------------------
 // multibase / multihash
@@ -343,30 +344,37 @@ export function verifyProof(document: JsonObject, proof: DataIntegrityProof, pub
  * covers every proof's hash data (64 bytes), so a caller of `checkSignature`
  * with large messages cannot make the cache hold them.
  */
-const signatureChecks = new Map<string, boolean>();
 export const SIGNATURE_CACHE_ENTRIES = 8192;
 /** The most signed bytes a cached check may cover. */
 export const SIGNATURE_CACHE_MAX_DATA = 128;
 
-/** How many signature checks are cached now. */
-export function signatureCacheSize(): number {
-  return signatureChecks.size;
-}
-
 /** Forget every cached signature check (tests, or to bound memory sooner). */
 export function clearSignatureCache(): void {
-  signatureChecks.clear();
+  signatureCache.clear();
+}
+
+/** The id a check is cached under, or undefined when it is too large to cache. */
+function signatureCheckId(key: DecodedMultikey, data: Uint8Array, signature: Uint8Array): string | undefined {
+  if (data.length > SIGNATURE_CACHE_MAX_DATA || signature.length > 64 || key.publicKey.length > 33) return undefined;
+  return `${key.type}:${hex.encode(key.publicKey)}:${hex.encode(data)}:${hex.encode(signature)}`;
 }
 
 /**
  * Check a signature over exact bytes: Ed25519 under the vh-log-interop-0
  * acceptance rules (`verifyEd25519`), or BIP340 with the key's x coordinate.
  * The result is cached by its exact inputs (see above).
+ *
+ * `key` must come from `decodeMultikey`, which validates it: a 32-byte
+ * Ed25519 key, or a 33-byte compressed secp256k1 key whose first byte is
+ * dropped to give the BIP340 x coordinate. This function does not validate
+ * the key again; given a hand-built `DecodedMultikey` (say a compressed key
+ * with a bad prefix byte, or a raw 32-byte x-only key) it answers for the
+ * bytes it was given, which `verifyProof` would have refused
+ * (`MULTIKEY_INVALID`) before checking.
  */
 export function checkSignature(key: DecodedMultikey, data: Uint8Array, signature: Uint8Array): boolean {
-  const cacheable = data.length <= SIGNATURE_CACHE_MAX_DATA && signature.length <= 64 && key.publicKey.length <= 33;
-  const id = cacheable ? `${key.type}:${hex.encode(key.publicKey)}:${hex.encode(data)}:${hex.encode(signature)}` : "";
-  const known = cacheable ? signatureChecks.get(id) : undefined;
+  const id = signatureCheckId(key, data, signature);
+  const known = id === undefined ? undefined : signatureCache.lookup(id);
   if (known !== undefined) return known;
   let ok: boolean;
   try {
@@ -376,9 +384,7 @@ export function checkSignature(key: DecodedMultikey, data: Uint8Array, signature
   } catch {
     ok = false;
   }
-  if (!cacheable) return ok;
-  if (signatureChecks.size >= SIGNATURE_CACHE_ENTRIES) signatureChecks.delete(signatureChecks.keys().next().value!);
-  signatureChecks.set(id, ok);
+  if (id !== undefined) signatureCache.remember(id, ok, SIGNATURE_CACHE_ENTRIES);
   return ok;
 }
 
