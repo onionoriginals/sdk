@@ -47,7 +47,7 @@ import {
   prepareDeactivateOriginal,
   prepareUpdateOriginal,
   checkAlias,
-  resourceDigest,
+  resourceDigestAsync,
   signerLocation,
   verifyAuthorHistory,
   verifyOriginal,
@@ -920,7 +920,7 @@ export class OriginalsSDK {
    */
   async resourceBytes(digest: string): Promise<Uint8Array | undefined> {
     const data = await this.store.getResource(digest);
-    return data && resourceDigest(data) === digest ? data : undefined;
+    return data && (await resourceDigestAsync(data)) === digest ? data : undefined;
   }
 
   /**
@@ -953,9 +953,11 @@ export class OriginalsSDK {
     if (typeof r !== "object" || r === null) sdkError("invalid-evidence", "INPUT_INVALID", "an Original has exactly one resource: give `resource` (P4.1)");
     exactKeys(r, ["mediaType", "bytes"], "resource");
     if (!(r.bytes instanceof Uint8Array)) sdkError("invalid-evidence", "INPUT_INVALID", "resource.bytes must be a Uint8Array");
-    const digest = resourceDigest(r.bytes);
-    bytes.set(digest, r.bytes.slice());
-    const resource: ResourceDescriptor = { mediaType: r.mediaType, size: r.bytes.length, digest };
+    // Copied before hashing: the caller's array may change while the digest is awaited.
+    const copy = r.bytes.slice();
+    const digest = await resourceDigestAsync(copy);
+    bytes.set(digest, copy);
+    const resource: ResourceDescriptor = { mediaType: r.mediaType, size: copy.length, digest };
     const entry = prepareCreateOriginal({
       versionTime: this.versionTime(), name: input.name, ...(input.metadata !== undefined ? { metadata: input.metadata } : {}), resource, author: input.author,
       ...(input.editors !== undefined ? { editors: input.editors } : {}),
@@ -1002,9 +1004,11 @@ export class OriginalsSDK {
       if (r.expectedDigest !== undefined && current.digest !== r.expectedDigest) {
         sdkError("stale-parent", "STALE_DIGEST", `the resource is at ${current.digest}, not ${r.expectedDigest}`);
       }
-      const digest = resourceDigest(r.bytes);
-      bytes.set(digest, r.bytes.slice());
-      resource = { mediaType: r.mediaType ?? current.mediaType, size: r.bytes.length, digest };
+      // Copied before hashing: the caller's array may change while the digest is awaited.
+      const copy = r.bytes.slice();
+      const digest = await resourceDigestAsync(copy);
+      bytes.set(digest, copy);
+      resource = { mediaType: r.mediaType ?? current.mediaType, size: copy.length, digest };
     }
     const entry = prepareUpdateOriginal(head, {
       versionTime: this.versionTime(head.versionTime),
@@ -1238,7 +1242,7 @@ export class OriginalsSDK {
     const bytes = new Map<string, Uint8Array>();
     for (const t of (unsigned.state as unknown as EntryState).transitions) {
       const data = await this.store.getResource(t.to);
-      if (data && resourceDigest(data) === t.to) bytes.set(t.to, data);
+      if (data && (await resourceDigestAsync(data)) === t.to) bytes.set(t.to, data);
     }
     return { kind: "candidate", original: did, parent: record.parent, versionId: entry.versionId, entry, line: record.entry, summary: summarize(unsigned, previous), bytes };
   }
@@ -1258,7 +1262,7 @@ export class OriginalsSDK {
     const bytes = new Map<string, Uint8Array>();
     for (const t of (unsigned.state as unknown as EntryState).transitions) {
       const data = await this.store.getResource(t.to);
-      if (data && resourceDigest(data) === t.to) bytes.set(t.to, data);
+      if (data && (await resourceDigestAsync(data)) === t.to) bytes.set(t.to, data);
     }
     const summary = summarize(unsigned, previous);
     const draft: Draft = { kind: "draft", signed: false, original: did, parent: record.parent, entry: unsigned, summary, display: describeEntry(summary), bytes };
@@ -1325,7 +1329,7 @@ export class OriginalsSDK {
     const bytes: Record<string, Uint8Array> = {};
     for (const v of view.report.resources.versions) {
       const data = await this.store.getResource(v.digest);
-      if (data && resourceDigest(data) === v.digest) bytes[v.digest] = data;
+      if (data && (await resourceDigestAsync(data)) === v.digest) bytes[v.digest] = data;
       else missing.push({ kind: "resource", version: v.version, digest: v.digest, versionId: v.versionId });
     }
     const manifest: EvidenceManifest = {
@@ -1536,7 +1540,7 @@ export class OriginalsSDK {
 
   private async keepEvidence(contents: EvidenceContents, report: OriginalsReport, from: "package" | "host"): Promise<void> {
     for (const [digest, bytes] of Object.entries(contents.bytes)) {
-      if (resourceDigest(bytes) === digest) await this.store.putResource(digest, bytes);
+      if ((await resourceDigestAsync(bytes)) === digest) await this.store.putResource(digest, bytes);
     }
     for (const evidence of contents.authors) {
       const history = await verifyAuthorHistory(evidence, { now: this.clock() });

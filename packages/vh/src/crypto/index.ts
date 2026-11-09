@@ -68,6 +68,50 @@ export function decodeSha256Multihash(bytes: Uint8Array): Uint8Array {
 
 export { sha256 };
 
+/**
+ * Inputs shorter than this are hashed with noble: a native call costs more
+ * than it saves on a log line. Resource versions are usually far larger.
+ */
+export const NATIVE_SHA256_MIN_BYTES = 16 * 1024;
+
+interface DigestSubtle {
+  digest(algorithm: "SHA-256", data: Uint8Array): Promise<ArrayBuffer>;
+}
+
+function nativeSubtle(): DigestSubtle | undefined {
+  const subtle = (globalThis as { crypto?: { subtle?: Partial<DigestSubtle> } }).crypto?.subtle;
+  return typeof subtle?.digest === "function" ? (subtle as DigestSubtle) : undefined;
+}
+
+/**
+ * SHA-256 of exact bytes, with the platform's WebCrypto when it has one
+ * (browsers in a secure context, Node 20+, Bun, Deno): about eight times
+ * faster than noble on a large resource. The digest is SHA-256 either way
+ * (FIPS 180-4), so the result is byte-identical to `sha256`; where WebCrypto
+ * is missing or refuses the input (a SharedArrayBuffer view, an insecure
+ * browser context), noble computes it.
+ */
+export async function sha256Async(bytes: Uint8Array): Promise<Uint8Array> {
+  const subtle = bytes.length >= NATIVE_SHA256_MIN_BYTES ? nativeSubtle() : undefined;
+  if (subtle) {
+    try {
+      return new Uint8Array(await subtle.digest("SHA-256", bytes));
+    } catch {
+      // Unusable here: noble below.
+    }
+  }
+  return sha256(bytes);
+}
+
+/** `sha256Multihash`, computed with `sha256Async`. */
+export async function sha256MultihashAsync(bytes: Uint8Array): Promise<Uint8Array> {
+  const out = new Uint8Array(34);
+  out[0] = SHA2_256;
+  out[1] = 32;
+  out.set(await sha256Async(bytes), 2);
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Multikey
 

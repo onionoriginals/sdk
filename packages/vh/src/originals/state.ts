@@ -4,7 +4,7 @@
  * entry fields open (D1, D4). Each entry's state holds the full asset state,
  * never a delta, alongside the signed fields P5.1 requires.
  */
-import { multibaseDecode, multibaseEncode, sha256Multihash, decodeSha256Multihash } from "../crypto/index.js";
+import { multibaseDecode, multibaseEncode, sha256Multihash, sha256MultihashAsync, decodeSha256Multihash } from "../crypto/index.js";
 import { OriginalsError, fail } from "../errors.js";
 import { canonicalize, isJsonObject, type JsonObject, type JsonValue } from "../json/index.js";
 import { parseDidWebvh } from "../webvh/index.js";
@@ -120,6 +120,15 @@ function members(value: unknown, required: string[], optional: string[], where: 
 /** The digest of exact bytes (P4.3): no decoding or normalization. */
 export function resourceDigest(bytes: Uint8Array): string {
   return multibaseEncode(sha256Multihash(bytes));
+}
+
+/**
+ * `resourceDigest` with the platform's native SHA-256 when there is one
+ * (`sha256Async`): the same digest, much faster on a large resource. Use it
+ * wherever the caller can await.
+ */
+export async function resourceDigestAsync(bytes: Uint8Array): Promise<string> {
+  return multibaseEncode(await sha256MultihashAsync(bytes));
 }
 
 /** Check a digest's encoding; an algorithm outside the SHA-256 set is an unsupported profile (P4.2). */
