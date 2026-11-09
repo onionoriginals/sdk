@@ -21,6 +21,7 @@
  */
 import { OriginalsError } from "@originals/vh";
 import { parseJson } from "@originals/vh/json";
+import { resourceDigestAsync } from "@originals/vh/originals";
 import type { AuthorDidEvidence, RetainedAnchor } from "@originals/vh/originals";
 
 export interface StoredOriginal {
@@ -66,6 +67,16 @@ export interface OriginalsStore {
   commit(did: string, update: CommitUpdate): Promise<void>;
   putResource(digest: string, bytes: Uint8Array): Promise<void>;
   getResource(digest: string): Promise<Uint8Array | undefined>;
+  /**
+   * Optional. The size of the bytes this store holds for `digest` when it
+   * checked them against the digest (P4.3) and they cannot have changed
+   * since; undefined otherwise, including for bytes that did not match. The
+   * SDK then counts the version verified without reading and hashing its
+   * bytes again (owner decision, 9 November 2026: checked when stored).
+   * `MemoryStore` checks bytes when they are put; `FileStore` checks them
+   * once per process and while the file is unchanged.
+   */
+  checkedResource?(digest: string): Promise<number | undefined>;
   /** Keep author DID evidence that arrived with imported Originals. Verified on every read. */
   putAuthorEvidence(evidence: AuthorDidEvidence): Promise<void>;
   getAuthorEvidence(did: string): Promise<AuthorDidEvidence | undefined>;
@@ -143,9 +154,18 @@ export class MemoryStore implements OriginalsStore {
     return Promise.resolve();
   }
 
-  putResource(digest: string, bytes: Uint8Array): Promise<void> {
-    if (!this.resources.has(digest)) this.resources.set(digest, bytes.slice());
-    return Promise.resolve();
+  /** Digests whose held bytes matched them when put, with their size. The bytes are private copies, so they never change. */
+  private readonly checked = new Map<string, number>();
+
+  async putResource(digest: string, bytes: Uint8Array): Promise<void> {
+    if (this.resources.has(digest)) return;
+    const copy = bytes.slice();
+    this.resources.set(digest, copy);
+    if ((await resourceDigestAsync(copy)) === digest && this.resources.get(digest) === copy) this.checked.set(digest, copy.length);
+  }
+
+  checkedResource(digest: string): Promise<number | undefined> {
+    return Promise.resolve(this.checked.get(digest));
   }
 
   getResource(digest: string): Promise<Uint8Array | undefined> {
@@ -224,6 +244,7 @@ export class MemoryStore implements OriginalsStore {
   /** Forget stored bytes, as a store that lost them would. */
   deleteResource(digest: string): void {
     this.resources.delete(digest);
+    this.checked.delete(digest);
   }
 
   list(): Promise<string[]> {

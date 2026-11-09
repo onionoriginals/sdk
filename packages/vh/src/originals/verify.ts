@@ -60,6 +60,18 @@ export interface VerifyOriginalOptions {
    * from the sat itself (P9.17, P9.18); these add the others.
    */
   bytes?: Record<string, Uint8Array> | ((digest: string) => Uint8Array | undefined);
+  /**
+   * Resource versions the caller holds whose bytes were checked against their
+   * digest when they were stored (P4.3), and kept unchanged since: the size
+   * of those bytes, or undefined. For a content-addressed store that hashes
+   * what it keeps, so held bytes need not be read and hashed on every
+   * verification (owner decision, 9 November 2026: checked when stored is a
+   * checked version). A version is reported `verified` when that size is its
+   * descriptor's, `mismatch` otherwise, exactly as if its bytes had been
+   * supplied. Bytes in `bytes`, or on an anchoring sat, take precedence and
+   * are always hashed.
+   */
+  checked?: (digest: string) => number | undefined;
   /** Verify this exact checkpoint instead of the head (P3.2). */
   checkpoint?: string;
   /** Other copies of the asset log, compared with the supplied one (VH-Log "Comparing Copies"). */
@@ -401,7 +413,7 @@ function lookup(bytes: VerifyOriginalOptions["bytes"], digest: string): Uint8Arr
  * inscribed on the anchoring sat is read from there, already checked against its descriptor;
  * earlier ones need `bytes` (P9.17, P9.18; originals-spec #53).
  */
-async function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOptions["bytes"], onSat: ReadonlyMap<string, Uint8Array>): Promise<ResourceVersion[]> {
+async function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOptions["bytes"], onSat: ReadonlyMap<string, Uint8Array>, checked?: VerifyOriginalOptions["checked"]): Promise<ResourceVersion[]> {
   const out: ResourceVersion[] = [];
   for (const v of prefix) {
     const state = v.entry.state as unknown as EntryState;
@@ -410,7 +422,12 @@ async function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOp
     const inscribed = onSat.get(d.digest);
     const supplied = inscribed ?? lookup(bytes, d.digest);
     // The same SHA-256 as resourceDigest, natively where the platform has it.
-    const check = supplied === undefined ? "missing" : supplied.length === d.size && (await resourceDigestAsync(supplied)) === d.digest ? "verified" : "mismatch";
+    // Held bytes checked when stored: matching their digest, so they match the descriptor exactly when the size does (P4.3).
+    const held = supplied === undefined ? checked?.(d.digest) : undefined;
+    const check =
+      supplied !== undefined ? (supplied.length === d.size && (await resourceDigestAsync(supplied)) === d.digest ? "verified" : "mismatch")
+      : held !== undefined ? (held === d.size ? "verified" : "mismatch")
+      : "missing";
     out.push({ version: out.length + 1, digest: d.digest, mediaType: d.mediaType, size: d.size, versionId: v.entry.versionId, bytes: check, onBitcoin: inscribed !== undefined });
   }
   return out;
@@ -597,7 +614,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   }
   const prefix = selected ? log.entries.slice(0, selected.versionNumber) : [];
   // Only an anchor's sat supplies bytes: what Bitcoin accepted, never an ignored inscription (P9.17).
-  const versions = await resourceVersions(prefix, options.bytes, onBitcoin ? assembly!.bytes : new Map());
+  const versions = await resourceVersions(prefix, options.bytes, onBitcoin ? assembly!.bytes : new Map(), options.checked);
   const missing = versions.filter((v) => v.bytes === "missing");
   const mismatched = versions.filter((v) => v.bytes === "mismatch");
   const state = selected ? (selected.entry.state as unknown as EntryState) : undefined;
