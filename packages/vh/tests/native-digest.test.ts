@@ -131,3 +131,72 @@ describe("verifyOriginal with bytes checked when stored (`checked`)", () => {
     expect(swapped.resources.versions.map((v) => v.bytes)).toEqual(["mismatch", "verified"]);
   });
 });
+
+describe("bytes are read when they were before native hashing", () => {
+  test("a view WebCrypto refuses is hashed as it was at call time, the same with or without WebCrypto", async () => {
+    const original = noise(NATIVE_SHA256_MIN_BYTES * 2, 21);
+    const expected = sha256(original);
+    for (const crypto of [realCrypto.value, undefined]) {
+      withCrypto(crypto);
+      const shared = new Uint8Array(new SharedArrayBuffer(original.length));
+      shared.set(original);
+      const pending = sha256Async(shared);
+      shared.fill(99);
+      expect(await pending).toEqual(expected);
+    }
+  });
+
+  test("a view WebCrypto rejects is hashed by noble from the bytes at call time", async () => {
+    // A WebCrypto that refuses every input after yielding: noble hashes after an await.
+    withCrypto({ subtle: { digest: () => Promise.resolve().then(() => Promise.reject(new TypeError("refused"))) } });
+    const original = noise(NATIVE_SHA256_MIN_BYTES * 2, 22);
+    const view = original.slice();
+    const pending = sha256Async(view);
+    view.fill(7);
+    expect(await pending).toEqual(sha256(original));
+  });
+
+  test("a bytes callback whose data changes after it returns gets the report it got when each version was hashed in turn (C12-02, C12-10)", async () => {
+    const key = seeded(31);
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
+    const at = clock();
+    const author = alice.ref("orig");
+    const sign = alice.signer(key, "orig");
+    const v1 = new Uint8Array(NATIVE_SHA256_MIN_BYTES * 2).fill(1);
+    const v2 = new Uint8Array(NATIVE_SHA256_MIN_BYTES * 2).fill(2);
+    const describe = (b: Uint8Array): ResourceDescriptor => ({ mediaType: "image/png", size: b.length, digest: resourceDigest(b) });
+    const first = await createOriginal({ versionTime: at(), name: "test", resource: describe(v1), author, sign });
+    const second = await updateOriginal(first, { versionTime: at(), resource: describe(v2), author, sign });
+    for (const crypto of [realCrypto.value, undefined]) {
+      withCrypto(crypto);
+      // Version 2's bytes become right only after version 1's are returned: read then, they are wrong.
+      const secondBytes = new Uint8Array(v2.length).fill(99);
+      const report = await verifyOriginal({
+        log: [first, second], authors: [alice.evidence()], now: NOW,
+        bytes: (d) => {
+          if (d === describe(v1).digest) {
+            queueMicrotask(() => secondBytes.set(v2));
+            return v1;
+          }
+          return secondBytes;
+        },
+      });
+      expect(report.resources.versions.map((v) => v.bytes)).toEqual(["verified", "mismatch"]);
+      expect(report.resources.status).toBe("digest-failure");
+      expect(report.reasons).toContain("resources-digest-failure");
+    }
+  });
+
+  test("bytes changed after the callback returns them do not verify in their place (C12-10)", async () => {
+    const key = seeded(31);
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
+    const v1 = noise(NATIVE_SHA256_MIN_BYTES * 2, 23);
+    const descriptor: ResourceDescriptor = { mediaType: "image/png", size: v1.length, digest: resourceDigest(v1) };
+    const first = await createOriginal({ versionTime: clock()(), name: "test", resource: descriptor, author: alice.ref("orig"), sign: alice.signer(key, "orig") });
+    // Wrong bytes when returned, right ones a microtask later.
+    const view = new Uint8Array(v1.length).fill(99);
+    const report = await verifyOriginal({ log: [first], authors: [alice.evidence()], now: NOW, bytes: () => (queueMicrotask(() => view.set(v1)), view) });
+    expect(report.resources.versions[0]!.bytes).toBe("mismatch");
+    expect(report.reasons).toContain("resources-digest-failure");
+  });
+});

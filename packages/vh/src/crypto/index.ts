@@ -88,19 +88,27 @@ function nativeSubtle(): DigestSubtle | undefined {
  * (browsers in a secure context, Node 20+, Bun, Deno): about eight times
  * faster than noble on a large resource. The digest is SHA-256 either way
  * (FIPS 180-4), so the result is byte-identical to `sha256`; where WebCrypto
- * is missing or refuses the input (a SharedArrayBuffer view, an insecure
- * browser context), noble computes it.
+ * is missing or refuses the input (an insecure browser context), noble
+ * computes it. The bytes are read synchronously, when it is called: an input
+ * WebCrypto hashes is copied first, so a later change to the caller's view
+ * never reaches the digest.
  */
 export async function sha256Async(bytes: Uint8Array): Promise<Uint8Array> {
-  const subtle = bytes.length >= NATIVE_SHA256_MIN_BYTES ? nativeSubtle() : undefined;
-  if (subtle) {
-    try {
-      return new Uint8Array(await subtle.digest("SHA-256", bytes));
-    } catch {
-      // Unusable here: noble below.
-    }
+  const subtle = bytes instanceof Uint8Array && bytes.length >= NATIVE_SHA256_MIN_BYTES ? nativeSubtle() : undefined;
+  // Without WebCrypto, noble hashes synchronously: the bytes are read at call time.
+  if (!subtle) return sha256(bytes);
+  // A private copy, taken now, before anything is awaited: the digest is of the
+  // bytes as they were at call time, whatever the caller does to its view while
+  // the digest is pending, with or without WebCrypto. `new Uint8Array(view)`
+  // copies (a Buffer's own `slice` would alias), and the copy has an ordinary
+  // ArrayBuffer, which WebCrypto accepts where it refuses a SharedArrayBuffer.
+  const copy = new Uint8Array(bytes);
+  try {
+    return new Uint8Array(await subtle.digest("SHA-256", copy));
+  } catch {
+    // Unusable here: noble hashes the same private copy.
+    return sha256(copy);
   }
-  return sha256(bytes);
 }
 
 /** `sha256Multihash`, computed with `sha256Async`. */

@@ -8,7 +8,9 @@
  * didwebvh-ts (the shape originals.build mints). Each edit is a new resource
  * version of `--size` incompressible bytes (a PNG is near enough
  * incompressible). At each sample point every operation is timed `--repeat`
- * times and the median is reported. Nothing here touches the network.
+ * times and the median is reported, except the edit that reaches it: an edit
+ * adds a version, so it runs once, and `commit` is that edit less the
+ * prepareEdit and sign medians. Nothing here touches the network.
  */
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { localSigner, multibaseEncode } from "@originals/vh/crypto";
@@ -82,9 +84,13 @@ async function time<T>(fn: () => Promise<T>): Promise<[number, T]> {
   return [performance.now() - t, v];
 }
 
-async function median(fn: () => Promise<unknown>, n = REPEAT): Promise<number> {
+/** The median of `n` timed runs of `fn`, each after an untimed `setup`. */
+async function median<S>(fn: (s: S) => Promise<unknown>, setup: () => Promise<S> = async () => undefined as S, n = REPEAT): Promise<number> {
   const out: number[] = [];
-  for (let i = 0; i < n; i++) out.push((await time(fn))[0]);
+  for (let i = 0; i < n; i++) {
+    const s = await setup();
+    out.push((await time(() => fn(s)))[0]);
+  }
   out.sort((a, b) => a - b);
   return out[Math.floor(out.length / 2)];
 }
@@ -105,9 +111,9 @@ async function main() {
   let head = created.original.checkpoint;
   let versions = 1;
   const rows: Array<Record<string, number>> = [];
-  console.log(`resource ${SIZE} bytes; samples at ${SAMPLES.join(", ")} versions; median of ${REPEAT}`);
+  console.log(`resource ${SIZE} bytes; samples at ${SAMPLES.join(", ")} versions; median of ${REPEAT}, except edit and commit (one run: an edit adds a version)`);
   console.log(`create (1 version): ${fmt(createMs)} ms`);
-  const header = ["versions", "edit", "prepareEdit", "sign", "commit", "get", "package", "pkgMB", "load", "import(new)", "import(+1)", "signer calls/edit"];
+  const header = ["versions", "edit(1 run)", "prepareEdit", "sign", "commit(derived)", "get", "package", "pkgMB", "load", "import(new)", "import(+1)", "signer calls/edit"];
   console.log(header.join("\t"));
 
   const edit = async () => {
@@ -121,13 +127,14 @@ async function main() {
   for (const target of SAMPLES) {
     while (versions < target - 1) await edit();
     // The edit that reaches `target`, timed, split into its parts.
-    let editMs = 0, prepMs = 0, signMs = 0, commitMs = 0, calls = 0; // commit = edit - prepareEdit - sign
+    let editMs = 0, prepMs = 0, signMs = 0, commitMs = 0, calls = 0; // commit = edit - median prepareEdit - median sign
     if (target > 1) {
       versions++;
       const bytes = resource(versions);
-      // prepareEdit and sign on their own (sign stores nothing), then the full edit an app makes.
-      const [p, draft] = await time(() => sdk.prepareEdit(did, { parent: head, author: author.ref, resource: { bytes } }));
-      const [s] = await time(() => sdk.sign(draft, signer));
+      // prepareEdit and sign on their own, medians (neither stores anything), then the full edit an app makes, once.
+      let draft!: Awaited<ReturnType<typeof sdk.prepareEdit>>;
+      const p = await median(async () => { draft = await sdk.prepareEdit(did, { parent: head, author: author.ref, resource: { bytes } }); });
+      const s = await median(() => sdk.sign(draft, signer));
       const before = signer.calls();
       const [e, r] = await time(() => sdk.edit(did, { parent: head, author: author.ref, resource: { bytes }, signer }));
       editMs = e; prepMs = p; signMs = s; commitMs = Math.max(0, e - p - s);
@@ -143,15 +150,18 @@ async function main() {
       const server = OriginalsSDK.create({ store: new MemoryStore(), authors: [author.evidence], clock });
       await server.import(pkg);
     });
-    const behind = OriginalsSDK.create({ store: new MemoryStore(), authors: [author.evidence], clock });
     let importNextMs = NaN;
     if (target > 1) {
-      // Load everything but the newest entry, then import the newest package.
+      // A store holding everything but the newest entry (set up untimed, afresh for each run) imports the newest package.
       const log = await sdk.committedLog(did);
       const prefixHead = log.trimEnd().split("\n").slice(-2, -1)[0];
       const prefix = (JSON.parse(prefixHead) as { versionId: string }).versionId;
-      await behind.import((await sdk.package(did, { checkpoint: prefix })).bytes).catch(() => undefined);
-      importNextMs = (await time(() => behind.import(pkg)))[0];
+      const prefixPkg = (await sdk.package(did, { checkpoint: prefix })).bytes;
+      importNextMs = await median((behind) => behind.import(pkg), async () => {
+        const behind = OriginalsSDK.create({ store: new MemoryStore(), authors: [author.evidence], clock });
+        await behind.import(prefixPkg).catch(() => undefined);
+        return behind;
+      });
     }
     const row = { versions: target, edit: editMs, prepareEdit: prepMs, sign: signMs, commit: commitMs, get: getMs, package: packageMs, pkgMB: pkg.length / 1e6, load: loadMs, importNew: importNewMs, importNext: importNextMs, signerCalls: calls };
     rows.push(row);
