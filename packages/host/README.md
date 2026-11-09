@@ -41,7 +41,9 @@ answer as HTTP **507** with a body naming the quota:
 ```
 
 `limit` is `maxOriginals` or `maxTotalBytes`; `requested` is the bytes the
-refused write needed. The bytes count every hosted file a user wrote (asset
+refused write needed. A shared save counts against the namespace owner, so
+a granted editor whose save is refused gets only `{ "error": "store_full" }`:
+the owner's usage is theirs to see. The bytes count every hosted file a user wrote (asset
 logs, resource versions, alias and DID logs), and rewriting a key replaces
 its size. Set the quotas for your deployment, and show users their usage:
 

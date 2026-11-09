@@ -592,7 +592,12 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
           outcome = await attempt(siteKey, s, caller);
         } catch (e) {
           const msg = (e as Error).message;
-          if (msg === 'STORE_FULL') return json(storeFullBody(e), 507);
+          if (msg === 'STORE_FULL') {
+            // The bytes count against the namespace owner. Only the owner hears the quota's
+            // numbers; a granted editor learns the store is full, not the owner's usage.
+            const owner = store.ownerOf(`${siteKey}/originals/asset/did.jsonl`);
+            return json(owner === caller.sub ? storeFullBody(e) : { error: 'store_full' }, 507);
+          }
           return json({ error: 'store_error', message: msg }, 500);
         }
         if (outcome === 'again') continue;
