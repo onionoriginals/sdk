@@ -170,3 +170,80 @@ describe("bytes are read when they were before native hashing", () => {
     expect(report.reasons).toContain("resources-digest-failure");
   });
 });
+
+describe("verification options are read when they were before native hashing", () => {
+  async function oneVersion() {
+    const key = seeded(31);
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
+    const v1 = noise(NATIVE_SHA256_MIN_BYTES * 2, 24);
+    const descriptor: ResourceDescriptor = { mediaType: "image/png", size: v1.length, digest: resourceDigest(v1) };
+    const first = await createOriginal({ versionTime: clock()(), name: "test", resource: descriptor, author: alice.ref("orig"), sign: alice.signer(key, "orig") });
+    return { alice, v1, first };
+  }
+
+  test("a retained version a bytes callback sets after it returns is not the one reported (C12-10)", async () => {
+    const { alice, v1, first } = await oneVersion();
+    for (const crypto of [realCrypto.value, undefined]) {
+      withCrypto(crypto);
+      const retained: { original?: string } = {};
+      const report = await verifyOriginal({
+        log: [first], authors: [alice.evidence()], now: NOW, retained,
+        bytes: () => (queueMicrotask(() => (retained.original = first.versionId)), v1),
+      });
+      // Read with the bytes, as when they were hashed synchronously: nothing was retained then.
+      expect(report.assetFreshness.retainedVersionId).toBeNull();
+      expect(report.resources.status).toBe("available");
+    }
+  });
+
+  test("identity evidence a bytes callback changes after it returns is reported as it was (C12-10)", async () => {
+    const { alice, v1, first } = await oneVersion();
+    for (const crypto of [realCrypto.value, undefined]) {
+      withCrypto(crypto);
+      const evidence = alice.evidence();
+      const before = evidence.obtainedAt ?? null;
+      const report = await verifyOriginal({
+        log: [first], authors: [evidence], now: NOW,
+        bytes: () => (queueMicrotask(() => (evidence.obtainedAt = "2001-01-01T00:00:00Z")), v1),
+      });
+      expect(report.identityEvidence.obtained.obtainedAt).toBe(before);
+    }
+  });
+});
+
+describe("native hashing holds a bounded amount of copied bytes", () => {
+  test("past the budget, versions are hashed with noble and report the same (C12-02)", async () => {
+    const key = seeded(31);
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
+    const at = clock();
+    const author = alice.ref("orig");
+    const sign = alice.signer(key, "orig");
+    // Nine 8 MiB versions, alternating two buffers: 72 MiB in all, over the 64 MiB budget.
+    const size = 8 * 1024 * 1024;
+    const pair = [new Uint8Array(size).fill(1), new Uint8Array(size).fill(2)];
+    const descriptors = pair.map((b): ResourceDescriptor => ({ mediaType: "image/png", size, digest: resourceDigest(b) }));
+    const log = [await createOriginal({ versionTime: at(), name: "big", resource: descriptors[0]!, author, sign })];
+    for (let i = 1; i < 9; i++) log.push(await updateOriginal(log.at(-1)!, { versionTime: at(), resource: descriptors[i % 2]!, author, sign }));
+    const bytes = { [descriptors[0]!.digest]: pair[0]!, [descriptors[1]!.digest]: pair[1]! };
+
+    let inFlight = 0;
+    let peak = 0;
+    const subtle = realCrypto.value.subtle;
+    withCrypto({
+      subtle: {
+        digest: (a: string, d: Uint8Array) => {
+          inFlight += d.length;
+          peak = Math.max(peak, inFlight);
+          return subtle.digest(a, d).finally(() => (inFlight -= d.length));
+        },
+      },
+    });
+    const native = await verifyOriginal({ log, authors: [alice.evidence()], now: NOW, bytes });
+    expect(peak).toBeGreaterThan(0);
+    expect(peak).toBeLessThanOrEqual(64 * 1024 * 1024);
+    withCrypto(undefined);
+    const noble = await verifyOriginal({ log, authors: [alice.evidence()], now: NOW, bytes });
+    expect(native).toEqual(noble);
+    expect(native.resources.versions.map((v) => v.bytes)).toEqual(Array(9).fill("verified"));
+  });
+});
