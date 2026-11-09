@@ -28,6 +28,32 @@ route answers 401. The landing verifies its JWT there.
 instance serves besides its canonical host, such as a legacy domain earlier
 identities were minted on.
 
+## Per-user quotas
+
+`createOriginalsStore` limits each user (each `authenticate` subject) to
+**100 recorded Originals and 25 MiB of hosted bytes** unless told otherwise
+(`ORIGINALS_STORE_DEFAULTS`). A write past either quota is refused with a
+`StoreFullError`, which `createOriginalsRoutes` and the shared-save routes
+answer as HTTP **507** with a body naming the quota:
+
+```json
+{ "error": "store_full", "limit": "maxTotalBytes", "max": 26214400, "used": 26000000, "requested": 680000 }
+```
+
+`limit` is `maxOriginals` or `maxTotalBytes`; `requested` is the bytes the
+refused write needed. The bytes count every hosted file a user wrote (asset
+logs, resource versions, alias and DID logs), and rewriting a key replaces
+its size. Set the quotas for your deployment, and show users their usage:
+
+```ts
+const store = createOriginalsStore({ dataDir, maxOriginals: 1_000, maxTotalBytes: 512 * 1024 * 1024 });
+store.limits;          // { maxOriginals: 1000, maxTotalBytes: 536870912 }
+store.usage!(subject); // { originals, totalBytes }
+```
+
+A drawing app saving 25 versions of a 680 KB image uses about 17 MiB of the
+default 25 MiB.
+
 ## Tests
 
 ```bash
