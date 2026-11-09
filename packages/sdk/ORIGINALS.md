@@ -71,7 +71,31 @@ await sdk.commit(draft, signer);                                     // retrying
 const pkg = await sdk.package(did, { checkpoint });  // ZIP evidence package, complete or partial (P7.1)
 const { report, manifest, reasons } = await sdk.load(pkg.bytes); // read-only; no key, no network (P7.3)
 await sdk.import(pkg.bytes); // "imported" | "already-current" | "kept-newer-local" | "conflict" (P7.5)
+
+// Incremental uploads: send only what the receiver lacks.
+const next = await sdk.package(did, { omitResources: { throughVersion: heldByServer } }); // partial
+await server.import(next.bytes, { original: did, requireResources: true }); // server side
 ```
+
+**Partial packages on purpose.** `package(did, { omitResources })` leaves out
+the bytes of the first `throughVersion` resource versions and of any version
+whose digest is in `digests`, unless a packaged version names the same bytes.
+Each is listed as a missing resource item and the manifest says `partial`
+(P7.4, P14.10). The result is byte-identical to reading the complete package,
+deleting those bytes and writing it again; it is just never built at full
+size. Leaving bytes out changes nothing else: the log, author binding and
+identity evidence verify as before, and the left-out versions are reported
+as unavailable content, never a failure (P7.3). On the receiving side,
+`import(zip, { requireResources: true })` accepts a partial package only when
+the store already holds every left-out version, each matching its digest,
+and refuses packaged bytes that do not match; both are checked before
+anything is stored (`RESOURCES_NOT_HELD`, unavailable-bytes, with
+`details.missing`; `RESOURCE_DIGEST_MISMATCH`, invalid-evidence).
+`import(zip, { original })` refuses a package for any other Original
+(`IMPORT_REJECTED`). The import verifies the package itself and its
+result's `original.report` is the verified report, so a separate `load` is
+needed only by an app that must check something before anything is stored
+(that the author is the caller, say).
 
 The `originals` command verifies a package offline:
 `originals verify harbor.zip [--json] [--now <time>]`. It prints the

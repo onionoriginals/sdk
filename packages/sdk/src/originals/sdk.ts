@@ -306,6 +306,39 @@ export interface PublishedOriginal extends LoadedEvidence {
   verified: boolean;
 }
 
+/**
+ * Leave resource versions' bytes out of a package (P7.1, P7.4, P14.10): a
+ * partial package lists each as a missing resource item, so a reader that
+ * already holds them (a server one save behind) is sent only what it lacks.
+ * A version is left out when it is one of the first `throughVersion`
+ * versions or its digest is in `digests`, unless a version that is packaged
+ * names the same bytes. Leaving bytes out never changes what verifies:
+ * missing bytes are unavailable content, never a failure (P7.3).
+ */
+export interface OmitResources {
+  throughVersion?: number;
+  digests?: Iterable<string>;
+}
+
+export interface PackageOptions {
+  /** Package through this checkpoint rather than the head (P7.1, P7.6). */
+  checkpoint?: string;
+  omitResources?: OmitResources;
+}
+
+export interface ImportOptions {
+  /** Refuse (IMPORT_REJECTED) a package for any other Original, before anything is stored. */
+  original?: string;
+  /**
+   * Accept a partial package only when this store already holds the bytes of
+   * every version it leaves out, each matching its digest, and refuse one
+   * whose packaged bytes do not match (P4.3). Checked before anything is
+   * stored: RESOURCES_NOT_HELD (unavailable-bytes, `details.missing`) or
+   * RESOURCE_DIGEST_MISMATCH (invalid-evidence).
+   */
+  requireResources?: boolean;
+}
+
 export interface ImportResult {
   status: "imported" | "already-current" | "kept-newer-local" | "conflict";
   original: OriginalView;
@@ -561,6 +594,20 @@ function digestsOf(log: string): string[] {
     }
   }
   return [...digests];
+}
+
+/** Whether a resource version is to be left out of a package, from `omitResources`. */
+function omittedResources(omit: OmitResources | undefined): (v: ResourceVersion) => boolean {
+  if (omit === undefined) return () => false;
+  if (typeof omit !== "object" || omit === null) sdkError("invalid-evidence", "INPUT_INVALID", "omitResources is { throughVersion?, digests? }");
+  exactKeys(omit, ["throughVersion", "digests"], "omitResources");
+  const through = omit.throughVersion ?? 0;
+  if (!Number.isSafeInteger(through) || through < 0) sdkError("invalid-evidence", "INPUT_INVALID", "omitResources.throughVersion is a version number, 0 or more");
+  if (omit.digests !== undefined && (typeof omit.digests !== "object" || omit.digests === null || typeof (omit.digests as Iterable<string>)[Symbol.iterator] !== "function")) {
+    sdkError("invalid-evidence", "INPUT_INVALID", "omitResources.digests is an iterable of digests");
+  }
+  const digests = new Set(omit.digests ?? []);
+  return (v) => v.version <= through || digests.has(v.digest);
 }
 
 export class OriginalsSDK {
@@ -1309,10 +1356,15 @@ export class OriginalsSDK {
 
   // ---------------------------------------------------------------- evidence
 
-  /** An evidence package for the head or an exact checkpoint (P7.1). */
-  async package(did: string, options: { checkpoint?: string } = {}): Promise<EvidencePackage> {
+  /**
+   * An evidence package for the head or an exact checkpoint (P7.1). With
+   * `omitResources`, a partial package without those versions' bytes.
+   */
+  async package(did: string, options: PackageOptions = {}): Promise<EvidencePackage> {
+    exactKeys(options, ["checkpoint", "omitResources"], "package options");
+    const omit = omittedResources(options.omitResources);
     const log = await this.stored(did);
-    const view = await this.get(did, options);
+    const view = await this.get(did, options.checkpoint !== undefined ? { checkpoint: options.checkpoint } : {});
     const ids = versionIds(log);
     const prefix = `${lines(log).slice(0, ids.indexOf(view.checkpoint) + 1).join("\n")}\n`;
     // A did:btco signer's history is read from Bitcoin, not packaged; it is listed as missing (P5.13).
@@ -1323,7 +1375,15 @@ export class OriginalsSDK {
     const editorDids = new Set(signerDidsOf(prefix).filter((d) => d !== (view.report.identityEvidence.author ?? undefined)));
     for (const did of signerDidsOf(prefix)) if (!authors.some((a) => a.did === did)) missing.push({ kind: "identity", did, role: editorDids.has(did) ? "editor" : "author" });
     const bytes: Record<string, Uint8Array> = {};
-    for (const v of view.report.resources.versions) {
+    const versions = view.report.resources.versions;
+    // Bytes are packaged by digest: a version is left out only when no packaged version names the same bytes.
+    const kept = new Set(versions.filter((v) => !omit(v)).map((v) => v.digest));
+    for (const v of versions) {
+      if (!kept.has(v.digest)) {
+        missing.push({ kind: "resource", version: v.version, digest: v.digest, versionId: v.versionId });
+        continue;
+      }
+      if (bytes[v.digest]) continue;
       const data = await this.store.getResource(v.digest);
       if (data && resourceDigest(data) === v.digest) bytes[v.digest] = data;
       else missing.push({ kind: "resource", version: v.version, digest: v.digest, versionId: v.versionId });
@@ -1489,11 +1549,12 @@ export class OriginalsSDK {
    * reported as a fork. Author evidence is stored only when it is at least as
    * new as what this store has verified (P7.8).
    */
-  async import(zip: Uint8Array): Promise<ImportResult> {
-    return this.importContents(readEvidence(zip, this.options.archiveLimits));
+  async import(zip: Uint8Array, options: ImportOptions = {}): Promise<ImportResult> {
+    exactKeys(options, ["original", "requireResources"], "import options");
+    return this.importContents(readEvidence(zip, this.options.archiveLimits), options.original, "package", options.requireResources === true);
   }
 
-  private async importContents(contents: EvidenceContents, expected?: string, from: "package" | "host" = "package"): Promise<ImportResult> {
+  private async importContents(contents: EvidenceContents, expected?: string, from: "package" | "host" = "package", requireResources = false): Promise<ImportResult> {
     const loaded = await this.loadContents(contents, from);
     const r = loaded.report;
     if (!r.original || r.history.status !== "valid" || r.authorBinding.status !== "valid" || r.identityEvidence.status !== "complete") {
@@ -1508,6 +1569,7 @@ export class OriginalsSDK {
       sdkError("invalid-evidence", "IMPORT_REJECTED", "the package's log does not verify to its last entry", { report: r });
     }
     const did = r.original;
+    if (requireResources) await this.requireHeld(r);
     const incoming = versionIds(contents.log);
     const local = (await this.store.get(did))?.log;
     const result = async (status: ImportResult["status"]): Promise<ImportResult> => ({ status, original: await this.get(did) });
@@ -1532,6 +1594,21 @@ export class OriginalsSDK {
     await this.keepEvidence(contents, r, from);
     await this.store.commit(did, { expectedHead: headOf(local), log: contents.log });
     return result("imported");
+  }
+
+  /** Every resource version is in the package, matching, or already held here, matching (P4.3). */
+  private async requireHeld(r: OriginalsReport): Promise<void> {
+    const mismatched = r.resources.versions.filter((v) => v.bytes === "mismatch");
+    if (mismatched.length > 0) {
+      sdkError("invalid-evidence", "RESOURCE_DIGEST_MISMATCH", `the packaged bytes of version ${mismatched[0].version} do not match its digest`, { report: r });
+    }
+    const missing: Array<{ version: number; digest: string; versionId: string }> = [];
+    for (const v of r.resources.versions) {
+      if (v.bytes !== "verified" && !(await this.resourceBytes(v.digest))) missing.push({ version: v.version, digest: v.digest, versionId: v.versionId });
+    }
+    if (missing.length > 0) {
+      sdkError("unavailable-bytes", "RESOURCES_NOT_HELD", `the package leaves out ${missing.length} resource version(s) this store does not hold, starting with version ${missing[0].version}`, { missing, report: r });
+    }
   }
 
   private async keepEvidence(contents: EvidenceContents, report: OriginalsReport, from: "package" | "host"): Promise<void> {
