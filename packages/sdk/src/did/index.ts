@@ -24,6 +24,7 @@ import type { AliasEvidence, AuthorDidEvidence, AuthorRef } from "@originals/vh/
 import type { ExternalSigner, ExternalVerifier } from "../types/common.js";
 import { StructuredError } from "../utils/telemetry.js";
 import { createDIDOriginal, prepareDIDDataForSigning, verifyDIDSignature } from "./identity-operations.js";
+import { canonicalizeWebVHDomain } from "./webvh-names.js";
 
 export {
   createDIDOriginal,
@@ -101,7 +102,8 @@ export interface WebvhIdentity {
 
 interface LogLine {
   versionId: string;
-  state: { id?: unknown };
+  parameters?: { updateKeys?: unknown };
+  state: { id?: unknown; verificationMethod?: unknown; assertionMethod?: unknown };
 }
 
 /**
@@ -137,7 +139,7 @@ export function identityFromLog(log: string, options: { obtainedAt?: string; aut
 const jsonl = (log: unknown[]): string => log.map((e) => `${JSON.stringify(e)}\n`).join("");
 
 export interface CreateIdentityOptions {
-  /** The host, as `example.com` or `localhost:5173`. */
+  /** The host, as `example.com` or `example.com:8443`: a fully qualified name, never `localhost` (did:webvh 1.0). */
   domain: string;
   /** Path segments under the domain; originals.build uses `[userPathSegment(subject)]`. */
   paths?: string[];
@@ -174,6 +176,46 @@ export async function createWebvhIdentity(options: CreateIdentityOptions): Promi
 }
 
 /**
+ * Refuse a log that is not the identity `options` describe: hosted at
+ * `domain` under `paths` now, with `identitySigner`'s key among its update
+ * keys and `authorshipKey` as `#key-1` under assertionMethod in its latest
+ * state. A log from the app's storage or a create-if-absent `save` is
+ * otherwise taken on trust, and one for another account would have this
+ * account sign under a DID another key controls. Moves and rotations pass:
+ * the app gives where it hosts the DID now and the keys it holds now.
+ */
+function requireRequested(identity: WebvhIdentity, options: CreateIdentityOptions): WebvhIdentity {
+  const fail = (why: string): never => {
+    throw new StructuredError("IDENTITY_MISMATCH", `the stored identity log is not the identity asked for: ${why}`);
+  };
+  const lines = identity.log.trimEnd().split("\n").map((l) => JSON.parse(l) as LogLine);
+  const paths = options.paths ?? [];
+  const segments = identity.location.split(":").slice(3).map((x) => {
+    try {
+      return decodeURIComponent(x);
+    } catch {
+      return x;
+    }
+  });
+  if (segments.length !== paths.length + 1 || segments[0] !== canonicalizeWebVHDomain(options.domain) || paths.some((p, i) => segments[i + 1] !== p)) {
+    fail(`it is hosted at ${identity.location}, not at ${options.domain} under ${JSON.stringify(paths)}`);
+  }
+  let updateKeys: unknown;
+  for (const line of lines) if (line.parameters?.updateKeys !== undefined) updateKeys = line.parameters.updateKeys;
+  const identityKey = options.identitySigner.getPublicKeyMultibase();
+  if (!Array.isArray(updateKeys) || !updateKeys.includes(identityKey)) fail("the identity key is not among its update keys");
+  const state = lines[lines.length - 1].state;
+  const fragment = `#${AUTHORSHIP_KEY}`;
+  const named = (id: unknown) => typeof id === "string" && (id === fragment || id === `${identity.location}${fragment}`);
+  const methods = Array.isArray(state.verificationMethod) ? (state.verificationMethod as Array<{ id?: unknown; publicKeyMultibase?: unknown }>) : [];
+  const assertion = Array.isArray(state.assertionMethod) ? (state.assertionMethod as unknown[]) : [];
+  if (!methods.some((m) => named(m.id) && m.publicKeyMultibase === options.authorshipKey) || !assertion.some(named)) {
+    fail(`its latest state does not have the authorship key as ${fragment} under assertionMethod`);
+  }
+  return identity;
+}
+
+/**
  * The user's identity from where the app keeps its log, or a new one, saved
  * there first. `load` returns the hosted log or null. `save` stores a new log
  * and must succeed before the identity is used.
@@ -184,6 +226,11 @@ export async function createWebvhIdentity(options: CreateIdentityOptions): Promi
  * then the stored one, so every caller ends with the same identity. A `save`
  * that overwrites instead lets the last writer replace an identity the first
  * may already have signed with.
+ *
+ * A loaded or stored log must be the identity asked for: at `domain` under
+ * `paths`, with the identity key among its update keys and the authorship key
+ * as `#key-1` (`IDENTITY_MISMATCH` otherwise). It is not otherwise verified
+ * here; the SDK verifies it with every Original it signs (P5.6).
  */
 export async function ensureWebvhIdentity(
   options: CreateIdentityOptions & {
@@ -193,7 +240,7 @@ export async function ensureWebvhIdentity(
   },
 ): Promise<WebvhIdentity> {
   const held = await options.load();
-  if (held) return identityFromLog(held);
+  if (held) return requireRequested(identityFromLog(held), options);
   const identity = await createWebvhIdentity({
     domain: options.domain,
     identitySigner: options.identitySigner,
@@ -202,7 +249,11 @@ export async function ensureWebvhIdentity(
     ...(options.portable !== undefined ? { portable: options.portable } : {}),
   });
   const stored = await options.save(identity.log);
-  return typeof stored === "string" && stored !== "" ? identityFromLog(stored) : identity;
+  if (stored === undefined || stored === null) return identity;
+  if (typeof stored !== "string" || stored.trim() === "") {
+    throw new StructuredError("INPUT_INVALID", "save returned something other than the stored log or nothing");
+  }
+  return requireRequested(identityFromLog(stored), options);
 }
 
 /** The alias path segment for an Original: `o-` and the first 16 characters of its did:vh SCID. */

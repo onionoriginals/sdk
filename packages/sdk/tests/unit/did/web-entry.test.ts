@@ -95,9 +95,42 @@ describe("ensureWebvhIdentity", () => {
     expect(a).toEqual(identityFromLog(stored!));
     expect(b).toEqual(a);
     // The loser gets the stored identity even when it minted a different one.
-    const other = await createWebvhIdentity({ domain: "other.example", paths, identitySigner, authorshipKey });
+    const other = await createWebvhIdentity({ domain: "example.com", paths, identitySigner, authorshipKey, portable: false });
     const lost = await ensureWebvhIdentity({ ...options, load: () => Promise.resolve(null), save: () => Promise.resolve(other.log) });
     expect(lost).toEqual(other);
+    expect(lost.did).not.toBe(a.did);
+  });
+
+  test("a loaded or stored log that is not the identity asked for is refused, and an empty answer from save too", async () => {
+    const base = { domain: "example.com", paths, identitySigner, authorshipKey };
+    const otherSigner = localWebvhSigner(secret(21));
+    const otherAuthorship = localSigner("Ed25519", secret(22)).publicKeyMultibase;
+    const foreign = {
+      domain: await createWebvhIdentity({ ...base, domain: "other.example" }),
+      paths: await createWebvhIdentity({ ...base, paths: [userPathSegment("ffffffffffffffff")] }),
+      identityKey: await createWebvhIdentity({ ...base, identitySigner: otherSigner }),
+      // Another account's DID that names this account's (public) authorship key: signing under it must still be refused.
+      administered: await createWebvhIdentity({ ...base, identitySigner: otherSigner, authorshipKey }),
+      authorship: await createWebvhIdentity({ ...base, authorshipKey: otherAuthorship }),
+    };
+    for (const id of Object.values(foreign)) {
+      for (const via of ["load", "save"] as const) {
+        const options = { ...base, load: () => Promise.resolve(via === "load" ? id.log : null), save: () => Promise.resolve(via === "save" ? id.log : undefined) };
+        await expect(ensureWebvhIdentity(options)).rejects.toMatchObject({ code: "IDENTITY_MISMATCH" });
+      }
+    }
+    await expect(ensureWebvhIdentity({ ...base, load: () => Promise.resolve(null), save: () => Promise.resolve("") })).rejects.toMatchObject({ code: "INPUT_INVALID" });
+  });
+
+  test("P5.14: a moved identity loads when the app gives where it is hosted now", async () => {
+    const identity = await createWebvhIdentity({ domain: "example.com", paths, identitySigner, authorshipKey });
+    const moved = await updateDIDOriginal({ type: "did", log: identity.log.trimEnd().split("\n").map((l) => JSON.parse(l) as never), signer: identitySigner, verifier: identitySigner, domain: "moved.example" });
+    const log = moved.log.map((e) => `${JSON.stringify(e)}\n`).join("");
+    const options = { domain: "moved.example", paths, identitySigner, authorshipKey, load: () => Promise.resolve(log), save: () => Promise.resolve() };
+    const loaded = await ensureWebvhIdentity(options);
+    expect(loaded.did).toBe(identity.did);
+    expect(loaded.location).toMatch(/:moved\.example:/);
+    await expect(ensureWebvhIdentity({ ...options, domain: "example.com" })).rejects.toMatchObject({ code: "IDENTITY_MISMATCH" });
   });
 });
 

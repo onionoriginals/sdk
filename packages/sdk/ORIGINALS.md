@@ -495,7 +495,11 @@ DID and points `ref.verificationMethod` at the new location (P5.14); taking
 the DID from the log's last line, as the apps did, breaks after a move.
 Make `save` create-if-absent and return the log already stored when it
 loses: two tabs signing in at once both mint, and only the store can pick
-one. `ensureWebvhIdentity` then returns the stored identity to both.
+one. `ensureWebvhIdentity` then returns the stored identity to both. A
+loaded or stored log must be the identity asked for (hosted at `domain`
+under `paths`, the identity key among its update keys, the authorship key as
+`#key-1`), or it is refused as `IDENTITY_MISMATCH`; after a move, pass the
+domain it is hosted at now.
 `userPathSegment` keeps originals.build's `user-<first 16 characters>`
 segment, so it needs subjects unique in their first 16 characters (a random
 id, not `auth0|...`); otherwise two accounts share one hosted log.
