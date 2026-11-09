@@ -1,7 +1,8 @@
 /**
  * Resource bytes checked when stored (P4.3; owner decision, 9 November 2026).
- * A store that hashed bytes when it kept them, and knows they have not
- * changed since, reports them through `checkedResource`; the SDK then counts
+ * A store that hashed bytes when it kept them, and whose bytes nothing
+ * outside it can change, reports them through `checkedResource`
+ * (`MemoryStore`; `FileStore` cannot know its files unchanged); the SDK then counts
  * the version verified without reading and hashing it again. Every report is
  * the one a store without the capability gives: the same `verified`,
  * `missing` and `mismatch` per version (C12-02, C12-10), and bytes that
@@ -87,33 +88,71 @@ describe("MemoryStore checks bytes when they are put", () => {
   });
 });
 
-describe("FileStore checks bytes once per process, while the file is unchanged", () => {
-  test("reports equal a store without checking, and a file changed on disk is hashed again and fails", async () => {
+describe("MemoryStore keeps bytes nothing outside it can change", () => {
+  test("C12-02: a Buffer changed after it is put is not what the store holds or vouches for", async () => {
+    const store = new MemoryStore();
+    const original = Buffer.from(V[0]);
+    const d = resourceDigest(original);
+    await store.putResource(d, original);
+    original[0] ^= 1;
+    const held = (await store.getResource(d))!;
+    expect(resourceDigest(held)).toBe(d);
+    expect(await store.checkedResource(d)).toBe(V[0].length);
+  });
+
+  test("C12-02: changing bytes returned by getResource does not change what the store holds", async () => {
+    const store = new MemoryStore();
+    const d = resourceDigest(V[0]);
+    await store.putResource(d, Buffer.from(V[0]));
+    const out = (await store.getResource(d))!;
+    out[0] ^= 1;
+    expect(resourceDigest((await store.getResource(d))!)).toBe(d);
+    expect(await store.checkedResource(d)).toBe(V[0].length);
+  });
+
+  test("C12-02, C12-10: a report from checked bytes equals one from the held bytes, after the caller's Buffer changes", async () => {
+    const store = new MemoryStore();
+    const { alice, did } = await threeVersions(store);
+    const d0 = resourceDigest(V[0]);
+    // A second store given Buffers the caller then changes: the same report as the first.
+    const other = new MemoryStore();
+    for (const b of V) {
+      const buf = Buffer.from(b);
+      await other.putResource(resourceDigest(b), buf);
+      buf.fill(0);
+    }
+    for (const digest of [d0, resourceDigest(V[1]), resourceDigest(V[2])]) {
+      const held = (await other.getResource(digest))!;
+      held.fill(1);
+    }
+    const log = await store.get(did);
+    await other.commit(did, { expectedHead: null, log: log!.log });
+    await bothWays(alice, other, did); // the first read retains the head; compare reads after it
+    const r = await bothWays(alice, other, did);
+    expect(r.withChecks).toEqual(r.without);
+    expect(r.withChecks.resources.map((v) => v.bytes)).toEqual(["verified", "verified", "verified"]);
+  });
+});
+
+describe("FileStore does not vouch for its bytes", () => {
+  test("it has no checkedResource: a file can change with no change to its metadata (a shared writable mapping), so held bytes are read and hashed every time", async () => {
     const dir = mkdtempSync(join(tmpdir(), "originals-checked-"));
     const store = await FileStore.open(dir);
     try {
+      expect((store as OriginalsStore).checkedResource).toBeUndefined();
       const { alice, did } = await threeVersions(store);
-      const d0 = resourceDigest(V[0]);
-      expect(await store.checkedResource(d0)).toBe(V[0].length);
-      let r = await bothWays(alice, store, did);
-      expect(r.withChecks).toEqual(r.without);
+      const r = await bothWays(alice, store, did);
       expect(r.withChecks.resources.map((v) => v.bytes)).toEqual(["verified", "verified", "verified"]);
 
-      // Rewritten in place, same size, its times put back: the change time still moves.
-      const path = join(dir, "resources", d0);
+      // Rewritten in place, same size, its times put back: hashed, so a mismatch.
+      const path = join(dir, "resources", resourceDigest(V[0]));
       const { atime, mtime } = statSync(path);
       writeFileSync(path, bytes("first versioN"));
       utimesSync(path, atime, mtime);
-      expect(await store.checkedResource(d0)).toBeUndefined();
-      r = await bothWays(alice, store, did);
-      expect(r.withChecks).toEqual(r.without);
-      expect(r.withChecks.resources.map((v) => v.bytes)).toEqual(["mismatch", "verified", "verified"]);
-
-      // Put back: hashed again, and checked again.
-      writeFileSync(path, V[0]);
-      expect(await store.checkedResource(d0)).toBe(V[0].length);
-      expect(await store.checkedResource(resourceDigest(bytes("never stored")))).toBeUndefined();
-      expect(await store.checkedResource("not-a-digest")).toBeUndefined();
+      const after = await bothWays(alice, store, did);
+      expect(after.withChecks).toEqual(after.without);
+      expect(after.withChecks.resources.map((v) => v.bytes)).toEqual(["mismatch", "verified", "verified"]);
+      expect(after.withChecks.report.reasons).toContain("resources-digest-failure");
     } finally {
       await store.close();
     }

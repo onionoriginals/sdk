@@ -101,6 +101,16 @@ on; it never reports an unanchored Original as current (P7.10). The
   handle waits for every write in flight, then releases the lock, so a store
   can be handed to another process; a closed handle refuses writes
   (`STORE_CLOSED`).
+- **Resource bytes checked when stored (P4.3; owner decision, 9 November
+  2026).** A store may implement the optional `checkedResource(digest)`,
+  returning the size of bytes it hashed against `digest` when it stored them;
+  the SDK then counts that version verified without reading and hashing it
+  again, with the same report as otherwise. A store may implement it only if
+  its bytes cannot change outside it. `MemoryStore` does: it keeps private
+  copies (also of a Node `Buffer`) and hands out only copies. `FileStore` does
+  not: a file can change with no change to its size or times (a shared
+  writable mapping), so its bytes are read and hashed, with native SHA-256,
+  on every verification.
 - **Retries (P6.4).** Committing an accepted, identical draft returns its
   existing checkpoint with status `duplicate`. Any other retry needs a new
   preparation step.

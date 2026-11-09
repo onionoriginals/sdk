@@ -73,8 +73,14 @@ export interface OriginalsStore {
    * since; undefined otherwise, including for bytes that did not match. The
    * SDK then counts the version verified without reading and hashing its
    * bytes again (owner decision, 9 November 2026: checked when stored).
-   * `MemoryStore` checks bytes when they are put; `FileStore` checks them
-   * once per process and while the file is unchanged.
+   *
+   * Implement it only if the held bytes cannot change outside the store: a
+   * store whose bytes something else can write (a file another process can
+   * rewrite or map writable, a shared buffer) must not, since no cheap check
+   * proves bytes unchanged. `MemoryStore` implements it: it keeps private
+   * copies, checked when put. `FileStore` does not: file metadata does not
+   * show every change (a shared writable mapping changes bytes without
+   * touching size or times), so its bytes are read and hashed every time.
    */
   checkedResource?(digest: string): Promise<number | undefined>;
   /** Keep author DID evidence that arrived with imported Originals. Verified on every read. */
@@ -154,12 +160,17 @@ export class MemoryStore implements OriginalsStore {
     return Promise.resolve();
   }
 
-  /** Digests whose held bytes matched them when put, with their size. The bytes are private copies, so they never change. */
+  /**
+   * Digests whose held bytes matched them when put, with their size. The
+   * bytes are private copies (`new Uint8Array`, a real copy even of a Node
+   * Buffer, whose own `slice` would share the caller's memory) and are only
+   * ever handed out as copies, so nothing outside the store can change them.
+   */
   private readonly checked = new Map<string, number>();
 
   async putResource(digest: string, bytes: Uint8Array): Promise<void> {
     if (this.resources.has(digest)) return;
-    const copy = bytes.slice();
+    const copy = new Uint8Array(bytes);
     this.resources.set(digest, copy);
     if ((await resourceDigestAsync(copy)) === digest && this.resources.get(digest) === copy) this.checked.set(digest, copy.length);
   }
@@ -170,7 +181,7 @@ export class MemoryStore implements OriginalsStore {
 
   getResource(digest: string): Promise<Uint8Array | undefined> {
     const bytes = this.resources.get(digest);
-    return Promise.resolve(bytes?.slice());
+    return Promise.resolve(bytes === undefined ? undefined : new Uint8Array(bytes));
   }
 
   putAuthorEvidence(evidence: AuthorDidEvidence): Promise<void> {

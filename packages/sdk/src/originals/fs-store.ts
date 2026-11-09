@@ -64,7 +64,7 @@
  */
 import { OriginalsError } from "@originals/vh";
 import { sha256 } from "@originals/vh/crypto";
-import { resourceDigestAsync, type AuthorDidEvidence, type RetainedAnchor } from "@originals/vh/originals";
+import type { AuthorDidEvidence, RetainedAnchor } from "@originals/vh/originals";
 import { hex } from "@scure/base";
 import type { InscriptionRecoveryRecord, InscriptionRecoveryStore } from "../bitcoin/inscription-recovery.js";
 import type { ClockStore } from "./bitcoin.js";
@@ -76,15 +76,6 @@ export interface FileStoreFaults {
 }
 
 /** What every handle on one root in this process shares. */
-/** What identifies a file's content without reading it: a rewrite or a replacement changes one of these. */
-interface FileIdentity {
-  size: number;
-  mtimeMs: number;
-  ctimeMs: number;
-  ino: number;
-  dev: number;
-}
-
 interface RootState {
   /** The token of this process's record in `.lock`. */
   token: string;
@@ -95,8 +86,6 @@ interface RootState {
   locks: Map<string, Promise<void>>;
   /** Temporary files being written now. */
   writing: Set<string>;
-  /** Resource files hashed in this process and matching their digest, by digest, with the file's identity then. */
-  checked: Map<string, FileIdentity>;
   /** Every mutating operation in flight, from any handle; the last `close()` waits for them all. */
   inflight: Set<Promise<unknown>>;
   /** Open handles; the root's `.lock` is released when the last one closes. */
@@ -517,7 +506,7 @@ export class FileStore implements OriginalsStore {
       }
       // Registered before the first await, so a concurrent open in this process waits for this one.
       const token = randomHex(16);
-      const state: RootState = { token, ready: Promise.resolve(), locks: new Map(), writing: new Set(), checked: new Map(), inflight: new Set(), handles: 0 };
+      const state: RootState = { token, ready: Promise.resolve(), locks: new Map(), writing: new Set(), inflight: new Set(), handles: 0 };
       state.ready = takeLock(root, token).catch((error: unknown) => {
         if (roots.get(key) === state) roots.delete(key);
         throw error;
@@ -604,39 +593,6 @@ export class FileStore implements OriginalsStore {
       if ((await this.getResource(digest)) !== undefined) return;
       await this.writeAtomically(join(this.root, "resources"), digest, bytes);
     });
-  }
-
-  /**
-   * The size of a resource file hashed in this process that matched its
-   * digest and is unchanged since (same size, inode and modification and
-   * change times); otherwise the file is read and hashed now, and remembered
-   * when it matches. Undefined when absent or not matching.
-   */
-  async checkedResource(digest: string): Promise<number | undefined> {
-    if (!DIGEST.test(digest)) return undefined;
-    const path = join(this.root, "resources", digest);
-    const identity = async (): Promise<FileIdentity | undefined> => {
-      try {
-        const s = await fs.stat(path);
-        return { size: s.size, mtimeMs: s.mtimeMs, ctimeMs: s.ctimeMs, ino: s.ino, dev: s.dev };
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-        throw error;
-      }
-    };
-    const same = (a: FileIdentity | undefined, b: FileIdentity | undefined) =>
-      a !== undefined && b !== undefined && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs && a.ino === b.ino && a.dev === b.dev;
-    const before = await identity();
-    if (!before) return undefined;
-    if (same(this.shared.checked.get(digest), before)) return before.size;
-    const bytes = await this.getResource(digest);
-    // Remembered only when the file did not change while it was read.
-    if (!bytes || (await resourceDigestAsync(bytes)) !== digest || !same(before, await identity()) || bytes.length !== before.size) {
-      this.shared.checked.delete(digest);
-      return undefined;
-    }
-    this.shared.checked.set(digest, before);
-    return before.size;
   }
 
   async getResource(digest: string): Promise<Uint8Array | undefined> {

@@ -11,13 +11,18 @@ Stop re-hashing resource bytes the store already checked when it stored them.
   that size matches its descriptor and `mismatch` otherwise, exactly as if
   its bytes had been supplied. Supplied bytes and bytes from an anchoring sat
   take precedence and are still hashed.
-- `OriginalsStore.checkedResource?(digest)` is optional.
+- `OriginalsStore.checkedResource?(digest)` is optional. A store may
+  implement it only if its bytes cannot change outside it.
   - `MemoryStore` hashes bytes when they are put and reports only those that
-    matched. Its copies are private, so they never change.
-  - `FileStore` hashes a resource file once per process, and again whenever
-    its size, inode, or modification or change time differs.
-  - The SDK passes these to verification instead of reading and hashing
-    every stored version on every `get`, `prepareEdit` and `sign`.
+    matched. It keeps real copies (also of a Node `Buffer`, whose `slice`
+    would share the caller's memory) and hands out only copies, so they never
+    change.
+  - `FileStore` does not implement it: a file can change with no change to
+    its size, times or inode (a shared writable mapping), so no cheap check
+    proves it unchanged. Its bytes are read and hashed on every verification,
+    with native SHA-256.
+  - The SDK passes checked sizes to verification instead of reading and
+    hashing every stored version on every `get`, `prepareEdit` and `sign`.
 
 Owner decision, 9 November 2026: bytes checked when stored count as checked.
 Reports are the same as from a store without the capability. Together with

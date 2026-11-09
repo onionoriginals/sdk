@@ -2,7 +2,11 @@
  * Repeatable benchmark of the Originals workflow (create, prepareEdit, sign,
  * commit, get, package, load, import) as an Original's history grows.
  *
- *   bun scripts/bench-originals.ts [--versions 1,25,100] [--size 680000] [--json out.json]
+ *   bun scripts/bench-originals.ts [--versions 1,25,100] [--size 680000] [--store memory|file] [--json out.json]
+ *
+ * `--store file` keeps the Original in a `FileStore` in a temporary directory
+ * (removed afterwards) instead of a `MemoryStore`; stores that import are
+ * always `MemoryStore`s.
  *
  * One Original is built with an author whose DID is a did:webvh written by
  * didwebvh-ts (the shape originals.build mints). Each edit is a new resource
@@ -16,7 +20,11 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import { localSigner, multibaseEncode } from "@originals/vh/crypto";
 import { serializeLog, type LogEntry } from "@originals/vh/log";
 import * as W from "didwebvh-ts";
-import { MemoryStore, OriginalsSDK, keySigner, type OriginalsSigner, type SigningRequest } from "../src/originals/index.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { FileStore } from "../src/originals/fs-store.js";
+import { MemoryStore, OriginalsSDK, keySigner, type OriginalsSigner, type OriginalsStore, type SigningRequest } from "../src/originals/index.js";
 
 const arg = (name: string, fallback: string) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -26,6 +34,8 @@ const SAMPLES = arg("versions", "1,25,100").split(",").map(Number).sort((a, b) =
 const SIZE = Number(arg("size", "680000"));
 const REPEAT = Number(arg("repeat", "3"));
 const JSON_OUT = arg("json", "");
+const STORE = arg("store", "memory");
+if (STORE !== "memory" && STORE !== "file") throw new Error("--store is memory or file");
 
 /** Deterministic incompressible bytes (xorshift), different per version. */
 function resource(n: number): Uint8Array {
@@ -101,7 +111,8 @@ async function main() {
   const author = await webvhAuthor();
   let now = Date.parse("2026-11-08T00:00:00Z");
   const clock = () => (now += 1000);
-  const store = new MemoryStore();
+  const dir = STORE === "file" ? mkdtempSync(join(tmpdir(), "originals-bench-")) : undefined;
+  const store: OriginalsStore = dir ? await FileStore.open(dir) : new MemoryStore();
   const sdk = OriginalsSDK.create({ store, authors: [author.evidence], clock });
   const signer = counting(keySigner({ keyType: "Ed25519", secretKey: author.secret, verificationMethod: author.ref.verificationMethod }));
 
@@ -111,7 +122,7 @@ async function main() {
   let head = created.original.checkpoint;
   let versions = 1;
   const rows: Array<Record<string, number>> = [];
-  console.log(`resource ${SIZE} bytes; samples at ${SAMPLES.join(", ")} versions; median of ${REPEAT}, except edit and commit (one run: an edit adds a version)`);
+  console.log(`${STORE === "file" ? "FileStore" : "MemoryStore"}; resource ${SIZE} bytes; samples at ${SAMPLES.join(", ")} versions; median of ${REPEAT}, except edit and commit (one run: an edit adds a version)`);
   console.log(`create (1 version): ${fmt(createMs)} ms`);
   const header = ["versions", "edit(1 run)", "prepareEdit", "sign", "commit(derived)", "get", "package", "pkgMB", "load", "import(new)", "import(+1)", "signer calls/edit"];
   console.log(header.join("\t"));
@@ -167,7 +178,11 @@ async function main() {
     rows.push(row);
     console.log([target, fmt(editMs), fmt(prepMs), fmt(signMs), fmt(commitMs), fmt(getMs), fmt(packageMs), row.pkgMB.toFixed(1), fmt(loadMs), fmt(importNewMs), fmt(importNextMs), calls].join("\t"));
   }
-  if (JSON_OUT) await Bun.write(JSON_OUT, JSON.stringify({ size: SIZE, repeat: REPEAT, createMs, rows }, null, 2));
+  if (dir) {
+    await (store as FileStore).close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+  if (JSON_OUT) await Bun.write(JSON_OUT, JSON.stringify({ store: STORE, size: SIZE, repeat: REPEAT, createMs, rows }, null, 2));
 }
 
 await main();
