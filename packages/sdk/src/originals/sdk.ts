@@ -39,8 +39,8 @@
  *   on its own.
  */
 import { OriginalsError } from "@originals/vh";
-import { multibaseEncode } from "@originals/vh/crypto";
-import { isJsonObject, parseJson, type JsonObject } from "@originals/vh/json";
+import { NATIVE_SHA256_MIN_BYTES, multibaseEncode } from "@originals/vh/crypto";
+import { canonicalize, isJsonObject, parseJson, type JsonObject, type JsonValue } from "@originals/vh/json";
 import { serializeLog, vhHash, type LogEntry, type UnsignedEntry } from "@originals/vh/log";
 import {
   prepareCreateOriginal,
@@ -362,42 +362,63 @@ function sdkError(category: ConstructorParameters<typeof OriginalsError>[0], cod
 
 /**
  * A private copy of caller bytes. `new Uint8Array(view)` copies; a Node
- * Buffer's own `slice` would return a view of the caller's memory.
+ * Buffer's own `slice` would return a view of the caller's memory. An empty
+ * view (a detached buffer's, say) is sliced, as before, so a detached buffer
+ * throws the TypeError it did.
  */
 function copyBytes(bytes: Uint8Array): Uint8Array {
-  return new Uint8Array(bytes);
+  return bytes.length === 0 ? bytes.slice() : new Uint8Array(bytes);
 }
 
-/** Digests that stand in for a resource's while its input is checked: never signed or stored. */
-const STAND_INS = [resourceDigest(Uint8Array.of(0)), resourceDigest(Uint8Array.of(1))];
+/**
+ * The bytes of the resource version `digest` names (P4.3), as they were when
+ * this was called, or undefined. For bytes that were read in the same step as
+ * they were checked, before native hashing (archived, or handed to the store):
+ * bytes large enough to hash natively are copied when this is called, and the
+ * copy is hashed and returned, so a store or caller that reuses its buffer
+ * while the digest is pending changes neither the answer nor the bytes kept.
+ * Smaller ones are hashed at once and returned as given, as before.
+ */
+async function checkedBytes(data: Uint8Array, digest: string): Promise<Uint8Array | undefined> {
+  if (!(data instanceof Uint8Array) || data.length < NATIVE_SHA256_MIN_BYTES) return resourceDigest(data) === digest ? data : undefined;
+  const copy = copyBytes(data);
+  return (await resourceDigestAsync(copy)) === digest ? copy : undefined;
+}
+
+/** A digest that stands in for a resource's while its input is checked: never signed or stored. */
+const STAND_IN = resourceDigest(Uint8Array.of(0));
 
 /**
- * Build an entry whose resource digest is computed with native SHA-256
+ * Build a genesis entry whose resource digest is computed with native SHA-256
  * (`resourceDigestAsync`), reading and checking the caller's input exactly
  * when, and as, it was read when the digest was computed synchronously.
  *
  * `build` runs first, before anything is awaited, with a stand-in digest: it
  * reads every input field now and throws the same error for an invalid one.
- * The checked arguments are then snapshotted, the digest is awaited, and the
- * entry is built from the snapshot with the real digest. A caller that changes
- * its input after the call cannot change the result.
+ * The arguments are then taken as the JSON they canonicalize to, which is what
+ * that build hashed, still before anything is awaited; the digest is awaited
+ * and the entry is built from that JSON with the real digest. Nothing of the
+ * caller's is read after the await, so changing it after the call cannot
+ * change the result. A genesis entry was always a detached copy of its input
+ * (its SCID is substituted into a parsed copy), so the entry is the one it
+ * was. Arguments that do not round-trip (none that pass the build should), and
+ * a small resource, are built with a synchronous digest, as before.
  *
- * Whether the new digest equals the current version's decides the
- * transition (P4.4), and the rules checked depend on it. A version of another
- * size cannot have the current digest, so a stand-in that differs from it
- * checks the same rules; a same-size version is hashed synchronously, as
- * before.
+ * Only for a create: a genesis entry has no current version whose digest the
+ * stand-in could equal, so the stand-in checks the rules the real digest does
+ * (P4.4). An edit hashes synchronously: its entry keeps the caller's objects,
+ * as it always did.
  */
-async function buildWithDigest<A extends { resource?: ResourceDescriptor }>(args: A, bytes: Uint8Array, current: ResourceDescriptor | undefined, build: (args: A) => UnsignedEntry): Promise<UnsignedEntry> {
-  const withDigest = (a: A, digest: string): A => ({ ...a, resource: { ...a.resource!, digest } });
-  if (current !== undefined && bytes.length === current.size) return build(withDigest(args, resourceDigest(bytes)));
-  build(withDigest(args, STAND_INS[0] === current?.digest ? STAND_INS[1] : STAND_INS[0]));
+async function buildWithDigest<A extends { resource: ResourceDescriptor }>(args: A, bytes: Uint8Array, build: (args: A) => UnsignedEntry): Promise<UnsignedEntry> {
+  const withDigest = (a: A, digest: string): A => ({ ...a, resource: { ...a.resource, digest } });
+  const synchronously = () => build(withDigest(args, resourceDigest(bytes)));
+  if (bytes.length < NATIVE_SHA256_MIN_BYTES) return synchronously();
+  build(withDigest(args, STAND_IN));
   let snapshot: A;
   try {
-    snapshot = structuredClone(args);
+    snapshot = parseJson(canonicalize(args as unknown as JsonValue)) as unknown as A;
   } catch {
-    // Checked, but not cloneable (a Proxy, say): used as given.
-    snapshot = args;
+    return synchronously();
   }
   return build(withDigest(snapshot, await resourceDigestAsync(bytes)));
 }
@@ -981,6 +1002,7 @@ export class OriginalsSDK {
    */
   async resourceBytes(digest: string): Promise<Uint8Array | undefined> {
     const data = await this.store.getResource(digest);
+    // The store's own bytes, as before; resourceDigestAsync reads (or copies) them when called.
     return data && (await resourceDigestAsync(data)) === digest ? data : undefined;
   }
 
@@ -1021,7 +1043,7 @@ export class OriginalsSDK {
         resource: { mediaType: r.mediaType, size: copy.length, digest: "" }, author: input.author,
         ...(input.editors !== undefined ? { editors: input.editors } : {}),
       },
-      copy, undefined, prepareCreateOriginal,
+      copy, prepareCreateOriginal,
     );
     bytes.set((entry.state as unknown as EntryState).asset.resource.digest, copy);
     const summary = summarize(entry);
@@ -1056,7 +1078,6 @@ export class OriginalsSDK {
     const { head, view } = await this.parentOf(did, input.parent);
     const bytes = new Map<string, Uint8Array>();
     let resource: ResourceDescriptor | undefined;
-    let copy: Uint8Array | undefined;
     if (input.resource !== undefined) {
       const r = input.resource;
       if (typeof r !== "object" || r === null) sdkError("invalid-evidence", "INPUT_INVALID", "resource is the resource's next version: {bytes, mediaType?, expectedDigest?} (P4.1)");
@@ -1067,10 +1088,13 @@ export class OriginalsSDK {
       if (r.expectedDigest !== undefined && current.digest !== r.expectedDigest) {
         sdkError("stale-parent", "STALE_DIGEST", `the resource is at ${current.digest}, not ${r.expectedDigest}`);
       }
-      copy = copyBytes(r.bytes);
-      resource = { mediaType: r.mediaType ?? current.mediaType, size: copy.length, digest: "" };
+      // Hashed now, synchronously, as before: the entry keeps the caller's objects (metadata, author,
+      // editors), so it is built before anything is awaited. One version's digest costs little.
+      const digest = resourceDigest(r.bytes);
+      bytes.set(digest, copyBytes(r.bytes));
+      resource = { mediaType: r.mediaType ?? current.mediaType, size: r.bytes.length, digest };
     }
-    const args = {
+    const entry = prepareUpdateOriginal(head, {
       versionTime: this.versionTime(head.versionTime),
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
@@ -1079,11 +1103,7 @@ export class OriginalsSDK {
       ...(input.editor !== undefined ? { editor: input.editor } : {}),
       ...(input.editors !== undefined ? { editors: input.editors } : {}),
       ...(aliases ? { aliases } : {}),
-    };
-    const entry = copy === undefined
-      ? prepareUpdateOriginal(head, args)
-      : await buildWithDigest(args, copy, view.state.resource, (a) => prepareUpdateOriginal(head, a));
-    if (copy !== undefined) bytes.set((entry.state as unknown as EntryState).asset.resource.digest, copy);
+    });
     const summary = summarize(entry, head.state as unknown as EntryState);
     return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary, display: describeEntry(summary), bytes };
   }
@@ -1393,7 +1413,9 @@ export class OriginalsSDK {
     const bytes: Record<string, Uint8Array> = {};
     for (const v of view.report.resources.versions) {
       const data = await this.store.getResource(v.digest);
-      if (data && (await resourceDigestAsync(data)) === v.digest) bytes[v.digest] = data;
+      // The bytes archived are the ones checked, never the store's buffer read again later.
+      const checked = data && (await checkedBytes(data, v.digest));
+      if (checked) bytes[v.digest] = checked;
       else missing.push({ kind: "resource", version: v.version, digest: v.digest, versionId: v.versionId });
     }
     const manifest: EvidenceManifest = {
@@ -1604,7 +1626,8 @@ export class OriginalsSDK {
 
   private async keepEvidence(contents: EvidenceContents, report: OriginalsReport, from: "package" | "host"): Promise<void> {
     for (const [digest, bytes] of Object.entries(contents.bytes)) {
-      if ((await resourceDigestAsync(bytes)) === digest) await this.store.putResource(digest, bytes);
+      const checked = await checkedBytes(bytes, digest);
+      if (checked) await this.store.putResource(digest, checked);
     }
     for (const evidence of contents.authors) {
       const history = await verifyAuthorHistory(evidence, { now: this.clock() });

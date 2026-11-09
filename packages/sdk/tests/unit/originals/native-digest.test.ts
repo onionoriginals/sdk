@@ -1,17 +1,19 @@
 /**
  * Native SHA-256 must not change what a prepare reads (P4.3). `prepareCreate`
- * and `prepareEdit` hash a new resource version with `resourceDigestAsync`,
- * but read and check the caller's input before anything is awaited, as when
- * the digest was computed synchronously: a caller that changes its input or
- * its bytes after the call gets the draft, or the error, it would have got
- * before. Bytes kept in a draft are a private copy, so they always match their
- * digest (C12-02).
+ * hashes a new resource with `resourceDigestAsync`, but reads and checks the
+ * caller's input before anything is awaited, as when the digest was computed
+ * synchronously: a caller that changes its input or its bytes after the call
+ * gets the draft, or the error, it would have got before. `prepareEdit` hashes
+ * synchronously, as before. Bytes kept in a draft are a private copy, so they
+ * always match their digest; bytes read from a store are kept as they were
+ * checked (C12-02).
  */
 import { describe, expect, test } from "bun:test";
 import { NATIVE_SHA256_MIN_BYTES } from "@originals/vh/crypto";
 import { resourceDigest } from "@originals/vh/originals";
 import { OriginalsError } from "@originals/vh";
-import { MemoryStore, OriginalsSDK } from "../../../src/originals/index.js";
+import { MemoryStore, OriginalsSDK, type SharedHost } from "../../../src/originals/index.js";
+import { readEvidence } from "../../../src/originals/evidence.js";
 import { Author, NOW, seed } from "./helpers.js";
 
 const KEY = seed(37);
@@ -82,7 +84,7 @@ describe("prepareEdit reads its input when it did", () => {
     const { sdk, author, signer } = await setup();
     const c = await sdk.create({ name: "x", resource: { mediaType: "image/png", bytes: new Uint8Array(LARGE).fill(1) }, author, signer });
     if (c.kind !== "original") throw new Error("expected an Original");
-    // Another size than the current version: hashed natively, after a stand-in check.
+    // Another size than the current version.
     const b = Buffer.alloc(LARGE + 1, 4);
     // An edit reads its input once the parent is verified, as it always did; the bytes are copied then.
     const [digest, kept] = onlyBytes(await sdk.prepareEdit(c.original.did, { parent: c.original.checkpoint, resource: { bytes: b }, author }));
@@ -108,4 +110,128 @@ describe("prepareEdit reads its input when it did", () => {
     const edit = sdk.prepareEdit(c.original.did, { parent: c.original.checkpoint, name: null as never, resource: { bytes: new Uint8Array(LARGE + 7).fill(9) }, author });
     expect(await codeOf(edit)).toBe("STATE_NAME");
   });
+});
+
+describe("arguments a prepare cannot clone are read as they were consumed", () => {
+  test("Proxy metadata changed after the call is the metadata it was (C12-02)", async () => {
+    const { sdk, author } = await setup();
+    const target: { title?: string } = { title: "before" };
+    const pending = sdk.prepareCreate({ name: "proxy", metadata: new Proxy(target, {}) as never, resource: { mediaType: "image/png", bytes: new Uint8Array(LARGE).fill(1) }, author });
+    target.title = "after";
+    expect((await pending).entry.state.asset).toMatchObject({ metadata: { title: "before" } });
+  });
+
+  test("Proxy metadata made invalid after the call does not fail a prepare that read it valid", async () => {
+    const { sdk, author } = await setup();
+    const target: { title?: string } = { title: "before" };
+    const pending = sdk.prepareCreate({ name: "proxy", metadata: new Proxy(target, {}) as never, resource: { mediaType: "image/png", bytes: new Uint8Array(LARGE).fill(1) }, author });
+    target.title = undefined;
+    expect((await pending).entry.state.asset).toMatchObject({ metadata: { title: "before" } });
+  });
+
+  test("metadata a clock changes while the input is read is hashed as read, every read alike (C12-02)", async () => {
+    const { alice, author, signer } = await setup();
+    const target = { title: "t0" };
+    let calls = 0;
+    let armed = false;
+    // Each clock call queues a change to the metadata: one lands only if the input is read after an await.
+    const clock = () => {
+      const n = ++calls;
+      if (armed) queueMicrotask(() => (target.title = `t${n}`));
+      return NOW;
+    };
+    const seen: unknown[] = [];
+    const watched = () => new Proxy(target, { get: (t, k, r) => { const v = Reflect.get(t, k, r); if (k === "title") seen.push(v); return v; } });
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock });
+    const c = await sdk.create({ name: "x", resource: { mediaType: "image/png", bytes: new Uint8Array(LARGE).fill(1) }, author, signer });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    const createInput = (metadata: object) => ({ name: "y", metadata: metadata as never, resource: { mediaType: "image/png", bytes: new Uint8Array(LARGE).fill(3) }, author });
+    const editInput = (metadata: object) => ({ parent: c.original.checkpoint, metadata: metadata as never, resource: { bytes: new Uint8Array(LARGE + 1).fill(2) }, author });
+
+    for (const prepare of [(m: object) => sdk.prepareCreate(createInput(m)), (m: object) => sdk.prepareEdit(c.original.did, editInput(m))]) {
+      seen.length = 0;
+      armed = true;
+      const draft = await prepare(watched());
+      armed = false;
+      expect(seen.length).toBeGreaterThan(0);
+      expect(new Set(seen).size).toBe(1);
+      // The same entry as one prepared with plain metadata holding what was read.
+      expect(draft.entry.versionId).toBe((await prepare({ title: seen[0] })).entry.versionId);
+    }
+  });
+});
+
+describe("stored bytes are kept as they were checked", () => {
+  /** A store that hands back a fresh buffer and reuses it two microtasks later. */
+  function reusingStore(): MemoryStore {
+    const store = new MemoryStore();
+    const get = store.getResource.bind(store);
+    store.getResource = async (digest: string) => {
+      const bytes = await get(digest);
+      if (bytes) queueMicrotask(() => queueMicrotask(() => bytes.fill(0xee)));
+      return bytes;
+    };
+    return store;
+  }
+
+  test("a package archives the bytes it checked, not the store's reused buffer (C12-02)", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const store = reusingStore();
+    const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: () => NOW });
+    const c = await sdk.create({ name: "x", resource: { mediaType: "image/png", bytes: new Uint8Array(LARGE).fill(1) }, author: alice.ref("orig"), signer: alice.signer("orig", KEY) });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    const pkg = await sdk.package(c.original.did);
+    expect(pkg.manifest.completeness).toBe("complete");
+    expect((await sdk.load(pkg.bytes)).report.resources.status).toBe("available");
+  });
+
+  test("evidence kept from a shared host is the bytes checked, not the host's buffer changed meanwhile (C12-02)", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const source = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: () => NOW });
+    const v1 = new Uint8Array(LARGE).fill(1);
+    const c = await source.create({ name: "x", resource: { mediaType: "image/png", bytes: v1 }, author: alice.ref("orig"), signer: alice.signer("orig", KEY) });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    const contents = readEvidence((await source.package(c.original.did)).bytes);
+    const digest = resourceDigest(v1);
+    const hostBytes = contents.bytes[digest]!;
+    const host: SharedHost = { submit: () => Promise.reject(new Error("unused")), accepted: () => Promise.resolve(contents) };
+    // The host's adapter reuses its buffer while the digest that keeps it is pending.
+    const subtle = crypto.subtle;
+    const digestOf = subtle.digest.bind(subtle);
+    const real = Object.getOwnPropertyDescriptor(subtle, "digest");
+    Object.defineProperty(subtle, "digest", {
+      configurable: true,
+      value: (a: AlgorithmIdentifier, d: BufferSource) => {
+        const result = digestOf(a, d);
+        if (new Error().stack?.includes("keepEvidence")) hostBytes.fill(0xee);
+        return result;
+      },
+    });
+    const store = new MemoryStore();
+    try {
+      const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: () => NOW });
+      expect((await sdk.sync(c.original.did, host)).status).toBe("imported");
+    } finally {
+      if (real) Object.defineProperty(subtle, "digest", real);
+      else delete (subtle as { digest?: unknown }).digest;
+    }
+    const kept = await store.getResource(digest);
+    expect(kept && resourceDigest(kept)).toBe(digest);
+  });
+});
+
+test("a detached buffer is refused with the TypeError it was before", async () => {
+  const { sdk, author } = await setup();
+  const bytes = new Uint8Array(LARGE).fill(1);
+  structuredClone(bytes.buffer, { transfer: [bytes.buffer] });
+  let expected: unknown;
+  try {
+    bytes.slice();
+  } catch (e) {
+    expected = e;
+  }
+  expect(expected).toBeInstanceOf(TypeError);
+  const error = await sdk.prepareCreate({ name: "detached", resource: { mediaType: "image/png", bytes }, author }).catch((e: unknown) => e);
+  expect(error).toBeInstanceOf(TypeError);
+  expect((error as TypeError).message).toBe((expected as TypeError).message);
 });
