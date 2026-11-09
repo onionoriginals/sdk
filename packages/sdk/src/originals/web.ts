@@ -9,7 +9,7 @@
  * answer by the SDK; the reasons helpers only sort what a report says.
  */
 import { OriginalsError } from "@originals/vh";
-import { FETCH_LIMITS } from "@originals/vh/fetch";
+import { FETCH_LIMITS, isPublicAddress } from "@originals/vh/fetch";
 import type { AliasEvidence, AuthorDidEvidence } from "@originals/vh/originals";
 import { didWebvhFilesUrl } from "@originals/vh/webvh";
 import { base64 } from "@scure/base";
@@ -22,8 +22,11 @@ import type { HostAnswer, SharedHost, Submission } from "./shared.js";
 export interface WebFetchOptions {
   /**
    * Send every request to this origin instead (`http://localhost:5173` in
-   * local development, where a dev server proxies the host). The URL's path
-   * and query are kept. Without it, only `https:` URLs are fetched.
+   * local development, where a dev server proxies the host). Only the URL's
+   * path and query are kept, set on this origin: a path beginning `//` stays
+   * a path and never names another host. The origin is the caller's own
+   * configuration and is trusted as given, loopback included; it must be
+   * `http:` or `https:`.
    */
   origin?: string;
   /** The fetch to use; defaults to `globalThis.fetch`. */
@@ -39,21 +42,46 @@ const refuse: Refuse = (code, message, details) => {
 };
 
 /**
+ * A host that is not public by its name alone, with no DNS: an IP literal
+ * (the URL parser has already normalised `2130706433`, `0x7f000001` and
+ * `127.1` to dotted form) that `safeFetch` would refuse, or `localhost` and
+ * its subdomains, which always name loopback (RFC 6761). Any other name is
+ * left to the platform: a browser cannot see what it resolves to.
+ */
+function nonPublicHost(hostname: string): boolean {
+  const name = hostname.toLowerCase().replace(/\.$/, "");
+  if (name === "localhost" || name.endsWith(".localhost")) return true;
+  const literal = name.startsWith("[") || /^\d+\.\d+\.\d+\.\d+$/.test(name);
+  return literal && !isPublicAddress(name);
+}
+
+/** The reader of a body, typed locally: DOM and Bun's lib disagree on its type. */
+type BodyReader = { read(): Promise<{ done: boolean; value?: Uint8Array }>; cancel(): Promise<void> };
+
+/**
  * A `HostedFetch` over the platform's `fetch`, for browsers and other
  * runtimes where `@originals/vh/fetch`'s `safeFetch` (which resolves and
  * vets addresses with Node) is not available. It refuses as `safeFetch`
  * does, every refusal an `unavailable-bytes` OriginalsError:
  *
+ * - `FETCH_URL`: the URL, or the configured `origin`, is not a usable URL
  * - `FETCH_SCHEME`: not `https:` (unless `origin` is given)
+ * - `FETCH_PRIVATE_ADDRESS`: without `origin`, the host is an IP literal
+ *   that is not public (loopback, private, link-local, ...) or `localhost`
+ *   (P8.5). Checked on the parsed host with no DNS: a browser cannot vet
+ *   what a name resolves to.
  * - `FETCH_REDIRECT`: any redirect, which is never followed (P8.5)
  * - `FETCH_STATUS`: any status but 2xx, with `details.status`
- * - `FETCH_TOO_LARGE`: past `maxBytes`, by declared length or as it arrives,
- *   with `details.bytesRead`
- * - `FETCH_ABORTED` / `FETCH_FAILED`: the request was aborted, or the network failed
+ * - `FETCH_TOO_LARGE`: past `maxBytes`, by declared length or as it arrives
+ * - `FETCH_TIMEOUT`: `timeoutMs` ran out, before the headers or while the
+ *   body arrived
+ * - `FETCH_ABORTED`: the caller's `signal` aborted, at any point
+ * - `FETCH_FAILED`: the network failed
  *
- * Credentials are never sent and nothing is served from the HTTP cache. A
- * browser cannot vet the addresses a hostname resolves to: a server
- * retrieving on others' behalf should use `safeFetch` instead.
+ * Every refusal after the request was made carries `details.bytesRead`, and
+ * a refused body is cancelled. Credentials are never sent and nothing is
+ * served from the HTTP cache. A server retrieving on others' behalf should
+ * use `safeFetch` instead, which also vets the addresses names resolve to.
  */
 export function hostedFetch(options: WebFetchOptions = {}): HostedFetch {
   const doFetch: (url: string, init: RequestInit) => Promise<Response> = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
@@ -64,68 +92,98 @@ export function hostedFetch(options: WebFetchOptions = {}): HostedFetch {
     } catch {
       return refuse("FETCH_URL", `${url} is not a URL`);
     }
-    if (options.origin !== undefined) target = new URL(`${target.pathname}${target.search}`, options.origin);
-    else if (target.protocol !== "https:") refuse("FETCH_SCHEME", `only https is retrieved, not ${target.protocol}`);
-    const maxBytes = request?.maxBytes ?? FETCH_LIMITS.maxResourceBytes;
-    let response: Response;
-    try {
-      response = await doFetch(target.href, { signal: request?.signal, redirect: "manual", credentials: "omit", cache: "no-store" });
-    } catch (error) {
-      if (request?.signal?.aborted) return refuse("FETCH_ABORTED", `${url}: the request was aborted`, { bytesRead: 0 });
-      return refuse("FETCH_FAILED", `${url} could not be retrieved: ${(error as Error)?.message ?? String(error)}`, { bytesRead: 0 });
-    }
-    const close = () => void response.body?.cancel().catch(() => undefined);
-    if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
-      close();
-      return refuse("FETCH_REDIRECT", `${url} redirects; redirects are not followed`, { bytesRead: 0 });
-    }
-    if (!response.ok) {
-      close();
-      return refuse("FETCH_STATUS", `${url} answered ${response.status}`, { status: response.status, bytesRead: 0 });
-    }
-    const declared = Number(response.headers.get("content-length") ?? NaN);
-    if (Number.isFinite(declared) && declared > maxBytes) {
-      close();
-      return refuse("FETCH_TOO_LARGE", `${url} is ${declared} bytes; the cap is ${maxBytes}`, { bytesRead: 0 });
-    }
-    const bytes = await readCapped(response, maxBytes, url);
-    options.cache?.set(url, bytes);
-    return bytes;
-  };
-}
-
-async function readCapped(response: Response, maxBytes: number, url: string): Promise<Uint8Array> {
-  if (!response.body) {
-    const all = new Uint8Array(await response.arrayBuffer());
-    if (all.length > maxBytes) refuse("FETCH_TOO_LARGE", `${url} exceeds the ${maxBytes}-byte cap`, { bytesRead: all.length });
-    return all;
-  }
-  // Typed locally: DOM and Bun's lib disagree on the reader's type.
-  const reader = response.body.getReader() as unknown as { read(): Promise<{ done: boolean; value?: Uint8Array }>; cancel(): Promise<void> };
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done || !value) break;
-      size += value.length;
-      if (size > maxBytes) {
-        void reader.cancel().catch(() => undefined);
-        refuse("FETCH_TOO_LARGE", `${url} exceeds the ${maxBytes}-byte cap`, { bytesRead: size });
+    if (options.origin !== undefined) {
+      let base: URL;
+      try {
+        base = new URL(options.origin);
+      } catch {
+        return refuse("FETCH_URL", `the origin ${options.origin} is not a URL`);
       }
-      chunks.push(value);
+      if (base.protocol !== "https:" && base.protocol !== "http:") refuse("FETCH_URL", `the origin ${options.origin} is not http or https`);
+      // Set on the origin, never resolved against it: `//evil.example/p` is a path here, not an authority.
+      const path = target.pathname;
+      const search = target.search;
+      target = new URL(base.origin);
+      target.pathname = path;
+      target.search = search;
+    } else {
+      if (target.protocol !== "https:") refuse("FETCH_SCHEME", `only https is retrieved, not ${target.protocol}`);
+      if (nonPublicHost(target.hostname)) refuse("FETCH_PRIVATE_ADDRESS", `${target.hostname} is not a public address`);
     }
-  } catch (error) {
-    if (error instanceof OriginalsError) throw error;
-    refuse("FETCH_FAILED", `${url} could not be read: ${(error as Error)?.message ?? String(error)}`, { bytesRead: size });
-  }
-  const out = new Uint8Array(size);
-  let at = 0;
-  for (const c of chunks) {
-    out.set(c, at);
-    at += c.length;
-  }
-  return out;
+    const maxBytes = request?.maxBytes ?? FETCH_LIMITS.maxResourceBytes;
+    const timeoutMs = request?.timeoutMs ?? FETCH_LIMITS.timeoutMs;
+    const signal = request?.signal;
+    if (signal?.aborted) return refuse("FETCH_ABORTED", `${url} was not requested: the caller aborted`, { bytesRead: 0 });
+
+    // One controller ends the request, headers and body alike, at the timeout or when the caller aborts.
+    const controller = new AbortController();
+    let timedOut = false;
+    const onAbort = () => controller.abort();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+    // Raced against every await, so an injected fetch or body that ignores the signal still stops.
+    const stopped = new Promise<never>((_, reject) => controller.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+    stopped.catch(() => undefined);
+
+    let response: Response | undefined;
+    let reader: BodyReader | undefined;
+    let size = 0;
+    let succeeded = false;
+    try {
+      response = await Promise.race([doFetch(target.href, { signal: controller.signal, redirect: "manual", credentials: "omit", cache: "no-store" }), stopped]);
+      if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
+        refuse("FETCH_REDIRECT", `${url} redirects; redirects are not followed`, { bytesRead: 0 });
+      }
+      if (!response.ok) refuse("FETCH_STATUS", `${url} answered ${response.status}`, { status: response.status, bytesRead: 0 });
+      const declared = Number(response.headers.get("content-length") ?? NaN);
+      if (Number.isFinite(declared) && declared > maxBytes) refuse("FETCH_TOO_LARGE", `${url} is ${declared} bytes; the cap is ${maxBytes}`, { bytesRead: 0 });
+
+      let bytes: Uint8Array;
+      if (!response.body) {
+        bytes = new Uint8Array(await Promise.race([response.arrayBuffer(), stopped]));
+        size = bytes.length;
+        if (size > maxBytes) refuse("FETCH_TOO_LARGE", `${url} exceeds the ${maxBytes}-byte cap`, { bytesRead: size });
+      } else {
+        reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        for (;;) {
+          const { done, value } = await Promise.race([reader.read(), stopped]);
+          if (done || !value) break;
+          size += value.length;
+          if (size > maxBytes) refuse("FETCH_TOO_LARGE", `${url} exceeds the ${maxBytes}-byte cap`, { bytesRead: size });
+          chunks.push(value);
+        }
+        bytes = new Uint8Array(size);
+        let at = 0;
+        for (const c of chunks) {
+          bytes.set(c, at);
+          at += c.length;
+        }
+      }
+      succeeded = true;
+      options.cache?.set(url, bytes);
+      return bytes;
+    } catch (error) {
+      if (error instanceof OriginalsError) throw error;
+      if (controller.signal.aborted) {
+        if (timedOut) return refuse("FETCH_TIMEOUT", `${url} did not answer within ${timeoutMs} ms`, { bytesRead: size });
+        return refuse("FETCH_ABORTED", `${url}: the request was aborted`, { bytesRead: size });
+      }
+      return refuse("FETCH_FAILED", `${url} could not be retrieved: ${(error as Error)?.message ?? String(error)}`, { bytesRead: size });
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      if (!succeeded) {
+        // A refused response is released: its body cancelled, its request aborted.
+        if (reader) void reader.cancel().catch(() => undefined);
+        else void response?.body?.cancel().catch(() => undefined);
+        controller.abort();
+      }
+    }
+  };
 }
 
 // ---------------------------------------------------------------- shared hosts over HTTP

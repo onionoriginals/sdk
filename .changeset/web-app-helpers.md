@@ -6,10 +6,14 @@ Add browser-safe helpers for web apps to `@originals/sdk/originals`.
 Easel, Commission Desk and the landing each wrote their own copies of these.
 
 - `hostedFetch({ origin?, fetch?, cache? })`: a `HostedFetch` over the
-  platform's `fetch`. It refuses as `safeFetch` does: `FETCH_SCHEME`,
-  `FETCH_REDIRECT` (redirects are never followed), `FETCH_STATUS`,
-  `FETCH_TOO_LARGE`, `FETCH_FAILED` and `FETCH_ABORTED`, all
-  `unavailable-bytes`. It sends no credentials and skips the HTTP cache.
+  platform's `fetch`. It refuses as `safeFetch` does: `FETCH_URL`,
+  `FETCH_SCHEME`, `FETCH_PRIVATE_ADDRESS` (an IP-literal host that is not
+  public, or `localhost`, checked without DNS; P8.5), `FETCH_REDIRECT`
+  (redirects are never followed), `FETCH_STATUS`, `FETCH_TOO_LARGE`,
+  `FETCH_TIMEOUT` (`timeoutMs`, covering headers and body), `FETCH_ABORTED`
+  and `FETCH_FAILED`, all `unavailable-bytes`. It sends no credentials and
+  skips the HTTP cache. With `origin` (local development) only the URL's
+  path and query are set on that origin, which is trusted as given.
 - `httpSharedHost({ sdk, aliasDid, read, send?, submitBase? })`: a
   `SharedHost` for an `@originals/host` instance. Also `encodeSubmission`
   (the submit route's wire format), `readHostAnswer`, `SubmitRefusedError`

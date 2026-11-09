@@ -6,7 +6,7 @@
  * refused (P8.5); an unanchored Original's `not-anchored` is informational
  * (P7.10).
  */
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { OriginalsError } from "@originals/vh";
 import { localSigner } from "@originals/vh/crypto";
 import { createLog, serializeLog, signWith } from "@originals/vh/log";
@@ -111,6 +111,104 @@ describe("hostedFetch", () => {
     controller.abort();
     const aborted = await refusal(hostedFetch({ fetch: (() => Promise.reject(new DOMException("aborted", "AbortError"))) as unknown as typeof fetch })("https://example.com/x", { ...opts(), signal: controller.signal }));
     expect(aborted.code).toBe("FETCH_ABORTED");
+  });
+
+  test("with `origin`, a path beginning `//` stays a path on that origin, never a new authority", async () => {
+    const fetch = server(new Map());
+    const read = hostedFetch({ fetch, origin: "http://localhost:5173" });
+    for (const url of [
+      "https://good.example//evil.example/p",
+      "https://good.example///127.0.0.1:99/p",
+      "https://good.example//u:p@evil.example/p",
+      "https://good.example//[::1]:99/p",
+      "https://good.example/\\evil.example/p",
+    ]) await read(url, opts()).catch(() => undefined);
+    expect(fetch.calls.map((c) => new URL(c.url).host)).toEqual(Array(5).fill("localhost:5173"));
+    expect(fetch.calls.map((c) => new URL(c.url).pathname)).toEqual([
+      "//evil.example/p", "///127.0.0.1:99/p", "//u:p@evil.example/p", "//[::1]:99/p", "//evil.example/p",
+    ]);
+    const bad = await refusal(hostedFetch({ fetch, origin: "file:///etc" })("https://example.com/x", opts()));
+    expect([bad.category, bad.code]).toEqual(["unavailable-bytes", "FETCH_URL"]);
+  });
+
+  test("without `origin`, refuses an IP-literal or localhost host that is not public, as safeFetch does (P8.5), without DNS", async () => {
+    const fetch = server(new Map([["https://8.8.8.8/a", bytes("ok")], ["https://[2606:4700::1111]/a", bytes("ok")]]));
+    const read = hostedFetch({ fetch });
+    for (const url of [
+      "https://127.0.0.1/a", "https://[::1]/a", "https://2130706433/a", "https://0x7f000001/a", "https://127.1/a",
+      "https://10.0.0.1/a", "https://192.168.1.1/a", "https://169.254.169.254/latest", "https://[fe80::1]/a",
+      "https://[fc00::1]/a", "https://[::ffff:127.0.0.1]/a", "https://0.0.0.0/a", "https://localhost/a", "https://app.localhost./a",
+    ]) {
+      const e = await refusal(read(url, opts()));
+      expect([url, e.category, e.code]).toEqual([url, "unavailable-bytes", "FETCH_PRIVATE_ADDRESS"]);
+    }
+    expect(fetch.calls).toEqual([]);
+    // Public literals and ordinary names are fetched.
+    expect(await read("https://8.8.8.8/a", opts())).toEqual(bytes("ok"));
+    expect(await read("https://[2606:4700::1111]/a", opts())).toEqual(bytes("ok"));
+    // An `origin` the caller configured is trusted as given.
+    const dev = server(new Map([["http://127.0.0.1:5173/a", bytes("ok")]]));
+    expect(await hostedFetch({ fetch: dev, origin: "http://127.0.0.1:5173" })("https://example.com/a", opts())).toEqual(bytes("ok"));
+  });
+
+  describe("over a real local server", () => {
+    // The platform's fetch, captured before the preload's beforeEach replaces it with a mock.
+    const realFetch = globalThis.fetch;
+    let local: ReturnType<typeof Bun.serve>;
+    let origin: string;
+    beforeAll(() => {
+      local = Bun.serve({
+        port: 0,
+        hostname: "127.0.0.1",
+        fetch(req) {
+          const path = new URL(req.url).pathname;
+          if (path === "/slow-headers") return new Promise<Response>((r) => setTimeout(() => r(new Response("late")), 300));
+          // One byte now, the rest after 300 ms.
+          return new Response(new ReadableStream<Uint8Array>({
+            async start(c) {
+              c.enqueue(new Uint8Array([97]));
+              await new Promise((r) => setTimeout(r, 300));
+              c.enqueue(new Uint8Array([98]));
+              c.close();
+            },
+          }));
+        },
+      });
+      origin = `http://127.0.0.1:${local.port}`;
+    });
+    afterAll(() => void local.stop(true));
+
+    test("timeoutMs bounds the headers and the body: FETCH_TIMEOUT, as safeFetch reports it", async () => {
+      const read = hostedFetch({ origin, fetch: realFetch });
+      for (const [path, bytesRead] of [["/slow-headers", 0], ["/slow-body", 1]] as const) {
+        const start = Date.now();
+        const e = await refusal(read(`https://example.com${path}`, { ...opts(), timeoutMs: 40 }));
+        expect([path, e.category, e.code, e.details?.bytesRead]).toEqual([path, "unavailable-bytes", "FETCH_TIMEOUT", bytesRead]);
+        expect(Date.now() - start).toBeLessThan(250);
+      }
+      // A response inside the time is returned.
+      expect(await read("https://example.com/slow-body", { ...opts(), timeoutMs: 2000 })).toEqual(bytes("ab"));
+    });
+
+    test("an abort while the body arrives is FETCH_ABORTED with the bytes read, not FETCH_FAILED", async () => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 60);
+      const start = Date.now();
+      const e = await refusal(hostedFetch({ origin, fetch: realFetch })("https://example.com/slow-body", { ...opts(), signal: controller.signal }));
+      expect([e.category, e.code, e.details?.bytesRead]).toEqual(["unavailable-bytes", "FETCH_ABORTED", 1]);
+      expect(Date.now() - start).toBeLessThan(250);
+    });
+  });
+
+  test("an abort mid-body cancels the body even when the injected fetch ignores the signal", async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array([1])); }, cancel() { cancelled = true; } });
+    const controller = new AbortController();
+    const read = hostedFetch({ fetch: (() => Promise.resolve(new Response(body))) as unknown as typeof fetch });
+    setTimeout(() => controller.abort(), 20);
+    const e = await refusal(read("https://example.com/x", { ...opts(), signal: controller.signal }));
+    expect([e.code, e.details?.bytesRead]).toEqual(["FETCH_ABORTED", 1]);
+    expect(cancelled).toBe(true);
   });
 });
 
