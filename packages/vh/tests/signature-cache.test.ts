@@ -9,7 +9,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { hex } from "@scure/base";
-import { SIGNATURE_CACHE_ENTRIES, checkSignature, clearSignatureCache, verifyEd25519, verifyProof, type DataIntegrityProof } from "../src/crypto/index.js";
+import { SIGNATURE_CACHE_ENTRIES, SIGNATURE_CACHE_MAX_DATA, checkSignature, clearSignatureCache, signatureCacheSize, verifyEd25519, verifyProof, type DataIntegrityProof } from "../src/crypto/index.js";
 import type { JsonObject } from "../src/json/index.js";
 import { createOriginal, resourceDigest, updateOriginal, verifyOriginal } from "../src/originals/index.js";
 import { NOW, VhAuthor, bytes, clock, seeded } from "./helpers/originals.js";
@@ -82,15 +82,38 @@ describe("checkSignature", () => {
   });
 
   test("is bounded: the oldest results are dropped, and a dropped one is checked again correctly", () => {
-    const v = vectors.find((x) => x.expected)!;
+    const v = vectors.find((x) => x.expected && x.msg.length <= SIGNATURE_CACHE_MAX_DATA)!;
     expect(checkSignature({ type: "Ed25519", publicKey: v.key }, v.msg, v.sig)).toBe(true);
+    expect(signatureCacheSize()).toBe(1);
+    expect(checkSignature({ type: "Ed25519", publicKey: v.key }, v.msg, v.sig)).toBe(true);
+    expect(signatureCacheSize()).toBe(1); // a hit adds nothing
     // Fill the cache past its bound with distinct checks that fail fast (a 63-byte signature).
     for (let i = 0; i < SIGNATURE_CACHE_ENTRIES + 10; i++) {
       const msg = new Uint8Array(8);
       new DataView(msg.buffer).setUint32(0, i);
       expect(checkSignature({ type: "Ed25519", publicKey: v.key }, msg, v.sig.subarray(0, 63))).toBe(false);
+      expect(signatureCacheSize()).toBe(Math.min(i + 2, SIGNATURE_CACHE_ENTRIES));
     }
+    // The first check was dropped: checking it again is a miss that evicts one more and is still right.
     expect(checkSignature({ type: "Ed25519", publicKey: v.key }, v.msg, v.sig)).toBe(true);
+    expect(signatureCacheSize()).toBe(SIGNATURE_CACHE_ENTRIES);
+    clearSignatureCache();
+    expect(signatureCacheSize()).toBe(0);
+  });
+
+  test("is bounded in bytes: checks over large messages are not kept, and give the same result", () => {
+    const v = vectors.find((x) => x.expected)!;
+    for (let i = 0; i < 32; i++) {
+      const big = new Uint8Array(1 << 20).fill(i);
+      expect(checkSignature({ type: "Ed25519", publicKey: v.key }, big, v.sig.subarray(0, 63))).toBe(false);
+      expect(checkSignature({ type: "Ed25519", publicKey: v.key }, big, v.sig)).toBe(false);
+    }
+    expect(signatureCacheSize()).toBe(0);
+    const long = vectors.find((x) => x.msg.length > SIGNATURE_CACHE_MAX_DATA);
+    if (long) {
+      expect(checkSignature({ type: "Ed25519", publicKey: long.key }, long.msg, long.sig)).toBe(long.expected);
+      expect(signatureCacheSize()).toBe(0);
+    }
   });
 });
 

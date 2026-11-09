@@ -338,10 +338,20 @@ export function verifyProof(document: JsonObject, proof: DataIntegrityProof, pub
  * result found here is the result checking again would give; only the time
  * is saved. Verifying a log again (every `get`, `prepareEdit`, `sign`,
  * `import`) re-checks every entry's proof, which this makes nearly free.
- * Bounded; the oldest result is dropped first.
+ * Bounded in entries (the oldest result is dropped first) and in bytes: only
+ * checks over at most `SIGNATURE_CACHE_MAX_DATA` signed bytes are kept, which
+ * covers every proof's hash data (64 bytes), so a caller of `checkSignature`
+ * with large messages cannot make the cache hold them.
  */
 const signatureChecks = new Map<string, boolean>();
 export const SIGNATURE_CACHE_ENTRIES = 8192;
+/** The most signed bytes a cached check may cover. */
+export const SIGNATURE_CACHE_MAX_DATA = 128;
+
+/** How many signature checks are cached now. */
+export function signatureCacheSize(): number {
+  return signatureChecks.size;
+}
 
 /** Forget every cached signature check (tests, or to bound memory sooner). */
 export function clearSignatureCache(): void {
@@ -354,8 +364,9 @@ export function clearSignatureCache(): void {
  * The result is cached by its exact inputs (see above).
  */
 export function checkSignature(key: DecodedMultikey, data: Uint8Array, signature: Uint8Array): boolean {
-  const id = `${key.type}:${hex.encode(key.publicKey)}:${hex.encode(data)}:${hex.encode(signature)}`;
-  const known = signatureChecks.get(id);
+  const cacheable = data.length <= SIGNATURE_CACHE_MAX_DATA && signature.length <= 64 && key.publicKey.length <= 33;
+  const id = cacheable ? `${key.type}:${hex.encode(key.publicKey)}:${hex.encode(data)}:${hex.encode(signature)}` : "";
+  const known = cacheable ? signatureChecks.get(id) : undefined;
   if (known !== undefined) return known;
   let ok: boolean;
   try {
@@ -365,6 +376,7 @@ export function checkSignature(key: DecodedMultikey, data: Uint8Array, signature
   } catch {
     ok = false;
   }
+  if (!cacheable) return ok;
   if (signatureChecks.size >= SIGNATURE_CACHE_ENTRIES) signatureChecks.delete(signatureChecks.keys().next().value!);
   signatureChecks.set(id, ok);
   return ok;
