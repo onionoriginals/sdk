@@ -659,6 +659,52 @@ Once hosted, an asset log changes only through the submit route: an upload
 never roll it back or advance it unverified; a signer's DID log and witness
 file only grow.
 
+### Two copies of history: the host and the app's own server
+
+An app that saves a published Original through a shared host and also keeps
+its own copy (a server-side store of evidence packages, say) has two places
+that must agree, and a save reaches them in two steps:
+
+1. `submit` succeeds: the host has accepted the entry and the SDK has
+   committed it locally (P6.7).
+2. The app uploads the new package to its own server.
+
+If step 2 fails (offline, a 5xx, the tab closes), the host is now **ahead**
+of the app's server. The next device to open the Original from the app's
+server prepares an edit against an old parent, and the host refuses it as
+`stale-parent`. Nothing is lost, but every later save fails until the copies
+agree again. The fix is to `sync` with the host when opening a published
+Original, and to re-upload when the host was ahead:
+
+```ts
+const opened = await sdk.import(await myServer.evidence(did));  // the app server's copy
+const alias = webvhAlias((await sdk.get(did)).state.aliases);
+if (alias) {
+  const synced = await sdk.sync(did, httpSharedHost({ sdk, aliasDid: alias, read: hostedFetch() }));
+  if (synced.status === "imported") await myServer.save((await sdk.package(did)).bytes); // repair it
+}
+```
+
+`sync` verifies the host's log before using any of it; a host whose history
+diverges from local history is kept as a branch and reported as a fork, never
+adopted silently (P6.6, P6.8). Keeping a durable "unsynced" mark for a save
+whose step 2 failed, and retrying it on the next save, closes the gap sooner.
+
+## Web app helpers (implemented; browser-safe)
+
+Code every web app on the SDK used to copy, now exported from
+`@originals/sdk/originals`. None of it changes what verifies.
+
+| Helper | What it does |
+|---|---|
+| `hostedFetch({ origin?, fetch?, cache? })` | A `HostedFetch` over the platform's `fetch`, for browsers. It refuses as `safeFetch` does, each refusal `unavailable-bytes`: `FETCH_SCHEME` (not https unless `origin`), `FETCH_REDIRECT` (never followed, P8.5), `FETCH_STATUS` (`details.status`), `FETCH_TOO_LARGE` (`details.bytesRead`), `FETCH_FAILED`, `FETCH_ABORTED`. No credentials, no HTTP cache. A browser cannot vet resolved addresses, so a server retrieving for others uses `safeFetch`. |
+| `httpSharedHost({ sdk, aliasDid, read, send?, submitBase? })` | A `SharedHost` for an `@originals/host` instance: posts to `POST /api/originals/submit/<site key>` (or the app's own `send`) and reads the accepted log back through the alias (`retrieveHosted`). |
+| `encodeSubmission`, `readHostAnswer`, `SubmitRefusedError` | The submit route's wire format (PROVISIONAL): base64 resources, identity logs as text. An answer other than 200 accepted/already-accepted or 409 stale-parent is a `SubmitRefusedError` (`SUBMIT_REFUSED`, with `status` and `body`, for example a 507 `store_full`). |
+| `siteKeyOf(aliasDid)` | `<domain>/<path>`: the alias's `#files` base without its scheme, which names the submit route and the hosted keys. |
+| `aliasSegment(original)`, `webvhAlias(aliases)` | The `o-<16 chars of the SCID>` segment originals.build names an alias with (a convention, not a rule), and the did:webvh alias a state lists. |
+| `uploadOrder(path)`, `publicationUploads(sdk, did, alias)` | `hostedFiles` in the order to upload them (alias log, asset log, the rest, resources last, since the host labels resources from the asset log, P9.7), each with its host key. |
+| `blockingReasons(reasons)`, `INFORMATIONAL_REASONS` | Every reason but `not-anchored`, which every unanchored result carries (P7.10): a valid unanchored Original has no blocking reason and is shown with `validAsOf`. |
+
 ## Bitcoin anchoring and ownership — phase 4 (implemented in the SDK; the landing's path, PR 10b, is behind `bitcoinAnchoring`, off)
 
 The representation is [plan 012](../../plans/012-bitcoin-representation.md)
