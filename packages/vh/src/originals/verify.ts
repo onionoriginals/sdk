@@ -44,7 +44,7 @@ import { chainOrder, type ChainPosition, type SatEvidence } from "./btco.js";
 import { authorKey, stillAuthorized, verifyAuthorHistory, versionNumberOf, type AuthorDidEvidence, type AuthorHistory, type EvidenceSource } from "./author.js";
 import { didWebvhLogUrl } from "../webvh/index.js";
 import { deriveDocument, exactNumberError, originalsSpecialisation } from "./profile.js";
-import { ORIGINALS_LIMITS, ORIGINALS_METHOD, resourceDigestAsync, signerOf, type AssetState, type EntryState } from "./state.js";
+import { ORIGINALS_LIMITS, ORIGINALS_METHOD, resourceDigest, resourceDigestAsync, signerOf, type AssetState, type EntryState } from "./state.js";
 
 export interface VerifyOriginalOptions {
   /**
@@ -402,16 +402,30 @@ function lookup(bytes: VerifyOriginalOptions["bytes"], digest: string): Uint8Arr
  * earlier ones need `bytes` (P9.17, P9.18; originals-spec #53).
  */
 async function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOptions["bytes"], onSat: ReadonlyMap<string, Uint8Array>): Promise<ResourceVersion[]> {
-  const out: ResourceVersion[] = [];
+  // Every version's bytes are looked up and read in one synchronous pass, in version order, as
+  // when each was hashed in turn: nothing is awaited until all of them are read, and
+  // `resourceDigestAsync` reads (or copies) its input when called. A `bytes` callback, or a view
+  // it returned, that changes after the call cannot change the report.
+  const pending: Array<{ version: Omit<ResourceVersion, "bytes">; check: "missing" | "mismatch" | Promise<string> }> = [];
   for (const v of prefix) {
     const state = v.entry.state as unknown as EntryState;
     if (state.transitions.length === 0) continue;
     const d = state.asset.resource;
     const inscribed = onSat.get(d.digest);
     const supplied = inscribed ?? lookup(bytes, d.digest);
-    // The same SHA-256 as resourceDigest, natively where the platform has it.
-    const check = supplied === undefined ? "missing" : supplied.length === d.size && (await resourceDigestAsync(supplied)) === d.digest ? "verified" : "mismatch";
-    out.push({ version: out.length + 1, digest: d.digest, mediaType: d.mediaType, size: d.size, versionId: v.entry.versionId, bytes: check, onBitcoin: inscribed !== undefined });
+    const check =
+      supplied === undefined ? "missing"
+      : supplied.length !== d.size ? "mismatch"
+      // Not a byte array: noble refuses it here and now, as before.
+      : !(supplied instanceof Uint8Array) ? Promise.resolve(resourceDigest(supplied))
+      // The same SHA-256 as resourceDigest, natively where the platform has it.
+      : resourceDigestAsync(supplied);
+    pending.push({ version: { version: pending.length + 1, digest: d.digest, mediaType: d.mediaType, size: d.size, versionId: v.entry.versionId, onBitcoin: inscribed !== undefined }, check });
+  }
+  const out: ResourceVersion[] = [];
+  for (const { version: v, check } of pending) {
+    const result = check === "missing" || check === "mismatch" ? check : (await check) === v.digest ? "verified" : "mismatch";
+    out.push({ version: v.version, digest: v.digest, mediaType: v.mediaType, size: v.size, versionId: v.versionId, bytes: result, onBitcoin: v.onBitcoin });
   }
   return out;
 }

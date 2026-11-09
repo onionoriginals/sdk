@@ -47,6 +47,7 @@ import {
   prepareDeactivateOriginal,
   prepareUpdateOriginal,
   checkAlias,
+  resourceDigest,
   resourceDigestAsync,
   signerLocation,
   verifyAuthorHistory,
@@ -357,6 +358,48 @@ function newestEvidence(candidates: HeldEvidence[]): { chosen: AuthorDidEvidence
 
 function sdkError(category: ConstructorParameters<typeof OriginalsError>[0], code: string, message: string, details?: Record<string, unknown>): never {
   throw new OriginalsError(category, code, message, details);
+}
+
+/**
+ * A private copy of caller bytes. `new Uint8Array(view)` copies; a Node
+ * Buffer's own `slice` would return a view of the caller's memory.
+ */
+function copyBytes(bytes: Uint8Array): Uint8Array {
+  return new Uint8Array(bytes);
+}
+
+/** Digests that stand in for a resource's while its input is checked: never signed or stored. */
+const STAND_INS = [resourceDigest(Uint8Array.of(0)), resourceDigest(Uint8Array.of(1))];
+
+/**
+ * Build an entry whose resource digest is computed with native SHA-256
+ * (`resourceDigestAsync`), reading and checking the caller's input exactly
+ * when, and as, it was read when the digest was computed synchronously.
+ *
+ * `build` runs first, before anything is awaited, with a stand-in digest: it
+ * reads every input field now and throws the same error for an invalid one.
+ * The checked arguments are then snapshotted, the digest is awaited, and the
+ * entry is built from the snapshot with the real digest. A caller that changes
+ * its input after the call cannot change the result.
+ *
+ * Whether the new digest equals the current version's decides the
+ * transition (P4.4), and the rules checked depend on it. A version of another
+ * size cannot have the current digest, so a stand-in that differs from it
+ * checks the same rules; a same-size version is hashed synchronously, as
+ * before.
+ */
+async function buildWithDigest<A extends { resource?: ResourceDescriptor }>(args: A, bytes: Uint8Array, current: ResourceDescriptor | undefined, build: (args: A) => UnsignedEntry): Promise<UnsignedEntry> {
+  const withDigest = (a: A, digest: string): A => ({ ...a, resource: { ...a.resource!, digest } });
+  if (current !== undefined && bytes.length === current.size) return build(withDigest(args, resourceDigest(bytes)));
+  build(withDigest(args, STAND_INS[0] === current?.digest ? STAND_INS[1] : STAND_INS[0]));
+  let snapshot: A;
+  try {
+    snapshot = structuredClone(args);
+  } catch {
+    // Checked, but not cloneable (a Proxy, say): used as given.
+    snapshot = args;
+  }
+  return build(withDigest(snapshot, await resourceDigestAsync(bytes)));
 }
 
 function exactKeys(value: object, allowed: string[], where: string): void {
@@ -953,17 +996,18 @@ export class OriginalsSDK {
     if (typeof r !== "object" || r === null) sdkError("invalid-evidence", "INPUT_INVALID", "an Original has exactly one resource: give `resource` (P4.1)");
     exactKeys(r, ["mediaType", "bytes"], "resource");
     if (!(r.bytes instanceof Uint8Array)) sdkError("invalid-evidence", "INPUT_INVALID", "resource.bytes must be a Uint8Array");
-    // Copied before hashing: the caller's array may change while the digest is awaited.
-    const copy = r.bytes.slice();
-    const digest = await resourceDigestAsync(copy);
-    bytes.set(digest, copy);
-    const resource: ResourceDescriptor = { mediaType: r.mediaType, size: copy.length, digest };
-    const entry = prepareCreateOriginal({
-      versionTime: this.versionTime(), name: input.name, ...(input.metadata !== undefined ? { metadata: input.metadata } : {}), resource, author: input.author,
-      ...(input.editors !== undefined ? { editors: input.editors } : {}),
-    });
+    const copy = copyBytes(r.bytes);
+    const entry = await buildWithDigest(
+      {
+        versionTime: this.versionTime(), name: input.name, ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+        resource: { mediaType: r.mediaType, size: copy.length, digest: "" }, author: input.author,
+        ...(input.editors !== undefined ? { editors: input.editors } : {}),
+      },
+      copy, undefined, prepareCreateOriginal,
+    );
+    bytes.set((entry.state as unknown as EntryState).asset.resource.digest, copy);
     const summary = summarize(entry);
-    return Promise.resolve({ kind: "draft", signed: false, original: entry.state.id as string, parent: null, entry, summary, display: describeEntry(summary), bytes });
+    return { kind: "draft", signed: false, original: entry.state.id as string, parent: null, entry, summary, display: describeEntry(summary), bytes };
   }
 
   /** Create an Original, or return an unsigned draft when no signer is given. */
@@ -994,6 +1038,7 @@ export class OriginalsSDK {
     const { head, view } = await this.parentOf(did, input.parent);
     const bytes = new Map<string, Uint8Array>();
     let resource: ResourceDescriptor | undefined;
+    let copy: Uint8Array | undefined;
     if (input.resource !== undefined) {
       const r = input.resource;
       if (typeof r !== "object" || r === null) sdkError("invalid-evidence", "INPUT_INVALID", "resource is the resource's next version: {bytes, mediaType?, expectedDigest?} (P4.1)");
@@ -1004,13 +1049,10 @@ export class OriginalsSDK {
       if (r.expectedDigest !== undefined && current.digest !== r.expectedDigest) {
         sdkError("stale-parent", "STALE_DIGEST", `the resource is at ${current.digest}, not ${r.expectedDigest}`);
       }
-      // Copied before hashing: the caller's array may change while the digest is awaited.
-      const copy = r.bytes.slice();
-      const digest = await resourceDigestAsync(copy);
-      bytes.set(digest, copy);
-      resource = { mediaType: r.mediaType ?? current.mediaType, size: copy.length, digest };
+      copy = copyBytes(r.bytes);
+      resource = { mediaType: r.mediaType ?? current.mediaType, size: copy.length, digest: "" };
     }
-    const entry = prepareUpdateOriginal(head, {
+    const args = {
       versionTime: this.versionTime(head.versionTime),
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
@@ -1019,7 +1061,11 @@ export class OriginalsSDK {
       ...(input.editor !== undefined ? { editor: input.editor } : {}),
       ...(input.editors !== undefined ? { editors: input.editors } : {}),
       ...(aliases ? { aliases } : {}),
-    });
+    };
+    const entry = copy === undefined
+      ? prepareUpdateOriginal(head, args)
+      : await buildWithDigest(args, copy, view.state.resource, (a) => prepareUpdateOriginal(head, a));
+    if (copy !== undefined) bytes.set((entry.state as unknown as EntryState).asset.resource.digest, copy);
     const summary = summarize(entry, head.state as unknown as EntryState);
     return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary, display: describeEntry(summary), bytes };
   }

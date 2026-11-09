@@ -32,6 +32,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/native-digest.test.ts",
         "packages/vh/tests/native-digest.test.ts",
         "packages/vh/tests/originals.test.ts"
       ]
