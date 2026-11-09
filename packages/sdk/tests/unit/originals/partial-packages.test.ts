@@ -8,7 +8,9 @@
  */
 import { describe, expect, test } from "bun:test";
 import { OriginalsError } from "@originals/vh";
-import { resourceDigest } from "@originals/vh/originals";
+import { localSigner } from "@originals/vh/crypto";
+import { serializeLog, signWith } from "@originals/vh/log";
+import { createOriginal, resourceDigest } from "@originals/vh/originals";
 import { MemoryStore, OriginalsSDK, readEvidence, readZip, writeEvidence, type OriginalView } from "../../../src/originals/index.js";
 import { Author, bytes, clock, seed } from "./helpers.js";
 
@@ -273,5 +275,32 @@ describe("import keeps verified bytes when its history is already held (P7.3)", 
     expect(result.status).toBe("kept-newer-local");
     expect(result.original.resources.map((r) => r.bytes)).toEqual(["verified", "missing", "missing", "missing"]);
     expect(await store.getResource(view.resources[1].digest)).toBeUndefined();
+  });
+  test("C12-10: held bytes are held to the signed size as packaged bytes are: a descriptor whose size is wrong is RESOURCE_DIGEST_MISMATCH", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const sign = signWith(localSigner("Ed25519", KEY), { cryptosuite: "eddsa-jcs-2022", verificationMethod: alice.ref("orig").verificationMethod });
+    const hello = bytes("hello");
+    const digest = resourceDigest(hello);
+    // A validly signed entry whose descriptor says 6 bytes for the digest of 5.
+    const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00Z", name: "Wrong size", resource: { mediaType: "text/plain", size: 6, digest }, author: alice.ref("orig"), sign });
+    const contents = {
+      manifest: {
+        format: "originals-evidence/0.1", profile: "originals:1.0", original: genesis.state.id as string, checkpoint: genesis.versionId, head: genesis.versionId,
+        completeness: "partial" as const, missing: [{ kind: "resource" as const, version: 1, digest, versionId: genesis.versionId }],
+      },
+      log: serializeLog([genesis]), authors: [alice.evidence()], bytes: {} as Record<string, Uint8Array>,
+    };
+    const store = new MemoryStore();
+    await store.putResource(digest, hello);
+    const held = await reader(alice, store).import(writeEvidence(contents as never), { requireResources: true }).catch((e: unknown) => e);
+    expect(held).toBeInstanceOf(OriginalsError);
+    expect((held as OriginalsError).code).toBe("RESOURCE_DIGEST_MISMATCH");
+    expect(await store.get(genesis.state.id as string)).toBeUndefined();
+    // The same bytes in the package are refused the same way.
+    contents.bytes[digest] = hello;
+    contents.manifest.completeness = "complete" as never;
+    contents.manifest.missing = [];
+    const packaged = await reader(alice).import(writeEvidence(contents as never), { requireResources: true }).catch((e: unknown) => e);
+    expect((packaged as OriginalsError).code).toBe("RESOURCE_DIGEST_MISMATCH");
   });
 });

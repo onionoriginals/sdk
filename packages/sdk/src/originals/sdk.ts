@@ -1650,7 +1650,13 @@ export class OriginalsSDK {
     }
     const missing: Array<{ version: number; digest: string; versionId: string }> = [];
     for (const v of versions) {
-      if (supplied(v.digest) === undefined && !(await this.resourceBytes(v.digest))) missing.push({ version: v.version, digest: v.digest, versionId: v.versionId });
+      if (supplied(v.digest) !== undefined) continue;
+      const held = await this.resourceBytes(v.digest);
+      if (!held) missing.push({ version: v.version, digest: v.digest, versionId: v.versionId });
+      // Held bytes are held to the signed descriptor as supplied bytes are: digest and size (P4.3).
+      else if (held.length !== v.size) {
+        sdkError("invalid-evidence", "RESOURCE_DIGEST_MISMATCH", `the held bytes of version ${v.version} are ${held.length} bytes; its descriptor says ${v.size}`, { report: r });
+      }
     }
     if (missing.length > 0) {
       sdkError("unavailable-bytes", "RESOURCES_NOT_HELD", `the package leaves out ${missing.length} resource version(s) this store does not hold, starting with version ${missing[0].version}`, { missing, report: r });
