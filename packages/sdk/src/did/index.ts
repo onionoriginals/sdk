@@ -72,7 +72,14 @@ export function localWebvhSigner(secretKey: Uint8Array): WebvhSigner {
   };
 }
 
-/** `user-` and the first 16 characters of an account subject: the path segment originals.build gives a user. */
+/**
+ * `user-` and the first 16 characters of an account subject: the path
+ * segment originals.build gives a user, kept so identities already minted
+ * resolve where they are. Two subjects that share their first 16 characters
+ * get the same segment, and so the same hosted `did.jsonl`: use it only for
+ * subjects whose first 16 characters are unique (a random id such as a
+ * Turnkey sub-organization UUID), not for prefixed ids like `auth0|...`.
+ */
 export function userPathSegment(subject: string): string {
   if (typeof subject !== "string" || subject.length === 0) throw new StructuredError("INPUT_INVALID", "an account subject is a non-empty string");
   return `user-${subject.slice(0, 16)}`;
@@ -168,12 +175,22 @@ export async function createWebvhIdentity(options: CreateIdentityOptions): Promi
 
 /**
  * The user's identity from where the app keeps its log, or a new one, saved
- * there first. `load` returns the hosted log or null; `save` stores a new one
- * and must succeed before the identity is used, so an identity is never
- * minted twice for one account.
+ * there first. `load` returns the hosted log or null. `save` stores a new log
+ * and must succeed before the identity is used.
+ *
+ * Two calls at once (two tabs, two devices) can both find nothing and both
+ * mint. Only the store can settle that: make `save` create-if-absent, and when
+ * a log is already there, leave it and return it. The identity returned is
+ * then the stored one, so every caller ends with the same identity. A `save`
+ * that overwrites instead lets the last writer replace an identity the first
+ * may already have signed with.
  */
 export async function ensureWebvhIdentity(
-  options: CreateIdentityOptions & { load(): Promise<string | null | undefined>; save(log: string): Promise<void> },
+  options: CreateIdentityOptions & {
+    load(): Promise<string | null | undefined>;
+    /** Store `log` if no log is stored; return the stored log if one already is (or nothing when `log` was stored). */
+    save(log: string): Promise<string | null | undefined | void>;
+  },
 ): Promise<WebvhIdentity> {
   const held = await options.load();
   if (held) return identityFromLog(held);
@@ -184,8 +201,8 @@ export async function ensureWebvhIdentity(
     ...(options.paths !== undefined ? { paths: options.paths } : {}),
     ...(options.portable !== undefined ? { portable: options.portable } : {}),
   });
-  await options.save(identity.log);
-  return identity;
+  const stored = await options.save(identity.log);
+  return typeof stored === "string" && stored !== "" ? identityFromLog(stored) : identity;
 }
 
 /** The alias path segment for an Original: `o-` and the first 16 characters of its did:vh SCID. */

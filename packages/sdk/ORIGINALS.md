@@ -481,7 +481,7 @@ const identity = await ensureWebvhIdentity({
   identitySigner,                                // #key-0: update key and authentication
   authorshipKey,                                 // #key-1: assertionMethod, signs entries (never the update key, P5.11)
   load: () => api.getIdentityLog(),              // the hosted log, or null
-  save: (log) => api.putIdentityLog(log),        // saved before the identity is used
+  save: (log) => api.putIdentityLogIfAbsent(log), // create-if-absent; returns the stored log if one was already there
 });
 const sdk = OriginalsSDK.create({ store, authors: [identity.evidence] });
 // identity.ref names #key-1 at the latest version, for every entry the authorship key signs.
@@ -493,6 +493,12 @@ const alias = await createWebvhAlias({ domain, paths: [userPathSegment(subject),
 reference names (P5.8). After a did:webvh move, `identityFromLog` keeps that
 DID and points `ref.verificationMethod` at the new location (P5.14); taking
 the DID from the log's last line, as the apps did, breaks after a move.
+Make `save` create-if-absent and return the log already stored when it
+loses: two tabs signing in at once both mint, and only the store can pick
+one. `ensureWebvhIdentity` then returns the stored identity to both.
+`userPathSegment` keeps originals.build's `user-<first 16 characters>`
+segment, so it needs subjects unique in their first 16 characters (a random
+id, not `auth0|...`); otherwise two accounts share one hosted log.
 `localWebvhSigner(secretKey)` is a `WebvhSigner` over a raw key, for
 development and servers; a custody service (Turnkey) implements the same
 interface.

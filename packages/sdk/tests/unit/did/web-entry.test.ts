@@ -78,6 +78,27 @@ describe("ensureWebvhIdentity", () => {
     // A failed save leaves no identity to use.
     await expect(ensureWebvhIdentity({ ...options, load: () => Promise.resolve(null), save: () => Promise.reject(new Error("offline")) })).rejects.toThrow("offline");
   });
+
+  test("two calls at once with a create-if-absent save end with the one stored identity", async () => {
+    let stored: string | null = null;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let loads = 0;
+    const options = {
+      domain: "example.com", paths, identitySigner, authorshipKey,
+      // Both calls find nothing: the second load waits until both are past it.
+      load: async () => { if (++loads === 2) release(); await gate; return stored; },
+      save: (log: string) => { if (stored !== null) return Promise.resolve(stored); stored = log; return Promise.resolve(); },
+    };
+    const [a, b] = await Promise.all([ensureWebvhIdentity(options), ensureWebvhIdentity(options)]);
+    expect(a.did).toBe(b.did);
+    expect(a).toEqual(identityFromLog(stored!));
+    expect(b).toEqual(a);
+    // The loser gets the stored identity even when it minted a different one.
+    const other = await createWebvhIdentity({ domain: "other.example", paths, identitySigner, authorshipKey });
+    const lost = await ensureWebvhIdentity({ ...options, load: () => Promise.resolve(null), save: () => Promise.resolve(other.log) });
+    expect(lost).toEqual(other);
+  });
 });
 
 describe("createWebvhAlias", () => {
