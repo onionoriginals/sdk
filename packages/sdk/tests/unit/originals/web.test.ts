@@ -131,8 +131,8 @@ describe("hostedFetch", () => {
     expect([bad.category, bad.code]).toEqual(["unavailable-bytes", "FETCH_URL"]);
   });
 
-  test("without `origin`, refuses an IP-literal or localhost host that is not public, as safeFetch does (P8.5), without DNS", async () => {
-    const fetch = server(new Map([["https://8.8.8.8/a", bytes("ok")], ["https://[2606:4700::1111]/a", bytes("ok")]]));
+  test("without `origin`, refuses every IP-literal host and localhost (P8.5), without DNS", async () => {
+    const fetch = server(new Map([["https://example.com/a", bytes("ok")]]));
     const read = hostedFetch({ fetch });
     for (const url of [
       "https://127.0.0.1/a", "https://[::1]/a", "https://2130706433/a", "https://0x7f000001/a", "https://127.1/a",
@@ -142,13 +142,28 @@ describe("hostedFetch", () => {
       const e = await refusal(read(url, opts()));
       expect([url, e.category, e.code]).toEqual([url, "unavailable-bytes", "FETCH_PRIVATE_ADDRESS"]);
     }
+    // P8.5 refuses public IP literals too.
+    for (const url of ["https://8.8.8.8/a", "https://[2606:4700::1111]/a", "https://134744072/a"]) {
+      const e = await refusal(read(url, opts()));
+      expect([url, e.category, e.code]).toEqual([url, "unavailable-bytes", "FETCH_IP_LITERAL"]);
+    }
     expect(fetch.calls).toEqual([]);
-    // Public literals and ordinary names are fetched.
-    expect(await read("https://8.8.8.8/a", opts())).toEqual(bytes("ok"));
-    expect(await read("https://[2606:4700::1111]/a", opts())).toEqual(bytes("ok"));
+    // Names are fetched.
+    expect(await read("https://example.com/a", opts())).toEqual(bytes("ok"));
     // An `origin` the caller configured is trusted as given.
     const dev = server(new Map([["http://127.0.0.1:5173/a", bytes("ok")]]));
     expect(await hostedFetch({ fetch: dev, origin: "http://127.0.0.1:5173" })("https://example.com/a", opts())).toEqual(bytes("ok"));
+  });
+
+  test("a response that arrives after the timeout is released, when the injected fetch ignores the signal", async () => {
+    let cancelled = false;
+    const late: typeof globalThis.fetch = () =>
+      new Promise((resolve) => setTimeout(() => resolve(new Response(new ReadableStream({ pull() {}, cancel() { cancelled = true; } }))), 30));
+    const e = await refusal(hostedFetch({ fetch: late as never })("https://example.com/slow", { ...opts(), timeoutMs: 5 }));
+    expect(e.code).toBe("FETCH_TIMEOUT");
+    expect(cancelled).toBe(false);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(cancelled).toBe(true);
   });
 
   describe("over a real local server", () => {

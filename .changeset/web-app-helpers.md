@@ -8,7 +8,8 @@ Easel, Commission Desk and the landing each wrote their own copies of these.
 - `hostedFetch({ origin?, fetch?, cache? })`: a `HostedFetch` over the
   platform's `fetch`. It refuses as `safeFetch` does: `FETCH_URL`,
   `FETCH_SCHEME`, `FETCH_PRIVATE_ADDRESS` (an IP-literal host that is not
-  public, or `localhost`, checked without DNS; P8.5), `FETCH_REDIRECT`
+  public, or `localhost`, checked without DNS; P8.5), `FETCH_IP_LITERAL`
+  (a public IP-literal host, which P8.5 also refuses), `FETCH_REDIRECT`
   (redirects are never followed), `FETCH_STATUS`, `FETCH_TOO_LARGE`,
   `FETCH_TIMEOUT` (`timeoutMs`, covering headers and body), `FETCH_ABORTED`
   and `FETCH_FAILED`, all `unavailable-bytes`. It sends no credentials and

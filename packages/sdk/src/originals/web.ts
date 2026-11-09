@@ -42,17 +42,19 @@ const refuse: Refuse = (code, message, details) => {
 };
 
 /**
- * A host that is not public by its name alone, with no DNS: an IP literal
- * (the URL parser has already normalised `2130706433`, `0x7f000001` and
- * `127.1` to dotted form) that `safeFetch` would refuse, or `localhost` and
- * its subdomains, which always name loopback (RFC 6761). Any other name is
- * left to the platform: a browser cannot see what it resolves to.
+ * Why a host is refused by its name alone, with no DNS, or undefined. P8.5
+ * refuses IP literals outright (the URL parser has already normalised
+ * `2130706433`, `0x7f000001` and `127.1` to dotted form): a non-public one is
+ * `FETCH_PRIVATE_ADDRESS`, a public one `FETCH_IP_LITERAL`. `localhost` and
+ * its subdomains always name loopback (RFC 6761). Any other name is left to
+ * the platform: a browser cannot see what it resolves to.
  */
-function nonPublicHost(hostname: string): boolean {
+function refusedHost(hostname: string): "FETCH_PRIVATE_ADDRESS" | "FETCH_IP_LITERAL" | undefined {
   const name = hostname.toLowerCase().replace(/\.$/, "");
-  if (name === "localhost" || name.endsWith(".localhost")) return true;
+  if (name === "localhost" || name.endsWith(".localhost")) return "FETCH_PRIVATE_ADDRESS";
   const literal = name.startsWith("[") || /^\d+\.\d+\.\d+\.\d+$/.test(name);
-  return literal && !isPublicAddress(name);
+  if (!literal) return undefined;
+  return isPublicAddress(name) ? "FETCH_IP_LITERAL" : "FETCH_PRIVATE_ADDRESS";
 }
 
 /** The reader of a body, typed locally: DOM and Bun's lib disagree on its type. */
@@ -70,6 +72,8 @@ type BodyReader = { read(): Promise<{ done: boolean; value?: Uint8Array }>; canc
  *   that is not public (loopback, private, link-local, ...) or `localhost`
  *   (P8.5). Checked on the parsed host with no DNS: a browser cannot vet
  *   what a name resolves to.
+ * - `FETCH_IP_LITERAL`: without `origin`, the host is a public IP literal,
+ *   which P8.5 also refuses: a hosted Original is named by a domain.
  * - `FETCH_REDIRECT`: any redirect, which is never followed (P8.5)
  * - `FETCH_STATUS`: any status but 2xx, with `details.status`
  * - `FETCH_TOO_LARGE`: past `maxBytes`, by declared length or as it arrives
@@ -108,7 +112,9 @@ export function hostedFetch(options: WebFetchOptions = {}): HostedFetch {
       target.search = search;
     } else {
       if (target.protocol !== "https:") refuse("FETCH_SCHEME", `only https is retrieved, not ${target.protocol}`);
-      if (nonPublicHost(target.hostname)) refuse("FETCH_PRIVATE_ADDRESS", `${target.hostname} is not a public address`);
+      const refused = refusedHost(target.hostname);
+      if (refused === "FETCH_PRIVATE_ADDRESS") refuse(refused, `${target.hostname} is not a public address`);
+      if (refused === "FETCH_IP_LITERAL") refuse(refused, `${target.hostname} is an IP literal; only names are retrieved (P8.5)`);
     }
     const maxBytes = request?.maxBytes ?? FETCH_LIMITS.maxResourceBytes;
     const timeoutMs = request?.timeoutMs ?? FETCH_LIMITS.timeoutMs;
@@ -132,8 +138,18 @@ export function hostedFetch(options: WebFetchOptions = {}): HostedFetch {
     let reader: BodyReader | undefined;
     let size = 0;
     let succeeded = false;
+    let finished = false;
+    let late: Response | undefined;
+    const release = (r: Response | undefined) => void r?.body?.cancel().catch(() => undefined);
     try {
-      response = await Promise.race([doFetch(target.href, { signal: controller.signal, redirect: "manual", credentials: "omit", cache: "no-store" }), stopped]);
+      const pending = doFetch(target.href, { signal: controller.signal, redirect: "manual", credentials: "omit", cache: "no-store" });
+      // A response that arrives after the request was refused (an injected fetch that ignores the
+      // signal) is released too, whenever it comes.
+      pending.then((r) => {
+        if (!finished) late = r;
+        else if (!succeeded) release(r);
+      }, () => undefined);
+      response = await Promise.race([pending, stopped]);
       if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
         refuse("FETCH_REDIRECT", `${url} redirects; redirects are not followed`, { bytesRead: 0 });
       }
@@ -174,12 +190,14 @@ export function hostedFetch(options: WebFetchOptions = {}): HostedFetch {
       }
       return refuse("FETCH_FAILED", `${url} could not be retrieved: ${(error as Error)?.message ?? String(error)}`, { bytesRead: size });
     } finally {
+      finished = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
       if (!succeeded) {
         // A refused response is released: its body cancelled, its request aborted.
         if (reader) void reader.cancel().catch(() => undefined);
-        else void response?.body?.cancel().catch(() => undefined);
+        else release(response);
+        if (late !== undefined && late !== response) release(late);
         controller.abort();
       }
     }
