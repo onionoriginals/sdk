@@ -73,6 +73,42 @@ interface UserIndex {
   totalBytes: number;
 }
 
+/**
+ * The per-user quotas `createOriginalsStore` applies when not given others:
+ * at most 100 recorded Originals and 25 MiB of hosted bytes per user. A
+ * write past either is refused with a `StoreFullError` (HTTP 507
+ * `store_full`, whose body names the limit). Set them for your deployment:
+ * `createOriginalsStore({ dataDir, maxOriginals, maxTotalBytes })`.
+ */
+export const ORIGINALS_STORE_DEFAULTS = Object.freeze({ maxOriginals: 100, maxTotalBytes: 25 * 1024 * 1024 });
+
+/** The quota a refused write would exceed, how much is used, and the limit. */
+export interface StoreFullDetails {
+  limit: 'maxOriginals' | 'maxTotalBytes';
+  max: number;
+  used: number;
+  /** For `maxTotalBytes`: the bytes the refused write needed. */
+  requested?: number;
+}
+
+/**
+ * A write refused by a per-user quota. Its message stays `STORE_FULL`, so
+ * code that matched the message keeps working; `details` says which quota.
+ */
+export class StoreFullError extends Error {
+  readonly details: StoreFullDetails;
+  constructor(details: StoreFullDetails) {
+    super('STORE_FULL');
+    this.name = 'StoreFullError';
+    this.details = details;
+  }
+}
+
+/** The 507 answer for a store-full refusal: `{ error: "store_full", limit, max, used, requested? }`. */
+export function storeFullBody(e: unknown): Record<string, unknown> {
+  return e instanceof StoreFullError ? { error: 'store_full', ...e.details } : { error: 'store_full' };
+}
+
 export interface OriginalsStore {
   saveBytes(subOrgId: string, key: string, bytes: Uint8Array, contentType: string): void;
   recordOriginal(
@@ -89,6 +125,10 @@ export interface OriginalsStore {
   readHosted(key: string): Uint8Array | null;
   /** The sub that owns a hosted key (first writer), or null when unclaimed. */
   ownerOf(key: string): string | null;
+  /** The per-user quotas in force (`ORIGINALS_STORE_DEFAULTS` unless configured). */
+  readonly limits?: Readonly<{ maxOriginals: number; maxTotalBytes: number }>;
+  /** What a user has used against those quotas. */
+  usage?(subOrgId: string): { originals: number; totalBytes: number };
 }
 
 const CTYPE_SUFFIX = '.ctype';
@@ -214,12 +254,17 @@ function subFile(dataDir: string, subOrgId: string): string {
 
 export function createOriginalsStore(opts: {
   dataDir: string;
+  /** Recorded Originals per user; default `ORIGINALS_STORE_DEFAULTS.maxOriginals` (100). */
   maxOriginals?: number;
+  /** Hosted bytes per user; default `ORIGINALS_STORE_DEFAULTS.maxTotalBytes` (25 MiB). */
   maxTotalBytes?: number;
 }): OriginalsStore {
+  for (const [name, value] of [['maxOriginals', opts.maxOriginals], ['maxTotalBytes', opts.maxTotalBytes]] as const) {
+    if (value !== undefined && !(Number.isSafeInteger(value) && value >= 0)) throw new TypeError(`createOriginalsStore: ${name} must be a whole number, 0 or more`);
+  }
   const dataDir = opts.dataDir;
-  const maxOriginals = opts.maxOriginals ?? 100;
-  const maxTotalBytes = opts.maxTotalBytes ?? 25 * 1024 * 1024; // 25 MiB / user
+  const maxOriginals = opts.maxOriginals ?? ORIGINALS_STORE_DEFAULTS.maxOriginals;
+  const maxTotalBytes = opts.maxTotalBytes ?? ORIGINALS_STORE_DEFAULTS.maxTotalBytes;
   const hostedDir = join(dataDir, 'hosted');
 
   function readIndex(subOrgId: string): UserIndex {
@@ -285,7 +330,7 @@ export function createOriginalsStore(opts: {
     const idx = readIndex(subOrgId);
     const prev = idx.sizes[key] ?? 0;
     const nextTotal = idx.totalBytes - prev + bytes.byteLength;
-    if (nextTotal > maxTotalBytes) throw new Error('STORE_FULL');
+    if (nextTotal > maxTotalBytes) throw new StoreFullError({ limit: 'maxTotalBytes', max: maxTotalBytes, used: idx.totalBytes, requested: bytes.byteLength - prev });
 
     claimOrVerifyOwner(target, ownerPath, subOrgId);
 
@@ -321,7 +366,7 @@ export function createOriginalsStore(opts: {
       writeIndex(subOrgId, idx);
       return;
     }
-    if (idx.originals.length >= maxOriginals) throw new Error('STORE_FULL');
+    if (idx.originals.length >= maxOriginals) throw new StoreFullError({ limit: 'maxOriginals', max: maxOriginals, used: idx.originals.length });
     idx.originals.push(o);
     writeIndex(subOrgId, idx);
   }
@@ -454,5 +499,10 @@ export function createOriginalsStore(opts: {
     });
   }
 
-  return { saveBytes, recordOriginal, list, evidenceFiles, serve, read, readHosted, ownerOf };
+  function usage(subOrgId: string): { originals: number; totalBytes: number } {
+    const idx = readIndex(subOrgId);
+    return { originals: idx.originals.length, totalBytes: idx.totalBytes };
+  }
+
+  return { saveBytes, recordOriginal, list, evidenceFiles, serve, read, readHosted, ownerOf, usage, limits: Object.freeze({ maxOriginals, maxTotalBytes }) };
 }

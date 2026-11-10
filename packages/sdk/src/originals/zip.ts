@@ -33,19 +33,37 @@ function archiveError(code: string, message: string): never {
   throw new OriginalsError("invalid-evidence", code, message);
 }
 
-const CRC_TABLE = (() => {
-  const table = new Uint32Array(256);
+/**
+ * CRC-32 (the ZIP polynomial, reflected 0xEDB88320) by slicing-by-8: eight
+ * 256-entry tables, eight input bytes per step. The same CRC as the bytewise
+ * table loop, several times faster on a resource-sized entry; every package
+ * write and read computes one per entry.
+ */
+const CRC_TABLES = (() => {
+  const t = new Uint32Array(256 * 8);
   for (let n = 0; n < 256; n++) {
     let c = n;
     for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    table[n] = c >>> 0;
+    t[n] = c >>> 0;
   }
-  return table;
+  for (let n = 0; n < 256; n++) {
+    for (let k = 1; k < 8; k++) t[k * 256 + n] = (t[(k - 1) * 256 + n] >>> 8) ^ t[t[(k - 1) * 256 + n] & 0xff];
+  }
+  return t;
 })();
 
 export function crc32(data: Uint8Array): number {
+  const t = CRC_TABLES;
   let crc = 0xffffffff;
-  for (let i = 0; i < data.length; i++) crc = CRC_TABLE[(crc ^ data[i]) & 0xff] ^ (crc >>> 8);
+  let i = 0;
+  const end8 = data.length - (data.length % 8);
+  for (; i < end8; i += 8) {
+    const a = (crc ^ (data[i] | (data[i + 1] << 8) | (data[i + 2] << 16) | (data[i + 3] << 24))) >>> 0;
+    crc =
+      t[1792 + (a & 0xff)] ^ t[1536 + ((a >>> 8) & 0xff)] ^ t[1280 + ((a >>> 16) & 0xff)] ^ t[1024 + (a >>> 24)] ^
+      t[768 + data[i + 4]] ^ t[512 + data[i + 5]] ^ t[256 + data[i + 6]] ^ t[data[i + 7]];
+  }
+  for (; i < data.length; i++) crc = t[(crc ^ data[i]) & 0xff] ^ (crc >>> 8);
   return (crc ^ 0xffffffff) >>> 0;
 }
 

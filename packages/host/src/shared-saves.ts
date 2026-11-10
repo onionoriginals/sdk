@@ -114,7 +114,7 @@ import { ORIGINALS_LIMITS, btcoAliasOf, resourceDigestAsync, verifyOriginal, typ
 import { signerPath } from '@originals/sdk/originals';
 import { json } from './router.js';
 import { deeperThan, logPrefix, MAX_WITNESS_DEPTH, parseWitnessFile, signedMediaType, verifiedSignerLog } from './hosted-layout.js';
-import type { OriginalsStore } from './originals-store.js';
+import { storeFullBody, type OriginalsStore } from './originals-store.js';
 
 const DIGEST = /^z[1-9A-HJ-NP-Za-km-z]{40,60}$/;
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
@@ -592,7 +592,12 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
           outcome = await attempt(siteKey, s, caller);
         } catch (e) {
           const msg = (e as Error).message;
-          if (msg === 'STORE_FULL') return json({ error: 'store_full' }, 507);
+          if (msg === 'STORE_FULL') {
+            // The bytes count against the namespace owner. Only the owner hears the quota's
+            // numbers; a granted editor learns the store is full, not the owner's usage.
+            const owner = store.ownerOf(`${siteKey}/originals/asset/did.jsonl`);
+            return json(owner === caller.sub ? storeFullBody(e) : { error: 'store_full' }, 507);
+          }
           return json({ error: 'store_error', message: msg }, 500);
         }
         if (outcome === 'again') continue;

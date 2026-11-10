@@ -29,7 +29,7 @@
  */
 import { json, type Handler } from './router.js';
 import { createRateLimiter } from './rate-limit.js';
-import type { OriginalsStore, OriginalInscription } from './originals-store.js';
+import { storeFullBody, type OriginalsStore, type OriginalInscription } from './originals-store.js';
 import { bytesMatchDigest, classifyHostedKey, hostedContentType, parseWitnessFile, signedMediaType, signerLogVerdict, signerWitnessVerdict } from './hosted-layout.js';
 import { readBodyCapped } from './body.js';
 import { createSharedSaves, parseSubmission } from './shared-saves.js';
@@ -147,7 +147,7 @@ export function createOriginalsRoutes(deps: {
 
   function storeError(e: unknown): Response {
     const msg = (e as Error).message;
-    if (msg === 'STORE_FULL') return json({ error: 'store_full' }, 507);
+    if (msg === 'STORE_FULL') return json(storeFullBody(e), 507);
     if (msg === 'BAD_KEY') return json({ error: 'bad_key' }, 400);
     if (msg === 'FORBIDDEN') return json({ error: 'forbidden' }, 403);
     if (msg === 'INCONSISTENT_OWNERSHIP') return json({ error: 'inconsistent_ownership' }, 409);

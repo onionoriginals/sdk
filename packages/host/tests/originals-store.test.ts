@@ -2,7 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { createOriginalsStore } from '../src/originals-store.js';
+import { ORIGINALS_STORE_DEFAULTS, StoreFullError, createOriginalsStore, storeFullBody } from '../src/originals-store.js';
 
 function tmpDir(): string {
   return mkdtempSync(join(tmpdir(), 'originals-store-'));
@@ -260,5 +260,46 @@ describe('originals-store', () => {
     // The key was never claimed by the failed attempt — the real owner can write it.
     expect(() => store.saveBytes('sub-1', key, enc('mine'), 'application/jsonl')).not.toThrow();
     expect(store.serve(new URL(`http://${key}`))!.status).toBe(200);
+  });
+});
+
+describe('originals-store quotas are explicit', () => {
+  test('the defaults are exported, in force, and reported', () => {
+    expect(ORIGINALS_STORE_DEFAULTS).toEqual({ maxOriginals: 100, maxTotalBytes: 25 * 1024 * 1024 });
+    const store = createOriginalsStore({ dataDir: tmpDir() });
+    expect(store.limits).toEqual(ORIGINALS_STORE_DEFAULTS);
+    expect(createOriginalsStore({ dataDir: tmpDir(), maxOriginals: 7, maxTotalBytes: 9 }).limits).toEqual({ maxOriginals: 7, maxTotalBytes: 9 });
+  });
+
+  test('usage counts recorded Originals and hosted bytes per user', () => {
+    const store = createOriginalsStore({ dataDir: tmpDir() });
+    expect(store.usage!('sub-1')).toEqual({ originals: 0, totalBytes: 0 });
+    store.saveBytes('sub-1', 'h/a/did.jsonl', enc('12345'), 'application/jsonl');
+    store.saveBytes('sub-1', 'h/a/did.jsonl', enc('123'), 'application/jsonl'); // a rewrite replaces its size
+    store.recordOriginal('sub-1', { did: 'did:webvh:S:h:a', title: 'A', resourceHash: 'x', createdAt: 't' });
+    expect(store.usage!('sub-1')).toEqual({ originals: 1, totalBytes: 3 });
+    expect(store.usage!('sub-2')).toEqual({ originals: 0, totalBytes: 0 });
+  });
+
+  test('a refusal says which quota, the limit, what is used and what was asked for', () => {
+    const store = createOriginalsStore({ dataDir: tmpDir(), maxOriginals: 1, maxTotalBytes: 8 });
+    store.saveBytes('sub-1', 'h/a/did.jsonl', enc('12345'), 'application/jsonl');
+    const bytes = (() => { try { store.saveBytes('sub-1', 'h/b/did.jsonl', enc('6789'), 'application/jsonl'); } catch (e) { return e; } })();
+    expect(bytes).toBeInstanceOf(StoreFullError);
+    expect((bytes as Error).message).toBe('STORE_FULL');
+    expect((bytes as StoreFullError).details).toEqual({ limit: 'maxTotalBytes', max: 8, used: 5, requested: 4 });
+    expect(storeFullBody(bytes)).toEqual({ error: 'store_full', limit: 'maxTotalBytes', max: 8, used: 5, requested: 4 });
+
+    store.recordOriginal('sub-1', { did: 'did:webvh:S:h:a', title: 'A', resourceHash: 'x', createdAt: 't' });
+    const count = (() => { try { store.recordOriginal('sub-1', { did: 'did:webvh:S:h:b', title: 'B', resourceHash: 'y', createdAt: 't' }); } catch (e) { return e; } })();
+    expect((count as StoreFullError).details).toEqual({ limit: 'maxOriginals', max: 1, used: 1 });
+    expect(storeFullBody(new Error('STORE_FULL'))).toEqual({ error: 'store_full' });
+  });
+
+  test('a quota that is not a whole number is refused when the store is made', () => {
+    for (const bad of [-1, 1.5, Number.NaN, Infinity]) {
+      expect(() => createOriginalsStore({ dataDir: tmpDir(), maxTotalBytes: bad })).toThrow(TypeError);
+      expect(() => createOriginalsStore({ dataDir: tmpDir(), maxOriginals: bad })).toThrow(TypeError);
+    }
   });
 });
