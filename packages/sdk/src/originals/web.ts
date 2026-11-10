@@ -24,19 +24,23 @@ export interface WebFetchOptions {
    * Send every request to this origin instead (`http://localhost:5173` in
    * local development, where a dev server proxies the host). Only the URL's
    * path and query are kept, set on this origin: a path beginning `//` stays
-   * a path and never names another host. The origin is the caller's own
-   * configuration and is trusted as given, loopback included; it must be
-   * `http:` or `https:`.
+   * a path and never names another host, and the URL's own host is dropped,
+   * so the origin stands for one fixed upstream host. The origin is the
+   * caller's own configuration and is trusted as given, loopback included;
+   * it must be `http:` or `https:`.
    */
   origin?: string;
   /**
    * Without `origin`, the only hosts requests may go to, as `example.com` or
-   * `example.com:8443` (compared after URL normalisation). Required then:
-   * P8.5 refuses names that resolve to private, loopback or link-local
-   * addresses, and a browser cannot see what a name resolves to, so the
-   * caller vouches for the hosts instead (its own host, say). To read from
-   * any host, retrieve on a server with `safeFetch`, which checks every
-   * resolved address, and point `origin` at it.
+   * `example.com:8443` (compared after URL normalisation). Required then.
+   *
+   * PROVISIONAL (P8.5): P8.5 refuses names that resolve to private, loopback
+   * or link-local addresses, and a browser cannot see what a name resolves
+   * to. Listing a host here is the caller vouching that it is public
+   * infrastructure it trusts (its own host, say); the address is not checked.
+   * The spec grants no such exception yet. To read from hosts nobody vouches
+   * for, retrieve on a server with `safeFetch`, which checks every resolved
+   * address and connects to the address it checked.
    */
   hosts?: readonly string[];
   /** The fetch to use; defaults to `globalThis.fetch`. */
@@ -65,6 +69,23 @@ function refusedHost(hostname: string): "FETCH_PRIVATE_ADDRESS" | "FETCH_IP_LITE
   const literal = name.startsWith("[") || /^\d+\.\d+\.\d+\.\d+$/.test(name);
   if (!literal) return undefined;
   return isPublicAddress(name) ? "FETCH_IP_LITERAL" : "FETCH_PRIVATE_ADDRESS";
+}
+
+/**
+ * `host[:port]` as compared: lowercase, punycode, without a trailing dot on
+ * the name or a default `:443`. Undefined unless `h` is exactly a host and an
+ * optional port: no userinfo, path, query, fragment or backslash.
+ */
+function normalHost(h: unknown): string | undefined {
+  if (typeof h !== "string" || h === "" || /[@/\\?#\s]/.test(h)) return undefined;
+  let url: URL;
+  try {
+    url = new URL(`https://${h}`);
+  } catch {
+    return undefined;
+  }
+  const name = url.hostname.replace(/\.$/, "");
+  return url.port === "" ? name : `${name}:${url.port}`;
 }
 
 /** The reader of a body, typed locally: DOM and Bun's lib disagree on its type. */
@@ -103,17 +124,9 @@ type BodyReader = { read(): Promise<{ done: boolean; value?: Uint8Array }>; canc
 export function hostedFetch(options: WebFetchOptions = {}): HostedFetch {
   const allowed = new Set<string>();
   for (const h of options.hosts ?? []) {
-    let url: URL | undefined;
-    try {
-      url = typeof h === "string" && h !== "" ? new URL(`https://${h}`) : undefined;
-    } catch {
-      url = undefined;
-    }
-    // A bare host[:port]: nothing that would parse as a path, query or user.
-    if (!url || url.pathname !== "/" || url.search || url.hash || url.username || url.password || h.includes("/")) {
-      refuse("FETCH_URL", `${String(h)} is not a host`);
-    }
-    allowed.add(url.host.replace(/\.$/, ""));
+    const host = normalHost(h);
+    if (host === undefined) refuse("FETCH_URL", `${String(h)} is not a host`);
+    allowed.add(host);
   }
   const doFetch: (url: string, init: RequestInit) => Promise<Response> = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
   return async (url, request) => {
@@ -142,7 +155,7 @@ export function hostedFetch(options: WebFetchOptions = {}): HostedFetch {
       const refused = refusedHost(target.hostname);
       if (refused === "FETCH_PRIVATE_ADDRESS") refuse(refused, `${target.hostname} is not a public address`);
       if (refused === "FETCH_IP_LITERAL") refuse(refused, `${target.hostname} is an IP literal; only names are retrieved (P8.5)`);
-      if (!allowed.has(target.host.replace(/\.$/, ""))) {
+      if (!allowed.has(normalHost(target.host) ?? "")) {
         refuse("FETCH_HOST_NOT_ALLOWED", `${target.host} is not one of the hosts this fetch may read (give \`hosts\`, or \`origin\` for a server that checks addresses)`);
       }
     }

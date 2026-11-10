@@ -169,8 +169,13 @@ describe("hostedFetch", () => {
     // No hosts and no origin: nothing is read.
     expect((await refusal(hostedFetch({ fetch })("https://example.com/a", opts()))).code).toBe("FETCH_HOST_NOT_ALLOWED");
     expect(fetch.calls.map((c) => c.url)).toEqual(["https://example.com/a", "https://example.com./a", "https://example.com:8443/a"]);
+    // A trailing dot on the name is the same host, with a port too, either way round.
+    const ported = server(new Map([["https://example.com:8443/x", bytes("ok")], ["https://example.com.:8443/x", bytes("ok")]]));
+    expect(await hostedFetch({ fetch: ported, hosts: ["example.com.:8443"] })("https://example.com:8443/x", opts())).toEqual(bytes("ok"));
+    expect(await hostedFetch({ fetch: ported, hosts: ["example.com:8443"] })("https://example.com.:8443/x", opts())).toEqual(bytes("ok"));
+    expect(await hostedFetch({ fetch: ported, hosts: ["example.com:443"] })("https://example.com/x", opts()).catch((e: OriginalsError) => e.code)).toBe("FETCH_STATUS");
     // A host is a bare host[:port].
-    for (const bad of ["", "example.com/path", "user@example.com", "example.com?x"]) {
+    for (const bad of ["", "example.com/path", "user@example.com", "example.com?x", "@example.com", "example.com?", "example.com#", "example.com\\", "exa mple.com"]) {
       expect(() => hostedFetch({ fetch, hosts: [bad] })).toThrow();
     }
   });

@@ -8,7 +8,9 @@ Easel, Commission Desk and the landing each wrote their own copies of these.
 - `hostedFetch({ origin?, hosts?, fetch?, cache? })`: a `HostedFetch` over the
   platform's `fetch`. Without `origin` it reads only from the `hosts` the
   caller vouches for (`FETCH_HOST_NOT_ALLOWED`), since a browser cannot check
-  what a name resolves to (P8.5). It refuses as `safeFetch` does: `FETCH_URL`,
+  what a name resolves to. PROVISIONAL (P8.5): listing a host is the caller
+  vouching for it, an exception the spec does not grant yet. `origin` drops
+  the URL's host and stands for one fixed upstream host. It refuses as `safeFetch` does: `FETCH_URL`,
   `FETCH_SCHEME`, `FETCH_PRIVATE_ADDRESS` (an IP-literal host that is not
   public, or `localhost`, checked without DNS; P8.5), `FETCH_IP_LITERAL`
   (a public IP-literal host, which P8.5 also refuses), `FETCH_REDIRECT`
