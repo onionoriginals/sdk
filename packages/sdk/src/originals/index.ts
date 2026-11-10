@@ -10,6 +10,8 @@ export * from "./evidence.js";
 export { readZip, writeZip, crc32, checkArchivePath, ZIP_LIMITS, type ZipLimits } from "./zip.js";
 export * from "./hosting.js";
 export * from "./shared.js";
+// Browser-safe helpers web apps used to copy: hosted reads, shared-host transport, publication, reasons.
+export * from "./web.js";
 export * from "./bitcoin.js";
 // What an Originals inscription carries and what the author is told before one (P9.17, P9.18, P14.12).
 export { inscriptionMetadata, descriptorOfLine, isActiveContent, inscriptionNotice, type InscriptionNotice } from "./inscription.js";
