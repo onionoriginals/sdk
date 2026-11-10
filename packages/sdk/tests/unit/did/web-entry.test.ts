@@ -122,6 +122,43 @@ describe("ensureWebvhIdentity", () => {
     await expect(ensureWebvhIdentity({ ...base, load: () => Promise.resolve(null), save: () => Promise.resolve("") })).rejects.toMatchObject({ code: "INPUT_INVALID" });
   });
 
+  test("an identity at a punycode domain loads again with the options that created it", async () => {
+    const options = { domain: "xn--bcher-kva.example", paths, identitySigner, authorshipKey };
+    const identity = await createWebvhIdentity(options);
+    const loaded = await ensureWebvhIdentity({ ...options, load: () => Promise.resolve(identity.log), save: () => Promise.resolve() });
+    expect(loaded).toEqual(identity);
+  });
+
+  test("P5.3: the authorship key embedded under assertionMethod is accepted, as the verifier accepts it", async () => {
+    const identity = await createWebvhIdentity({ domain: "example.com", paths, identitySigner, authorshipKey });
+    const lines = identity.log.trimEnd().split("\n").map((l) => JSON.parse(l) as { state: { verificationMethod: Array<{ id: string }>; assertionMethod: unknown[] } });
+    const last = lines[lines.length - 1].state;
+    const method = last.verificationMethod.find((m) => m.id === "#key-1")!;
+    last.verificationMethod = last.verificationMethod.filter((m) => m !== method);
+    last.assertionMethod = [method];
+    const log = lines.map((l) => `${JSON.stringify(l)}\n`).join("");
+    const loaded = await ensureWebvhIdentity({ domain: "example.com", paths, identitySigner, authorshipKey, load: () => Promise.resolve(log), save: () => Promise.resolve() });
+    expect(loaded.did).toBe(identity.did);
+    // Embedded with another key, it is refused.
+    last.assertionMethod = [{ ...method, publicKeyMultibase: localSigner("Ed25519", secret(30)).publicKeyMultibase }];
+    const other = lines.map((l) => `${JSON.stringify(l)}\n`).join("");
+    await expect(ensureWebvhIdentity({ domain: "example.com", paths, identitySigner, authorshipKey, load: () => Promise.resolve(other), save: () => Promise.resolve() })).rejects.toMatchObject({ code: "IDENTITY_MISMATCH" });
+  });
+
+  test("a malformed stored log is INPUT_INVALID, never a raw TypeError", async () => {
+    const identity = await createWebvhIdentity({ domain: "example.com", paths, identitySigner, authorshipKey });
+    const [first] = identity.log.trimEnd().split("\n");
+    const withNull = `${first}\nnull\n${first}\n`;
+    const genesis = JSON.parse(first) as { state: { verificationMethod: unknown[] } };
+    genesis.state.verificationMethod = [null, ...genesis.state.verificationMethod];
+    const nullMethod = `${JSON.stringify(genesis)}\n`;
+    for (const log of [withNull]) {
+      await expect(ensureWebvhIdentity({ domain: "example.com", paths, identitySigner, authorshipKey, load: () => Promise.resolve(log), save: () => Promise.resolve() })).rejects.toMatchObject({ code: "INPUT_INVALID" });
+    }
+    // A null entry among the methods is skipped, not thrown on: the real #key-1 still names the key.
+    await expect(ensureWebvhIdentity({ domain: "example.com", paths, identitySigner, authorshipKey, load: () => Promise.resolve(nullMethod), save: () => Promise.resolve() })).resolves.toMatchObject({ did: identity.did });
+  });
+
   test("P5.14: a moved identity loads when the app gives where it is hosted now", async () => {
     const identity = await createWebvhIdentity({ domain: "example.com", paths, identitySigner, authorshipKey });
     const moved = await updateDIDOriginal({ type: "did", log: identity.log.trimEnd().split("\n").map((l) => JSON.parse(l) as never), signer: identitySigner, verifier: identitySigner, domain: "moved.example" });

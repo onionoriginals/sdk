@@ -24,7 +24,7 @@ import type { AliasEvidence, AuthorDidEvidence, AuthorRef } from "@originals/vh/
 import type { ExternalSigner, ExternalVerifier } from "../types/common.js";
 import { StructuredError } from "../utils/telemetry.js";
 import { createDIDOriginal, prepareDIDDataForSigning, verifyDIDSignature } from "./identity-operations.js";
-import { canonicalizeWebVHDomain } from "./webvh-names.js";
+import { requireWebVHDomain } from "./webvh-rules.js";
 
 export {
   createDIDOriginal,
@@ -106,6 +106,23 @@ interface LogLine {
   state: { id?: unknown; verificationMethod?: unknown; assertionMethod?: unknown };
 }
 
+/** The log's lines as objects, or INPUT_INVALID: never a raw parse or type error. */
+function parseLines(log: string, what: string): LogLine[] {
+  let parsed: unknown[];
+  try {
+    parsed = log.trimEnd().split("\n").map((l) => JSON.parse(l) as unknown);
+  } catch {
+    throw new StructuredError("INPUT_INVALID", `the ${what} log is not JSON Lines`);
+  }
+  for (const line of parsed) {
+    const ok = typeof line === "object" && line !== null && !Array.isArray(line) &&
+      typeof (line as LogLine).state === "object" && (line as LogLine).state !== null &&
+      ((line as LogLine).parameters === undefined || (typeof (line as LogLine).parameters === "object" && (line as LogLine).parameters !== null));
+    if (!ok) throw new StructuredError("INPUT_INVALID", `the ${what} log has a line that is not a log entry`);
+  }
+  return parsed as LogLine[];
+}
+
 /**
  * The identity a hosted did:webvh log describes. The DID is the genesis
  * DID; the author reference names `#<authorship>` at the latest version's
@@ -114,12 +131,7 @@ interface LogLine {
  */
 export function identityFromLog(log: string, options: { obtainedAt?: string; authorship?: string } = {}): WebvhIdentity {
   const text = log.endsWith("\n") ? log : `${log}\n`;
-  let lines: LogLine[];
-  try {
-    lines = text.trimEnd().split("\n").map((l) => JSON.parse(l) as LogLine);
-  } catch {
-    throw new StructuredError("INPUT_INVALID", "the identity log is not JSON Lines");
-  }
+  const lines = parseLines(text, "identity");
   const first = lines[0];
   const last = lines[lines.length - 1];
   if (typeof first?.state?.id !== "string" || typeof last?.state?.id !== "string" || typeof last.versionId !== "string" || !first.state.id.startsWith("did:webvh:")) {
@@ -188,7 +200,7 @@ function requireRequested(identity: WebvhIdentity, options: CreateIdentityOption
   const fail = (why: string): never => {
     throw new StructuredError("IDENTITY_MISMATCH", `the stored identity log is not the identity asked for: ${why}`);
   };
-  const lines = identity.log.trimEnd().split("\n").map((l) => JSON.parse(l) as LogLine);
+  const lines = parseLines(identity.log, "identity");
   const paths = options.paths ?? [];
   const segments = identity.location.split(":").slice(3).map((x) => {
     try {
@@ -197,7 +209,7 @@ function requireRequested(identity: WebvhIdentity, options: CreateIdentityOption
       return x;
     }
   });
-  if (segments.length !== paths.length + 1 || segments[0] !== canonicalizeWebVHDomain(options.domain) || paths.some((p, i) => segments[i + 1] !== p)) {
+  if (segments.length !== paths.length + 1 || segments[0] !== requireWebVHDomain(options.domain) || paths.some((p, i) => segments[i + 1] !== p)) {
     fail(`it is hosted at ${identity.location}, not at ${options.domain} under ${JSON.stringify(paths)}`);
   }
   let updateKeys: unknown;
@@ -207,11 +219,14 @@ function requireRequested(identity: WebvhIdentity, options: CreateIdentityOption
   const state = lines[lines.length - 1].state;
   const fragment = `#${AUTHORSHIP_KEY}`;
   const named = (id: unknown) => typeof id === "string" && (id === fragment || id === `${identity.location}${fragment}`);
-  const methods = Array.isArray(state.verificationMethod) ? (state.verificationMethod as Array<{ id?: unknown; publicKeyMultibase?: unknown }>) : [];
+  type Method = { id?: unknown; publicKeyMultibase?: unknown };
+  const isMethod = (m: unknown): m is Method => typeof m === "object" && m !== null && !Array.isArray(m);
+  const holdsKey = (m: unknown) => isMethod(m) && named(m.id) && m.publicKeyMultibase === options.authorshipKey;
+  const methods = Array.isArray(state.verificationMethod) ? (state.verificationMethod as unknown[]) : [];
   const assertion = Array.isArray(state.assertionMethod) ? (state.assertionMethod as unknown[]) : [];
-  if (!methods.some((m) => named(m.id) && m.publicKeyMultibase === options.authorshipKey) || !assertion.some(named)) {
-    fail(`its latest state does not have the authorship key as ${fragment} under assertionMethod`);
-  }
+  // Under assertionMethod either by reference to a verificationMethod entry or embedded there (P5.3).
+  const asserted = assertion.some((a) => (typeof a === "string" ? named(a) && methods.some(holdsKey) : holdsKey(a)));
+  if (!asserted) fail(`its latest state does not have the authorship key as ${fragment} under assertionMethod`);
   return identity;
 }
 
