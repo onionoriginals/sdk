@@ -108,8 +108,10 @@ on; it never reports an unanchored Original as current (P7.10). The
   again, with the same report as otherwise. A store may implement it only if
   its bytes cannot change outside it. `MemoryStore` does: it keeps private
   copies (also of a Node `Buffer`) and hands out only copies; a subclass that
-  overrides `getResource` gets no answers unless it overrides
-  `checkedResource` too. `FileStore` does
+  overrides `getResource` (or code that patches it) gets no answers unless it
+  overrides `checkedResource` too. The answer must cover exactly the bytes the
+  store's own `getResource` serves, so a wrapper serving other bytes must not
+  forward the wrapped store's `checkedResource`. `FileStore` does
   not: a file can change with no change to its size or times (a shared
   writable mapping), so its bytes are read and hashed, with native SHA-256,
   on every verification.
