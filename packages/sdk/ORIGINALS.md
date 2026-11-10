@@ -91,7 +91,9 @@ the store already holds every left-out version, each matching its digest,
 and refuses packaged bytes that do not match; both cover every resource
 version of the imported log, whatever checkpoint the manifest names, and are
 checked before anything is stored (`RESOURCES_NOT_HELD`, unavailable-bytes,
-with `details.missing`; `RESOURCE_DIGEST_MISMATCH`, invalid-evidence). An
+with `details.missing`: `Array<{ version, digest, versionId }>`, one per
+version neither packaged nor held, in version order; `RESOURCE_DIGEST_MISMATCH`,
+invalid-evidence, also for held bytes whose size is not the signed size). An
 import whose history is already held (`already-current`, `kept-newer-local`)
 still keeps the packaged bytes the held log names, so sending the complete
 package again fills in what a partial one left out.
