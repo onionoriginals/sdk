@@ -43,7 +43,7 @@ import { anchoringIndex, assembleFromBitcoin, type AnchoringReport, type Ownersh
 import { chainOrder, type ChainPosition, type SatEvidence } from "./btco.js";
 import { authorKey, stillAuthorized, verifyAuthorHistory, versionNumberOf, type AuthorDidEvidence, type AuthorHistory, type EvidenceSource } from "./author.js";
 import { didWebvhLogUrl } from "../webvh/index.js";
-import { NATIVE_SHA256_MIN_BYTES, snapshotBytes } from "../crypto/index.js";
+import { NATIVE_SHA256_MIN_BYTES, bytesView } from "../crypto/index.js";
 import { deriveDocument, exactNumberError, originalsSpecialisation } from "./profile.js";
 import { ORIGINALS_LIMITS, ORIGINALS_METHOD, resourceDigest, resourceDigestAsync, signerOf, type AssetState, type EntryState } from "./state.js";
 
@@ -440,20 +440,21 @@ function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOptions[
     const supplied = inscribed ?? lookup(bytes, d.digest);
     // Held bytes checked when stored: matching their digest, so they match the descriptor exactly when the size does (P4.3).
     const held = supplied === undefined ? checked?.(d.digest) : undefined;
-    // A private copy, read now through the array's internal slots (`snapshotBytes`): the verdict is
-    // for exactly these bytes. Not a Uint8Array of any realm: handled as before.
-    const copy = supplied === undefined ? undefined : snapshotBytes(supplied);
-    const size = copy?.length;
-    const native = copy !== undefined && size === d.size && size >= NATIVE_SHA256_MIN_BYTES && size <= budget;
+    // Read now through the array's internal slots (`bytesView`, no copy): the size is checked before
+    // anything is copied, and the verdict is for exactly the bytes hashed. Not a Uint8Array of any
+    // realm: handled as before.
+    const view = supplied === undefined ? undefined : bytesView(supplied);
+    const size = view?.length;
+    const native = view !== undefined && size === d.size && size >= NATIVE_SHA256_MIN_BYTES && size <= budget;
     if (native) budget -= size;
     const check =
       supplied === undefined ? (held === undefined ? "missing" : held === d.size ? "verified" : "mismatch")
-      : copy === undefined ? (supplied.length !== d.size ? "mismatch" : Promise.resolve(resourceDigest(supplied)))
+      : view === undefined ? (supplied.length !== d.size ? "mismatch" : Promise.resolve(resourceDigest(supplied)))
       : size !== d.size ? "mismatch"
-      // The same SHA-256 as resourceDigest, natively where the platform has it.
-      : native ? resourceDigestAsync(copy)
-      // Small or over the budget: hashed now with noble, the copy then dropped.
-      : Promise.resolve(resourceDigest(copy));
+      // The same SHA-256 as resourceDigest, natively where the platform has it (sha256Async copies first).
+      : native ? resourceDigestAsync(view)
+      // Small or over the budget: hashed now with noble, from the view, without a copy.
+      : Promise.resolve(resourceDigest(view));
     pending.push({ version: { version: pending.length + 1, digest: d.digest, mediaType: d.mediaType, size: d.size, versionId: v.entry.versionId, onBitcoin: inscribed !== undefined }, check });
   }
   return settleVersions(pending);

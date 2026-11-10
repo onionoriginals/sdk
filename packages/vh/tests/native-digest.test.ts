@@ -132,6 +132,37 @@ describe("verifyOriginal with bytes checked when stored (`checked`)", () => {
   });
 });
 
+describe("supplied bytes are not copied before their size is checked", () => {
+  test("an input larger than its descriptor is a mismatch, reported without copying it (C12-10)", async () => {
+    const key = seeded(43);
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
+    const at = clock();
+    const small = new Uint8Array(32 * 1024).fill(1);
+    const d = { mediaType: "application/octet-stream", size: small.length, digest: resourceDigest(small) };
+    const genesis = await createOriginal({ versionTime: at(), name: "sized", resource: d, author: alice.ref("orig"), sign: alice.signer(key, "orig") });
+    const huge = new Uint8Array(4 * 1024 * 1024).fill(1);
+    let copies = 0;
+    const RealUint8Array = globalThis.Uint8Array;
+    // Count array allocations of the huge size while verifying: the oversized input must not be copied.
+    const counting = new Proxy(RealUint8Array, {
+      construct(target, args: unknown[]) {
+        const made = Reflect.construct(target, args) as Uint8Array;
+        if (made.length === huge.length && !(args[0] instanceof ArrayBuffer)) copies++;
+        return made;
+      },
+    });
+    globalThis.Uint8Array = counting as unknown as Uint8ArrayConstructor;
+    let report;
+    try {
+      report = await verifyOriginal({ log: [genesis], authors: [alice.evidence()], now: NOW, bytes: { [d.digest]: huge } });
+    } finally {
+      globalThis.Uint8Array = RealUint8Array;
+    }
+    expect(report.resources.versions.map((v) => v.bytes)).toEqual(["mismatch"]);
+    expect(copies).toBe(0);
+  });
+});
+
 describe("bytes are read when they were before native hashing", () => {
   test("a view WebCrypto refuses is hashed as it was at call time, the same with or without WebCrypto", async () => {
     const original = noise(NATIVE_SHA256_MIN_BYTES * 2, 21);
