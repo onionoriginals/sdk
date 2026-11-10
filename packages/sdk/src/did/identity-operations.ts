@@ -5,13 +5,13 @@ import type {
   ServiceEndpoint,
 } from "../types/did.js";
 import { StructuredError } from '../utils/telemetry.js';
-import { createDID } from "didwebvh-ts";
-import { requireWebVHDomain } from "./DIDManager.js";
+import { createDID, prepareDataForSigning, updateDID as updateDIDLog } from "didwebvh-ts";
 import {
+  requireWebVHDomain,
   normalizeUpdateKey,
   assertEd25519WebVHUpdateKeys,
   requireWebVHPaths,
-} from "./WebVHManager.js";
+} from "./webvh-rules.js";
 import { buildWebVHCreateDocument, buildWebVHUpdateDocument } from "./webvh-document.js";
 
 // Type for DID log (from didwebvh-ts)
@@ -183,17 +183,7 @@ export async function prepareDIDDataForSigning(
   document: Record<string, unknown>,
   proof: Record<string, unknown>,
 ): Promise<Uint8Array> {
-  // Dynamically import didwebvh-ts to avoid module resolution issues
-  const mod = (await import("didwebvh-ts")) as unknown as {
-    prepareDataForSigning: (
-      document: Record<string, unknown>,
-      proof: Record<string, unknown>,
-    ) => Promise<Uint8Array>;
-  };
-
-  const { prepareDataForSigning } = mod;
-
-  // Runtime validation
+  // didwebvh-ts is already imported statically (createDID); one module, one chunk.
   if (typeof prepareDataForSigning !== "function") {
     throw new StructuredError(
       "WEBVH_MODULE_LOAD_FAILED",
@@ -201,7 +191,7 @@ export async function prepareDIDDataForSigning(
     );
   }
 
-  return prepareDataForSigning(document, proof);
+  return prepareDataForSigning(document, proof as unknown as Parameters<typeof prepareDataForSigning>[1]);
 }
 
 /**
@@ -385,17 +375,13 @@ export async function updateOriginal(
 export async function updateDIDOriginal(
   options: UpdateDIDOriginalOptions,
 ): Promise<OriginalResult> {
-  // Dynamically import didwebvh-ts to avoid module resolution issues
-  const mod = (await import("didwebvh-ts")) as unknown as {
-    updateDID: (options: Record<string, unknown>) => Promise<{
-      did: string;
-      doc: Record<string, unknown>;
-      log: DIDLog;
-      meta: DIDResolutionMeta;
-    }>;
-  };
-
-  const { updateDID } = mod;
+  // didwebvh-ts is imported statically with createDID: one module, one chunk.
+  const updateDID = updateDIDLog as unknown as (options: Record<string, unknown>) => Promise<{
+    did: string;
+    doc: Record<string, unknown>;
+    log: DIDLog;
+    meta: DIDResolutionMeta;
+  }>;
 
   // Runtime validation
   if (typeof updateDID !== "function") {

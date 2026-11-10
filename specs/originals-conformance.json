@@ -149,6 +149,7 @@
       "coveredBy": [
         "packages/sdk/tests/unit/originals/checked-resources.test.ts",
         "packages/sdk/tests/unit/originals/evidence.test.ts",
+        "packages/sdk/tests/unit/originals/partial-packages.test.ts",
         "packages/vh/tests/native-digest.test.ts",
         "packages/vh/tests/originals.test.ts"
       ]

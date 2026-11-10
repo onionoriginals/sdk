@@ -13,7 +13,8 @@ import type {
   RecoverWebVHResult,
 } from './WebVHManager.js';
 import { validateSatoshiNumber, canonicalizeSatoshi, MAX_SATOSHI_SUPPLY } from '../utils/satoshi-validation.js';
-import { canonicalizeWebVHDomain } from './webvh-names.js';
+import { requireWebVHDomain } from './webvh-rules.js';
+export { requireWebVHDomain } from './webvh-rules.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { DIDCache } from './DIDCache.js';
@@ -88,28 +89,6 @@ function collectCarriedVerificationMethods(didDoc: DIDDocument): CarriedVerifica
   return Array.from(byKey.values());
 }
 
-/**
- * Resolve the caller-supplied did:webvh domain, or throw. The SDK no longer
- * guesses one: #520 decided the *.originals.build networks are never stood up,
- * and a did:webvh domain is permanent once published — so an omitted domain
- * must fail loudly rather than mint a DID at a host nobody serves (#531). The
- * configured webvhNetwork tier deliberately does NOT supply a default here.
- *
- * A non-blank domain is canonicalized by `canonicalizeWebVHDomain`
- * (identity policy: a fully qualified DNS or punycode host, `URL#host` spelling), which
- * throws a `StructuredError` `INVALID_DOMAIN` otherwise.
- */
-export function requireWebVHDomain(domain: string | undefined): string {
-  if (typeof domain !== 'string' || domain.trim().length === 0) {
-    throw new StructuredError(
-      'WEBVH_DOMAIN_REQUIRED',
-      'A did:webvh domain is required: pass an explicit `domain` (e.g. "example.com" or ' +
-      '"example.com:8443"). The SDK no longer defaults to a *.originals.build host — those ' +
-      'networks are not served, and a did:webvh domain is permanent once published.'
-    );
-  }
-  return canonicalizeWebVHDomain(domain, { identity: true });
-}
 
 /** Methods whose documents can change without this instance's knowledge, so `mode: 'current'` reads them again. */
 function changesElsewhere(did: string): boolean {

@@ -185,6 +185,12 @@ jobs:
       - name: Production bundle boots in a browser
         run: bun run --cwd apps/landing check:boot
 
+      # Apps that import only the browser entries (@originals/sdk/did,
+      # @originals/sdk/originals, @originals/vh/*) must build with Vite and no
+      # shims, and run identity, create, edit, publish, package and load.
+      - name: Browser entries bundle with no shims and run
+        run: bun run verify:browser-bundle
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest
