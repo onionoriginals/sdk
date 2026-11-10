@@ -78,7 +78,8 @@ export interface OriginalsStore {
    * store whose bytes something else can write (a file another process can
    * rewrite or map writable, a shared buffer) must not, since no cheap check
    * proves bytes unchanged. `MemoryStore` implements it: it keeps private
-   * copies, checked when put. `FileStore` does not: file metadata does not
+   * copies, checked when put (a subclass that overrides `getResource` gets
+   * no answers unless it overrides `checkedResource` too). `FileStore` does not: file metadata does not
    * show every change (a shared writable mapping changes bytes without
    * touching size or times), so its bytes are read and hashed every time.
    */
@@ -178,7 +179,14 @@ export class MemoryStore implements OriginalsStore {
     if ((await resourceDigestAsync(copy)) === digest && this.#resources.get(digest) === copy) this.#checked.set(digest, copy.length);
   }
 
+  /**
+   * Vouches only for bytes `getResource` serves from this class's own copies.
+   * A subclass that overrides `getResource` serves other bytes, so it gets
+   * nothing here: it must override `checkedResource` itself to opt in, and
+   * then keep the contract above for the bytes it serves.
+   */
   checkedResource(digest: string): Promise<number | undefined> {
+    if (this.getResource !== MemoryStore.prototype.getResource) return Promise.resolve(undefined);
     return Promise.resolve(this.#checked.get(digest));
   }
 

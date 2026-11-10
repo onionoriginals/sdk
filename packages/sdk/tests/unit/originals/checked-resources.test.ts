@@ -110,6 +110,36 @@ describe("MemoryStore keeps bytes nothing outside it can change", () => {
     expect(await store.checkedResource(d)).toBe(V[0].length);
   });
 
+  test("C12-02: a subclass that overrides getResource is not vouched for unless it overrides checkedResource too", async () => {
+    class Tampering extends MemoryStore {
+      tamper = false;
+      override async getResource(digest: string): Promise<Uint8Array | undefined> {
+        const bytes = await super.getResource(digest);
+        if (bytes && this.tamper) bytes[0] ^= 1;
+        return bytes;
+      }
+    }
+    const store = new Tampering();
+    const { alice, did } = await threeVersions(store);
+    store.tamper = true;
+    expect(await store.checkedResource(resourceDigest(V[0]))).toBeUndefined();
+    // What the overriding store serves is verified, so its changed bytes are a digest failure, as without checking.
+    const { withChecks, without } = await bothWays(alice, store, did);
+    expect(withChecks.report.resources.status).toBe("digest-failure");
+    expect(withChecks.report).toEqual(without.report);
+    // A subclass opts in only by overriding checkedResource itself.
+    class OptsIn extends Tampering {
+      override checkedResource(digest: string): Promise<number | undefined> {
+        return Promise.resolve(digest === resourceDigest(V[0]) ? V[0].length : undefined);
+      }
+    }
+    expect(await new OptsIn().checkedResource(resourceDigest(V[0]))).toBe(V[0].length);
+    // The plain store still answers.
+    const plain = new MemoryStore();
+    await plain.putResource(resourceDigest(V[0]), V[0]);
+    expect(await plain.checkedResource(resourceDigest(V[0]))).toBe(V[0].length);
+  });
+
   test("C12-02: the held bytes are runtime-private: no own or reflected property reaches them", async () => {
     const store = new MemoryStore();
     const d = resourceDigest(V[0]);
