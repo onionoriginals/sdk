@@ -814,6 +814,23 @@ describe('who may submit: the namespace owner, or an account whose landing DID t
     expect(readFileSync(`${env.logPath}.owner`, 'utf8')).toBe(SUB);
   });
 
+  test('a full store: the owner hears the quota numbers, a granted editor only that the store is full (P6.7)', async () => {
+    const editor = await landingDid(COLLAB);
+    const env = await shared({ editor: editor.evidence, start: Date.now() });
+    const store = createOriginalsStore({ dataDir: env.h.dataDir });
+    // A quota exactly at the owner's usage: any new resource bytes are refused.
+    const saves = createSharedSaves({ store: createOriginalsStore({ dataDir: env.h.dataDir, maxTotalBytes: store.usage(SUB).totalBytes }), now: () => Date.now() });
+    const own = await env.a.sign(await env.a.prepareEdit(env.did, { parent: (await env.a.get(env.did)).checkpoint, resource: { bytes: MINE }, editor: editor.ref }), editor.signer);
+    const parsed = parseSubmission(encodeSubmission({ original: env.did, entry: own.line, resources: { [resourceDigest(MINE)]: MINE }, identities: [editor.evidence] }));
+    if ('http' in parsed) throw new Error('expected a well-formed submission');
+    const byEditor = await saves.submit(env.siteKey, parsed, { sub: COLLAB, slug: userWebvhSlug(COLLAB) });
+    expect(byEditor.status).toBe(507);
+    expect(await byEditor.json()).toEqual({ error: 'store_full' });
+    const byOwner = await saves.submit(env.siteKey, parsed, OWNER);
+    expect(byOwner.status).toBe(507);
+    expect(await byOwner.json()).toMatchObject({ error: 'store_full', limit: 'maxTotalBytes', used: store.usage(SUB).totalBytes });
+  });
+
   test('the caller is judged against the head the submission extends: a grant removed meanwhile refuses the account (P1, P5.17)', async () => {
     const editor = await landingDid(COLLAB);
     const env = await shared({ editor: editor.evidence, start: Date.now() });

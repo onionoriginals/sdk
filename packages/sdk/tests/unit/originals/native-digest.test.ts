@@ -1,12 +1,11 @@
 /**
  * Native SHA-256 must not change what a prepare reads (P4.3). `prepareCreate`
- * hashes a new resource with `resourceDigestAsync`, but reads and checks the
- * caller's input before anything is awaited, as when the digest was computed
- * synchronously: a caller that changes its input or its bytes after the call
- * gets the draft, or the error, it would have got before. `prepareEdit` hashes
- * synchronously, as before. Bytes kept in a draft are a private copy, so they
- * always match their digest; bytes read from a store are kept as they were
- * checked (C12-02).
+ * and `prepareEdit` hash the caller's new resource synchronously, as before, so
+ * they read their input exactly as they did: once per field, before anything
+ * is awaited. Bytes kept in a draft are a private copy, so they always match
+ * their digest. Bytes read from a store are hashed with `resourceDigestAsync`
+ * on a private copy taken when read, at every size, and that copy is what is
+ * returned, archived or kept (C12-02).
  */
 import { describe, expect, test } from "bun:test";
 import { NATIVE_SHA256_MIN_BYTES } from "@originals/vh/crypto";
@@ -217,6 +216,88 @@ describe("stored bytes are kept as they were checked", () => {
     }
     const kept = await store.getResource(digest);
     expect(kept && resourceDigest(kept)).toBe(digest);
+  });
+});
+
+describe("bytes read from a store are a private copy of what was checked, at every size", () => {
+  /** A store that hands back a fresh buffer and overwrites it two microtasks later. */
+  function overwritingStore(): MemoryStore {
+    const store = new MemoryStore();
+    const get = store.getResource.bind(store);
+    store.getResource = async (digest: string) => {
+      const bytes = await get(digest);
+      if (bytes) queueMicrotask(() => queueMicrotask(() => bytes.fill(0xee)));
+      return bytes;
+    };
+    return store;
+  }
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  for (const size of [32, NATIVE_SHA256_MIN_BYTES - 1, LARGE]) {
+    test(`a package of a ${size}-byte resource archives the bytes it hashed, and reloads available (C12-02)`, async () => {
+      const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+      const store = overwritingStore();
+      const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: () => NOW });
+      const c = await sdk.create({ name: "x", resource: { mediaType: "image/png", bytes: new Uint8Array(size).fill(1) }, author: alice.ref("orig"), signer: alice.signer("orig", KEY) });
+      if (c.kind !== "original") throw new Error("expected an Original");
+      const pkg = await sdk.package(c.original.did);
+      expect(pkg.manifest.completeness).toBe("complete");
+      expect((await sdk.load(pkg.bytes)).report.resources.status).toBe("available");
+    });
+
+    test(`resourceBytes of a ${size}-byte resource returns the checked bytes, which still match their digest (C12-02)`, async () => {
+      const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+      const store = overwritingStore();
+      const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: () => NOW });
+      const digest = resourceDigest(new Uint8Array(size).fill(1));
+      await store.putResource(digest, new Uint8Array(size).fill(1));
+      const got = await sdk.resourceBytes(digest);
+      await settle();
+      expect(got && resourceDigest(got)).toBe(digest);
+    });
+
+    test(`a pending candidate's ${size}-byte resource is the checked bytes, which still match their digest (C12-02)`, async () => {
+      const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+      const store = overwritingStore();
+      const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: () => NOW });
+      const signer = alice.signer("orig", KEY);
+      const c = await sdk.create({ name: "x", resource: { mediaType: "image/png", bytes: new Uint8Array(size + 1).fill(1) }, author: alice.ref("orig"), signer });
+      if (c.kind !== "original") throw new Error("expected an Original");
+      const v2 = new Uint8Array(size).fill(2);
+      const candidate = await sdk.sign(await sdk.prepareEdit(c.original.did, { parent: c.original.checkpoint, resource: { bytes: v2 }, author: alice.ref("orig") }), signer);
+      await store.putResource(resourceDigest(v2), v2);
+      await store.putPending(c.original.did, { parent: c.original.checkpoint, entry: candidate.line });
+      const pending = await sdk.pending(c.original.did);
+      await settle();
+      const kept = pending?.bytes.get(resourceDigest(v2));
+      expect(kept && resourceDigest(kept)).toBe(resourceDigest(v2));
+    });
+  }
+});
+
+describe("prepareCreate reads its arguments as many times as it did, at every size", () => {
+  const reads = (size: number) => {
+    let n = 0;
+    return { size, metadata: { get a() { return ++n; } } };
+  };
+
+  test("a counting getter is read the same number of times for a large resource as for a small one", async () => {
+    const { sdk, author } = await setup();
+    const metadataOf = async ({ size, metadata }: ReturnType<typeof reads>) =>
+      (await sdk.prepareCreate({ name: "x", metadata: metadata as never, resource: { mediaType: "image/png", bytes: new Uint8Array(size).fill(1) }, author })).entry.state.asset.metadata;
+    const small = await metadataOf(reads(32));
+    expect(await metadataOf(reads(LARGE))).toEqual(small);
+  });
+
+  test("a getter that throws once read more often than before does not fail a large create", async () => {
+    const { sdk, author } = await setup();
+    // Measured on the synchronous path: how often a create reads a metadata field.
+    let seen = 0;
+    await sdk.prepareCreate({ name: "x", metadata: { get a() { return ++seen; } } as never, resource: { mediaType: "image/png", bytes: new Uint8Array(32).fill(1) }, author });
+    let n = 0;
+    const metadata = { get a() { if (++n > seen) throw new Error("read once too often"); return 1; } };
+    const draft = await sdk.prepareCreate({ name: "x", metadata: metadata as never, resource: { mediaType: "image/png", bytes: new Uint8Array(LARGE).fill(1) }, author });
+    expect(draft.entry.state.asset.metadata).toEqual({ a: 1 });
   });
 });
 
