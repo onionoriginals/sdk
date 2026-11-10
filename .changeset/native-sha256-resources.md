@@ -30,5 +30,11 @@ Hash resource versions with the platform's native SHA-256.
   keep a private copy of the caller's bytes (a real copy, also of a Node
   `Buffer`). `@originals/host` checks shared-save resources with it.
 
+Contract (owner decision, 10 November 2026): a caller must not change the
+options, inputs or stored buffers it hands to `verifyOriginal` or an SDK
+call until that call settles. A change made while hashing runs may or may
+not be seen. Bytes the SDK archives, keeps or returns are always exactly the
+bytes it hashed.
+
 With 25 versions of a 680 KB resource, an edit drops from 281 ms to 119 ms
 and `get` from 135 ms to 59 ms (Bun, `packages/sdk/scripts/bench-originals.ts`).

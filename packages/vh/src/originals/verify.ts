@@ -455,6 +455,16 @@ function retainOriginal(head: string | undefined, retained: string | undefined, 
   return retained !== undefined && versionNumberOf(retained) > versionNumberOf(head) ? retained : head;
 }
 
+/**
+ * Verify an Original's log and report on it (section 7).
+ *
+ * Contract: the caller must not change `options`, or bytes it handed in or
+ * that its `bytes` callback returned, until the returned promise settles.
+ * Hashing is asynchronous (native SHA-256), so a change made while it runs
+ * may or may not be seen. The bytes are read and copied before hashing, so
+ * each version's verdict is for exactly the bytes that were read (owner
+ * decision, 10 November 2026).
+ */
 export async function verifyOriginal(options: VerifyOriginalOptions): Promise<OriginalsReport> {
   const reasons: string[] = [];
   const histories: AuthorHistory[] = [];
