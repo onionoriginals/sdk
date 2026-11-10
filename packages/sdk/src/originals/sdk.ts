@@ -393,15 +393,27 @@ function sdkError(category: ConstructorParameters<typeof OriginalsError>[0], cod
   throw new OriginalsError(category, code, message, details);
 }
 
+const typedArrayBufferOf = (() => {
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const get = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype) as object, "buffer")!.get!;
+  return (value: Uint8Array) => get.call(value) as ArrayBufferLike;
+})();
+const isDetached = (buffer: ArrayBufferLike): boolean => (buffer as { detached?: boolean }).detached === true;
+
 /**
- * A private copy of caller bytes. `new Uint8Array(view)` copies; a Node
- * Buffer's own `slice` would return a view of the caller's memory. An empty
- * view (a detached buffer's, say) is sliced, as before, so a detached buffer
- * throws the TypeError it did.
+ * A private copy of caller bytes, from the view `bytesView` built (never the
+ * array's own properties: a Node Buffer's own `slice` would alias, and an
+ * own `constructor` could make `slice` return other bytes). An empty array
+ * is the empty resource, except that a detached or out-of-bounds view throws
+ * the TypeError it did: this realm's own `slice` validates the array before
+ * it would look at anything else, so for those it throws first.
  */
 function copyBytes(view: Uint8Array, original: Uint8Array): Uint8Array {
-  // A detached buffer throws the TypeError it did, from this realm's own slice (never an own property).
-  return view.length === 0 ? Uint8Array.prototype.slice.call(original) : new Uint8Array(view);
+  if (view.length > 0) return new Uint8Array(view);
+  if (isDetached(typedArrayBufferOf(original))) Uint8Array.prototype.slice.call(original);
+  // Validates without creating anything: throws for an out-of-bounds view of a shrunk buffer.
+  Uint8Array.prototype.fill.call(original, 0, 0, 0);
+  return new Uint8Array(0);
 }
 
 /**
@@ -1087,6 +1099,9 @@ export class OriginalsSDK {
     const view = bytesView(r.bytes)!;
     const digest = resourceDigest(view);
     bytes.set(digest, copyBytes(view, r.bytes));
+    // `resource.bytes` is read as often as before (instanceof, digest, copy, size): a getter on the
+    // resource sees the reads it saw. The size is the view's, so hashed, sized and kept agree.
+    void r.bytes;
     const resource: ResourceDescriptor = { mediaType: r.mediaType, size: view.length, digest };
     const entry = prepareCreateOriginal({
       versionTime: this.versionTime(), name: input.name, ...(input.metadata !== undefined ? { metadata: input.metadata } : {}), resource, author: input.author,
@@ -1140,6 +1155,8 @@ export class OriginalsSDK {
       const read = bytesView(r.bytes)!;
       const digest = resourceDigest(read);
       bytes.set(digest, copyBytes(read, r.bytes));
+      // Read as often as before (instanceof, digest, copy, size); the size is the view's.
+      void r.bytes;
       resource = { mediaType: r.mediaType ?? current.mediaType, size: read.length, digest };
     }
     const entry = prepareUpdateOriginal(head, {

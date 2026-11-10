@@ -404,9 +404,9 @@ function checkLogForm(text: string): void {
 }
 
 /**
- * The most bytes of resource versions one verification copies to hash natively. Copies are held
- * until every version is read, so this bounds the memory native hashing adds; past it, versions
- * are hashed with noble, as before.
+ * The most memory native hashing adds to one verification. Each version hashed natively costs
+ * twice its size: the private copy, held until every version is read, and WebCrypto's own copy
+ * of its input. Past the budget, versions are hashed with noble from a view, as before.
  */
 const NATIVE_DIGEST_BUDGET = 64 * 1024 * 1024;
 
@@ -445,8 +445,8 @@ function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOptions[
     // realm: handled as before.
     const view = supplied === undefined ? undefined : bytesView(supplied);
     const size = view?.length;
-    const native = view !== undefined && size === d.size && size >= NATIVE_SHA256_MIN_BYTES && size <= budget;
-    if (native) budget -= size;
+    const native = view !== undefined && size === d.size && size >= NATIVE_SHA256_MIN_BYTES && 2 * size <= budget;
+    if (native) budget -= 2 * size;
     const check =
       supplied === undefined ? (held === undefined ? "missing" : held === d.size ? "verified" : "mismatch")
       : view === undefined ? (supplied.length !== d.size ? "mismatch" : Promise.resolve(resourceDigest(supplied)))
