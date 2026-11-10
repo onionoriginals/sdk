@@ -13,9 +13,10 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { schnorr, secp256k1 } from "@noble/curves/secp256k1.js";
 import { sha256, sha512 } from "@noble/hashes/sha2.js";
-import { base58 } from "@scure/base";
+import { base58, hex } from "@scure/base";
 import { OriginalsError, fail } from "../errors.js";
 import { canonicalBytes, isJsonObject, type JsonObject, type JsonValue } from "../json/index.js";
+import * as signatureCache from "./signature-cache.js";
 
 // ---------------------------------------------------------------------------
 // multibase / multihash
@@ -329,14 +330,62 @@ export function verifyProof(document: JsonObject, proof: DataIntegrityProof, pub
     throw error;
   }
   if (signature.length !== 64) return false;
-  const data = proofHashData(unsecured, options);
+  return checkSignature(key, proofHashData(unsecured, options), signature);
+}
+
+/**
+ * Checked signatures, by their exact inputs: key type, public key, signed
+ * bytes and signature. A signature check is a pure function of those, so a
+ * result found here is the result checking again would give; only the time
+ * is saved. Verifying a log again (every `get`, `prepareEdit`, `sign`,
+ * `import`) re-checks every entry's proof, which this makes nearly free.
+ * Bounded in entries (the oldest result is dropped first) and in bytes: only
+ * checks over at most `SIGNATURE_CACHE_MAX_DATA` signed bytes are kept, which
+ * covers every proof's hash data (64 bytes), so a caller of `checkSignature`
+ * with large messages cannot make the cache hold them.
+ */
+export const SIGNATURE_CACHE_ENTRIES = 8192;
+/** The most signed bytes a cached check may cover. */
+export const SIGNATURE_CACHE_MAX_DATA = 128;
+
+/** Forget every cached signature check (tests, or to bound memory sooner). */
+export function clearSignatureCache(): void {
+  signatureCache.clear();
+}
+
+/** The id a check is cached under, or undefined when it is too large to cache. */
+function signatureCheckId(key: DecodedMultikey, data: Uint8Array, signature: Uint8Array): string | undefined {
+  if (data.length > SIGNATURE_CACHE_MAX_DATA || signature.length > 64 || key.publicKey.length > 33) return undefined;
+  return `${key.type}:${hex.encode(key.publicKey)}:${hex.encode(data)}:${hex.encode(signature)}`;
+}
+
+/**
+ * Check a signature over exact bytes: Ed25519 under the vh-log-interop-0
+ * acceptance rules (`verifyEd25519`), or BIP340 with the key's x coordinate.
+ * The result is cached by its exact inputs (see above).
+ *
+ * `key` must come from `decodeMultikey`, which validates it: a 32-byte
+ * Ed25519 key, or a 33-byte compressed secp256k1 key whose first byte is
+ * dropped to give the BIP340 x coordinate. This function does not validate
+ * the key again; given a hand-built `DecodedMultikey` (say a compressed key
+ * with a bad prefix byte, or a raw 32-byte x-only key) it answers for the
+ * bytes it was given, which `verifyProof` would have refused
+ * (`MULTIKEY_INVALID`) before checking.
+ */
+export function checkSignature(key: DecodedMultikey, data: Uint8Array, signature: Uint8Array): boolean {
+  const id = signatureCheckId(key, data, signature);
+  const known = id === undefined ? undefined : signatureCache.lookup(id);
+  if (known !== undefined) return known;
+  let ok: boolean;
   try {
-    return key.type === "Ed25519"
+    ok = key.type === "Ed25519"
       ? verifyEd25519(key.publicKey, data, signature)
       : schnorr.verify(signature, data, key.publicKey.slice(1));
   } catch {
-    return false;
+    ok = false;
   }
+  if (id !== undefined) signatureCache.remember(id, ok, SIGNATURE_CACHE_ENTRIES);
+  return ok;
 }
 
 /** A signer holding raw secret key bytes. For tests and local custody only. */
