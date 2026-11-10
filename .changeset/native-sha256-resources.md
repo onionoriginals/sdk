@@ -6,8 +6,10 @@
 
 Hash resource versions with the platform's native SHA-256.
 
-- `@originals/vh` adds `sha256Async`, `sha256MultihashAsync` and
-  `resourceDigestAsync`. They use WebCrypto (`crypto.subtle.digest`) for
+- `@originals/vh` adds `sha256Async`, `sha256MultihashAsync`,
+  `resourceDigestAsync` and `snapshotBytes`, a private copy of a Uint8Array
+  from any realm (an iframe's or `vm` context's too) read through its
+  contents, never an own property such as a `length` getter. They use WebCrypto (`crypto.subtle.digest`) for
   inputs of 16 KiB and up, and noble otherwise or where WebCrypto is missing
   or refuses the input. The digest is SHA-256 either way, so every value is
   byte-identical to `resourceDigest`. The bytes are read when it is called:

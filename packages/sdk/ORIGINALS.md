@@ -218,7 +218,10 @@ on; it never reports an unanchored Original as current (P7.10). The
 asynchronous. Do not change the options, inputs or buffers you hand to an SDK
 call or to `verifyOriginal` (or that a store or `bytes` callback returns) until
 the call settles: a change made meanwhile may or may not be seen. Whatever the
-SDK archives, keeps or returns is exactly the bytes it hashed.
+SDK archives, keeps or returns is exactly the bytes it hashed, including
+Uint8Arrays from another realm (an iframe, a `vm` context). Byte arrays are
+read through their contents: an own property shadowing `length` is not
+consulted.
 
 `load`, `verify` and `resolve` return a report that keeps its parts separate:
 

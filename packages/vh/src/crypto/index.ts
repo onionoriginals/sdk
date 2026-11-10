@@ -95,21 +95,44 @@ function nativeSubtle(): DigestSubtle | undefined {
  * never reaches the digest.
  */
 export async function sha256Async(bytes: Uint8Array): Promise<Uint8Array> {
-  const subtle = bytes instanceof Uint8Array && bytes.length >= NATIVE_SHA256_MIN_BYTES ? nativeSubtle() : undefined;
-  // Without WebCrypto, noble hashes synchronously: the bytes are read at call time.
-  if (!subtle) return sha256(bytes);
   // A private copy, taken now, before anything is awaited: the digest is of the
   // bytes as they were at call time, whatever the caller does to its view while
-  // the digest is pending, with or without WebCrypto. `new Uint8Array(view)`
-  // copies (a Buffer's own `slice` would alias), and the copy has an ordinary
-  // ArrayBuffer, which WebCrypto accepts where it refuses a SharedArrayBuffer.
-  const copy = new Uint8Array(bytes);
+  // the digest is pending, with or without WebCrypto (see `snapshotBytes`).
+  const copy = snapshotBytes(bytes);
+  // Not a Uint8Array of any realm: noble refuses it as it always did.
+  if (copy === undefined) return sha256(bytes);
+  const subtle = copy.length >= NATIVE_SHA256_MIN_BYTES ? nativeSubtle() : undefined;
+  if (!subtle) return sha256(copy);
   try {
     return new Uint8Array(await subtle.digest("SHA-256", copy));
   } catch {
     // Unusable here: noble hashes the same private copy.
     return sha256(copy);
   }
+}
+
+const typedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype) as object;
+// The intrinsic getters, called with `.call`: they read internal slots, in any realm.
+// eslint-disable-next-line @typescript-eslint/unbound-method
+const typedArrayTag = Object.getOwnPropertyDescriptor(typedArrayPrototype, Symbol.toStringTag)!.get!;
+// eslint-disable-next-line @typescript-eslint/unbound-method
+const typedArrayLength = Object.getOwnPropertyDescriptor(typedArrayPrototype, "length")!.get!;
+
+/**
+ * A private copy of a Uint8Array from any realm (another iframe's or `vm`
+ * context's too, which `instanceof Uint8Array` misses), read through its
+ * internal slots: its own properties, such as a `length` getter, are never
+ * consulted. The copy has an ordinary ArrayBuffer (WebCrypto refuses a
+ * SharedArrayBuffer view) and shares no memory with the input (a Node
+ * Buffer's own `slice` would). Undefined for anything that is not a
+ * Uint8Array. A detached buffer's view has no bytes: it copies as empty, the
+ * empty resource it always hashed as.
+ */
+export function snapshotBytes(value: unknown): Uint8Array | undefined {
+  if (typeof value !== "object" || value === null || !ArrayBuffer.isView(value)) return undefined;
+  if (typedArrayTag.call(value) !== "Uint8Array") return undefined;
+  if ((typedArrayLength.call(value) as number) === 0) return new Uint8Array(0);
+  return new Uint8Array(value as Uint8Array);
 }
 
 /** `sha256Multihash`, computed with `sha256Async`. */
