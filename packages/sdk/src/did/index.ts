@@ -315,13 +315,8 @@ export async function createWebvhAlias(options: {
 /** The alias a hosted alias log describes: its latest DID and the log. */
 export function aliasFromLog(log: string): AliasEvidence {
   const text = log.endsWith("\n") ? log : `${log}\n`;
-  const lines = text.trimEnd().split("\n");
-  let id: unknown;
-  try {
-    id = (JSON.parse(lines[lines.length - 1]) as LogLine).state?.id;
-  } catch {
-    throw new StructuredError("INPUT_INVALID", "the alias log is not JSON Lines");
-  }
+  const lines = parseLines(text, "alias");
+  const id = lines[lines.length - 1].state.id;
   if (typeof id !== "string" || !id.startsWith("did:webvh:")) throw new StructuredError("INPUT_INVALID", "the alias log does not name a did:webvh");
   return { did: id, log: text };
 }

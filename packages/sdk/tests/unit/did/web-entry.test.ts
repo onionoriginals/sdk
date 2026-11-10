@@ -187,6 +187,8 @@ describe("createWebvhAlias", () => {
     expect(() => userPathSegment("")).toThrow();
     expect(() => identityFromLog("not json")).toThrow();
     expect(() => aliasFromLog('{"state":{"id":"did:vh:x"}}')).toThrow();
+    // Every line is read, not only the last.
+    expect(() => aliasFromLog(`not-json\n{"state":{"id":"did:webvh:x:example.com"}}\n`)).toThrow(expect.objectContaining({ code: "INPUT_INVALID" }) as Error);
   });
 });
 
