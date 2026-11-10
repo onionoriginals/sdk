@@ -39,7 +39,7 @@
  *   on its own.
  */
 import { OriginalsError } from "@originals/vh";
-import { multibaseEncode, snapshotBytes } from "@originals/vh/crypto";
+import { bytesView, multibaseEncode, snapshotBytes } from "@originals/vh/crypto";
 import { isJsonObject, parseJson, type JsonObject } from "@originals/vh/json";
 import { serializeLog, vhHash, type LogEntry, type UnsignedEntry } from "@originals/vh/log";
 import {
@@ -399,10 +399,9 @@ function sdkError(category: ConstructorParameters<typeof OriginalsError>[0], cod
  * view (a detached buffer's, say) is sliced, as before, so a detached buffer
  * throws the TypeError it did.
  */
-function copyBytes(bytes: Uint8Array): Uint8Array {
-  // Through the internal slots (`snapshotBytes`), so an own `length` property is not read.
-  const copy = snapshotBytes(bytes) ?? new Uint8Array(bytes);
-  return copy.length === 0 ? bytes.slice() : copy;
+function copyBytes(view: Uint8Array, original: Uint8Array): Uint8Array {
+  // A detached buffer throws the TypeError it did, from this realm's own slice (never an own property).
+  return view.length === 0 ? Uint8Array.prototype.slice.call(original) : new Uint8Array(view);
 }
 
 /**
@@ -1066,9 +1065,11 @@ export class OriginalsSDK {
     if (!(r.bytes instanceof Uint8Array)) sdkError("invalid-evidence", "INPUT_INVALID", "resource.bytes must be a Uint8Array");
     // Hashed now, synchronously, as before (like `prepareEdit`): the input is read exactly as it
     // was, once per field and before anything is awaited, and the entry is built from it directly.
-    const digest = resourceDigest(r.bytes);
-    bytes.set(digest, copyBytes(r.bytes));
-    const resource: ResourceDescriptor = { mediaType: r.mediaType, size: r.bytes.length, digest };
+    // Read through its internal slots (`bytesView`): the bytes hashed, kept and sized are one view.
+    const view = bytesView(r.bytes)!;
+    const digest = resourceDigest(view);
+    bytes.set(digest, copyBytes(view, r.bytes));
+    const resource: ResourceDescriptor = { mediaType: r.mediaType, size: view.length, digest };
     const entry = prepareCreateOriginal({
       versionTime: this.versionTime(), name: input.name, ...(input.metadata !== undefined ? { metadata: input.metadata } : {}), resource, author: input.author,
       ...(input.editors !== undefined ? { editors: input.editors } : {}),
@@ -1117,9 +1118,11 @@ export class OriginalsSDK {
       }
       // Hashed now, synchronously, as before: the entry keeps the caller's objects (metadata, author,
       // editors), so it is built before anything is awaited. One version's digest costs little.
-      const digest = resourceDigest(r.bytes);
-      bytes.set(digest, copyBytes(r.bytes));
-      resource = { mediaType: r.mediaType ?? current.mediaType, size: r.bytes.length, digest };
+      // Read through its internal slots (`bytesView`): the bytes hashed, kept and sized are one view.
+      const read = bytesView(r.bytes)!;
+      const digest = resourceDigest(read);
+      bytes.set(digest, copyBytes(read, r.bytes));
+      resource = { mediaType: r.mediaType ?? current.mediaType, size: read.length, digest };
     }
     const entry = prepareUpdateOriginal(head, {
       versionTime: this.versionTime(head.versionTime),

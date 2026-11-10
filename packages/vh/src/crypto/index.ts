@@ -112,27 +112,45 @@ export async function sha256Async(bytes: Uint8Array): Promise<Uint8Array> {
 }
 
 const typedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype) as object;
-// The intrinsic getters, called with `.call`: they read internal slots, in any realm.
-// eslint-disable-next-line @typescript-eslint/unbound-method
-const typedArrayTag = Object.getOwnPropertyDescriptor(typedArrayPrototype, Symbol.toStringTag)!.get!;
-// eslint-disable-next-line @typescript-eslint/unbound-method
-const typedArrayLength = Object.getOwnPropertyDescriptor(typedArrayPrototype, "length")!.get!;
+// The intrinsic getters, called with `.call`: they read internal slots, in any realm, and never
+// an own property of the array.
+const intrinsic = (key: PropertyKey) => {
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const get = Object.getOwnPropertyDescriptor(typedArrayPrototype, key)!.get!;
+  return (value: object) => get.call(value) as unknown;
+};
+const typedArrayTag = intrinsic(Symbol.toStringTag);
+const typedArrayLength = intrinsic("length");
+const typedArrayBuffer = intrinsic("buffer");
+const typedArrayByteOffset = intrinsic("byteOffset");
 
 /**
- * A private copy of a Uint8Array from any realm (another iframe's or `vm`
- * context's too, which `instanceof Uint8Array` misses), read through its
- * internal slots: its own properties, such as a `length` getter, are never
- * consulted. The copy has an ordinary ArrayBuffer (WebCrypto refuses a
+ * A fresh view over exactly the memory a Uint8Array of any realm (another
+ * iframe's or `vm` context's too, which `instanceof Uint8Array` misses)
+ * covers, built from its internal slots: none of its own properties
+ * (`length`, `byteLength`, `buffer`, `slice`, ...) is consulted, and nothing
+ * is copied. Undefined for anything that is not a Uint8Array. A view of a
+ * detached buffer has no bytes: an empty view, the empty resource it always
+ * hashed as.
+ */
+export function bytesView(value: unknown): Uint8Array | undefined {
+  if (typeof value !== "object" || value === null || !ArrayBuffer.isView(value)) return undefined;
+  if (typedArrayTag(value) !== "Uint8Array") return undefined;
+  const length = typedArrayLength(value) as number;
+  if (length === 0) return new Uint8Array(0);
+  return new Uint8Array(typedArrayBuffer(value) as ArrayBuffer, typedArrayByteOffset(value) as number, length);
+}
+
+/**
+ * A private copy of a Uint8Array of any realm, read as `bytesView` reads it.
+ * The copy has an ordinary ArrayBuffer (WebCrypto refuses a
  * SharedArrayBuffer view) and shares no memory with the input (a Node
  * Buffer's own `slice` would). Undefined for anything that is not a
- * Uint8Array. A detached buffer's view has no bytes: it copies as empty, the
- * empty resource it always hashed as.
+ * Uint8Array.
  */
 export function snapshotBytes(value: unknown): Uint8Array | undefined {
-  if (typeof value !== "object" || value === null || !ArrayBuffer.isView(value)) return undefined;
-  if (typedArrayTag.call(value) !== "Uint8Array") return undefined;
-  if ((typedArrayLength.call(value) as number) === 0) return new Uint8Array(0);
-  return new Uint8Array(value as Uint8Array);
+  const view = bytesView(value);
+  return view === undefined ? undefined : new Uint8Array(view);
 }
 
 /** `sha256Multihash`, computed with `sha256Async`. */

@@ -9,7 +9,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { runInNewContext } from "node:vm";
-import { NATIVE_SHA256_MIN_BYTES } from "@originals/vh/crypto";
+import { NATIVE_SHA256_MIN_BYTES, bytesView } from "@originals/vh/crypto";
 import { resourceDigest } from "@originals/vh/originals";
 import { OriginalsError } from "@originals/vh";
 import { MemoryStore, OriginalsSDK, type SharedHost } from "../../../src/originals/index.js";
@@ -343,6 +343,43 @@ describe("bytes are read through their contents, never an own length property", 
     expect((await sdk.package(c.original.did)).manifest.completeness).toBe("complete");
     expect(state.reads).toBe(0);
   });
+});
+
+describe("byte arrays are read through their internal slots, never their own properties", () => {
+  /** A Uint8Array of 1s whose own properties claim other bytes, a length, or throw. */
+  function shadowed(size: number): Uint8Array {
+    const bytes = new Uint8Array(size).fill(1);
+    const other = new Uint8Array(size).fill(2);
+    for (const [key, get] of [
+      ["buffer", () => other.buffer], ["byteLength", () => { throw new Error("byteLength read"); }],
+      ["length", () => size + 1], ["slice", () => () => other],
+    ] as const) Object.defineProperty(bytes, key, { get });
+    return bytes;
+  }
+
+  test("bytesView covers exactly the array's memory without copying it", () => {
+    const backing = new Uint8Array(64).fill(7);
+    const sub = backing.subarray(8, 40);
+    const view = bytesView(sub)!;
+    expect(view.length).toBe(32);
+    view[0] = 9;
+    expect(backing[8]).toBe(9);
+    expect(bytesView(shadowed(16))).toEqual(new Uint8Array(16).fill(1));
+    expect(bytesView([1, 2])).toBeUndefined();
+    expect(bytesView(new Int8Array(2))).toBeUndefined();
+  });
+
+  for (const size of [32, LARGE]) {
+    test(`a ${size}-byte draft keeps exactly the bytes it hashed and sized, whatever the array's own properties say (C12-02)`, async () => {
+      const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+      const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: () => NOW });
+      const draft = await sdk.prepareCreate({ name: "x", resource: { mediaType: "image/png", bytes: shadowed(size) }, author: alice.ref("orig") });
+      const state = draft.entry.state as unknown as { asset: { resource: { digest: string; size: number } } };
+      expect(state.asset.resource.digest).toBe(resourceDigest(new Uint8Array(size).fill(1)));
+      expect(state.asset.resource.size).toBe(size);
+      expect(resourceDigest(draft.bytes.get(state.asset.resource.digest)!)).toBe(state.asset.resource.digest);
+    });
+  }
 });
 
 describe("prepareCreate reads its arguments as many times as it did, at every size", () => {
