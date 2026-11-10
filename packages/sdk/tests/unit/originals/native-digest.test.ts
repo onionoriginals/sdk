@@ -8,6 +8,7 @@
  * returned, archived or kept (C12-02).
  */
 import { describe, expect, test } from "bun:test";
+import { runInNewContext } from "node:vm";
 import { NATIVE_SHA256_MIN_BYTES } from "@originals/vh/crypto";
 import { resourceDigest } from "@originals/vh/originals";
 import { OriginalsError } from "@originals/vh";
@@ -273,6 +274,75 @@ describe("bytes read from a store are a private copy of what was checked, at eve
       expect(kept && resourceDigest(kept)).toBe(resourceDigest(v2));
     });
   }
+});
+
+describe("bytes from another realm get the same guarantee", () => {
+  /** A store whose buffers come from another realm (an iframe's, a vm context's) and are overwritten two microtasks later. */
+  function foreignStore(): MemoryStore {
+    const store = new MemoryStore();
+    const get = store.getResource.bind(store);
+    store.getResource = async (digest: string) => {
+      const own = await get(digest);
+      if (!own) return undefined;
+      const bytes = runInNewContext("(n) => new Uint8Array(n)")(own.length) as Uint8Array;
+      expect(bytes instanceof Uint8Array).toBe(false);
+      bytes.set(own);
+      queueMicrotask(() => queueMicrotask(() => bytes.fill(0xee)));
+      return bytes;
+    };
+    return store;
+  }
+
+  for (const size of [32, LARGE]) {
+    test(`a ${size}-byte resource from another realm is packaged and returned as the bytes hashed (C12-02)`, async () => {
+      const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+      const store = foreignStore();
+      const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: () => NOW });
+      const c = await sdk.create({ name: "x", resource: { mediaType: "image/png", bytes: new Uint8Array(size).fill(1) }, author: alice.ref("orig"), signer: alice.signer("orig", KEY) });
+      if (c.kind !== "original") throw new Error("expected an Original");
+      const pkg = await sdk.package(c.original.did);
+      expect((await sdk.load(pkg.bytes)).report.resources.status).toBe("available");
+      const digest = resourceDigest(new Uint8Array(size).fill(1));
+      const got = await sdk.resourceBytes(digest);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(got && resourceDigest(got)).toBe(digest);
+    });
+  }
+});
+
+describe("bytes are read through their contents, never an own length property", () => {
+  const shadowed = (size: number, limit = Infinity) => {
+    const state = { reads: 0 };
+    const bytes = new Uint8Array(size).fill(1);
+    Object.defineProperty(bytes, "length", { get() { if (++state.reads > limit) throw new Error("length read too often"); return size; } });
+    return { bytes, state };
+  };
+
+  test("prepareCreate reads a large resource's length as often as a small one's", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: () => NOW });
+    const small = shadowed(32);
+    const large = shadowed(LARGE);
+    await sdk.prepareCreate({ name: "x", resource: { mediaType: "image/png", bytes: small.bytes }, author: alice.ref("orig") });
+    await sdk.prepareCreate({ name: "x", resource: { mediaType: "image/png", bytes: large.bytes }, author: alice.ref("orig") });
+    expect(large.state.reads).toBe(small.state.reads);
+    // So a getter that tolerates exactly those reads never fails a large create.
+    const limited = shadowed(LARGE, small.state.reads);
+    expect((await sdk.prepareCreate({ name: "x", resource: { mediaType: "image/png", bytes: limited.bytes }, author: alice.ref("orig") })).kind).toBe("draft");
+  });
+
+  test("resourceBytes and package never read a stored buffer's own length", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const store = new MemoryStore();
+    const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: () => NOW });
+    const c = await sdk.create({ name: "x", resource: { mediaType: "image/png", bytes: new Uint8Array(LARGE).fill(1) }, author: alice.ref("orig"), signer: alice.signer("orig", KEY) });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    const { bytes, state } = shadowed(LARGE, 0);
+    store.getResource = () => Promise.resolve(bytes);
+    expect(await sdk.resourceBytes(resourceDigest(new Uint8Array(LARGE).fill(1)))).toBeDefined();
+    expect((await sdk.package(c.original.did)).manifest.completeness).toBe("complete");
+    expect(state.reads).toBe(0);
+  });
 });
 
 describe("prepareCreate reads its arguments as many times as it did, at every size", () => {

@@ -39,7 +39,7 @@
  *   on its own.
  */
 import { OriginalsError } from "@originals/vh";
-import { multibaseEncode } from "@originals/vh/crypto";
+import { multibaseEncode, snapshotBytes } from "@originals/vh/crypto";
 import { isJsonObject, parseJson, type JsonObject } from "@originals/vh/json";
 import { serializeLog, vhHash, type LogEntry, type UnsignedEntry } from "@originals/vh/log";
 import {
@@ -400,7 +400,9 @@ function sdkError(category: ConstructorParameters<typeof OriginalsError>[0], cod
  * throws the TypeError it did.
  */
 function copyBytes(bytes: Uint8Array): Uint8Array {
-  return bytes.length === 0 ? bytes.slice() : new Uint8Array(bytes);
+  // Through the internal slots (`snapshotBytes`), so an own `length` property is not read.
+  const copy = snapshotBytes(bytes) ?? new Uint8Array(bytes);
+  return copy.length === 0 ? bytes.slice() : copy;
 }
 
 /**
@@ -416,9 +418,10 @@ function copyBytes(bytes: Uint8Array): Uint8Array {
  * and refused as it was.
  */
 async function checkedBytes(data: Uint8Array, digest: string): Promise<Uint8Array | undefined> {
-  if (!(data instanceof Uint8Array)) return resourceDigest(data) === digest ? data : undefined;
-  // `new Uint8Array(view)` copies (a Node Buffer's own `slice` would alias the store's memory).
-  const copy = data.length === 0 ? new Uint8Array(0) : new Uint8Array(data);
+  // A Uint8Array of any realm (an iframe's or a `vm` context's too) is copied through its internal
+  // slots; a store handing over another realm's buffer gets the same guarantee as any other.
+  const copy = snapshotBytes(data);
+  if (copy === undefined) return resourceDigest(data) === digest ? data : undefined;
   return (await resourceDigestAsync(copy)) === digest ? copy : undefined;
 }
 
