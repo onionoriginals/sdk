@@ -15,8 +15,11 @@ Stop re-hashing resource bytes the store already checked when it stored them.
   implement it only if its bytes cannot change outside it.
   - `MemoryStore` hashes bytes when they are put and reports only those that
     matched. It keeps real copies (also of a Node `Buffer`, whose `slice`
-    would share the caller's memory) and hands out only copies, so they never
-    change.
+    would share the caller's memory) in private fields and hands out only
+    copies, so they never change. A subclass or patch that replaces its
+    `getResource` gets no answers unless it implements `checkedResource`
+    itself; an answer must cover exactly the bytes `getResource` serves, so a
+    wrapper serving other bytes must not forward the wrapped store's.
   - `FileStore` does not implement it: a file can change with no change to
     its size, times or inode (a shared writable mapping), so no cheap check
     proves it unchanged. Its bytes are read and hashed on every verification,

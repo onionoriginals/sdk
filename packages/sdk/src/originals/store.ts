@@ -78,8 +78,12 @@ export interface OriginalsStore {
    * store whose bytes something else can write (a file another process can
    * rewrite or map writable, a shared buffer) must not, since no cheap check
    * proves bytes unchanged. `MemoryStore` implements it: it keeps private
-   * copies, checked when put (a subclass that overrides `getResource` gets
-   * no answers unless it overrides `checkedResource` too). `FileStore` does not: file metadata does not
+   * copies, checked when put (a subclass that overrides `getResource`, or
+   * code that patches it, gets no answers unless it overrides
+   * `checkedResource` too). The answer must cover exactly the bytes this
+   * store's `getResource` serves: a wrapper that serves other bytes than the
+   * store it wraps must not forward that store's `checkedResource`.
+   * `FileStore` does not: file metadata does not
    * show every change (a shared writable mapping changes bytes without
    * touching size or times), so its bytes are read and hashed every time.
    */
@@ -186,7 +190,7 @@ export class MemoryStore implements OriginalsStore {
    * then keep the contract above for the bytes it serves.
    */
   checkedResource(digest: string): Promise<number | undefined> {
-    if (this.getResource !== MemoryStore.prototype.getResource) return Promise.resolve(undefined);
+    if (this.getResource !== memoryStoreGetResource) return Promise.resolve(undefined);
     return Promise.resolve(this.#checked.get(digest));
   }
 
@@ -273,3 +277,11 @@ export class MemoryStore implements OriginalsStore {
     return Promise.resolve([...this.originals.keys()]);
   }
 }
+
+/**
+ * `MemoryStore`'s own `getResource`, captured when this module loads: a later
+ * patch of `MemoryStore.prototype.getResource` cannot make the comparison in
+ * `checkedResource` pass for a reader that serves other bytes.
+ */
+// eslint-disable-next-line @typescript-eslint/unbound-method -- compared by identity, never called
+const memoryStoreGetResource = MemoryStore.prototype.getResource;

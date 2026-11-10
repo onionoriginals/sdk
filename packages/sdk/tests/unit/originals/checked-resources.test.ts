@@ -140,6 +140,26 @@ describe("MemoryStore keeps bytes nothing outside it can change", () => {
     expect(await plain.checkedResource(resourceDigest(V[0]))).toBe(V[0].length);
   });
 
+  test("C12-02: patching MemoryStore.prototype.getResource does not keep the store vouching for what the patch serves", async () => {
+    const store = new MemoryStore();
+    const { alice, did } = await threeVersions(store);
+    const original = MemoryStore.prototype.getResource;
+    MemoryStore.prototype.getResource = async function (this: MemoryStore, digest: string) {
+      const bytes = await original.call(this, digest);
+      if (bytes) bytes[0] ^= 1;
+      return bytes;
+    };
+    try {
+      expect(await store.checkedResource(resourceDigest(V[0]))).toBeUndefined();
+      const { withChecks, without } = await bothWays(alice, store, did);
+      expect(withChecks.report.resources.status).toBe("digest-failure");
+      expect(withChecks.report).toEqual(without.report);
+    } finally {
+      MemoryStore.prototype.getResource = original;
+    }
+    expect(await store.checkedResource(resourceDigest(V[0]))).toBe(V[0].length);
+  });
+
   test("C12-02: the held bytes are runtime-private: no own or reflected property reaches them", async () => {
     const store = new MemoryStore();
     const d = resourceDigest(V[0]);
