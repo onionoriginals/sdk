@@ -183,6 +183,13 @@ on; it never reports an unanchored Original as current (P7.10). The
 
 ## Verification report — phase 1, extended in later phases
 
+**Inputs are not changed during a call (owner decision, 10 November
+2026).** Resource bytes are hashed with native SHA-256, which is
+asynchronous. Do not change the options, inputs or buffers you hand to an SDK
+call or to `verifyOriginal` (or that a store or `bytes` callback returns) until
+the call settles: a change made meanwhile may or may not be seen. Whatever the
+SDK archives, keeps or returns is exactly the bytes it hashed.
+
 `load`, `verify` and `resolve` return a report that keeps its parts separate:
 
 | Part | Values |
