@@ -382,6 +382,39 @@ describe("byte arrays are read through their internal slots, never their own pro
   }
 });
 
+describe("prepare reads resource.bytes as main did, and an empty array keeps exactly nothing", () => {
+  test("a getter on the resource is read four times, so one that throws on its fourth read still throws", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: () => NOW });
+    for (const limit of [Infinity, 3]) {
+      let reads = 0;
+      const value = new Uint8Array(LARGE).fill(3);
+      const resource = { mediaType: "image/png", get bytes() { if (++reads > limit) throw new Error("fourth read"); return value; } };
+      const result = await sdk.prepareCreate({ name: "x", resource, author: alice.ref("orig") }).then(() => "draft", (e: Error) => e.message);
+      expect([reads, result]).toEqual(limit === Infinity ? [4, "draft"] : [4, "fourth read"]);
+    }
+  });
+
+  test("an empty array whose own constructor would make slice return other bytes keeps the empty bytes it hashed (C12-02)", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: () => NOW });
+    const empty = new Uint8Array(0);
+    Object.defineProperty(empty, "constructor", { value: { [Symbol.species]: function () { return new Uint8Array([9]); } } });
+    const draft = await sdk.prepareCreate({ name: "x", resource: { mediaType: "image/png", bytes: empty }, author: alice.ref("orig") });
+    const state = draft.entry.state as unknown as { asset: { resource: { digest: string; size: number } } };
+    expect(state.asset.resource.size).toBe(0);
+    expect(draft.bytes.get(state.asset.resource.digest)).toEqual(new Uint8Array(0));
+  });
+
+  test("an empty view of a detached buffer still throws a TypeError", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: () => NOW });
+    const bytes = new Uint8Array(8);
+    structuredClone(bytes.buffer, { transfer: [bytes.buffer] });
+    await expect(sdk.prepareCreate({ name: "x", resource: { mediaType: "image/png", bytes }, author: alice.ref("orig") })).rejects.toBeInstanceOf(TypeError);
+  });
+});
+
 describe("prepareCreate reads its arguments as many times as it did, at every size", () => {
   const reads = (size: number) => {
     let n = 0;

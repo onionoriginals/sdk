@@ -22,8 +22,10 @@ Hash resource versions with the platform's native SHA-256.
   everything the report reads from its options alongside them is read before
   it too; the digests are awaited where the aliases already were. Reports are
   unchanged: the same `verified`, `missing` and `mismatch` per version and the
-  same reasons. At most 64 MiB of versions are copied to hash natively per
-  verification; past that, versions are hashed with noble, as before.
+  same reasons. Native hashing adds at most 64 MiB of memory per
+  verification, counting each version twice (the private copy and
+  WebCrypto's own); past that, versions are hashed with noble from a view,
+  without a copy, as before.
 - `@originals/sdk` hashes packaged bytes, imported bytes, pending and
   refused drafts' bytes and `resourceBytes` with it. Each takes a private copy
   of the bytes a store or host hands over when it reads them, at every size,
