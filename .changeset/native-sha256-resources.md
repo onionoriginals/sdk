@@ -20,13 +20,15 @@ Hash resource versions with the platform's native SHA-256.
   unchanged: the same `verified`, `missing` and `mismatch` per version and the
   same reasons. At most 64 MiB of versions are copied to hash natively per
   verification; past that, versions are hashed with noble, as before.
-- `@originals/sdk` hashes a new Original's resource, packaged bytes, imported
-  bytes and `resourceBytes` with it. `prepareCreate` reads and checks its
-  input before awaiting the digest, as before, and builds the entry from what
-  it read. `prepareEdit` hashes the new version synchronously, as before. Both
+- `@originals/sdk` hashes packaged bytes, imported bytes, pending and
+  refused drafts' bytes and `resourceBytes` with it. Each takes a private copy
+  of the bytes a store or host hands over when it reads them, at every size,
+  hashes that copy and returns, archives or keeps exactly it: a store that
+  reuses its buffer afterwards changes neither the answer nor the bytes.
+  `prepareCreate` and `prepareEdit` hash the caller's new resource
+  synchronously, as before, so they read their input exactly as they did; both
   keep a private copy of the caller's bytes (a real copy, also of a Node
-  `Buffer`). A package archives, and an import keeps, the bytes as they were
-  checked. `@originals/host` checks shared-save resources with it.
+  `Buffer`). `@originals/host` checks shared-save resources with it.
 
 With 25 versions of a 680 KB resource, an edit drops from 281 ms to 119 ms
 and `get` from 135 ms to 59 ms (Bun, `packages/sdk/scripts/bench-originals.ts`).
