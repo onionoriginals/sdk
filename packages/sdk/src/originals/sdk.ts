@@ -398,7 +398,18 @@ const typedArrayBufferOf = (() => {
   const get = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype) as object, "buffer")!.get!;
   return (value: Uint8Array) => get.call(value) as ArrayBufferLike;
 })();
-const isDetached = (buffer: ArrayBufferLike): boolean => (buffer as { detached?: boolean }).detached === true;
+// ArrayBuffer's own `detached` getter where the platform has it, called intrinsically: never a
+// property the caller could define on the buffer.
+// eslint-disable-next-line @typescript-eslint/unbound-method -- called with .call
+const detachedGetter = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, "detached")?.get;
+const isDetached = (buffer: ArrayBufferLike): boolean => {
+  if (!detachedGetter) return false;
+  try {
+    return detachedGetter.call(buffer) === true;
+  } catch {
+    return false; // a SharedArrayBuffer has no detached state
+  }
+};
 
 /**
  * A private copy of caller bytes, from the view `bytesView` built (never the
@@ -1081,10 +1092,10 @@ export class OriginalsSDK {
     const view = bytesView(r.bytes)!;
     const digest = resourceDigest(view);
     bytes.set(digest, copyBytes(view, r.bytes));
-    // `resource.bytes` is read as often as before (instanceof, digest, copy, size): a getter on the
-    // resource sees the reads it saw. The size is the view's, so hashed, sized and kept agree.
-    void r.bytes;
-    const resource: ResourceDescriptor = { mediaType: r.mediaType, size: view.length, digest };
+    // `resource.bytes` is read as often and in the order as before (instanceof, digest, copy, then
+    // mediaType, then size): a getter on the resource sees what it saw. The size is the view's, so
+    // hashed, sized and kept agree.
+    const resource: ResourceDescriptor = { mediaType: r.mediaType, size: (void r.bytes, view.length), digest };
     const entry = prepareCreateOriginal({
       versionTime: this.versionTime(), name: input.name, ...(input.metadata !== undefined ? { metadata: input.metadata } : {}), resource, author: input.author,
       ...(input.editors !== undefined ? { editors: input.editors } : {}),
@@ -1137,9 +1148,8 @@ export class OriginalsSDK {
       const read = bytesView(r.bytes)!;
       const digest = resourceDigest(read);
       bytes.set(digest, copyBytes(read, r.bytes));
-      // Read as often as before (instanceof, digest, copy, size); the size is the view's.
-      void r.bytes;
-      resource = { mediaType: r.mediaType ?? current.mediaType, size: read.length, digest };
+      // Read as often and in the order as before (instanceof, digest, copy, mediaType, size); the size is the view's.
+      resource = { mediaType: r.mediaType ?? current.mediaType, size: (void r.bytes, read.length), digest };
     }
     const entry = prepareUpdateOriginal(head, {
       versionTime: this.versionTime(head.versionTime),

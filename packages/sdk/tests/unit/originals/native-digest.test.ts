@@ -395,6 +395,28 @@ describe("prepare reads resource.bytes as main did, and an empty array keeps exa
     }
   });
 
+  test("resource.bytes and mediaType are read in main's order, so the same getter throws first", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: () => NOW });
+    const events: string[] = [];
+    const value = new Uint8Array(LARGE).fill(4);
+    const resource = {
+      get bytes() { events.push("bytes"); if (events.length > 4) throw new TypeError("late bytes"); return value; },
+      get mediaType() { events.push("mediaType"); throw new RangeError("mediaType"); },
+    };
+    const error = await sdk.prepareCreate({ name: "x", resource: resource as never, author: alice.ref("orig") }).catch((e: Error) => e);
+    expect(events).toEqual(["bytes", "bytes", "bytes", "mediaType"]);
+    expect(error).toBeInstanceOf(RangeError);
+  });
+
+  test("an empty array's buffer is not read through its own properties", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: () => NOW });
+    const empty = new Uint8Array(0);
+    Object.defineProperty(empty.buffer, "detached", { get() { throw new RangeError("detached read"); } });
+    expect((await sdk.prepareCreate({ name: "x", resource: { mediaType: "image/png", bytes: empty }, author: alice.ref("orig") })).kind).toBe("draft");
+  });
+
   test("an empty array whose own constructor would make slice return other bytes keeps the empty bytes it hashed (C12-02)", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: () => NOW });
