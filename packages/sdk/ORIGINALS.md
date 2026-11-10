@@ -490,6 +490,53 @@ authors who need protection should anchor early; and a host can show an old
 prefix to a first-time reader (retained versionIds protect repeat readers).
 Bitcoin anchoring gives proven ordering, a single history and an owner.
 
+## Identities in a browser app (`@originals/sdk/did`; implemented)
+
+`@originals/sdk/did` creates and updates did:webvh DIDs with no Node
+built-ins: a Vite app that imports only it, `@originals/sdk/originals` and
+`@originals/vh/*` builds with **no shims** (no `fs`, `crypto`, `zlib` or
+`Buffer` aliases, no manual `sdk-core` chunk) and runs; CI builds and runs
+one in Chromium (`bun run verify:browser-bundle`). Importing anything from
+the root `@originals/sdk` pulls in the DID managers' log storage, the logger
+and the storage adapters, which is what needed the shims.
+
+It has `createDIDOriginal`, `updateDIDOriginal`, `prepareDIDDataForSigning`
+and `verifyDIDSignature`, and the identity shape originals.build mints:
+
+```ts
+import { ensureWebvhIdentity, createWebvhAlias, localWebvhSigner, userPathSegment, aliasPathSegment } from "@originals/sdk/did";
+
+const identity = await ensureWebvhIdentity({
+  domain, paths: [userPathSegment(subject)],     // did:webvh:<scid>:<domain>:user-<sub16>
+  identitySigner,                                // #key-0: update key and authentication
+  authorshipKey,                                 // #key-1: assertionMethod, signs entries (never the update key, P5.11)
+  load: () => api.getIdentityLog(),              // the hosted log, or null
+  save: (log) => api.putIdentityLogIfAbsent(log), // create-if-absent; returns the stored log if one was already there
+});
+const sdk = OriginalsSDK.create({ store, authors: [identity.evidence] });
+// identity.ref names #key-1 at the latest version, for every entry the authorship key signs.
+
+const alias = await createWebvhAlias({ domain, paths: [userPathSegment(subject), aliasPathSegment(did)], signer: identitySigner, original: did });
+```
+
+`identity.did` is the DID at genesis, the identity an Original's author
+reference names (P5.8). After a did:webvh move, `identityFromLog` keeps that
+DID and points `ref.verificationMethod` at the new location (P5.14); taking
+the DID from the log's last line, as the apps did, breaks after a move.
+Make `save` create-if-absent and return the log already stored when it
+loses: two tabs signing in at once both mint, and only the store can pick
+one. `ensureWebvhIdentity` then returns the stored identity to both. A
+loaded or stored log must be the identity asked for (hosted at `domain`
+under `paths`, the identity key among its update keys, the authorship key as
+`#key-1`), or it is refused as `IDENTITY_MISMATCH`; after a move, pass the
+domain it is hosted at now.
+`userPathSegment` keeps originals.build's `user-<first 16 characters>`
+segment, so it needs subjects unique in their first 16 characters (a random
+id, not `auth0|...`); otherwise two accounts share one hosted log.
+`localWebvhSigner(secretKey)` is a `WebvhSigner` over a raw key, for
+development and servers; a custody service (Turnkey) implements the same
+interface.
+
 ## Hosted publication — phase 3 (implemented)
 
 The author creates a did:webvh alias log on their domain whose document lists

@@ -133,14 +133,23 @@ export function isPublicAddress(address: string): boolean {
 // ---------------------------------------------------------------------------
 // Defaults (Node, loaded lazily)
 
+/**
+ * A Node built-in, imported by a name bundlers do not follow, so a browser
+ * bundle of this entry neither includes nor stubs it (Vite warned that it
+ * externalized them). It loads only when a Node default is used.
+ */
+function nodeBuiltin<T>(name: string): Promise<T> {
+  return import(/* @vite-ignore */ /* webpackIgnore: true */ name) as Promise<T>;
+}
+
 async function nodeResolve(hostname: string): Promise<string[]> {
-  const dns = await import("node:dns/promises");
+  const dns = await nodeBuiltin<typeof import("node:dns/promises")>("node:dns/promises");
   const answers = await dns.lookup(hostname, { all: true, verbatim: true });
   return answers.map((a) => a.address);
 }
 
 const nodeTransport: FetchTransport = async ({ url, address, signal }) => {
-  const https = await import("node:https");
+  const https = await nodeBuiltin<typeof import("node:https")>("node:https");
   return new Promise<FetchResponse>((resolve, reject) => {
     const request = https.request(
       {
