@@ -72,7 +72,7 @@ describe("hostedFetch", () => {
     const cache = new Map<string, Uint8Array>();
     const fetch = server(files);
     const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: clock(Date.parse("2026-10-18T13:00:00Z")) });
-    const r = await reader.loadPublished(alias.did, hostedFetch({ fetch, cache }));
+    const r = await reader.loadPublished(alias.did, hostedFetch({ fetch, cache, hosts: [new URL(base).host] }));
     expect(r.verified, JSON.stringify(r.reasons)).toBe(true);
     expect(r.report.original).toBe(did);
     // Every request omits credentials, refuses redirects and skips the HTTP cache; every response is cached by URL.
@@ -87,8 +87,8 @@ describe("hostedFetch", () => {
   });
 
   test("refuses as safeFetch does: scheme, status, redirect, size, network and abort", async () => {
-    const at = (r: Response | Error) => hostedFetch({ fetch: (() => (r instanceof Error ? Promise.reject(r) : Promise.resolve(r))) as unknown as typeof fetch });
-    const http = await refusal(hostedFetch({ fetch: server(new Map()) })("http://example.com/x", opts()));
+    const at = (r: Response | Error) => hostedFetch({ fetch: (() => (r instanceof Error ? Promise.reject(r) : Promise.resolve(r))) as unknown as typeof fetch, hosts: ["example.com"] });
+    const http = await refusal(hostedFetch({ fetch: server(new Map()), hosts: ["example.com"] })("http://example.com/x", opts()));
     expect([http.category, http.code]).toEqual(["unavailable-bytes", "FETCH_SCHEME"]);
 
     const missing = await refusal(at(new Response("no", { status: 404 }))("https://example.com/x", opts()));
@@ -109,7 +109,7 @@ describe("hostedFetch", () => {
 
     const controller = new AbortController();
     controller.abort();
-    const aborted = await refusal(hostedFetch({ fetch: (() => Promise.reject(new DOMException("aborted", "AbortError"))) as unknown as typeof fetch })("https://example.com/x", { ...opts(), signal: controller.signal }));
+    const aborted = await refusal(hostedFetch({ fetch: (() => Promise.reject(new DOMException("aborted", "AbortError"))) as unknown as typeof fetch, hosts: ["example.com"] })("https://example.com/x", { ...opts(), signal: controller.signal }));
     expect(aborted.code).toBe("FETCH_ABORTED");
   });
 
@@ -133,7 +133,7 @@ describe("hostedFetch", () => {
 
   test("without `origin`, refuses every IP-literal host and localhost (P8.5), without DNS", async () => {
     const fetch = server(new Map([["https://example.com/a", bytes("ok")]]));
-    const read = hostedFetch({ fetch });
+    const read = hostedFetch({ fetch, hosts: ["example.com"] });
     for (const url of [
       "https://127.0.0.1/a", "https://[::1]/a", "https://2130706433/a", "https://0x7f000001/a", "https://127.1/a",
       "https://10.0.0.1/a", "https://192.168.1.1/a", "https://169.254.169.254/latest", "https://[fe80::1]/a",
@@ -155,11 +155,31 @@ describe("hostedFetch", () => {
     expect(await hostedFetch({ fetch: dev, origin: "http://127.0.0.1:5173" })("https://example.com/a", opts())).toEqual(bytes("ok"));
   });
 
+  test("without `origin`, reads only the hosts the caller vouches for (P8.5: a browser cannot vet what a name resolves to)", async () => {
+    const fetch = server(new Map([["https://example.com/a", bytes("ok")], ["https://example.com:8443/a", bytes("ok")]]));
+    const read = hostedFetch({ fetch, hosts: ["Example.COM.", "example.com:8443"] });
+    expect(await read("https://example.com/a", opts())).toEqual(bytes("ok"));
+    // The trailing-dot spelling is the same host, so it passes the check (the mock then serves only the exact URL).
+    expect((await refusal(read("https://EXAMPLE.com./a", opts()))).code).toBe("FETCH_STATUS");
+    expect(await read("https://example.com:8443/a", opts())).toEqual(bytes("ok"));
+    for (const url of ["https://127.0.0.1.nip.io/private", "https://other.example/a", "https://sub.example.com/a", "https://example.com:9443/a"]) {
+      const e = await refusal(read(url, opts()));
+      expect([url, e.category, e.code]).toEqual([url, "unavailable-bytes", "FETCH_HOST_NOT_ALLOWED"]);
+    }
+    // No hosts and no origin: nothing is read.
+    expect((await refusal(hostedFetch({ fetch })("https://example.com/a", opts()))).code).toBe("FETCH_HOST_NOT_ALLOWED");
+    expect(fetch.calls.map((c) => c.url)).toEqual(["https://example.com/a", "https://example.com./a", "https://example.com:8443/a"]);
+    // A host is a bare host[:port].
+    for (const bad of ["", "example.com/path", "user@example.com", "example.com?x"]) {
+      expect(() => hostedFetch({ fetch, hosts: [bad] })).toThrow();
+    }
+  });
+
   test("a response that arrives after the timeout is released, when the injected fetch ignores the signal", async () => {
     let cancelled = false;
     const late: typeof globalThis.fetch = () =>
       new Promise((resolve) => setTimeout(() => resolve(new Response(new ReadableStream({ pull() {}, cancel() { cancelled = true; } }))), 30));
-    const e = await refusal(hostedFetch({ fetch: late as never })("https://example.com/slow", { ...opts(), timeoutMs: 5 }));
+    const e = await refusal(hostedFetch({ fetch: late as never, hosts: ["example.com"] })("https://example.com/slow", { ...opts(), timeoutMs: 5 }));
     expect(e.code).toBe("FETCH_TIMEOUT");
     expect(cancelled).toBe(false);
     await new Promise((r) => setTimeout(r, 60));
@@ -219,7 +239,7 @@ describe("hostedFetch", () => {
     let cancelled = false;
     const body = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array([1])); }, cancel() { cancelled = true; } });
     const controller = new AbortController();
-    const read = hostedFetch({ fetch: (() => Promise.resolve(new Response(body))) as unknown as typeof fetch });
+    const read = hostedFetch({ fetch: (() => Promise.resolve(new Response(body))) as unknown as typeof fetch, hosts: ["example.com"] });
     setTimeout(() => controller.abort(), 20);
     const e = await refusal(read("https://example.com/x", { ...opts(), signal: controller.signal }));
     expect([e.code, e.details?.bytesRead]).toEqual(["FETCH_ABORTED", 1]);
@@ -253,7 +273,7 @@ describe("the shared-host transport (P6.7, P6.8)", () => {
   test("httpSharedHost sends to the alias's site key and reads back through the alias", async () => {
     const { sdk, alias } = await published();
     const sent: Array<[string, string]> = [];
-    const read = hostedFetch({ fetch: server(new Map()) });
+    const read = hostedFetch({ fetch: server(new Map()), hosts: ["example.com"] });
     const host = httpSharedHost({ sdk, aliasDid: alias.did, read, send: (key, body) => (sent.push([key, body]), Promise.resolve({ status: 409, body: { status: "stale-parent", head: "9-z" } })) });
     const submission = { original: "did:vh:zA", entry: "{}", resources: {}, identities: [] };
     expect(await host.submit(submission)).toEqual({ status: "stale-parent", head: "9-z" });

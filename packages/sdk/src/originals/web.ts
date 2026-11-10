@@ -29,6 +29,16 @@ export interface WebFetchOptions {
    * `http:` or `https:`.
    */
   origin?: string;
+  /**
+   * Without `origin`, the only hosts requests may go to, as `example.com` or
+   * `example.com:8443` (compared after URL normalisation). Required then:
+   * P8.5 refuses names that resolve to private, loopback or link-local
+   * addresses, and a browser cannot see what a name resolves to, so the
+   * caller vouches for the hosts instead (its own host, say). To read from
+   * any host, retrieve on a server with `safeFetch`, which checks every
+   * resolved address, and point `origin` at it.
+   */
+  hosts?: readonly string[];
   /** The fetch to use; defaults to `globalThis.fetch`. */
   fetch?: typeof globalThis.fetch;
   /** Each response's bytes are kept here by URL, so a page can show exactly the bytes the SDK verified. */
@@ -74,6 +84,9 @@ type BodyReader = { read(): Promise<{ done: boolean; value?: Uint8Array }>; canc
  *   what a name resolves to.
  * - `FETCH_IP_LITERAL`: without `origin`, the host is a public IP literal,
  *   which P8.5 also refuses: a hosted Original is named by a domain.
+ * - `FETCH_HOST_NOT_ALLOWED`: without `origin`, the host is not one of
+ *   `hosts` (or no `hosts` were given). Nothing is fetched from a name the
+ *   caller did not vouch for, since a browser cannot check where it resolves.
  * - `FETCH_REDIRECT`: any redirect, which is never followed (P8.5)
  * - `FETCH_STATUS`: any status but 2xx, with `details.status`
  * - `FETCH_TOO_LARGE`: past `maxBytes`, by declared length or as it arrives
@@ -88,6 +101,20 @@ type BodyReader = { read(): Promise<{ done: boolean; value?: Uint8Array }>; canc
  * use `safeFetch` instead, which also vets the addresses names resolve to.
  */
 export function hostedFetch(options: WebFetchOptions = {}): HostedFetch {
+  const allowed = new Set<string>();
+  for (const h of options.hosts ?? []) {
+    let url: URL | undefined;
+    try {
+      url = typeof h === "string" && h !== "" ? new URL(`https://${h}`) : undefined;
+    } catch {
+      url = undefined;
+    }
+    // A bare host[:port]: nothing that would parse as a path, query or user.
+    if (!url || url.pathname !== "/" || url.search || url.hash || url.username || url.password || h.includes("/")) {
+      refuse("FETCH_URL", `${String(h)} is not a host`);
+    }
+    allowed.add(url.host.replace(/\.$/, ""));
+  }
   const doFetch: (url: string, init: RequestInit) => Promise<Response> = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
   return async (url, request) => {
     let target: URL;
@@ -115,6 +142,9 @@ export function hostedFetch(options: WebFetchOptions = {}): HostedFetch {
       const refused = refusedHost(target.hostname);
       if (refused === "FETCH_PRIVATE_ADDRESS") refuse(refused, `${target.hostname} is not a public address`);
       if (refused === "FETCH_IP_LITERAL") refuse(refused, `${target.hostname} is an IP literal; only names are retrieved (P8.5)`);
+      if (!allowed.has(target.host.replace(/\.$/, ""))) {
+        refuse("FETCH_HOST_NOT_ALLOWED", `${target.host} is not one of the hosts this fetch may read (give \`hosts\`, or \`origin\` for a server that checks addresses)`);
+      }
     }
     const maxBytes = request?.maxBytes ?? FETCH_LIMITS.maxResourceBytes;
     const timeoutMs = request?.timeoutMs ?? FETCH_LIMITS.timeoutMs;
