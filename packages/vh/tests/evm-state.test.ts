@@ -53,7 +53,7 @@ async function anchoredOn(chain: string) {
 }
 
 describe("P14.18 the anchor member and token alias", () => {
-  test("PR59: anchor.chain not eip155 with a canonical decimal chain ID / minter in mixed case: rejected", () => {
+  test("C12-237: anchor.chain not eip155 with a canonical decimal chain ID / minter in mixed case: rejected", () => {
     for (const chain of ["eip155:01", "eip155:0", "cosmos:1", "eip155:18446744073709551616", "eip155:1a"]) {
       expect(() => checkAnchor({ chain, minter: A })).toThrow(/P14.18/);
     }
@@ -62,7 +62,7 @@ describe("P14.18 the anchor member and token alias", () => {
     expect(checkAnchor({ chain: "eip155:18446744073709551615", minter: A }).chain).toBe("eip155:18446744073709551615");
   });
 
-  test("did:evm form; CAIP-19 derived, never an alias", () => {
+  test("C12-282: did:evm form; CAIP-19 derived, never an alias", () => {
     const alias = `did:evm:1:${PIN.address}:12345`;
     expect(parseEvmAlias(alias)).toEqual({ chain: "eip155:1", contract: PIN.address, tokenId: 12345n });
     expect(caip19Of(alias)).toBe(`eip155:1/erc721:${PIN.address}/12345`);
@@ -79,7 +79,7 @@ describe("P14.18 the anchor member and token alias", () => {
     expect(tokenIdOf(did, A) < 1n << 256n).toBe(true);
   });
 
-  test("PR59: genesis with an anchor member while P14.21 pins no contract: a writer refuses", async () => {
+  test("C12-239: genesis with an anchor member while P14.21 pins no contract: a writer refuses", async () => {
     const key = seeded(32);
     const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
     await rejects(
@@ -90,7 +90,7 @@ describe("P14.18 the anchor member and token alias", () => {
     expect(evmSupport(ETHEREUM)).toEqual({ supported: false, reason: "no-anchor-contract-pinned" });
   });
 
-  test("PR59: anchor.chain well formed but not listed: unsupported; a writer refuses", async () => {
+  test("C12-238: anchor.chain well formed but not listed: unsupported; a writer refuses", async () => {
     const key = seeded(33);
     const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
     await rejects(
@@ -104,7 +104,7 @@ describe("P14.18 the anchor member and token alias", () => {
 });
 
 describe("P9.19 the anchor member is fixed at genesis", () => {
-  test("PR59: Original without anchor whose later entry adds one; with anchor whose non-move entry changes or removes it: rejected", async () => {
+  test("C12-235: Original without anchor whose later entry adds one; with anchor whose non-move entry changes or removes it: rejected", async () => {
     const key = seeded(34);
     const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
     const at = clock();
@@ -118,7 +118,7 @@ describe("P9.19 the anchor member is fixed at genesis", () => {
     await rejects(updateOriginal(genesis, { versionTime: at2(), author: au, sign: s2, anchor: null, evm: PIN }), "STATE_MOVE_BEFORE_ANCHOR");
   });
 
-  test("PR59: EVM anchor listing a did:btco alias, or another token's alias; no anchor listing a token alias: rejected", async () => {
+  test("C12-236: EVM anchor listing a did:btco alias, or another token's alias; no anchor listing a token alias: rejected", async () => {
     const { genesis, author, sign, at, id } = await anchoredOn(ROBINHOOD);
     await rejects(updateOriginal(genesis, { versionTime: at(), author, sign, aliases: ["did:btco:reg:1234"], evm: PIN }), "STATE_ALIASES");
     const other = derivedTokenAlias(id, { chain: ROBINHOOD, minter: C }, PIN);
@@ -140,7 +140,7 @@ describe("P9.19 the anchor member is fixed at genesis", () => {
 });
 
 describe("P9.28 move entries", () => {
-  test("PR59: move from an attested chain to a proven chain, or to Bitcoin; from a proven chain to Bitcoin: accepted by the state rules", async () => {
+  test("C12-265: move from an attested chain to a proven chain, or to Bitcoin; from a proven chain to Bitcoin: accepted by the state rules", async () => {
     const { anchoring, author, sign, at, id } = await anchoredOn(ROBINHOOD);
     const dest = derivedTokenAlias(id, { chain: ETHEREUM, minter: C }, PIN);
     const moved = await updateOriginal(anchoring, { versionTime: at(), author, sign, anchor: { chain: ETHEREUM, minter: C }, aliases: [dest], evm: PIN });
@@ -151,7 +151,7 @@ describe("P9.28 move entries", () => {
     await updateOriginal(proven.anchoring, { versionTime: proven.at(), author: proven.author, sign: proven.sign, anchor: null, aliases: ["did:btco:reg:99"], evm: PIN });
   });
 
-  test("PR59: move to a chain in the same layer or a lower one: rejected", async () => {
+  test("C12-266: move to a chain in the same layer or a lower one: rejected", async () => {
     const attested = await anchoredOn(ROBINHOOD);
     const toTempo = derivedTokenAlias(attested.id, { chain: TEMPO, minter: C }, PIN);
     await rejects(updateOriginal(attested.anchoring, { versionTime: attested.at(), author: attested.author, sign: attested.sign, anchor: { chain: TEMPO, minter: C }, aliases: [toTempo], evm: PIN }), "STATE_MOVE_LAYER");
@@ -162,7 +162,7 @@ describe("P9.28 move entries", () => {
     await rejects(updateOriginal(proven.anchoring, { versionTime: proven.at(), author: proven.author, sign: proven.sign, anchor: { chain: BASE, minter: C }, aliases: [side], evm: PIN }), "STATE_MOVE_LAYER");
   });
 
-  test("PR59: entry that changes anchor without listing the destination's alias: rejected", async () => {
+  test("C12-267: entry that changes anchor without listing the destination's alias: rejected", async () => {
     const { anchoring, author, sign, at, token } = await anchoredOn(ROBINHOOD);
     await rejects(updateOriginal(anchoring, { versionTime: at(), author, sign, anchor: { chain: ETHEREUM, minter: C }, aliases: [], evm: PIN }), "STATE_MOVE_ALIAS");
     await rejects(updateOriginal(anchoring, { versionTime: at(), author, sign, anchor: null, aliases: [], evm: PIN }), "STATE_MOVE_ALIAS");
@@ -170,7 +170,7 @@ describe("P9.28 move entries", () => {
     await rejects(updateOriginal(anchoring, { versionTime: at(), author, sign, anchor: { chain: ETHEREUM, minter: C }, aliases: [token], evm: PIN }), "STATE_ALIASES");
   });
 
-  test("PR59: move entry to a chain the verifier's P14.22 does not list: unsupported, not invalid", async () => {
+  test("C12-268: move entry to a chain the verifier's P14.22 does not list: unsupported, not invalid", async () => {
     const { anchoring, author, sign, at, id } = await anchoredOn(ROBINHOOD);
     const pin10: EvmAnchorPin = { ...PIN };
     const dest = `did:evm:10:${PIN.address}:${tokenIdOf(id, C)}`;
@@ -180,7 +180,7 @@ describe("P9.28 move entries", () => {
 });
 
 describe("P9.26 no did:btco signers with an anchor member", () => {
-  test("PR59: Original with an EVM anchor naming a did:btco author or editor: rejected", async () => {
+  test("C12-262, C12-301: Original with an EVM anchor naming a did:btco author or editor: rejected", async () => {
     const { genesis, author, sign, at } = await anchoredOn(ROBINHOOD);
     await rejects(updateOriginal(genesis, { versionTime: at(), author, sign, editors: [{ did: "did:btco:reg:5", name: true, metadata: false, resource: false }], evm: PIN }), "STATE_ANCHOR_BTCO_SIGNER");
   });

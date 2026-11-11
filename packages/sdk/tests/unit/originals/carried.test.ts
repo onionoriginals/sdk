@@ -1,8 +1,7 @@
 /**
  * Carried logs through the SDK (proposed; aviarytech/originals-spec PR 59 at
- * 3ed0f89): P7.11-P7.16. Each test cites its section 12 row as
- * `PR59 carried:` and a quote of the row's first column until the
- * conformance registry is re-pinned. The carrier formats themselves are
+ * 3ed0f89): P7.11-P7.16. Each test cites its section 12 row by C12 id and a
+ * quote of the row's first column. The carrier formats themselves are
  * tested in packages/vh/tests/carried.test.ts.
  */
 import { describe, expect, test } from "bun:test";
@@ -63,7 +62,7 @@ async function carried(env: Awaited<ReturnType<typeof harbor>>, checkpoint?: str
 }
 
 describe("P7.13: resolution only on the caller's opt-in", () => {
-  test("PR59 carried: \"Carried file opened or previewed without the caller's opt-in to resolve\": no DID resolved; proofs unchecked", async () => {
+  test("C12-202: \"Carried file opened or previewed without the caller's opt-in to resolve\": no DID resolved; proofs unchecked", async () => {
     const env = await harbor();
     const file = await carried(env);
     const { sdk, asked } = reader(env.alice);
@@ -74,7 +73,7 @@ describe("P7.13: resolution only on the caller's opt-in", () => {
     expect(r.verified).toEqual({ log: false, version: false });
   });
 
-  test("PR59 carried: \"Carried file whose bytes, with the carrier removed, are the version its log's last entry names, signer DIDs resolved\": verified, valid as of that checkpoint, never current", async () => {
+  test("C12-200: \"Carried file whose bytes, with the carrier removed, are the version its log's last entry names, signer DIDs resolved\": verified, valid as of that checkpoint, never current", async () => {
     const env = await harbor();
     const file = await carried(env);
     const { sdk, asked } = reader(env.alice);
@@ -86,7 +85,7 @@ describe("P7.13: resolution only on the caller's opt-in", () => {
     expect(r.current).toBe(false);
   });
 
-  test("PR59 carried: \"Carried file read offline, signer DID not resolvable\": proofs unchecked; identity evidence and author binding incomplete, never a pass", async () => {
+  test("C12-203: \"Carried file read offline, signer DID not resolvable\": proofs unchecked; identity evidence and author binding incomplete, never a pass", async () => {
     const env = await harbor();
     const file = await carried(env);
     const { sdk, asked } = reader(env.alice, () => undefined);
@@ -110,7 +109,7 @@ describe("P7.13: resolution only on the caller's opt-in", () => {
 });
 
 describe("P7.15, P7.16: writing a carried file", () => {
-  test("PR59 carried: \"Writer asked to carry a draft, a version other than the last entry's, or, after anchoring, an entry not accepted on the anchor\": refused", async () => {
+  test("C12-228: \"Writer asked to carry a draft, a version other than the last entry's, or, after anchoring, an entry not accepted on the anchor\": refused", async () => {
     const env = await harbor();
     // A draft is never history, so its versionId is no committed checkpoint.
     const draft = await env.sdk.prepareEdit(env.did, { parent: env.checkpoints[3], name: "Draft", author: env.author });
@@ -126,7 +125,7 @@ describe("P7.15, P7.16: writing a carried file", () => {
     expect((await env.sdk.carriedDisclosure(env.did, { checkpoint: env.checkpoints[3] })).checkpoint).toBe(env.checkpoints[3]);
   });
 
-  test("PR59 carried: \"Writer about to write a carrier\": the user is told what the file discloses first; a JSON carrier says the data gains a member", async () => {
+  test("C12-229: \"Writer about to write a carrier\": the user is told what the file discloses first; a JSON carrier says the data gains a member", async () => {
     const env = await harbor();
     await expect(env.sdk.carry(env.did, {} as never)).rejects.toMatchObject({ code: "CARRIER_DISCLOSURE_REQUIRED" });
     const d = await env.sdk.carriedDisclosure(env.did);
@@ -139,7 +138,7 @@ describe("P7.15, P7.16: writing a carried file", () => {
     expect(new TextDecoder().decode(file.bytes).startsWith('{"a":1,"originalLog":[')).toBe(true);
   });
 
-  test("PR59 carried: \"Carrier added or removed\": no entry signed; the version is unchanged", async () => {
+  test("C12-231: \"Carrier added or removed\": no entry signed; the version is unchanged", async () => {
     const env = await harbor();
     const before = await env.sdk.committedLog(env.did);
     const calls = env.signer.calls;
@@ -154,7 +153,7 @@ describe("P7.15, P7.16: writing a carried file", () => {
     expect(env.signer.calls).toBe(calls);
   });
 
-  test("PR59 carried: \"Carried file presented by an SDK or UI\": never labelled an evidence package or complete", async () => {
+  test("C12-230: \"Carried file presented by an SDK or UI\": never labelled an evidence package or complete", async () => {
     const env = await harbor();
     const file = await carried(env);
     expect(file.kind).toBe("carried-file");
@@ -168,7 +167,7 @@ describe("P7.15, P7.16: writing a carried file", () => {
 });
 
 describe("P7.14, P7.5: importing a carried log", () => {
-  test("PR59 carried: \"Carried log older than the reader's local history, or on another branch\": local history kept; a branch reported as a conflict", async () => {
+  test("C12-232: \"Carried log older than the reader's local history, or on another branch\": local history kept; a branch reported as a conflict", async () => {
     const env = await harbor();
     // Older than the local history: the local history is kept.
     const older = await carried(env, env.checkpoints[1]);

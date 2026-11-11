@@ -23,7 +23,9 @@ function testFiles(dir: string): string[] {
   });
 }
 
-// Test roots that may cite rows, relative to the repository root.
+// Test roots that may cite rows, relative to the repository root. contracts/test (Forge, not run in
+// CI) and packages/sdk/tests/integration (gated on a local chain or regtest) also cite rows, but are
+// not counted as coverage here: a row tested only there stays todo with a note naming the test.
 const repo = new URL("../../../../", import.meta.url).pathname;
 const roots = ["packages/vh/tests", "packages/sdk/tests/unit/originals"];
 const cited = new Map<string, Set<string>>();
@@ -39,19 +41,22 @@ for (const root of roots) {
 }
 
 describe("section 12 conformance registry", () => {
-  // The pinned table (originals-spec master 45ed1dc, with #53 merged: one resource per Original, and
-  // #54: non-integer metadata numbers as CBOR floats) has 192 rows. Ids are stable across re-pins, so they need not equal table positions; each row records
-  // its position in the pinned table. A row from an open spec pull request would carry `proposal`.
-  test("registers all 192 pinned rows with unique ids, in table order", () => {
-    expect(registry.rows.length).toBe(192);
+  // The pinned table has 300 rows. It is originals-spec 3ed0f89, the head of open PR 59 (carried logs
+  // and EVM anchoring, experimental) on master 915b726, which merged #58; not master itself. #58 and
+  // PR 59 added rows 193 to 300 (C12-200 to C12-307); PR 59 reworded C12-23 and C12-188. Ids are stable
+  // across re-pins, so they need not equal table positions; each row records its position in the
+  // pinned table. A row from an open spec pull request would carry `proposal`.
+  test("registers all 300 pinned rows with unique ids, in table order", () => {
+    expect(registry.rows.length).toBe(300);
     const pinned = registry.rows.filter((r) => r.proposal === undefined);
-    expect(pinned.length).toBe(192);
+    expect(pinned.length).toBe(300);
     expect(registry.rows.map((r) => r.position)).toEqual(registry.rows.map((_, i) => i + 1));
-    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(192);
+    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(300);
     for (const r of registry.rows) expect(r.id).toMatch(/^C12-\d{2,3}$/);
   });
 
   // #53 removed the rows about adding, removing and reusing resources and the 256-resource limit.
+  // #58 and PR 59 removed none.
   test("a retired id names its commit and reason, is never reused, and no test cites it", () => {
     const live = new Set(registry.rows.map((r) => r.id));
     expect(registry.retired.map((r) => r.id).sort()).toEqual(["C12-154", "C12-155", "C12-156", "C12-157", "C12-158", "C12-160", "C12-171"]);

@@ -176,7 +176,7 @@ describe.skipIf(!enabled)("EVM anchoring on anvil (PR 59, experimental)", () => 
     expect(r1.index).toBe(1);
     expect(r1.txHashes.length).toBe(4);
 
-    // 2: PR59 evm: "Entry of 30,000 bytes that does not change the resource, on a chain that accepts
+    // 2: C12-281: "Entry of 30,000 bytes that does not change the resource, on a chain that accepts
     // 24,000 bytes in one transaction": uploaded in stages and recorded by commitSameBody.
     const p2 = await prepareEvmPublication(ctx, { alias, lines: line(bigMeta), body: v2, maxTxBytes: 24_000 });
     expect(p2.metadata.length).toBeGreaterThan(24_000);

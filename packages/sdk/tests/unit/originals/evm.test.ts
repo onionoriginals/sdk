@@ -1,8 +1,8 @@
 /**
  * EVM anchoring adapters (originals-spec PR 59, EXPERIMENTAL): the ABI layer,
  * the evidence reader (P9.21, P9.22, P9.25), the writer's refusals and
- * labels (P9.27, P14.20), and the P9.27 / P9.29 disclosures. Rows of PR 59's
- * section 12 are cited as `PR59 evm:` and the row's first column. The
+ * labels (P9.27, P14.20), and the P9.27 / P9.29 disclosures. Section 12 rows
+ * are cited by C12 id and the row's first column. The
  * end-to-end path against a real EVM is tests/integration/evm-anvil.test.ts.
  */
 import { describe, expect, test } from "bun:test";
@@ -121,13 +121,13 @@ describe("readEvmToken (P9.21, P9.22, P9.25)", () => {
       expect(r.observed!.map((x) => [x.index, x.metadata])).toEqual([[2, undefined]]);
     }
     expect(evidence.reads.map((r) => r.finalized)).toEqual([10, 12]);
-    // PR59: event logs are never evidence (P9.25).
+    // C12-261: event logs are never evidence (P9.25).
     expect([...callsA, ...callsB].some((c) => c.method === "eth_getLogs")).toBe(false);
     // The referred body was not read again.
     expect(callsA.filter((c) => c.name === "body").length).toBe(1);
   });
 
-  test("PR59 evm: \"Provider reporting the listed chain ID whose block 0 has another hash\": not that chain; no state read, and it does not lower the common block", async () => {
+  test("C12-240: \"Provider reporting the listed chain ID whose block 0 has another hash\": not that chain; no state read, and it does not lower the common block", async () => {
     const calls: Call[] = [];
     const fetch = fakeNetwork({ good: fakeProvider(chain({ finalized: 10 }, records())), other: fakeProvider(chain({ finalized: 4, genesisHash: "0x" + "ee".repeat(32), fork: "other" }, records()), calls) });
     const { evidence, commonBlock } = await readEvmToken({ alias: ALIAS }, { pin: PIN, providers: ["good", "other"], fetch });
@@ -137,7 +137,7 @@ describe("readEvmToken (P9.21, P9.22, P9.25)", () => {
     expect(calls.filter((c) => c.method === "eth_call" || c.method === "eth_getCode")).toEqual([]);
   });
 
-  test("PR59 evm: \"Code at the anchor contract address with another runtime code hash, or none\": reported with its hash, and nothing else is read", async () => {
+  test("C12-241: \"Code at the anchor contract address with another runtime code hash, or none\": reported with its hash, and nothing else is read", async () => {
     for (const code of [bytes("other code"), new Uint8Array()]) {
       const calls: Call[] = [];
       const { evidence } = await readEvmToken({ alias: ALIAS }, { pin: PIN, providers: ["p"], fetch: fakeNetwork({ p: fakeProvider(chain({ code }, records()), calls) }) });
@@ -148,7 +148,7 @@ describe("readEvmToken (P9.21, P9.22, P9.25)", () => {
     }
   });
 
-  test("P9.25: a record over the limits from its own fields has no bytes read, and makes nothing missing", async () => {
+  test("C12-255: P9.25: a record over the limits from its own fields has no bytes read, and makes nothing missing", async () => {
     const calls: Call[] = [];
     const over = [
       rec(1, m0, b0),
@@ -166,7 +166,7 @@ describe("readEvmToken (P9.21, P9.22, P9.25)", () => {
     expect(recordExceedsLimits({ index: 1, metadataLength: 350_000, bodyLength: 300_000, bodyOf: 0, mediaType: "x" })).toBe(false);
   });
 
-  test("ranges: bytes are read in calls of rangeBytes; a provider returning a short range is inconsistent and its records are missing", async () => {
+  test("C12-256: ranges: bytes are read in calls of rangeBytes; a provider returning a short range is inconsistent and its records are missing", async () => {
     const big = Uint8Array.from({ length: 1_000 }, (_, i) => i % 251);
     const calls: Call[] = [];
     const ok = await readEvmToken({ alias: ALIAS }, { pin: PIN, providers: ["p"], rangeBytes: 300, fetch: fakeNetwork({ p: fakeProvider(chain({}, [rec(1, m0, big)]), calls) }) });
@@ -212,7 +212,7 @@ async function anchoredLog(chainId = "eip155:31337", minter = "0x" + "a1".repeat
 }
 
 describe("P9.27 / P9.29 disclosures", () => {
-  test("PR59 evm: \"Writer creating an Original with an EVM `anchor`\": told the first chain is permanent, upward only, stays dependent, its trust class, chain lifetime, the minter", () => {
+  test("C12-278: \"Writer creating an Original with an EVM `anchor`\": told the first chain is permanent, upward only, stays dependent, its trust class, chain lifetime, the minter", () => {
     const minter = "0x" + "a1".repeat(20);
     const n = evmGenesisNotice({ chain: "eip155:4663", minter }, PIN);
     expect(n.chain).toEqual({ chain: "eip155:4663", name: "Robinhood Chain", trustClass: "operator", layer: "attested" });
@@ -231,7 +231,7 @@ describe("P9.27 / P9.29 disclosures", () => {
     expect(() => evmGenesisNotice({ chain: "eip155:999", minter }, PIN)).toThrow(/not in this verifier's revision/);
   });
 
-  test("P9.29: a move notice says irreversible, the layers above, dependence on the chain left, and what becomes public; a sideways or downward move is refused", async () => {
+  test("C12-277: P9.29: a move notice says irreversible, the layers above, dependence on the chain left, and what becomes public; a sideways or downward move is refused", async () => {
     const { lines, resource } = await anchoredLog();
     const minter = "0x" + "c1".repeat(20);
     const n = evmMoveNotice({ from: { chain: "eip155:4663", minter }, to: { chain: "eip155:1", minter }, lines, version: resource, pin: PIN });
@@ -248,7 +248,7 @@ describe("P9.27 / P9.29 disclosures", () => {
     await rejects(() => evmMoveNotice({ from: { chain: "eip155:1", minter }, to: { chain: "eip155:4663", minter }, lines, version: resource, pin: PIN }), "MOVE_NOT_UPWARD");
   });
 
-  test("P9.29: the SDK refuses a move whose arrival would exceed 350,000 bytes", async () => {
+  test("C12-277: P9.29: the SDK refuses a move whose arrival would exceed 350,000 bytes", async () => {
     const { lines, resource } = await anchoredLog();
     const minter = "0x" + "c1".repeat(20);
     const room = 350_000 - inscriptionMetadata(lines).length;

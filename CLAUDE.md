@@ -40,11 +40,13 @@ terminology. Cite spec rules by ID (P5.3, D4) in code comments, tests and PRs.
   owner decision S8). The author DID is fixed at genesis. Rotation happens only
   in the author DID, never in the asset log (P5.8–P5.10).
 - **Forks stay unresolved off-chain.** Divergent valid branches are reported as
-  a conflict with no current branch. Only anchoring on Bitcoin settles a fork
-  (owner decision S1, P9.16).
+  a conflict with no current branch. Only an anchor settles a fork: on
+  Bitcoin (owner decision S1, P9.16) or, under experimental PR 59, on an EVM
+  chain, under that chain's finality and trust class, where a `consortium` or
+  `operator` chain's settlement is attested, never proven (P9.24, P9.27).
 - **Ownership is not authority.** The owner of an anchored Original is the
-  holder of its anchoring sat. Holding the sat never confers authority to sign
-  changes (P9.11, P9.12).
+  holder of its anchoring sat, or of its token on an EVM chain (P9.23).
+  Holding either never confers authority to sign changes (P9.11, P9.12).
 - **No silent choices.** Never pick a branch by timestamp. Never rebase an edit
   onto a moved parent: that is a conflict (P2.1, P4.5). Never report
   generic VH-Log or DID resolution as Originals verification (P3.5).
@@ -52,10 +54,14 @@ terminology. Cite spec rules by ID (P5.3, D4) in code comments, tests and PRs.
   resource availability, ordering and freshness are reported separately. A
   missing item is an explicit incomplete result, never a pass (section 7).
 - **Layers move one way.** An Original moves from local to web, and from
-  either to Bitcoin. Anchoring is terminal and happens once (P9.10, P9.16).
+  either to an anchor. Anchoring on Bitcoin is terminal and happens once
+  (P9.10, P9.16). Under experimental PR 59 an Original anchored on an EVM
+  chain is not terminal: a move entry by the author takes it only up a layer,
+  to a proven chain or to Bitcoin, never sideways or down (P9.20, P9.28).
 - **No witnesses.** Asset logs never activate VH witnesses (P9.8, P9.9;
-  owner decision Q14). Unanchored ordering is claimed only; Bitcoin anchoring is how an
-  Original gets proven ordering and a single history. Author DIDs keep their
+  owner decision Q14). Unanchored ordering is claimed only; anchoring is how an
+  Original gets ordering evidence and a single history: proven on Bitcoin,
+  and on an EVM chain only as its trust class allows (P9.27). Author DIDs keep their
   own method's witnesses.
 - **Spec first.** Where a pinned document is ambiguous or contradicts itself
   in a way that blocks the work, stop and report the rule ID with a proposed

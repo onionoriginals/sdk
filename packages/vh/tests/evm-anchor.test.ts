@@ -5,9 +5,8 @@
  * ownership (P9.23), anchors and uniqueness (P9.24), trust classes (P9.27),
  * moves (P9.28, P9.29), copies (P7.14) and did:evm resolution (P3.9, P14.18).
  *
- * Section 12 rows are cited as `PR59 evm:` with the start of the row's first
- * column: the registry (specs/originals-conformance.json) does not have them
- * yet. Contract-revert rows belong to the contract's own tests.
+ * Section 12 rows are cited by C12 id, followed by the start of the row's
+ * first column. Contract-revert rows belong to the contract's own tests.
  */
 import { describe, expect, test } from "bun:test";
 import type { LogEntry } from "../src/log/index.js";
@@ -127,7 +126,7 @@ const missingEvidence = (r: OriginalsReport) => {
 };
 
 describe("P9.27 the report of an Original anchored on an EVM chain", () => {
-  test("PR59 evm: 'Report for an Original anchored on an EVM chain': names the chain, its class, the token, the finalized block and the providers; never a Bitcoin anchor", async () => {
+  test("C12-279: 'Report for an Original anchored on an EVM chain': names the chain, its class, the token, the finalized block and the providers; never a Bitcoin anchor", async () => {
     const o = await original();
     const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log)]))]);
     expect(r.history.status).toBe("valid");
@@ -146,7 +145,7 @@ describe("P9.27 the report of an Original anchored on an EVM chain", () => {
     expect(r.retain.evm).toEqual([{ chain: ROBINHOOD, number: 1000, hash: blockHash(ROBINHOOD, 1000) }]);
   });
 
-  test("PR59 evm: 'Report for an Original anchored on a consortium or operator chain': attested by its validators or operator, never proven", async () => {
+  test("C12-280: 'Report for an Original anchored on a consortium or operator chain': attested by its validators or operator, never proven", async () => {
     const tempo = await original(TEMPO, 42);
     const r = await verify(tempo.alice, [token(tempo.alias, two(TEMPO, [rec(0, tempo.log)]))]);
     expect(r.ordering).toBe("evm-attested-by-validators");
@@ -160,7 +159,7 @@ describe("P9.27 the report of an Original anchored on an EVM chain", () => {
 });
 
 describe("support: section 14, P9.19, P9.21", () => {
-  test("PR59 evm: 'Genesis entry with an anchor member while P14.21 pins no contract': unsupported, not invalid; nothing verified", async () => {
+  test("C12-239: 'Genesis entry with an anchor member while P14.21 pins no contract': unsupported, not invalid; nothing verified", async () => {
     const o = await original();
     const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log)]))], o.log, { pin: null });
     expect(r.history.status).toBe("unsupported");
@@ -171,7 +170,7 @@ describe("support: section 14, P9.19, P9.21", () => {
     expect(r.current).toBe(false);
   });
 
-  test("PR59 evm: 'Carried log with an anchor member naming a chain the reader's revision does not list, or read while P14.21 pins no contract': unsupported; nothing verified", async () => {
+  test("C12-288: 'Carried log with an anchor member naming a chain the reader's revision does not list, or read while P14.21 pins no contract': unsupported; nothing verified", async () => {
     const o = await original();
     // A log with no token evidence at all, as a carried log is read: still unsupported without a pin.
     const unpinned = await verifyOriginal({ log: o.log, authors: [o.alice.evidence()], now: NOW });
@@ -185,7 +184,7 @@ describe("support: section 14, P9.19, P9.21", () => {
     expect(r.validAsOf).toBeNull();
   });
 
-  test("PR59 evm: 'The pinned contract deployed on a chain that is not listed': unsupported", async () => {
+  test("C12-242: 'The pinned contract deployed on a chain that is not listed': unsupported", async () => {
     const optimism: ListedChain = { name: "OP Mainnet", chain: "eip155:10", chainId: 10n, genesisHash: "0x" + "7a".repeat(32), classes: [{ from: 0, class: "exit-protected" }] };
     const devnet: EvmAnchorPin = { ...PIN, chains: [...EVM_CHAINS, optimism] };
     const key = seeded(44);
@@ -198,7 +197,7 @@ describe("support: section 14, P9.19, P9.21", () => {
     expect(r.evm?.unsupported).toMatchObject({ code: "EVM_CHAIN_NOT_LISTED", chain: "eip155:10" });
   });
 
-  test("PR59 evm: 'Code at the anchor contract address with another runtime code hash, or none': unsupported; never verified or not anchored", async () => {
+  test("C12-241: 'Code at the anchor contract address with another runtime code hash, or none': unsupported; never verified or not anchored", async () => {
     const o = await original();
     for (const codeHash of ["0x" + "ee".repeat(32), null]) {
       const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log)], { codeHash }))], o.log);
@@ -209,7 +208,7 @@ describe("support: section 14, P9.19, P9.21", () => {
     }
   });
 
-  test("PR59 evm: 'Provider reporting the listed chain ID whose block 0 has another hash': not that chain; its answers are not evidence", async () => {
+  test("C12-240: 'Provider reporting the listed chain ID whose block 0 has another hash': not that chain; its answers are not evidence", async () => {
     const o = await original();
     const impostor = read(ROBINHOOD, [rec(0, o.log)], { provider: "rpc-fake", genesisHash: "0x" + "99".repeat(32), owner: CAROL });
     // With an honest provider beside it, the impostor is excluded, not a disagreement.
@@ -223,7 +222,7 @@ describe("support: section 14, P9.19, P9.21", () => {
     expect(alone.evm!.stretches[0].missing?.code).toBe("EVM_NO_PROVIDER");
   });
 
-  test("PR59 evm: 'Publication read from a chain other than the one anchor names': not a publication of the Original", async () => {
+  test("C12-243: 'Publication read from a chain other than the one anchor names': not a publication of the Original", async () => {
     const o = await original();
     // The token's alias, but read from Ethereum, where the same contract may also be deployed (P9.20).
     const r = await verify(o.alice, [token(o.alias, two(ETHEREUM, [rec(0, o.log)]), ETHEREUM)], o.log);
@@ -234,7 +233,7 @@ describe("support: section 14, P9.19, P9.21", () => {
 });
 
 describe("P9.22 finality and providers", () => {
-  test("PR59 evm: 'Publication record present at the latest block but not in state at the finalized block': observed, not accepted; pending", async () => {
+  test("C12-244: 'Publication record present at the latest block but not in state at the finalized block': observed, not accepted; pending", async () => {
     const o = await original();
     const e4 = await o.next(o.anchoring, { name: "Harbor at dusk, cropped" });
     const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log)], { observed: [rec(1, e4)] }))]);
@@ -244,7 +243,7 @@ describe("P9.22 finality and providers", () => {
     expect(r.current).toBe(true); // the finalized state is current as of its block
   });
 
-  test("PR59 evm: 'Two providers report different hashes for the lower of their finalized blocks, or a different record, bytes or ownerOf': missing evidence until they agree", async () => {
+  test("C12-245: 'Two providers report different hashes for the lower of their finalized blocks, or a different record, bytes or ownerOf': missing evidence until they agree", async () => {
     const o = await original();
     const e4 = await o.next(o.anchoring, { name: "Renamed" });
     const ok = [rec(0, o.log), rec(1, e4)];
@@ -263,7 +262,7 @@ describe("P9.22 finality and providers", () => {
     }
   });
 
-  test("PR59 evm: 'One provider's finalized block is N and the other's is N+1, and they agree on block N': verified at block N", async () => {
+  test("C12-246: 'One provider's finalized block is N and the other's is N+1, and they agree on block N': verified at block N", async () => {
     const o = await original();
     const at1000 = { number: 1000, hash: blockHash(ROBINHOOD, 1000) };
     const r = await verify(o.alice, [token(o.alias, [read(ROBINHOOD, [rec(0, o.log)], { finalized: 1000 }), read(ROBINHOOD, [rec(0, o.log)], { provider: "rpc-b", finalized: 1001, block: at1000 })])]);
@@ -274,7 +273,7 @@ describe("P9.22 finality and providers", () => {
     missingEvidence(unread);
   });
 
-  test("PR59 evm: 'A block accepted as finalized is replaced': authoritative-source-changed and a finality failure", async () => {
+  test("C12-247: 'A block accepted as finalized is replaced': authoritative-source-changed and a finality failure", async () => {
     const o = await original();
     const tokens = [token(o.alias, two(ROBINHOOD, [rec(0, o.log)], { finalized: 1200, blockHashes: [{ number: 1000, hash: blockHash(ROBINHOOD, 1000, 5) }] }))];
     const r = await verify(o.alice, tokens, undefined, { retained: [{ chain: ROBINHOOD, number: 1000, hash: blockHash(ROBINHOOD, 1000) }] });
@@ -291,7 +290,7 @@ describe("P9.22 finality and providers", () => {
 });
 
 describe("P9.23, P9.24 ownership and the anchor", () => {
-  test("PR59 evm: 'Token minted, no anchoring publication': not anchored; no owner", async () => {
+  test("C12-248: 'Token minted, no anchoring publication': not anchored; no owner", async () => {
     const o = await original();
     for (const records of [[], [rec(0, [o.genesis, o.v2])]]) {
       const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, records))], o.log);
@@ -302,14 +301,14 @@ describe("P9.23, P9.24 ownership and the anchor", () => {
     }
   });
 
-  test("PR59 evm: 'Token held by a contract account': that contract is the owner", async () => {
+  test("C12-264: 'Token held by a contract account': that contract is the owner", async () => {
     const o = await original();
     const safe = "0x" + "5a".repeat(20); // a multisig contract; ownerOf does not say which
     const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log)], { owner: safe }))]);
     expect(r.evm!.owner?.address).toBe(safe);
   });
 
-  test("PR59 evm: 'Two anchoring entries from different branches published on the token' and 'Fork of an Original with an EVM anchor, then an anchoring entry accepted': the lower index is the anchor and settles the fork, as attested", async () => {
+  test("C12-249, C12-294: 'Two anchoring entries from different branches published on the token' and 'Fork of an Original with an EVM anchor, then an anchoring entry accepted': the lower index is the anchor and settles the fork, as attested", async () => {
     const o = await original();
     const v2b = await o.next(o.genesis, { name: "Harbor at night" });
     const anchoringB = await o.next(v2b, { aliases: [o.alias] });
@@ -325,7 +324,7 @@ describe("P9.23, P9.24 ownership and the anchor", () => {
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 
-  test("PR59 evm: 'Two publications extending the same head, recorded in one block or in different blocks': the lower record index is accepted", async () => {
+  test("C12-250: 'Two publications extending the same head, recorded in one block or in different blocks': the lower record index is accepted", async () => {
     const o = await original();
     const a = await o.next(o.anchoring, { name: "A" });
     const b = await o.next(o.anchoring, { name: "B" });
@@ -336,7 +335,7 @@ describe("P9.23, P9.24 ownership and the anchor", () => {
     }
   });
 
-  test("PR59 evm: 'Two successive publications, the second extending the first, recorded in one block': both accepted, in index order", async () => {
+  test("C12-251: 'Two successive publications, the second extending the first, recorded in one block': both accepted, in index order", async () => {
     const o = await original();
     const a = await o.next(o.anchoring, { name: "A" });
     const b = await o.next(a, { name: "B" });
@@ -348,7 +347,7 @@ describe("P9.23, P9.24 ownership and the anchor", () => {
 });
 
 describe("P9.25, P14.20 records and bytes", () => {
-  test("PR59 evm: 'Record whose length fields exceed 350,000 bytes, as a provider reports it, after valid earlier records': rejected from its fields; history resolves; not missing", async () => {
+  test("C12-255: 'Record whose length fields exceed 350,000 bytes, as a provider reports it, after valid earlier records': rejected from its fields; history resolves; not missing", async () => {
     const o = await original();
     const huge: EvmRecord = { index: 1, timestamp: TS0 + 12, metadataLength: 350_001, bodyLength: 0, bodyOf: 1, mediaType: "image/jpeg" };
     const longType: EvmRecord = { index: 2, timestamp: TS0 + 24, metadataLength: 10, bodyLength: 10, bodyOf: 2, mediaType: "x".repeat(256) };
@@ -361,7 +360,7 @@ describe("P9.25, P14.20 records and bytes", () => {
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 
-  test("PR59 evm: 'Record of 350,000 bytes that is no valid publication, after valid earlier records': read and rejected; the earlier history resolves", async () => {
+  test("C12-256: 'Record of 350,000 bytes that is no valid publication, after valid earlier records': read and rejected; the earlier history resolves", async () => {
     const o = await original();
     const body = bytes("0123456789");
     const metadata = new Uint8Array(350_000 - body.length).fill(0xff); // not one well-formed CBOR item (P14.12)
@@ -371,7 +370,7 @@ describe("P9.25, P14.20 records and bytes", () => {
     expect(r.current).toBe(true);
   });
 
-  test("PR59 evm: 'Publication whose body digest, size or media type differs from the last entry's descriptor': rejected", async () => {
+  test("C12-257: 'Publication whose body digest, size or media type differs from the last entry's descriptor': rejected", async () => {
     const o = await original();
     const e4 = await o.next(o.anchoring, { name: "Renamed" });
     const wrongBody = { ...rec(1, e4), body: bytes("not the photograph"), bodyLength: 18 };
@@ -383,7 +382,7 @@ describe("P9.25, P14.20 records and bytes", () => {
     }
   });
 
-  test("PR59 evm: 'Publication that refers to an earlier record's body, the last entry not changing the resource': accepted, the body checked as if stored", async () => {
+  test("C12-258: 'Publication that refers to an earlier record's body, the last entry not changing the resource': accepted, the body checked as if stored", async () => {
     const o = await original();
     const e4 = await o.next(o.anchoring, { name: "Renamed" });
     const first = rec(0, o.log);
@@ -392,7 +391,7 @@ describe("P9.25, P14.20 records and bytes", () => {
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 
-  test("PR59 evm: 'Publication that refers to an earlier record's body whose digest differs from the last entry's descriptor': rejected", async () => {
+  test("C12-259: 'Publication that refers to an earlier record's body whose digest differs from the last entry's descriptor': rejected", async () => {
     const o = await original();
     const e4 = await o.next(o.anchoring, { resource: photo("dusk v3") });
     const first = rec(0, o.log);
@@ -401,7 +400,7 @@ describe("P9.25, P14.20 records and bytes", () => {
     expect(r.evm!.stretches[0].ignored).toContainEqual(expect.objectContaining({ index: 1, reason: "body-not-the-resource" }));
   });
 
-  test("PR59 evm: 'Publication known only from a Published event, or a token whose records or bytes cannot be read from state': resolution fails with missing evidence", async () => {
+  test("C12-261: 'Publication known only from a Published event, or a token whose records or bytes cannot be read from state': resolution fails with missing evidence", async () => {
     const o = await original();
     const e4 = await o.next(o.anchoring, { name: "Renamed" });
     // Records not read (a reader that found the publication only through an event has no record).
@@ -416,7 +415,7 @@ describe("P9.25, P14.20 records and bytes", () => {
 });
 
 describe("P9.15 with the inscription time of P9.20, P9.26", () => {
-  test("PR59 evm: 'did:webvh signer key removed before the timestamp the publication's record holds': rejected, as P9.15", async () => {
+  test("C12-263: 'did:webvh signer key removed before the timestamp the publication's record holds': rejected, as P9.15", async () => {
     // A did:vh signer; P9.15 treats did:vh and did:webvh alike.
     const o = await original();
     o.alice.timeOverride = iso(TS0 - 600);
@@ -435,7 +434,7 @@ describe("P9.15 with the inscription time of P9.20, P9.26", () => {
     expect(later.head).toBe(p.anchoring.versionId);
   });
 
-  test("PR59 evm: 'Entry published on an Original's token, whose signer later removes the signing key': remains current; not historically authorized only; not claimed", async () => {
+  test("C12-293: 'Entry published on an Original's token, whose signer later removes the signing key': remains current; not historically authorized only; not claimed", async () => {
     const o = await original();
     o.alice.timeOverride = iso(TS0 + 3600);
     await o.alice.rotate([{ fragment: "next", signer: seeded(52) }]);
@@ -447,7 +446,7 @@ describe("P9.15 with the inscription time of P9.20, P9.26", () => {
 });
 
 describe("P7.14 copies of the log", () => {
-  test("PR59 evm: 'Carried file of an Original whose log has an anchor member, the chain readable': state from the token; the copy not preferred; chain and class named", async () => {
+  test("C12-287: 'Carried file of an Original whose log has an anchor member, the chain readable': state from the token; the copy not preferred; chain and class named", async () => {
     const o = await original();
     const unpublished = await o.next(o.anchoring, { name: "Draft name" });
     const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log)]))], [...o.log, unpublished]);
@@ -457,7 +456,7 @@ describe("P7.14 copies of the log", () => {
     expect(r.current).toBe(true);
   });
 
-  test("PR59 evm: carried file read through readCarriedFile, the chain readable / not read: verified from the token / evm-unread, missing evidence (P7.14)", async () => {
+  test("C12-287, C12-234: carried file read through readCarriedFile, the chain readable / not read: verified from the token / evm-unread, missing evidence (P7.14)", async () => {
     const o = await original();
     const d = (o.anchoring.state as { asset: { resource: { digest: string } } }).asset.resource.digest;
     const file = await writeCarriedFile(describedBytes(d)!, o.log, { disclosed: carriedDisclosure(o.log) });
@@ -476,7 +475,7 @@ describe("P7.14 copies of the log", () => {
     expect(nopin.anchoring.status).toBe("unsupported");
   });
 
-  test("PR59 evm: 'Complete evidence package of an anchored Original, read without access to the anchor': missing evidence; at most the entries before the first anchoring entry", async () => {
+  test("C12-297: 'Complete evidence package of an anchored Original, read without access to the anchor': missing evidence; at most the entries before the first anchoring entry", async () => {
     const o = await original();
     const e4 = await o.next(o.anchoring, { name: "Renamed" });
     const r = await verify(o.alice, [], [...o.log, e4]);
@@ -504,7 +503,7 @@ async function moving(to: string | null = ETHEREUM, seed = 61) {
 }
 
 describe("P9.28, P9.29 moves", () => {
-  test("PR59 evm: 'Move entry from an attested chain to a proven chain or to Bitcoin, departed and arrived': anchored on the destination; the owner is its holder", async () => {
+  test("C12-265: 'Move entry from an attested chain to a proven chain or to Bitcoin, departed and arrived': anchored on the destination; the owner is its holder", async () => {
     const m = await moving(ETHEREUM);
     const r = await verify(m.alice, [
       token(m.alias, two(ROBINHOOD, [rec(0, m.log), rec(1, m.move)])),
@@ -527,7 +526,7 @@ describe("P9.28, P9.29 moves", () => {
     expect(btc.current, JSON.stringify(btc.reasons)).toBe(true);
   });
 
-  test("PR59 evm: 'Report for an Original that moved from an attested chain to a proven chain': both chains, their classes and entries; the earlier stretch attested", async () => {
+  test("C12-276: 'Report for an Original that moved from an attested chain to a proven chain': both chains, their classes and entries; the earlier stretch attested", async () => {
     const m = await moving(ETHEREUM, 63);
     const e5 = await m.next(m.move, { name: "On Ethereum" });
     const r = await verify(m.alice, [
@@ -542,7 +541,7 @@ describe("P9.28, P9.29 moves", () => {
     expect(r.current).toBe(true);
   });
 
-  test("PR59 evm: 'Arrival on the destination with no departure accepted on the chain left': not accepted; still anchored where it was", async () => {
+  test("C12-269: 'Arrival on the destination with no departure accepted on the chain left': not accepted; still anchored where it was", async () => {
     const m = await moving(ETHEREUM, 64);
     const r = await verify(m.alice, [
       token(m.alias, two(ROBINHOOD, [rec(0, m.log)])),
@@ -553,7 +552,7 @@ describe("P9.28, P9.29 moves", () => {
     expect(r.evm!.owner?.address).toBe(HOLDER);
   });
 
-  test("PR59 evm: 'Departure accepted, no arrival yet': departed, not arrived; the move entry's state; no owner", async () => {
+  test("C12-270: 'Departure accepted, no arrival yet': departed, not arrived; the move entry's state; no owner", async () => {
     const m = await moving(ETHEREUM, 65);
     const r = await verify(m.alice, [
       token(m.alias, two(ROBINHOOD, [rec(0, m.log), rec(1, m.move)])),
@@ -566,7 +565,7 @@ describe("P9.28, P9.29 moves", () => {
     expect(r.current).toBe(false);
   });
 
-  test("PR59 evm: 'Publication on the token left behind, after the departure': not accepted; reported", async () => {
+  test("C12-271: 'Publication on the token left behind, after the departure': not accepted; reported", async () => {
     const m = await moving(ETHEREUM, 66);
     const stray = await m.next(m.move, { name: "Published on the old token" });
     const r = await verify(m.alice, [
@@ -577,7 +576,7 @@ describe("P9.28, P9.29 moves", () => {
     expect(r.head).toBe(m.move.versionId);
   });
 
-  test("PR59 evm: 'Arrival whose log differs from the entries accepted through the departure, or whose last entry is not the move entry': not an arrival", async () => {
+  test("C12-272: 'Arrival whose log differs from the entries accepted through the departure, or whose last entry is not the move entry': not an arrival", async () => {
     const m = await moving(ETHEREUM, 67);
     const other = await m.next(m.anchoring, { anchor: { chain: ETHEREUM, minter: C }, aliases: [m.dest], name: "Another move entry" });
     for (const carried of [[...m.log, other], m.log]) {
@@ -590,7 +589,7 @@ describe("P9.28, P9.29 moves", () => {
     }
   });
 
-  test("PR59 evm: 'Moved Original, a chain it left cannot be read': log verified; move unconfirmed; no owner and not current", async () => {
+  test("C12-273: 'Moved Original, a chain it left cannot be read': log verified; move unconfirmed; no owner and not current", async () => {
     const m = await moving(ETHEREUM, 68);
     const r = await verify(m.alice, [
       token(m.alias, two(ROBINHOOD, null)),
@@ -602,7 +601,7 @@ describe("P9.28, P9.29 moves", () => {
     expect(r.current).toBe(false);
   });
 
-  test("PR59 evm: 'A chain the Original left later replaces the block that held the departure': finality failure there; move unconfirmed", async () => {
+  test("C12-274: 'A chain the Original left later replaces the block that held the departure': finality failure there; move unconfirmed", async () => {
     const m = await moving(ETHEREUM, 69);
     const r = await verify(m.alice, [
       token(m.alias, two(ROBINHOOD, [rec(0, m.log), rec(1, m.move)], { finalized: 1100, blockHashes: [{ number: 1000, hash: blockHash(ROBINHOOD, 1000, 3) }] })),
@@ -614,14 +613,14 @@ describe("P9.28, P9.29 moves", () => {
     expect(r.current).toBe(false);
   });
 
-  test("PR59 evm: 'Carried log holding a move entry, read without access to a chain in the path': missing evidence; at most the entries before the first anchoring entry", async () => {
+  test("C12-289: 'Carried log holding a move entry, read without access to a chain in the path': missing evidence; at most the entries before the first anchoring entry", async () => {
     const m = await moving(ETHEREUM, 70);
     const r = await verify(m.alice, [token(m.alias, two(ROBINHOOD, [rec(0, m.log), rec(1, m.move)]))], m.through);
     missingEvidence(r);
     expect(r.history.entries).toBe(2);
   });
 
-  test("PR59 evm: 'Move made to a proven chain that a later revision reclassifies operator': still accepted, judged at the departure; reported under the current class", async () => {
+  test("C12-275: 'Move made to a proven chain that a later revision reclassifies operator': still accepted, judged at the departure; reported under the current class", async () => {
     const m = await moving(BASE, 71);
     const revised: EvmAnchorPin = {
       ...PIN,
@@ -637,7 +636,7 @@ describe("P9.28, P9.29 moves", () => {
     expect(r.evm!.owner?.describes).toBe("attested-by-operator");
   });
 
-  test("PR59 evm: 'Move entry to a chain the verifier's revision of P14.22 does not list': unsupported, not invalid", async () => {
+  test("C12-268: 'Move entry to a chain the verifier's revision of P14.22 does not list': unsupported, not invalid", async () => {
     const optimism: ListedChain = { name: "OP Mainnet", chain: "eip155:10", chainId: 10n, genesisHash: "0x" + "7a".repeat(32), classes: [{ from: 0, class: "exit-protected" }] };
     const devnet: EvmAnchorPin = { ...PIN, chains: [...EVM_CHAINS, optimism] };
     const o = await original(ROBINHOOD, 72);
@@ -649,7 +648,7 @@ describe("P9.28, P9.29 moves", () => {
     expect(r.current).toBe(false);
   });
 
-  test("PR59 evm: 'Move entry's signing key removed, or its signer DID deactivated, after the departure and before the arrival': arrival accepted", async () => {
+  test("C12-295: 'Move entry's signing key removed, or its signer DID deactivated, after the departure and before the arrival': arrival accepted", async () => {
     for (const how of ["rotate", "deactivate"] as const) {
       const m = await moving(ETHEREUM, how === "rotate" ? 73 : 74);
       m.alice.timeOverride = iso(TS0 + 300);
@@ -665,7 +664,7 @@ describe("P9.28, P9.29 moves", () => {
     }
   });
 
-  test("PR59 evm: 'Move entry published as a departure when its signing key is not valid at the departure's inscription time': rejected; not departed", async () => {
+  test("C12-296: 'Move entry published as a departure when its signing key is not valid at the departure's inscription time': rejected; not departed", async () => {
     const m = await moving(ETHEREUM, 76);
     m.alice.timeOverride = iso(TS0 + 300);
     await m.alice.rotate([{ fragment: "next", signer: seeded(77) }]);
@@ -679,7 +678,7 @@ describe("P9.28, P9.29 moves", () => {
     expect(r.head).toBe(m.anchoring.versionId);
   });
 
-  test("PR59 evm: 'Original that moved to Bitcoin grants a did:btco editor in or after the move entry': accepted by the state rules", async () => {
+  test("C12-301: 'Original that moved to Bitcoin grants a did:btco editor in or after the move entry': accepted by the state rules", async () => {
     const o = await original(ROBINHOOD, 78);
     const grant = [{ did: "did:btco:reg:5", name: true, metadata: false, resource: false }];
     const move = await o.next(o.anchoring, { anchor: null, aliases: [SAT], editors: grant });
@@ -688,7 +687,7 @@ describe("P9.28, P9.29 moves", () => {
 });
 
 describe("P3.9, P14.18 did:evm resolution", () => {
-  test("PR59 evm: 'did:evm alias resolved, the log accepted on its token listing it': the did:vh, state and report; the document derived", async () => {
+  test("C12-283: 'did:evm alias resolved, the log accepted on its token listing it': the did:vh, state and report; the document derived", async () => {
     const o = await original(ROBINHOOD, 81);
     const res = await resolveDidEvm(o.alias, { authors: [o.alice.evidence()], now: NOW, evm: { pin: PIN, tokens: [token(o.alias, two(ROBINHOOD, [rec(0, o.log)]))] } });
     expect(res.status).toBe("resolved");
@@ -699,7 +698,7 @@ describe("P3.9, P14.18 did:evm resolution", () => {
     expect(res.report?.current).toBe(true);
   });
 
-  test("PR59 evm: 'did:evm DID of a token with no accepted anchoring publication, or of a token whose accepted log does not list it': resolves to nothing", async () => {
+  test("C12-284: 'did:evm DID of a token with no accepted anchoring publication, or of a token whose accepted log does not list it': resolves to nothing", async () => {
     const o = await original(ROBINHOOD, 82);
     const minted = await resolveDidEvm(o.alias, { authors: [o.alice.evidence()], now: NOW, log: o.log, evm: { pin: PIN, tokens: [token(o.alias, two(ROBINHOOD, []))] } });
     expect(minted).toMatchObject({ status: "not-found", state: null, document: null });
@@ -714,7 +713,7 @@ describe("P3.9, P14.18 did:evm resolution", () => {
     await expect(resolveDidEvm(o.alias.replace(PIN.address, PIN.address.toUpperCase().replace("0X", "0x")), { authors: [], evm: { pin: PIN, tokens: [] } })).rejects.toMatchObject({ code: "STATE_ALIASES" });
   });
 
-  test("PR59 evm: 'did:evm DID of a token the Original has left': reported as moved, naming the alias that replaced it; no state on that token as current", async () => {
+  test("C12-285: 'did:evm DID of a token the Original has left': reported as moved, naming the alias that replaced it; no state on that token as current", async () => {
     const m = await moving(ETHEREUM, 83);
     const tokens = [
       token(m.alias, two(ROBINHOOD, [rec(0, m.log), rec(1, m.move)])),

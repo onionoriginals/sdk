@@ -15,7 +15,7 @@ contract Holder is IERC721Receiver {
     }
 }
 
-/// Tests cite originals-spec PR 59's section 12 rows as `PR59 evm:` and the row's first column.
+/// Tests cite originals-spec PR 59's section 12 rows by C12 id and the row's first column.
 contract OriginalsAnchorTest is Base {
     OriginalsAnchor internal a;
     address internal constant ALICE = address(0xA11CE);
@@ -101,7 +101,7 @@ contract OriginalsAnchorTest is Base {
 
     // ----------------------------------------------------------------- who may publish (P14.20, P9.23)
 
-    /// PR59 evm: "Publication by an address that is neither the holder nor an approved operator":
+    /// C12-252: "Publication by an address that is neither the holder nor an approved operator":
     /// reverted by the contract; no record.
     function test_publicationByNonHolderReverts() public {
         uint256 id = minted();
@@ -161,7 +161,7 @@ contract OriginalsAnchorTest is Base {
         eq(a.publicationCount(id), 0, "no record");
     }
 
-    /// PR59 evm: "Token held by a contract account": that contract is the owner (P9.23).
+    /// C12-264: "Token held by a contract account": that contract is the owner (P9.23).
     function test_contractAccountHolderPublishes() public {
         uint256 id = minted();
         Holder h = new Holder();
@@ -182,7 +182,7 @@ contract OriginalsAnchorTest is Base {
 
     // ----------------------------------------------------------------- limits (P9.25, P14.20)
 
-    /// PR59 evm: "`publish` or `publishSameBody` whose bytes exceed 350,000, an `append` that would
+    /// C12-254: "`publish` or `publishSameBody` whose bytes exceed 350,000, an `append` that would
     /// take an upload past 350,000 bytes, or a media type longer than 255 bytes": reverted by the
     /// contract; no record and no stored bytes.
     function test_limitsRevertWithNoRecordAndNoStoredBytes() public {
@@ -240,7 +240,7 @@ contract OriginalsAnchorTest is Base {
 
     // ----------------------------------------------------------------- staged upload (P14.20)
 
-    /// PR59 evm: "Upload opened and never committed": ignored.
+    /// C12-253: "Upload opened and never committed": ignored.
     function test_uploadNeverCommittedIsIgnored() public {
         uint256 id = minted();
         vm.startPrank(ALICE);
@@ -318,7 +318,7 @@ contract OriginalsAnchorTest is Base {
 
     // ----------------------------------------------------------------- referring to a stored body
 
-    /// PR59 evm: "Entry of 30,000 bytes that does not change the resource, on a chain that accepts
+    /// C12-281: "Entry of 30,000 bytes that does not change the resource, on a chain that accepts
     /// 24,000 bytes in one transaction": uploaded in stages and recorded by `commitSameBody`,
     /// referring to the stored body.
     function test_largeEntryUploadedInStagesRefersToStoredBody() public {
@@ -359,7 +359,7 @@ contract OriginalsAnchorTest is Base {
         eq(a.body(id, index, 0, type(uint32).max), b, "record 0's body");
     }
 
-    /// PR59 evm: "`publishSameBody` or `commitSameBody` naming a later record, a record of another
+    /// C12-260: "`publishSameBody` or `commitSameBody` naming a later record, a record of another
     /// token, or a record that itself refers to another": reverted by the contract; no record.
     function test_sameBodyMisuseReverts() public {
         uint256 id = minted();
