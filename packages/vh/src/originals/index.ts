@@ -15,3 +15,4 @@ export * from "./cbor.js";
 export * from "./evm.js";
 export * from "./evm-anchor.js";
 export * from "./did-evm.js";
+export * from "./carried.js";
