@@ -20,6 +20,9 @@ import {
   resolveDidEvm,
   updateOriginal,
   verifyOriginal,
+  carriedDisclosure,
+  readCarriedFile,
+  writeCarriedFile,
   type EvmAnchorPin,
   type EvmProviderRead,
   type EvmRecord,
@@ -452,6 +455,25 @@ describe("P7.14 copies of the log", () => {
     expect(r.state?.name).toBe("Harbor at dusk");
     expect(r.evm!.stretches[0]).toMatchObject({ chain: ROBINHOOD, class: "operator" });
     expect(r.current).toBe(true);
+  });
+
+  test("PR59 evm: carried file read through readCarriedFile, the chain readable / not read: verified from the token / evm-unread, missing evidence (P7.14)", async () => {
+    const o = await original();
+    const d = (o.anchoring.state as { asset: { resource: { digest: string } } }).asset.resource.digest;
+    const file = await writeCarriedFile(describedBytes(d)!, o.log, { disclosed: carriedDisclosure(o.log) });
+    const read = await readCarriedFile(file, { authors: [o.alice.evidence()], now: NOW, evm: { pin: PIN, tokens: [token(o.alias, two(ROBINHOOD, [rec(0, o.log)]))] } });
+    expect(read.anchoring.status).toBe("evm");
+    expect(read.verified, JSON.stringify(read.reasons)).toEqual({ log: true, version: true });
+    expect(read.current).toBe(true);
+    expect(read.report?.evm?.stretches[0]).toMatchObject({ chain: ROBINHOOD, class: "operator" });
+    const unread = await readCarriedFile(file, { authors: [o.alice.evidence()], now: NOW, evm: { pin: PIN, tokens: [] } });
+    expect(unread.anchoring.status).toBe("evm-unread");
+    expect(unread.anchoring.notCheckedAgainstAnchor).toEqual([o.anchoring.versionId]);
+    expect(unread.verified).toEqual({ log: false, version: false });
+    expect(unread.current).toBe(false);
+    expect(unread.reasons).toContain("evm-evidence-missing");
+    const nopin = await readCarriedFile(file, { authors: [o.alice.evidence()], now: NOW });
+    expect(nopin.anchoring.status).toBe("unsupported");
   });
 
   test("PR59 evm: 'Complete evidence package of an anchored Original, read without access to the anchor': missing evidence; at most the entries before the first anchoring entry", async () => {
