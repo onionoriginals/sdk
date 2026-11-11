@@ -377,6 +377,13 @@ export interface EntryStateContext {
    * checked here, and a verifier reports the Original unsupported (section 14).
    */
   evm?: EvmAnchorPin | null;
+  /**
+   * For a move entry, the timestamp (ms) of the departure record that carries
+   * it, when the verifier has read it: layers are judged by the classes that
+   * applied then (P9.28, P14.22; originals-spec PR 59, proposed). Without it,
+   * by the classes of the revision this verifier implements. PROVISIONAL.
+   */
+  moveTime?: number;
 }
 
 /** The members, id, operation, author reference and asset of an entry's state: what every later rule reads. */
@@ -441,8 +448,8 @@ function checkAnchorChange(s: JsonObject, asset: AssetState, ctx: EntryStateCont
   if (fromToken === undefined) invalid("STATE_MOVE_BEFORE_ANCHOR", "a move entry comes after the Original's anchoring entry: it moves only from a chain it is anchored on (P9.28)");
   if (s.editor !== undefined) fail("outside-grant", "STATE_MOVE_BY_EDITOR", "a move entry is signed by the author, not by an editor (P9.28)");
   if (s.operation !== "update") invalid("STATE_MOVE", "a move entry is an update (P9.28)");
-  const fromLayer = layerOfAnchor(previous.anchor, ctx.evm ?? null);
-  const toLayer = layerOfAnchor(asset.anchor, ctx.evm ?? null);
+  const fromLayer = layerOfAnchor(previous.anchor, ctx.evm ?? null, ctx.moveTime);
+  const toLayer = layerOfAnchor(asset.anchor, ctx.evm ?? null, ctx.moveTime);
   if (toLayer === undefined) fail("unsupported-profile", "EVM_CHAIN_NOT_LISTED", `the move entry's destination ${asset.anchor!.chain} is not in this verifier's revision of P14.22: unsupported, not invalid (P9.19, P9.28)`);
   if (fromLayer !== undefined && LAYER_RANK[toLayer] <= LAYER_RANK[fromLayer]) invalid("STATE_MOVE_LAYER", `a move goes only up a layer: ${fromLayer} to ${toLayer} is not (P9.28)`);
   if (asset.aliases.includes(fromToken)) invalid("STATE_MOVE_ALIAS", "a move entry replaces the token alias with the destination's (P9.28)");
