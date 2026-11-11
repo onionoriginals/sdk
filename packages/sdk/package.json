@@ -45,6 +45,11 @@
       "import": "./dist/originals/bitcoin-writer.js",
       "default": "./dist/originals/bitcoin-writer.js"
     },
+    "./originals/evm": {
+      "types": "./dist/originals/evm.d.ts",
+      "import": "./dist/originals/evm.js",
+      "default": "./dist/originals/evm.js"
+    },
     "./did": {
       "types": "./dist/did/index.d.ts",
       "import": "./dist/did/index.js",
@@ -61,6 +66,7 @@
     "check-coverage": "bun run ../../scripts/check-coverage.ts",
     "test:ci": "bash -o pipefail -c 'bun test tests/unit --coverage 2>&1 | bun run ../../scripts/check-coverage.ts'",
     "test:security": "bun test tests/security",
+    "test:evm-anvil": "bun test tests/integration/evm-anvil.test.ts",
     "bench:clock": "bun scripts/bench-inscription-clock.ts",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\""
