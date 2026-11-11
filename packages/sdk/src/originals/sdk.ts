@@ -53,7 +53,15 @@ import {
   verifyAuthorHistory,
   verifyOriginal,
   parseBtcoAlias,
+  anchoringIndex,
+  carriedDisclosure,
+  locateCarrier,
+  readCarriedFile,
+  writeCarriedFile,
   ORIGINALS_INSCRIPTION_MAX_BYTES,
+  type Carrier,
+  type CarriedDisclosure,
+  type CarriedFileReport,
   type AliasEvidence,
   type AliasReport,
   type AssetState,
@@ -343,6 +351,51 @@ export interface ImportOptions {
 export interface ImportResult {
   status: "imported" | "already-current" | "kept-newer-local" | "conflict";
   original: OriginalView;
+}
+
+/**
+ * Where a carried file's checkpoint comes from (P7.15): the head or an exact
+ * committed checkpoint, and for an anchored Original what an adapter read
+ * from its anchoring sat, without which no checkpoint from the anchoring
+ * entry on is accepted.
+ */
+export interface CarryOptions {
+  checkpoint?: string;
+  bitcoin?: SatEvidence[];
+}
+
+/**
+ * A carried file (P7.11): the version's exact bytes with the log from genesis
+ * through the checkpoint in its media type's carrier. It is never an evidence
+ * package and makes no claim to be complete.
+ */
+export interface CarriedFile {
+  kind: "carried-file";
+  bytes: Uint8Array;
+  original: string;
+  checkpoint: string;
+  mediaType: string;
+  carrier: Carrier;
+  /** What the file discloses, as the user was told before it was written (P7.15). */
+  disclosure: CarriedDisclosure;
+}
+
+export interface ReadCarriedOptions {
+  /**
+   * The caller's explicit opt-in to resolve the signer DIDs the carried log
+   * names, through the configured `authors` source when it is a function
+   * (P7.13, P8.5). Without it only signer histories this store retained, or
+   * the configured `authors` list, are used, and no request is made: a file
+   * opened or previewed never resolves a DID.
+   */
+  resolveSigners?: boolean;
+  /** What an adapter read from the anchoring sat of an anchored Original (P7.14). */
+  bitcoin?: SatEvidence[];
+}
+
+export interface ImportCarriedOptions extends ReadCarriedOptions {
+  /** Refuse (IMPORT_REJECTED) a carried log of any other Original. */
+  original?: string;
 }
 
 /** One candidate for a signer DID's evidence, with the versionIds of its log that verify (P7.8). */
@@ -635,6 +688,18 @@ function checkAnswer(answer: unknown, did: string): HostAnswer {
     (a.status === "stale-parent" || ((a.status === "accepted" || a.status === "already-accepted") && typeof a.checkpoint === "string"));
   if (!ok) sdkError("invalid-evidence", "HOST_ANSWER_INVALID", `the host's answer for ${did} is not accepted, already-accepted or stale-parent`);
   return a as HostAnswer;
+}
+
+/**
+ * A carried file's log as `did.jsonl` text: a carrier's, or a log found where
+ * no carrier is defined, whose own result P7.12 reports separately; undefined
+ * when there is none or it does not parse.
+ */
+function carriedLogText(file: Uint8Array): string | undefined {
+  const found = locateCarrier(file);
+  const log = found.status === "found" ? found.log : found.stray?.log;
+  if (log?.status !== "parsed") return undefined;
+  return log.entries.map((e) => `${JSON.stringify(e)}\n`).join("");
 }
 
 function digestsOf(log: string): string[] {
@@ -1691,8 +1756,17 @@ export class OriginalsSDK {
     if (r.head !== own[own.length - 1]) {
       sdkError("invalid-evidence", "IMPORT_REJECTED", "the package's log does not verify to its last entry", { report: r });
     }
-    const did = r.original;
     if (requireResources) await this.requireHeld(contents, r);
+    return this.storeImport(contents, r, from);
+  }
+
+  /**
+   * Store a verified import unless it would roll back or replace local
+   * history (P7.5): a prefix of the local log keeps the local one, and a
+   * diverging branch is kept beside it and reported as a conflict.
+   */
+  private async storeImport(contents: Pick<EvidenceContents, "log" | "authors" | "bytes">, r: OriginalsReport, from: "package" | "host" | "fetched"): Promise<ImportResult> {
+    const did = r.original!;
     const incoming = versionIds(contents.log);
     const local = (await this.store.get(did))?.log;
     const result = async (status: ImportResult["status"]): Promise<ImportResult> => ({ status, original: await this.get(did) });
@@ -1754,14 +1828,14 @@ export class OriginalsSDK {
   }
 
   /** Store supplied bytes that `log` names, each only under its own digest. */
-  private async keepBytes(contents: EvidenceContents, log: string): Promise<void> {
+  private async keepBytes(contents: Pick<EvidenceContents, "bytes">, log: string): Promise<void> {
     const named = new Set(digestsOf(log));
     for (const [digest, bytes] of Object.entries(contents.bytes)) {
       if (named.has(digest) && resourceDigest(bytes) === digest) await this.store.putResource(digest, bytes);
     }
   }
 
-  private async keepEvidence(contents: EvidenceContents, report: OriginalsReport, from: "package" | "host"): Promise<void> {
+  private async keepEvidence(contents: Pick<EvidenceContents, "authors" | "bytes">, report: OriginalsReport, from: "package" | "host" | "fetched"): Promise<void> {
     for (const [digest, bytes] of Object.entries(contents.bytes)) {
       const checked = await checkedBytes(bytes, digest);
       if (checked) await this.store.putResource(digest, checked);
@@ -1774,6 +1848,148 @@ export class OriginalsSDK {
         await this.store.putAuthorEvidence(this.obtained({ did: evidence.did, log: evidence.log, ...(evidence.witness !== undefined ? { witness: evidence.witness } : {}) }, from));
       }
     }
+  }
+
+  // ---------------------------------------------------------------- carried logs
+
+  /**
+   * The accepted checkpoint a carried file is written for, its entries from
+   * genesis, and its version's bytes (P7.15). A draft, a pending or refused
+   * candidate, or anything else not committed is not one; nor is an entry from
+   * the anchoring entry on unless the anchor shows it accepted (P9.12): pass
+   * `bitcoin`, what an adapter read from the anchoring sat.
+   */
+  private async carriedCheckpoint(did: string, options: CarryOptions): Promise<{ entries: LogEntry[]; version: Uint8Array }> {
+    const log = await this.stored(did);
+    const ids = versionIds(log);
+    const checkpoint = options.checkpoint ?? ids[ids.length - 1];
+    const at = ids.indexOf(checkpoint);
+    if (at < 0) sdkError("invalid-evidence", "CARRIER_NOT_ACCEPTED", `${checkpoint} is not a committed checkpoint of ${did}: a carrier is written only for an accepted checkpoint, never a draft (P7.15, P6.3)`);
+    const view = await this.get(did, { checkpoint, ...(options.bitcoin ? { bitcoin: options.bitcoin } : {}) });
+    if (!view.validAsOf) sdkError("invalid-evidence", "CARRIER_NOT_ACCEPTED", `${checkpoint} does not verify, so it is not an accepted checkpoint (P7.15)`, { report: view.report });
+    const entries = lines(log).slice(0, at + 1).map((line) => parseJson(line) as unknown as LogEntry);
+    const k = anchoringIndex(entries);
+    if (k >= 0) {
+      // P7.15, P9.12: after anchoring, only an entry accepted on the anchor is an accepted checkpoint.
+      const a = view.report.anchoring;
+      const accepted = a?.status === "anchored" ? [a.anchor!.versionId, ...a.accepted.map((p) => p.versionId)] : [];
+      if (!accepted.includes(checkpoint)) {
+        sdkError("invalid-evidence", "CARRIER_NOT_ACCEPTED", `${checkpoint} is at or after the anchoring entry and not accepted on the anchor${options.bitcoin ? "" : " (no Bitcoin evidence was given)"} (P7.15, P9.12)`, { report: view.report });
+      }
+    }
+    const state = entries[entries.length - 1].state as unknown as EntryState;
+    const version = await this.resourceBytes(state.asset.resource.digest);
+    if (!version) sdkError("unavailable-bytes", "RESOURCE_NOT_HELD", `this store does not hold the bytes of the version ${checkpoint} names`);
+    return { entries, version };
+  }
+
+  /**
+   * What a carried file of `did` at the head, or an exact checkpoint, would
+   * disclose (P7.15): the whole history, every earlier name and metadata, the
+   * signers' DIDs, and for a JSON carrier that the document's data gains a
+   * member. Show it to the user, then pass it to `carry`.
+   */
+  async carriedDisclosure(did: string, options?: CarryOptions): Promise<CarriedDisclosure> {
+    options = optionsObject(options, ["checkpoint", "bitcoin"], "carry options");
+    const { entries } = await this.carriedCheckpoint(did, options);
+    return carriedDisclosure(entries);
+  }
+
+  /**
+   * Write a carried file (P7.11, P7.15): the version the checkpoint names,
+   * with the log from genesis through it in the carrier its media type has.
+   * `disclosed` is the disclosure the user was shown (`carriedDisclosure`).
+   * Refused for a checkpoint that is not accepted, a media type with no
+   * carrier, or a version the carrier cannot be added to (P14.16, P14.17); the
+   * log is then offered separately, as `committedLog`. Nothing is signed, and
+   * the Original does not change (P7.16).
+   */
+  async carry(did: string, options: CarryOptions & { disclosed: CarriedDisclosure }): Promise<CarriedFile> {
+    options = optionsObject(options, ["checkpoint", "bitcoin", "disclosed"], "carry options");
+    const { entries, version } = await this.carriedCheckpoint(did, options);
+    const bytes = await writeCarriedFile(version, entries, { disclosed: options.disclosed });
+    const disclosure = carriedDisclosure(entries);
+    return { kind: "carried-file", bytes, original: disclosure.original, checkpoint: disclosure.checkpoint, mediaType: disclosure.mediaType, carrier: disclosure.carrier, disclosure };
+  }
+
+  /** Read a carried file with this store's retained evidence, resolving signer DIDs only on `resolveSigners` (P7.13). */
+  private async carriedRead(file: Uint8Array, options: ReadCarriedOptions): Promise<{ report: CarriedFileReport; authors: AuthorDidEvidence[] }> {
+    const source = this.options.authors;
+    // A configured list and this store's retained evidence make no request (P7.13).
+    const given = async (did: string): Promise<AuthorDidEvidence[]> => {
+      const listed = Array.isArray(source) ? source.find((a) => a.did === did) : undefined;
+      const kept = await this.store.getAuthorEvidence(did);
+      return [...(listed ? [{ ...listed, source: listed.source ?? ("supplied" as const) }] : []), ...(kept ? [{ ...kept, source: "retained" as const }] : [])];
+    };
+    const choose = async (candidates: AuthorDidEvidence[]) => newestEvidence(await Promise.all(candidates.map((c) => this.held(c))))?.chosen;
+    const text = carriedLogText(file);
+    const authors: AuthorDidEvidence[] = [];
+    for (const did of text ? signerDidsOf(text) : []) {
+      const chosen = await choose(await given(did));
+      if (chosen) authors.push(chosen);
+    }
+    const used = [...authors];
+    // Only on the caller's opt-in is the configured source asked (P7.13, P8.5).
+    const resolveSigners =
+      options.resolveSigners === true && typeof source === "function"
+        ? async (did: string) => {
+            const fetched = await source(did);
+            const chosen = fetched ? await choose([this.obtained(fetched, "fetched")]) : undefined;
+            if (chosen) used.push(chosen);
+            return chosen;
+          }
+        : undefined;
+    const report = await readCarriedFile(file, {
+      authors,
+      ...(resolveSigners ? { resolveSigners } : {}),
+      ...(options.bitcoin ? { bitcoin: options.bitcoin } : {}),
+      ...(text ? await this.comparisons(text) : {}),
+      now: this.clock(),
+    });
+    // Asked for, even when nothing was resolvable: the report says the caller opted in.
+    if (options.resolveSigners === true) report.signers.requested = true;
+    return { report, authors: used };
+  }
+
+  /**
+   * Read a carried file (P7.12-P7.14): the carrier removed exactly, checked
+   * against the last entry's media type, the remaining bytes against its
+   * descriptor, and the log verified. No DID is resolved unless
+   * `resolveSigners` is true; until signer histories are had the proofs are
+   * unchecked and nothing is verified (P7.13). A carried file is never an
+   * evidence package and makes no claim to be complete (P7.11).
+   */
+  async readCarried(file: Uint8Array, options?: ReadCarriedOptions): Promise<CarriedFileReport> {
+    options = optionsObject(options, ["resolveSigners", "bitcoin"], "readCarried options");
+    return (await this.carriedRead(file, options)).report;
+  }
+
+  /**
+   * Import a carried file's log and version (P7.14, P7.5): only a log that
+   * verifies to its last entry. It never replaces newer local history
+   * (`kept-newer-local`), and a different branch is kept beside the local one
+   * and reported as a conflict. The version's bytes are kept when they are
+   * that version. Importing signs nothing (P7.16).
+   */
+  async importCarried(file: Uint8Array, options?: ImportCarriedOptions): Promise<ImportResult> {
+    options = optionsObject(options, ["resolveSigners", "bitcoin", "original"], "importCarried options");
+    const { report: c, authors } = await this.carriedRead(file, options);
+    const r = c.report;
+    // As for a package (P7.5): the log verifies to its own last entry. A fork with local history
+    // leaves it unverified as a whole, and is kept as a branch below, never dropped.
+    const verifies = r !== null && r.original !== null && r.history.status === "valid" && r.authorBinding.status === "valid" && r.identityEvidence.status === "complete" && r.head === c.checkpoint;
+    if (!verifies || c.anchoring.status === "bitcoin-unread" || c.anchoring.status === "unsupported") {
+      sdkError("invalid-evidence", "IMPORT_REJECTED", "the carried log does not verify to its last entry", { carried: c });
+    }
+    if (options.original !== undefined && r.original !== options.original) {
+      sdkError("invalid-evidence", "IMPORT_REJECTED", `the carried log is for ${r.original}, not ${options.original}`, { carried: c });
+    }
+    const log = carriedLogText(file);
+    if (log === undefined) sdkError("invalid-evidence", "IMPORT_REJECTED", "the file has no carried log", { carried: c });
+    // The log is imported on its own result; the bytes only when they are its version (P7.12).
+    const bytes: Record<string, Uint8Array> = c.verified.version && c.descriptor && c.version ? { [c.descriptor.digest]: c.version } : {};
+    const evidence = authors.filter((a) => a.log !== undefined).map(({ did, log: l, witness }) => ({ did, log: l, ...(witness !== undefined ? { witness } : {}) }));
+    return this.storeImport({ log, authors: evidence, bytes }, r, "fetched");
   }
 }
 
