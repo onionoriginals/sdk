@@ -61,6 +61,18 @@ export interface VerifyOriginalOptions {
    * from the sat itself (P9.17, P9.18); these add the others.
    */
   bytes?: Record<string, Uint8Array> | ((digest: string) => Uint8Array | undefined);
+  /**
+   * Resource versions the caller holds whose bytes were checked against their
+   * digest when they were stored (P4.3), and kept unchanged since: the size
+   * of those bytes, or undefined. For a content-addressed store that hashes
+   * what it keeps, so held bytes need not be read and hashed on every
+   * verification (owner decision, 9 November 2026: checked when stored is a
+   * checked version). A version is reported `verified` when that size is its
+   * descriptor's, `mismatch` otherwise, exactly as if its bytes had been
+   * supplied. Bytes in `bytes`, or on an anchoring sat, take precedence and
+   * are always hashed.
+   */
+  checked?: (digest: string) => number | undefined;
   /** Verify this exact checkpoint instead of the head (P3.2). */
   checkpoint?: string;
   /** Other copies of the asset log, compared with the supplied one (VH-Log "Comparing Copies"). */
@@ -409,7 +421,7 @@ function lookup(bytes: VerifyOriginalOptions["bytes"], digest: string): Uint8Arr
  * inscribed on the anchoring sat is read from there, already checked against its descriptor;
  * earlier ones need `bytes` (P9.17, P9.18; originals-spec #53).
  */
-function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOptions["bytes"], onSat: ReadonlyMap<string, Uint8Array>): Promise<ResourceVersion[]> {
+function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOptions["bytes"], onSat: ReadonlyMap<string, Uint8Array>, checked?: VerifyOriginalOptions["checked"]): Promise<ResourceVersion[]> {
   // Every version's bytes are looked up and read in one synchronous pass, in version order, as
   // when each was hashed in turn: nothing is awaited until all of them are read, and
   // `resourceDigestAsync` reads (or copies) its input when called. A `bytes` callback, or a view
@@ -419,13 +431,15 @@ function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOptions[
   // NATIVE_DIGEST_BUDGET bytes of copies, a version is hashed with noble in the pass instead, as
   // before: the same digest, read at the same moment, without another copy.
   let budget = NATIVE_DIGEST_BUDGET;
-  const pending: Array<{ version: Omit<ResourceVersion, "bytes">; check: "missing" | "mismatch" | Promise<string> }> = [];
+  const pending: Array<{ version: Omit<ResourceVersion, "bytes">; check: "verified" | "missing" | "mismatch" | Promise<string> }> = [];
   for (const v of prefix) {
     const state = v.entry.state as unknown as EntryState;
     if (state.transitions.length === 0) continue;
     const d = state.asset.resource;
     const inscribed = onSat.get(d.digest);
     const supplied = inscribed ?? lookup(bytes, d.digest);
+    // Held bytes checked when stored: matching their digest, so they match the descriptor exactly when the size does (P4.3).
+    const held = supplied === undefined ? checked?.(d.digest) : undefined;
     // Read now through the array's internal slots (`bytesView`, no copy): the size is checked before
     // anything is copied, and the verdict is for exactly the bytes hashed. Not a Uint8Array of any
     // realm: handled as before.
@@ -434,7 +448,7 @@ function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOptions[
     const native = view !== undefined && size === d.size && size >= NATIVE_SHA256_MIN_BYTES && 2 * size <= budget;
     if (native) budget -= 2 * size;
     const check =
-      supplied === undefined ? "missing"
+      supplied === undefined ? (held === undefined ? "missing" : held === d.size ? "verified" : "mismatch")
       : view === undefined ? (supplied.length !== d.size ? "mismatch" : Promise.resolve(resourceDigest(supplied)))
       : size !== d.size ? "mismatch"
       // The same SHA-256 as resourceDigest, natively where the platform has it (sha256Async copies first).
@@ -446,10 +460,10 @@ function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOptions[
   return settleVersions(pending);
 }
 
-async function settleVersions(pending: Array<{ version: Omit<ResourceVersion, "bytes">; check: "missing" | "mismatch" | Promise<string> }>): Promise<ResourceVersion[]> {
+async function settleVersions(pending: Array<{ version: Omit<ResourceVersion, "bytes">; check: "verified" | "missing" | "mismatch" | Promise<string> }>): Promise<ResourceVersion[]> {
   const out: ResourceVersion[] = [];
   for (const { version: v, check } of pending) {
-    const result = check === "missing" || check === "mismatch" ? check : (await check) === v.digest ? "verified" : "mismatch";
+    const result = typeof check === "string" ? check : (await check) === v.digest ? "verified" : "mismatch";
     out.push({ version: v.version, digest: v.digest, mediaType: v.mediaType, size: v.size, versionId: v.versionId, bytes: result, onBitcoin: v.onBitcoin });
   }
   return out;
@@ -650,7 +664,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   // the aliases, where the report was already awaited. What was read between the two (the retained
   // anchor and version, the identity evidence, the aliases and `now`) is still read before anything
   // is awaited: a `bytes` callback cannot change it, as before.
-  const checking = resourceVersions(prefix, options.bytes, onBitcoin ? assembly!.bytes : new Map());
+  const checking = resourceVersions(prefix, options.bytes, onBitcoin ? assembly!.bytes : new Map(), options.checked);
   const state = selected ? (selected.entry.state as unknown as EntryState) : undefined;
 
   const bindingFailed = failure && (failure.category === "author-binding" || failure.category === "unauthorized-key" || failure.category === "outside-grant");

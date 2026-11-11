@@ -102,6 +102,36 @@ describe("verifyOriginal reports the same with native hashing on or off", () => 
   });
 });
 
+describe("verifyOriginal with bytes checked when stored (`checked`)", () => {
+  test("C12-02, C12-10: the same report as supplying the bytes; supplied bytes take precedence and are hashed", async () => {
+    const key = seeded(32);
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
+    const at = clock();
+    const author = alice.ref("orig");
+    const sign = alice.signer(key, "orig");
+    const v1 = noise(40_000, 21), v2 = noise(40_000, 22);
+    const d = (b: Uint8Array): ResourceDescriptor => ({ mediaType: "image/png", size: b.length, digest: resourceDigest(b) });
+    const genesis = await createOriginal({ versionTime: at(), name: "held", resource: d(v1), author, sign });
+    const second = await updateOriginal(genesis, { versionTime: at(), resource: d(v2), author, sign });
+    const base = { log: [genesis, second], authors: [alice.evidence()], now: NOW };
+    const sizes = new Map([[d(v1).digest, v1.length], [d(v2).digest, v2.length]]);
+
+    const supplied = await verifyOriginal({ ...base, bytes: { [d(v1).digest]: v1, [d(v2).digest]: v2 } });
+    const held = await verifyOriginal({ ...base, checked: (digest) => sizes.get(digest) });
+    expect(held).toEqual(supplied);
+    expect(held.resources.versions.map((v) => v.bytes)).toEqual(["verified", "verified"]);
+
+    // Held at another size than the descriptor's: a mismatch, as supplied bytes of that size would be.
+    const wrongSize = await verifyOriginal({ ...base, checked: (digest) => (digest === d(v1).digest ? v1.length + 1 : undefined) });
+    expect(wrongSize.resources.versions.map((v) => v.bytes)).toEqual(["mismatch", "missing"]);
+    expect(wrongSize.reasons).toContain("resources-digest-failure");
+
+    // Supplied bytes are used, and hashed, even when `checked` vouches for the digest.
+    const swapped = await verifyOriginal({ ...base, bytes: { [d(v1).digest]: noise(40_000, 99) }, checked: (digest) => sizes.get(digest) });
+    expect(swapped.resources.versions.map((v) => v.bytes)).toEqual(["mismatch", "verified"]);
+  });
+});
+
 describe("supplied bytes are not copied before their size is checked", () => {
   test("an input larger than its descriptor is a mismatch, reported without copying it (C12-10)", async () => {
     const key = seeded(43);

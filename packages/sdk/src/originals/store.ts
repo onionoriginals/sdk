@@ -21,6 +21,7 @@
  */
 import { OriginalsError } from "@originals/vh";
 import { parseJson } from "@originals/vh/json";
+import { resourceDigestAsync } from "@originals/vh/originals";
 import type { AuthorDidEvidence, RetainedAnchor } from "@originals/vh/originals";
 
 export interface StoredOriginal {
@@ -66,6 +67,27 @@ export interface OriginalsStore {
   commit(did: string, update: CommitUpdate): Promise<void>;
   putResource(digest: string, bytes: Uint8Array): Promise<void>;
   getResource(digest: string): Promise<Uint8Array | undefined>;
+  /**
+   * Optional. The size of the bytes this store holds for `digest` when it
+   * checked them against the digest (P4.3) and they cannot have changed
+   * since; undefined otherwise, including for bytes that did not match. The
+   * SDK then counts the version verified without reading and hashing its
+   * bytes again (owner decision, 9 November 2026: checked when stored).
+   *
+   * Implement it only if the held bytes cannot change outside the store: a
+   * store whose bytes something else can write (a file another process can
+   * rewrite or map writable, a shared buffer) must not, since no cheap check
+   * proves bytes unchanged. `MemoryStore` implements it: it keeps private
+   * copies, checked when put (a subclass that overrides `getResource`, or
+   * code that patches it, gets no answers unless it overrides
+   * `checkedResource` too). The answer must cover exactly the bytes this
+   * store's `getResource` serves: a wrapper that serves other bytes than the
+   * store it wraps must not forward that store's `checkedResource`.
+   * `FileStore` does not: file metadata does not
+   * show every change (a shared writable mapping changes bytes without
+   * touching size or times), so its bytes are read and hashed every time.
+   */
+  checkedResource?(digest: string): Promise<number | undefined>;
   /** Keep author DID evidence that arrived with imported Originals. Verified on every read. */
   putAuthorEvidence(evidence: AuthorDidEvidence): Promise<void>;
   getAuthorEvidence(did: string): Promise<AuthorDidEvidence | undefined>;
@@ -124,7 +146,8 @@ export function staleHead(did: string, expected: string | null, actual: string |
 /** An in-memory store. Commits are atomic because they are synchronous. */
 export class MemoryStore implements OriginalsStore {
   private readonly originals = new Map<string, StoredOriginal>();
-  private readonly resources = new Map<string, Uint8Array>();
+  /** Runtime-private (not only to TypeScript): nothing outside the store reaches the held bytes. */
+  readonly #resources = new Map<string, Uint8Array>();
   private readonly authors = new Map<string, AuthorDidEvidence>();
   private readonly retained = new Map<string, string>();
   private readonly anchors = new Map<string, RetainedAnchor>();
@@ -143,14 +166,37 @@ export class MemoryStore implements OriginalsStore {
     return Promise.resolve();
   }
 
-  putResource(digest: string, bytes: Uint8Array): Promise<void> {
-    if (!this.resources.has(digest)) this.resources.set(digest, bytes.slice());
-    return Promise.resolve();
+  /**
+   * Digests whose held bytes matched them when put, with their size. The
+   * bytes are private copies (`new Uint8Array`, a real copy even of a Node
+   * Buffer, whose own `slice` would share the caller's memory), held in a
+   * runtime-private field (`#resources`, which JavaScript cannot reach the way
+   * it can a TypeScript `private`) and only ever handed out as copies, so
+   * nothing outside the store can change them.
+   */
+  readonly #checked = new Map<string, number>();
+
+  async putResource(digest: string, bytes: Uint8Array): Promise<void> {
+    if (this.#resources.has(digest)) return;
+    const copy = new Uint8Array(bytes);
+    this.#resources.set(digest, copy);
+    if ((await resourceDigestAsync(copy)) === digest && this.#resources.get(digest) === copy) this.#checked.set(digest, copy.length);
+  }
+
+  /**
+   * Vouches only for bytes `getResource` serves from this class's own copies.
+   * A subclass that overrides `getResource` serves other bytes, so it gets
+   * nothing here: it must override `checkedResource` itself to opt in, and
+   * then keep the contract above for the bytes it serves.
+   */
+  checkedResource(digest: string): Promise<number | undefined> {
+    if (this.getResource !== memoryStoreGetResource) return Promise.resolve(undefined);
+    return Promise.resolve(this.#checked.get(digest));
   }
 
   getResource(digest: string): Promise<Uint8Array | undefined> {
-    const bytes = this.resources.get(digest);
-    return Promise.resolve(bytes?.slice());
+    const bytes = this.#resources.get(digest);
+    return Promise.resolve(bytes === undefined ? undefined : new Uint8Array(bytes));
   }
 
   putAuthorEvidence(evidence: AuthorDidEvidence): Promise<void> {
@@ -223,10 +269,19 @@ export class MemoryStore implements OriginalsStore {
 
   /** Forget stored bytes, as a store that lost them would. */
   deleteResource(digest: string): void {
-    this.resources.delete(digest);
+    this.#resources.delete(digest);
+    this.#checked.delete(digest);
   }
 
   list(): Promise<string[]> {
     return Promise.resolve([...this.originals.keys()]);
   }
 }
+
+/**
+ * `MemoryStore`'s own `getResource`, captured when this module loads: a later
+ * patch of `MemoryStore.prototype.getResource` cannot make the comparison in
+ * `checkedResource` pass for a reader that serves other bytes.
+ */
+// eslint-disable-next-line @typescript-eslint/unbound-method -- compared by identity, never called
+const memoryStoreGetResource = MemoryStore.prototype.getResource;

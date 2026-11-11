@@ -946,13 +946,30 @@ export class OriginalsSDK {
     return candidate;
   }
 
-  private async storedBytes(log: string, extra?: ReadonlyMap<string, Uint8Array>): Promise<Record<string, Uint8Array>> {
-    const out: Record<string, Uint8Array> = {};
+  /**
+   * The resource bytes to verify a log with: `extra` (new bytes, always
+   * hashed), then what the store holds. Bytes the store checked when it
+   * stored them are passed as `checked`, by size, and not read (P4.3; owner
+   * decision, 9 November 2026); the rest are read and hashed.
+   */
+  private async storedBytes(log: string, extra?: ReadonlyMap<string, Uint8Array>): Promise<{ bytes: Record<string, Uint8Array>; checked: Map<string, number> }> {
+    const bytes: Record<string, Uint8Array> = {};
+    const checked = new Map<string, number>();
     for (const digest of digestsOf(log)) {
-      const bytes = extra?.get(digest) ?? (await this.store.getResource(digest));
-      if (bytes) out[digest] = bytes;
+      const given = extra?.get(digest);
+      if (given) {
+        bytes[digest] = given;
+        continue;
+      }
+      const size = this.store.checkedResource ? await this.store.checkedResource(digest) : undefined;
+      if (size !== undefined) {
+        checked.set(digest, size);
+        continue;
+      }
+      const held = await this.store.getResource(digest);
+      if (held) bytes[digest] = held;
     }
-    return out;
+    return { bytes, checked };
   }
 
   /** What this store retains about a log's Original and author DIDs: retained versionIds and known branches (P7.8). */
@@ -1004,7 +1021,7 @@ export class OriginalsSDK {
 
   private async verify(log: string, checkpoint?: string, extra?: ReadonlyMap<string, Uint8Array>, bitcoin?: SatEvidence[]): Promise<OriginalsReport> {
     const aliases = await this.aliasEvidence(log);
-    const bytes = await this.storedBytes(log, extra);
+    const { bytes, checked } = await this.storedBytes(log, extra);
     const comparisons = await this.comparisons(log);
     const run = (authors: AuthorDidEvidence[]) =>
       verifyOriginal({
@@ -1013,6 +1030,7 @@ export class OriginalsSDK {
         aliases,
         authors,
         bytes,
+        ...(checked.size > 0 ? { checked: (digest: string) => checked.get(digest) } : {}),
         now: this.clock(),
         ...comparisons,
         ...(checkpoint ? { checkpoint } : {}),
