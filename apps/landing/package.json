@@ -1,6 +1,6 @@
 {
   "name": "@originals/landing",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -30,7 +30,7 @@
     "@originals/auth": "workspace:*",
     "@originals/host": "workspace:*",
     "@originals/sdk": "workspace:*",
-    "@originals/vh": "^0.4.0",
+    "@originals/vh": "^0.5.0",
     "@scure/base": "^2.2.0",
     "@scure/btc-signer": "^2.4.1",
     "@turnkey/api-key-stamper": "^0.6.7",

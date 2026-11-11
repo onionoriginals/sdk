@@ -1,5 +1,22 @@
 # @originals/landing
 
+## 0.5.2
+
+### Patch Changes
+
+- Updated dependencies [b5a95d0]
+- Updated dependencies [8295681]
+- Updated dependencies [f5de8cd]
+- Updated dependencies [b6f626e]
+- Updated dependencies [900ed2a]
+- Updated dependencies [ebc6308]
+- Updated dependencies [e5a3e3d]
+- Updated dependencies [0f4790b]
+- Updated dependencies [a0153f0]
+  - @originals/host@0.4.0
+  - @originals/vh@0.5.0
+  - @originals/sdk@6.2.0
+
 ## 0.5.1
 
 ### Patch Changes
