@@ -286,7 +286,8 @@ function findTextBlock(file: Uint8Array): { start: number; comment: CommentSynta
   const lines: Line[] = [last];
   let cursor = last;
   const previous = (): Line | null => {
-    if (cursor.start === 0) return null;
+    // A block's lines lie within the last 16 MiB: no need to read further back (P14.14).
+    if (cursor.start === 0 || file.length - cursor.start > CARRIER_MAX_BYTES) return null;
     const line = lineBefore(cursor.start - 1, true);
     if (line) cursor = line;
     return line;

@@ -330,6 +330,12 @@ describe("P14.16: text blocks", () => {
     expect(unprefixed.status === "found" && unprefixed.log.status === "invalid" && unprefixed.log.failure.code).toBe("CARRIED_LINE_PREFIX");
   });
 
+  test("a block reaching back past 16 MiB is no carrier, and is found without reading the whole file (P14.14)", async () => {
+    const { line } = await plain();
+    const filler = `${"x".repeat(1023)}\n`.repeat(16 * 1024 + 1);
+    expect(locateCarrier(enc(`a\n=====BEGIN ORIGINAL=====\n${filler}${line}\n=====END ORIGINAL=====\n`)).status).toBe("none");
+  });
+
   test("PR59 carried: \"Text block at the very start of the file, with no line feed before it\": no carrier", async () => {
     const { line } = await plain();
     expect(locateCarrier(enc(`=====BEGIN ORIGINAL=====\n${line}\n=====END ORIGINAL=====\n`)).status).toBe("none");
