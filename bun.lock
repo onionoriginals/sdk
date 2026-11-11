@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "@originals/monorepo",
@@ -8,8 +9,8 @@
         "@commitlint/cli": "^21.2.2",
         "@commitlint/config-conventional": "^21.2.4",
         "railway": "3.11.0",
-        "turbo": "^2.3.3"
-      }
+        "turbo": "^2.3.3",
+      },
     },
     "apps/landing": {
       "name": "@originals/landing",
@@ -32,10 +33,10 @@
         "didwebvh-ts": "^3.0.0",
         "qrcode-generator": "2.0.4",
         "react": "^19.3.1",
-        "react-dom": "^19.3.1"
+        "react-dom": "^19.3.1",
       },
       "devDependencies": {
-        "@turnkey/sdk-server": "^8.8.0",
+        "@turnkey/sdk-server": "^8.9.0",
         "@turnkey/sdk-types": "1.8.0",
         "@types/react": "^19.3.0",
         "@types/react-dom": "^19.3.0",
@@ -46,8 +47,8 @@
         "path-browserify": "^1.0.1",
         "playwright-core": "^1.49.0",
         "typescript": "^7.0.2",
-        "vite": "^8.1.6"
-      }
+        "vite": "^8.1.6",
+      },
     },
     "packages/auth": {
       "name": "@originals/auth",
@@ -57,8 +58,8 @@
         "@noble/hashes": "^2.0.1",
         "@originals/sdk": "^6.1.0",
         "@turnkey/crypto": "^2.10.0",
-        "@turnkey/sdk-server": "^8.8.0",
-        "jsonwebtoken": "^9.0.2"
+        "@turnkey/sdk-server": "^8.9.0",
+        "jsonwebtoken": "^9.0.2",
       },
       "devDependencies": {
         "@eslint/js": "^9.0.0",
@@ -70,14 +71,14 @@
         "bun-types": "^1.3.1",
         "eslint": "^10.14.0",
         "typescript": "^6.0.3",
-        "typescript-eslint": "^8.62.0"
+        "typescript-eslint": "^8.62.0",
       },
       "peerDependencies": {
-        "express": ">=4.0.0"
+        "express": ">=4.0.0",
       },
       "optionalPeers": [
-        "express"
-      ]
+        "express",
+      ],
     },
     "packages/host": {
       "name": "@originals/host",
@@ -86,7 +87,7 @@
         "@noble/hashes": "^2.0.1",
         "@originals/sdk": "^6.0.0",
         "@originals/vh": "^0.4.0",
-        "@scure/base": "^2.2.0"
+        "@scure/base": "^2.2.0",
       },
       "devDependencies": {
         "@eslint/js": "^9.0.0",
@@ -98,14 +99,14 @@
         "eslint": "^10.14.0",
         "prettier": "^3.9.10",
         "typescript": "^6.0.3",
-        "typescript-eslint": "^8.0.0"
-      }
+        "typescript-eslint": "^8.0.0",
+      },
     },
     "packages/sdk": {
       "name": "@originals/sdk",
       "version": "6.1.0",
       "bin": {
-        "originals": "./dist/originals/cli.js"
+        "originals": "./dist/originals/cli.js",
       },
       "dependencies": {
         "@noble/curves": "^2.2.0",
@@ -122,7 +123,7 @@
         "fflate": "^0.8.3",
         "jsonld": "^9.0.0",
         "micro-ordinals": "^0.4.0",
-        "uuid": "^14.0.3"
+        "uuid": "^14.0.3",
       },
       "devDependencies": {
         "@eslint/js": "^9.0.0",
@@ -134,8 +135,8 @@
         "eslint": "^10.14.0",
         "prettier": "^3.9.10",
         "typescript": "^6.0.3",
-        "typescript-eslint": "^8.0.0"
-      }
+        "typescript-eslint": "^8.0.0",
+      },
     },
     "packages/vh": {
       "name": "@originals/vh",
@@ -143,7 +144,7 @@
       "dependencies": {
         "@noble/curves": "^2.2.0",
         "@noble/hashes": "^2.0.1",
-        "@scure/base": "^2.2.0"
+        "@scure/base": "^2.2.0",
       },
       "devDependencies": {
         "@eslint/js": "^9.0.0",
@@ -155,9 +156,9 @@
         "eslint": "^10.14.0",
         "prettier": "^3.9.10",
         "typescript": "^6.0.3",
-        "typescript-eslint": "^8.0.0"
-      }
-    }
+        "typescript-eslint": "^8.0.0",
+      },
+    },
   },
   "overrides": {
     "brace-expansion": "^5.0.8",
@@ -481,7 +482,7 @@
 
     "@turnkey/encoding": ["@turnkey/encoding@0.6.0", "", { "dependencies": { "bs58": "6.0.0", "bs58check": "4.0.0" } }, "sha512-IC8qXvy36+iGAeiaVIuJvB35uU2Ld/RAWI/DRTKS+ttBej0GXhOn48Ouu5mlca4jt8ZEuwXmDVv74A8uBQclsA=="],
 
-    "@turnkey/http": ["@turnkey/http@6.7.0", "", { "dependencies": { "@turnkey/api-key-stamper": "0.6.18", "@turnkey/encoding": "0.6.0", "@turnkey/webauthn-stamper": "0.6.0", "cross-fetch": "^3.1.5" } }, "sha512-EfxzJWmoWnKhn7WF/t5tf5YQgUVHk2EiD5Tievj3uLx/62CYEFxSiD0fn5C0/kvOviA6UfaScYl7NFxOxtAxNQ=="],
+    "@turnkey/http": ["@turnkey/http@6.8.0", "", { "dependencies": { "@turnkey/api-key-stamper": "0.6.19", "@turnkey/encoding": "0.6.0", "@turnkey/webauthn-stamper": "0.6.0", "cross-fetch": "^3.1.5" } }, "sha512-2m0frZ/Eo3xNdguQ5/DZVL0tMvqYgurQTV9pH0PmF1jFsaXnPwUoMSwwa9nEI4fT5Wekly+Q5nIEjKQrISw9hA=="],
 
     "@turnkey/iframe-stamper": ["@turnkey/iframe-stamper@2.11.1", "", {}, "sha512-S9BoAIyVBH1BurTKsX/YzjVrEhW6Zn0A/9WPfhhC9YA/9RDELP4wNL3jUcijJWgT9OO6BRbRDUs81FrC0ruLww=="],
 
@@ -489,11 +490,11 @@
 
     "@turnkey/sdk-browser": ["@turnkey/sdk-browser@8.4.0", "", { "dependencies": { "@turnkey/api-key-stamper": "0.6.14", "@turnkey/crypto": "2.12.1", "@turnkey/encoding": "0.6.0", "@turnkey/http": "6.4.0", "@turnkey/iframe-stamper": "2.11.1", "@turnkey/indexed-db-stamper": "1.3.8", "@turnkey/sdk-types": "1.7.0", "@turnkey/wallet-stamper": "1.1.26", "@turnkey/webauthn-stamper": "0.6.0", "buffer": "^6.0.3", "cross-fetch": "^3.1.5", "hpke-js": "^1.6.5" } }, "sha512-C9JF6StsuaVywjqpHZMJeUtcOewx+K0CJzUXkQkLw7OTrt1+hfwJj8HJ0+2AeBteRlZQkD4G9zSRTuVabwbdYw=="],
 
-    "@turnkey/sdk-server": ["@turnkey/sdk-server@8.8.0", "", { "dependencies": { "@turnkey/api-key-stamper": "0.6.18", "@turnkey/crypto": "2.13.3", "@turnkey/http": "6.7.0", "@turnkey/sdk-types": "1.11.0", "@turnkey/wallet-stamper": "1.1.30", "buffer": "^6.0.3", "cross-fetch": "^3.1.5" } }, "sha512-QkiAn0/rGlBaKlovRSpXhux4zQ5dQVJNY7Tyoi2QSIRgyrikF2kJNw6GPlKmAlsFKeVu0jOPHpdNfGss07ph4A=="],
+    "@turnkey/sdk-server": ["@turnkey/sdk-server@8.9.0", "", { "dependencies": { "@turnkey/api-key-stamper": "0.6.19", "@turnkey/crypto": "2.13.4", "@turnkey/http": "6.8.0", "@turnkey/sdk-types": "1.12.0", "@turnkey/wallet-stamper": "1.1.31", "buffer": "^6.0.3", "cross-fetch": "^3.1.5" } }, "sha512-MXbw8idULPnKMzwm6+ofOfbE0zVG568nL+MJUwcNmQGGliOwIOvviIaPM6laNyvsNB1Z2eejPGE4/79BuQOVLQ=="],
 
     "@turnkey/sdk-types": ["@turnkey/sdk-types@1.8.0", "", {}, "sha512-ts0hEvoyjj32f9Wt1irQj273f4y3EU0U4nQTF9qn+kP81ZZJCfujsSDCTBAVxl7TQ3JnF6xBKduU13GhwWRmDg=="],
 
-    "@turnkey/wallet-stamper": ["@turnkey/wallet-stamper@1.1.30", "", { "dependencies": { "@turnkey/crypto": "2.13.3", "@turnkey/encoding": "0.6.0" }, "optionalDependencies": { "viem": "^2.21.35" } }, "sha512-3+0V0iqmgHmDai/2wg5yJh5T0NgX7HqbWobZyUDQDFV2ZxhZS7XQLDnzi+SxUctQjSZwHKiuRkFXL2RR9REkhg=="],
+    "@turnkey/wallet-stamper": ["@turnkey/wallet-stamper@1.1.31", "", { "dependencies": { "@turnkey/crypto": "2.13.4", "@turnkey/encoding": "0.6.0" }, "optionalDependencies": { "viem": "^2.21.35" } }, "sha512-NrAMYulSGVNdhBiRNMLWFzHiPCwjzbPxGv1Pyo+rc5NUpV6LufgqgOQb1PlIB5iIs5YwJenmFNPHhMy6rP/Kkw=="],
 
     "@turnkey/webauthn-stamper": ["@turnkey/webauthn-stamper@0.6.0", "", { "dependencies": { "sha256-uint8array": "^0.10.7" } }, "sha512-jdN17QEnn7RBykEOhtKIialWmDjnDAH8DzbyITwn8jsKcwT1TBNYge89hTUTjbdsDLBAqQw8cHujPdy0RaAqvw=="],
 
@@ -1069,8 +1070,6 @@
 
     "@turnkey/crypto/@turnkey/sdk-types": ["@turnkey/sdk-types@1.12.0", "", {}, "sha512-uITUqc/IdSn2ixBQOu6P93hJYttBAwQ0YdNj0QTXeCbXzTe5gxMRGnxmGdYDNT+IXZTq1LmVJ8QXnvQBmEGeEQ=="],
 
-    "@turnkey/http/@turnkey/api-key-stamper": ["@turnkey/api-key-stamper@0.6.18", "", { "dependencies": { "@noble/curves": "^1.3.0", "@turnkey/crypto": "2.13.3", "@turnkey/encoding": "0.6.0", "sha256-uint8array": "^0.10.7" } }, "sha512-qKfufzArRpuBtO+iLy90+gjYmsXr86kK2dVsY3YhXUU6qeO3LJVMyc6HIIq1ZVTCsH8fFpXRfi8btHXf9jxhbA=="],
-
     "@turnkey/indexed-db-stamper/@turnkey/sdk-types": ["@turnkey/sdk-types@1.7.0", "", {}, "sha512-QJjXMZIXsQKuUoQLa98t9sOjimOBd9uNsKJNZXzE+udaCB/l9e0h6BspqDS6oBHmeDqKM8m8Kius7uGZn3sAzw=="],
 
     "@turnkey/sdk-browser/@turnkey/api-key-stamper": ["@turnkey/api-key-stamper@0.6.14", "", { "dependencies": { "@noble/curves": "^1.3.0", "@turnkey/crypto": "2.12.1", "@turnkey/encoding": "0.6.0", "sha256-uint8array": "^0.10.7" } }, "sha512-6Nydou9nYG/4I7QUB3oDm3c0Sm43cuOGX3KbceT64kHGVztWnmF0zrKPHQKx9UraTsaaaowoFWLv5H5OZB89lQ=="],
@@ -1083,13 +1082,7 @@
 
     "@turnkey/sdk-browser/@turnkey/wallet-stamper": ["@turnkey/wallet-stamper@1.1.26", "", { "dependencies": { "@turnkey/crypto": "2.12.1", "@turnkey/encoding": "0.6.0" }, "optionalDependencies": { "viem": "^2.21.35" } }, "sha512-z7KFaDc3CEB+TteUyh/1ZYRohDM88qUU8TeYyqGLNYib4t0aQZ9sAPQHJAXo6KzxFysm8yqfj26Tlo/cGS7APA=="],
 
-    "@turnkey/sdk-server/@turnkey/api-key-stamper": ["@turnkey/api-key-stamper@0.6.18", "", { "dependencies": { "@noble/curves": "^1.3.0", "@turnkey/crypto": "2.13.3", "@turnkey/encoding": "0.6.0", "sha256-uint8array": "^0.10.7" } }, "sha512-qKfufzArRpuBtO+iLy90+gjYmsXr86kK2dVsY3YhXUU6qeO3LJVMyc6HIIq1ZVTCsH8fFpXRfi8btHXf9jxhbA=="],
-
-    "@turnkey/sdk-server/@turnkey/crypto": ["@turnkey/crypto@2.13.3", "", { "dependencies": { "@noble/ciphers": "1.3.0", "@noble/curves": "1.9.0", "@noble/hashes": "1.8.0", "@peculiar/x509": "1.12.3", "@turnkey/encoding": "0.6.0", "@turnkey/sdk-types": "1.11.0", "borsh": "2.0.0", "cbor-js": "0.1.0" } }, "sha512-hFiV+xxPGNw6wMs1jO0xROVv90dAZjzZqNUlmxPhLc+57Ro6IAcoSraIfiVOpdDdyk8tKJ7QduwZcV2QjVz/Dw=="],
-
-    "@turnkey/sdk-server/@turnkey/sdk-types": ["@turnkey/sdk-types@1.11.0", "", {}, "sha512-gTzMBMfaEdyqAYF4CO3byJ+QiG5BPilmCgWXJVGb8LwIWUaavAkxo6xyoXVbjNi//TJMD0K97z02Qfx6nP8whw=="],
-
-    "@turnkey/wallet-stamper/@turnkey/crypto": ["@turnkey/crypto@2.13.3", "", { "dependencies": { "@noble/ciphers": "1.3.0", "@noble/curves": "1.9.0", "@noble/hashes": "1.8.0", "@peculiar/x509": "1.12.3", "@turnkey/encoding": "0.6.0", "@turnkey/sdk-types": "1.11.0", "borsh": "2.0.0", "cbor-js": "0.1.0" } }, "sha512-hFiV+xxPGNw6wMs1jO0xROVv90dAZjzZqNUlmxPhLc+57Ro6IAcoSraIfiVOpdDdyk8tKJ7QduwZcV2QjVz/Dw=="],
+    "@turnkey/sdk-server/@turnkey/sdk-types": ["@turnkey/sdk-types@1.12.0", "", {}, "sha512-uITUqc/IdSn2ixBQOu6P93hJYttBAwQ0YdNj0QTXeCbXzTe5gxMRGnxmGdYDNT+IXZTq1LmVJ8QXnvQBmEGeEQ=="],
 
     "@types/body-parser/@types/node": ["@types/node@26.1.0", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-O0A1G3xPGy4w7AgQdAQYUlQ+BKk2Oovw8eRpofyp5KdBZULnbe+WqaOVNrm705SHphCiG4XHsACrSmPu1f+Kgw=="],
 
@@ -1151,27 +1144,11 @@
 
     "@turnkey/api-key-stamper/@noble/curves/@noble/hashes": ["@noble/hashes@1.8.0", "", {}, "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="],
 
-    "@turnkey/http/@turnkey/api-key-stamper/@noble/curves": ["@noble/curves@1.9.1", "", { "dependencies": { "@noble/hashes": "1.8.0" } }, "sha512-k11yZxZg+t+gWvBbIswW0yoJlu8cHOC7dhunwOzoWH/mXGBiYyR4YY6hAEK/3EUs4UpB8la1RfdRpeGsFHkWsA=="],
-
-    "@turnkey/http/@turnkey/api-key-stamper/@turnkey/crypto": ["@turnkey/crypto@2.13.3", "", { "dependencies": { "@noble/ciphers": "1.3.0", "@noble/curves": "1.9.0", "@noble/hashes": "1.8.0", "@peculiar/x509": "1.12.3", "@turnkey/encoding": "0.6.0", "@turnkey/sdk-types": "1.11.0", "borsh": "2.0.0", "cbor-js": "0.1.0" } }, "sha512-hFiV+xxPGNw6wMs1jO0xROVv90dAZjzZqNUlmxPhLc+57Ro6IAcoSraIfiVOpdDdyk8tKJ7QduwZcV2QjVz/Dw=="],
-
     "@turnkey/sdk-browser/@turnkey/api-key-stamper/@noble/curves": ["@noble/curves@1.9.1", "", { "dependencies": { "@noble/hashes": "1.8.0" } }, "sha512-k11yZxZg+t+gWvBbIswW0yoJlu8cHOC7dhunwOzoWH/mXGBiYyR4YY6hAEK/3EUs4UpB8la1RfdRpeGsFHkWsA=="],
 
     "@turnkey/sdk-browser/@turnkey/crypto/@noble/curves": ["@noble/curves@1.9.0", "", { "dependencies": { "@noble/hashes": "1.8.0" } }, "sha512-7YDlXiNMdO1YZeH6t/kvopHHbIZzlxrCV9WLqCY6QhcXOoXiNCMDqJIglZ9Yjx5+w7Dz30TITFrlTjnRg7sKEg=="],
 
     "@turnkey/sdk-browser/@turnkey/crypto/@noble/hashes": ["@noble/hashes@1.8.0", "", {}, "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="],
-
-    "@turnkey/sdk-server/@turnkey/api-key-stamper/@noble/curves": ["@noble/curves@1.9.1", "", { "dependencies": { "@noble/hashes": "1.8.0" } }, "sha512-k11yZxZg+t+gWvBbIswW0yoJlu8cHOC7dhunwOzoWH/mXGBiYyR4YY6hAEK/3EUs4UpB8la1RfdRpeGsFHkWsA=="],
-
-    "@turnkey/sdk-server/@turnkey/crypto/@noble/curves": ["@noble/curves@1.9.0", "", { "dependencies": { "@noble/hashes": "1.8.0" } }, "sha512-7YDlXiNMdO1YZeH6t/kvopHHbIZzlxrCV9WLqCY6QhcXOoXiNCMDqJIglZ9Yjx5+w7Dz30TITFrlTjnRg7sKEg=="],
-
-    "@turnkey/sdk-server/@turnkey/crypto/@noble/hashes": ["@noble/hashes@1.8.0", "", {}, "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="],
-
-    "@turnkey/wallet-stamper/@turnkey/crypto/@noble/curves": ["@noble/curves@1.9.0", "", { "dependencies": { "@noble/hashes": "1.8.0" } }, "sha512-7YDlXiNMdO1YZeH6t/kvopHHbIZzlxrCV9WLqCY6QhcXOoXiNCMDqJIglZ9Yjx5+w7Dz30TITFrlTjnRg7sKEg=="],
-
-    "@turnkey/wallet-stamper/@turnkey/crypto/@noble/hashes": ["@noble/hashes@1.8.0", "", {}, "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="],
-
-    "@turnkey/wallet-stamper/@turnkey/crypto/@turnkey/sdk-types": ["@turnkey/sdk-types@1.11.0", "", {}, "sha512-gTzMBMfaEdyqAYF4CO3byJ+QiG5BPilmCgWXJVGb8LwIWUaavAkxo6xyoXVbjNi//TJMD0K97z02Qfx6nP8whw=="],
 
     "@types/body-parser/@types/node/undici-types": ["undici-types@8.3.0", "", {}, "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ=="],
 
@@ -1219,17 +1196,7 @@
 
     "wrap-ansi/strip-ansi/ansi-regex": ["ansi-regex@6.3.0", "", {}, "sha512-WpDfL7NO6j7tH88IDBNVdUJxDh9nmCteAVW9dsep846XdwF4naCBK+/tGLX3KJgcpgMRXCFlTM2hKGoK9FsdrQ=="],
 
-    "@turnkey/http/@turnkey/api-key-stamper/@noble/curves/@noble/hashes": ["@noble/hashes@1.8.0", "", {}, "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="],
-
-    "@turnkey/http/@turnkey/api-key-stamper/@turnkey/crypto/@noble/curves": ["@noble/curves@1.9.0", "", { "dependencies": { "@noble/hashes": "1.8.0" } }, "sha512-7YDlXiNMdO1YZeH6t/kvopHHbIZzlxrCV9WLqCY6QhcXOoXiNCMDqJIglZ9Yjx5+w7Dz30TITFrlTjnRg7sKEg=="],
-
-    "@turnkey/http/@turnkey/api-key-stamper/@turnkey/crypto/@noble/hashes": ["@noble/hashes@1.8.0", "", {}, "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="],
-
-    "@turnkey/http/@turnkey/api-key-stamper/@turnkey/crypto/@turnkey/sdk-types": ["@turnkey/sdk-types@1.11.0", "", {}, "sha512-gTzMBMfaEdyqAYF4CO3byJ+QiG5BPilmCgWXJVGb8LwIWUaavAkxo6xyoXVbjNi//TJMD0K97z02Qfx6nP8whw=="],
-
     "@turnkey/sdk-browser/@turnkey/api-key-stamper/@noble/curves/@noble/hashes": ["@noble/hashes@1.8.0", "", {}, "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="],
-
-    "@turnkey/sdk-server/@turnkey/api-key-stamper/@noble/curves/@noble/hashes": ["@noble/hashes@1.8.0", "", {}, "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="],
 
     "typescript-eslint/@typescript-eslint/eslint-plugin/@typescript-eslint/scope-manager/@typescript-eslint/types": ["@typescript-eslint/types@8.63.0", "", {}, "sha512-xyLtl9DUBBFrcJS4x2pIqGLH68/tC2uOa4Z7pUteW09D3bXnnXUom4dyPikzWgB7llmIc1zoeI3aoUdC4rPK/Q=="],
 
