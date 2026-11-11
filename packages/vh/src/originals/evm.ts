@@ -251,6 +251,13 @@ export interface EvmProviderRead {
   records: EvmRecord[] | null;
   /** Records seen above `block` (observed, never accepted; P9.22), for pending labels. */
   observed?: EvmRecord[];
+  /**
+   * Optional: the hashes this provider reports for earlier block numbers the
+   * verifier retained (`RetainedEvmBlock`), so a replaced finalized block below
+   * `block` is found (P9.22). Without it only a retained block at `block`'s
+   * number can be checked.
+   */
+  blockHashes?: Array<{ number: number; hash: string }>;
 }
 
 /** Every provider's read of one token on one chain (P9.21, P9.22). Missing evidence when empty. */
