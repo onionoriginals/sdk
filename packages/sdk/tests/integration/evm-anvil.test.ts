@@ -28,6 +28,7 @@ import {
   derivedTokenAlias,
   resourceDigest,
   updateOriginal,
+  verifyOriginal,
   type EvmAnchorPin,
   type ListedChain,
 } from "@originals/vh/originals";
@@ -233,8 +234,24 @@ describe.skipIf(!enabled)("EVM anchoring on anvil (PR 59, experimental)", () => 
       });
       expect(read.observed!.map((r) => r.index)).toEqual([4]);
     }
-    // TODO(PR59 verifier): once @originals/vh's verifyOriginal accepts `evm` evidence (assembleFromEvm,
-    // being written in parallel), verify `evidence` here and expect an Original anchored on
-    // eip155:31337, attested by its operator, owned by MINTER, current as of `finalized`.
+    // The vh verifier over the evidence the reader produced (P9.21-P9.27): anchored on the devnet,
+    // attested by its operator, owned by MINTER, current as of the finalized block; record 4 observed only.
+    const authors = [alice.evidence()];
+    const report = await verifyOriginal({ authors, evm: { pin, tokens: [evidence] } });
+    expect(report.history.status, JSON.stringify(report.history.failure)).toBe("valid");
+    expect(report.evm?.status).toBe("anchored");
+    expect(report.head).toBe(rename.versionId);
+    expect(report.ordering).toBe("evm-attested-by-operator");
+    expect(report.evm?.owner).toMatchObject({ address: MINTER, chain: "eip155:31337", class: "operator" });
+    expect(report.evm?.stretches[0]?.block).toEqual({ number: finalized.number, hash: finalized.hash });
+    expect(report.evm?.stretches[0]?.observed.map((o) => o.index)).toEqual([4]);
+    expect(report.anchoring).toBeNull();
+    expect(report.current, JSON.stringify(report.reasons)).toBe(true);
+    // P9.22: the reader reports the hash of each block retained before; the same block passes.
+    const again = await readEvmToken({ original: did, anchor }, { pin, providers: [{ url, name: "anvil-a" }], fetch: realFetch, retained: report.retain.evm });
+    expect(again.evidence.reads[0]?.blockHashes).toEqual([{ number: finalized.number, hash: finalized.hash }]);
+    const rereport = await verifyOriginal({ authors, evm: { pin, tokens: [again.evidence], retained: report.retain.evm } });
+    expect(rereport.evm?.warnings).toEqual([]);
+    expect(rereport.current).toBe(true);
   }, 180_000);
 });

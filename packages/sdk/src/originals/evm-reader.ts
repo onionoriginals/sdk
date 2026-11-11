@@ -34,6 +34,7 @@ import {
   type EvmProviderRead,
   type EvmRecord,
   type EvmTokenEvidence,
+  type RetainedEvmBlock,
 } from "@originals/vh/originals";
 import { keccakHex } from "./evm-abi.js";
 import { EvmRevert, EvmRpc, type BlockRef, type EvmFetch } from "./evm-rpc.js";
@@ -67,6 +68,13 @@ export interface ReadEvmTokenOptions {
   rangeBytes?: number;
   /** Also read records above the common block, at `latest`, as `observed` (P9.22). Default false. */
   observe?: boolean;
+  /**
+   * The finalized blocks the verifier relied on before (P9.22). Each provider
+   * reports its current hash at each such number on this chain, as
+   * `blockHashes`, so a replaced block is detected even after finality has
+   * moved past it (spec finding: P9.22 does not require this).
+   */
+  retained?: ReadonlyArray<RetainedEvmBlock>;
 }
 
 /** What to read: the token alias, or the Original and its anchor member, from which it derives (P14.19). */
@@ -235,6 +243,14 @@ export async function readEvmToken(ref: EvmTokenRef, options: ReadEvmTokenOption
             read.observed = await observed(h.rpc, pin.address, parsed.tokenId, read.records.length);
           } catch (error) {
             fail(h.provider, error);
+          }
+        }
+        const earlier = (options.retained ?? []).filter((b) => b.chain === parsed.chain && b.number <= common);
+        if (earlier.length > 0) {
+          read.blockHashes = [];
+          for (const b of earlier) {
+            const got = b.number === common ? block : await h.rpc.block(b.number);
+            if (got) read.blockHashes.push({ number: b.number, hash: got.hash });
           }
         }
         reads.push(read);
