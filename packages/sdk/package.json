@@ -61,7 +61,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit -p .",
     "typecheck:public": "tsc --ignoreConfig --noEmit --strict --skipLibCheck --module NodeNext --target ES2022 tests/types/public-originals.ts",
-    "test": "bun test tests/unit && bun test tests/security && bun test tests/mocks tests/performance tests/index.test.ts tests/sdk.test.ts",
+    "test": "bun test tests/unit && bun test tests/security && bun test tests/mocks tests/performance tests/index.test.ts tests/sdk.test.ts tests/integration",
     "test:coverage": "bun test tests/unit --coverage",
     "check-coverage": "bun run ../../scripts/check-coverage.ts",
     "test:ci": "bash -o pipefail -c 'bun test tests/unit --coverage 2>&1 | bun run ../../scripts/check-coverage.ts'",
