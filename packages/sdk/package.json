@@ -1,6 +1,6 @@
 {
   "name": "@originals/sdk",
-  "version": "6.1.0",
+  "version": "6.2.0",
   "description": "TypeScript SDK for the Originals Protocol - creating, discovering, and transferring digital assets with cryptographically verifiable provenance",
   "type": "module",
   "main": "./dist/index.js",
@@ -90,7 +90,7 @@
     "@noble/ed25519": "^3.2.0",
     "@noble/hashes": "^2.0.1",
     "@noble/secp256k1": "^3.2.0",
-    "@originals/vh": "^0.4.0",
+    "@originals/vh": "^0.5.0",
     "@scure/base": "^2.2.0",
     "@scure/btc-signer": "^2.4.1",
     "b58": "^4.0.3",

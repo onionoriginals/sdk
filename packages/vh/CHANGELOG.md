@@ -1,5 +1,127 @@
 # @originals/vh
 
+## 0.5.0
+
+### Minor Changes
+
+- f5de8cd: Hash resource versions with the platform's native SHA-256.
+
+  - `@originals/vh` adds `sha256Async`, `sha256MultihashAsync`,
+    `resourceDigestAsync`, `bytesView` (a fresh view over exactly a
+    Uint8Array's memory, from any realm, built from its internal slots: no
+    own property such as `length`, `byteLength`, `buffer` or `slice` is
+    consulted, and nothing is copied) and `snapshotBytes` (a private copy of
+    that view). Supplied bytes are size-checked before any copy is made. They use WebCrypto (`crypto.subtle.digest`) for
+    inputs of 16 KiB and up, and noble otherwise or where WebCrypto is missing
+    or refuses the input. The digest is SHA-256 either way, so every value is
+    byte-identical to `resourceDigest`. The bytes are read when it is called:
+    an input WebCrypto hashes is copied first, so changing it afterwards does
+    not change the digest.
+  - `verifyOriginal` checks supplied resource bytes with it (P4.3). Every
+    version's bytes are looked up and read before any digest is awaited, and
+    everything the report reads from its options alongside them is read before
+    it too; the digests are awaited where the aliases already were. Reports are
+    unchanged: the same `verified`, `missing` and `mismatch` per version and the
+    same reasons. Native hashing adds at most 64 MiB of memory per
+    verification, counting each version twice (the private copy and
+    WebCrypto's own); past that, versions are hashed with noble from a view,
+    without a copy, as before.
+  - `@originals/sdk` hashes packaged bytes, imported bytes, pending and
+    refused drafts' bytes and `resourceBytes` with it. Each takes a private copy
+    of the bytes a store or host hands over when it reads them, at every size,
+    hashes that copy and returns, archives or keeps exactly it: a store that
+    reuses its buffer afterwards changes neither the answer nor the bytes.
+    `prepareCreate` and `prepareEdit` hash the caller's new resource
+    synchronously, as before, so they read their input exactly as they did; both
+    keep a private copy of the caller's bytes (a real copy, also of a Node
+    `Buffer`). `@originals/host` checks shared-save resources with it.
+
+  Contract (owner decision, 10 November 2026): a caller must not change the
+  options, inputs or stored buffers it hands to `verifyOriginal` or an SDK
+  call until that call settles. A change made while hashing runs may or may
+  not be seen. Bytes the SDK archives, keeps or returns are always exactly the
+  bytes it hashed.
+
+  With 25 versions of a 680 KB resource, an edit drops from 281 ms to 119 ms
+  and `get` from 135 ms to 59 ms (Bun, `packages/sdk/scripts/bench-originals.ts`).
+
+- ebc6308: Cache signature checks by their exact inputs.
+
+  Verifying a log again (every `get`, `prepareEdit`, `sign`, `load` and
+  `import` in `@originals/sdk`) re-checked every entry's Ed25519 or BIP340
+  signature. `verifyProof` now remembers the result of each check, keyed by the
+  key type, public key, signed bytes and signature. A signature check is a pure
+  function of those, so the cache returns the result checking again would give,
+  and verification results are unchanged. The cache holds at most
+  `SIGNATURE_CACHE_ENTRIES` (8192) results, dropping the oldest first, and only
+  checks over at most `SIGNATURE_CACHE_MAX_DATA` (128) signed bytes with
+  signatures up to 64 bytes and keys up to 33 bytes, so a caller cannot make it
+  hold large messages (every proof's hash data fits). At most a few MiB is
+  held. `clearSignatureCache()` empties it.
+
+  `checkSignature(key, data, signature)` is exported: the raw check
+  `verifyProof` makes, with the cache. It trusts `key` to come from
+  `decodeMultikey`, which validates it; `verifyProof` refuses invalid keys
+  (`MULTIKEY_INVALID`) before it gets that far.
+
+  With 100 versions of a 680 KB resource, an edit drops from 1710 ms to 728 ms
+  and `get` from 720 ms to 373 ms (Bun, `packages/sdk/scripts/bench-originals.ts`).
+
+- e5a3e3d: Stop re-hashing resource bytes the store already checked when it stored them.
+
+  - `verifyOriginal` takes `checked(digest) → size | undefined`: held resource
+    versions whose bytes were checked against their digest when stored (P4.3)
+    and have not changed since. Each such version is reported `verified` when
+    that size matches its descriptor and `mismatch` otherwise, exactly as if
+    its bytes had been supplied. Supplied bytes and bytes from an anchoring sat
+    take precedence and are still hashed.
+  - `OriginalsStore.checkedResource?(digest)` is optional. A store may
+    implement it only if its bytes cannot change outside it.
+    - `MemoryStore` hashes bytes when they are put and reports only those that
+      matched. It keeps real copies (also of a Node `Buffer`, whose `slice`
+      would share the caller's memory) in private fields and hands out only
+      copies, so they never change. A subclass or patch that replaces its
+      `getResource` gets no answers unless it implements `checkedResource`
+      itself; an answer must cover exactly the bytes `getResource` serves, so a
+      wrapper serving other bytes must not forward the wrapped store's.
+    - `FileStore` does not implement it: a file can change with no change to
+      its size, times or inode (a shared writable mapping), so no cheap check
+      proves it unchanged. Its bytes are read and hashed on every verification,
+      with native SHA-256.
+    - The SDK passes checked sizes to verification instead of reading and
+      hashing every stored version on every `get`, `prepareEdit` and `sign`.
+
+  Owner decision, 9 November 2026: bytes checked when stored count as checked.
+  Reports are the same as from a store without the capability. Together with
+  the native SHA-256 and signature-cache changes, an edit at 100 versions of a
+  680 KB resource drops from 1710 ms to 31 ms in Bun, and from 682 ms to 24 ms
+  in headless Chromium.
+
+### Patch Changes
+
+- 900ed2a: Add `@originals/sdk/did`, a browser entry for DIDs that needs no bundler shims.
+
+  - It exports `createDIDOriginal`, `updateDIDOriginal`,
+    `prepareDIDDataForSigning` and `verifyDIDSignature`, plus the identity
+    shape originals.build mints:
+    - `createWebvhIdentity` / `ensureWebvhIdentity`: `#key-0` is the identity
+      and update key, `#key-1` the authorship key. It refuses an authorship key
+      that is the update key (P5.11).
+    - `identityFromLog`: keeps the genesis DID after a move (P5.14).
+    - `createWebvhAlias`, `aliasFromLog`.
+    - `localWebvhSigner`, `userPathSegment`, `aliasPathSegment`.
+  - A Vite app that imports only this entry, `@originals/sdk/originals` and
+    `@originals/vh/*` builds with no shims and runs in Chromium. CI checks this
+    with `verify:browser-bundle`. The root `@originals/sdk` still reaches
+    `fs`, `path` and `fs/promises`.
+  - The did:webvh input rules (domain, paths, update keys) moved to
+    `did/webvh-rules`. The modules they came from re-export them, so nothing
+    changes for callers.
+  - `didwebvh-ts` is imported once, statically.
+  - `@originals/vh/fetch` loads `node:https` and `node:dns/promises` by a name
+    bundlers do not follow. A browser bundle no longer warns that they were
+    externalized; they still load only when `safeFetch`'s Node defaults run.
+
 ## 0.4.0
 
 ### Minor Changes
