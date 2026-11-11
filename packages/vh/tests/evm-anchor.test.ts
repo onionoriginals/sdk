@@ -1,0 +1,707 @@
+/**
+ * EVM anchoring, the verifier (originals-spec PR 59, proposed, EXPERIMENTAL):
+ * reading a token's publication records at the finalized block (P9.21,
+ * P9.22, P9.25, P14.20), the P9.12-P9.17 rules under the readings of P9.20,
+ * ownership (P9.23), anchors and uniqueness (P9.24), trust classes (P9.27),
+ * moves (P9.28, P9.29), copies (P7.14) and did:evm resolution (P3.9, P14.18).
+ *
+ * Section 12 rows are cited as `PR59 evm:` with the start of the row's first
+ * column: the registry (specs/originals-conformance.json) does not have them
+ * yet. Contract-revert rows belong to the contract's own tests.
+ */
+import { describe, expect, test } from "bun:test";
+import type { LogEntry } from "../src/log/index.js";
+import {
+  EVM_CHAINS,
+  createOriginal,
+  derivedTokenAlias,
+  parseBtcoAlias,
+  parseEvmAlias,
+  resolveDidEvm,
+  updateOriginal,
+  verifyOriginal,
+  type EvmAnchorPin,
+  type EvmProviderRead,
+  type EvmRecord,
+  type EvmTokenEvidence,
+  type ListedChain,
+  type OriginalsReport,
+  type RetainedEvmBlock,
+  type SatEvidence,
+  type SatInscription,
+} from "../src/originals/index.js";
+import { VhAuthor, bytes, carrying, clock, describedBytes, photo, seeded } from "./helpers/originals.js";
+
+const PIN: EvmAnchorPin = { address: "0x" + "ab".repeat(20), codeHash: "0x" + "c0".repeat(32) };
+const ROBINHOOD = "eip155:4663"; // operator: attested
+const TEMPO = "eip155:4217"; // consortium: attested
+const ETHEREUM = "eip155:1"; // consensus: proven
+const BASE = "eip155:8453"; // exit-protected: proven
+const A = "0x" + "11".repeat(20); // Alice, minter on the first chain
+const C = "0x" + "22".repeat(20); // Carol, minter on the destination
+const HOLDER = "0x" + "33".repeat(20);
+const CAROL = "0x" + "44".repeat(20);
+const SAT = "did:btco:reg:5000000000";
+const NOW = Date.parse("2026-10-19T00:00:00Z");
+/** Record timestamps, seconds: an hour after the entries were signed. */
+const TS0 = Date.parse("2026-10-18T13:00:00Z") / 1000;
+const iso = (seconds: number) => new Date(seconds * 1000).toISOString().replace(/\.000Z$/, "Z");
+
+const listed = (chain: string, pin: EvmAnchorPin = PIN): ListedChain => (pin.chains ?? EVM_CHAINS).find((c) => c.chain === chain)!;
+const blockHash = (chain: string, n: number, salt = 0) => "0x" + (BigInt(chain.slice(7)) * 1_000_000n + BigInt(n) + BigInt(salt) * 7n).toString(16).padStart(64, "0");
+
+/** A publication record carrying `entries`, its body the last entry's resource version (P14.20). */
+function rec(index: number, entries: LogEntry | LogEntry[], timestamp = TS0 + index * 12, extra: Partial<EvmRecord> = {}): EvmRecord {
+  const c = carrying(entries);
+  const metadata = c.metadata as Uint8Array;
+  return { index, timestamp, metadataLength: metadata.length, bodyLength: c.content.length, bodyOf: index, mediaType: c.mediaType, metadata, body: c.content, ...extra };
+}
+
+/** A `publishSameBody` record: its own metadata, the body of record `of` (P14.20). */
+function sameBody(index: number, entries: LogEntry | LogEntry[], of: EvmRecord, timestamp = TS0 + index * 12): EvmRecord {
+  const metadata = carrying(entries).metadata as Uint8Array;
+  return { index, timestamp, metadataLength: metadata.length, bodyLength: of.bodyLength, bodyOf: of.index, mediaType: of.mediaType, metadata, body: of.body };
+}
+
+type ReadOptions = Partial<Omit<EvmProviderRead, "records">> & { pin?: EvmAnchorPin };
+/** One provider's read of a token at its finalized block (P9.21, P9.22). */
+function read(chain: string, records: EvmRecord[] | null, o: ReadOptions = {}): EvmProviderRead {
+  const l = listed(chain, o.pin);
+  const finalized = o.finalized ?? 1000;
+  return {
+    provider: o.provider ?? "rpc-a",
+    chainId: o.chainId ?? l.chainId,
+    genesisHash: o.genesisHash ?? l.genesisHash,
+    finalized,
+    block: o.block ?? { number: finalized, hash: blockHash(chain, finalized) },
+    codeHash: o.codeHash === undefined ? PIN.codeHash : o.codeHash,
+    owner: o.owner === undefined ? HOLDER : o.owner,
+    records,
+    ...(o.observed ? { observed: o.observed } : {}),
+    ...(o.blockHashes ? { blockHashes: o.blockHashes } : {}),
+  };
+}
+
+/** Two independent providers that agree (P9.22). */
+const two = (chain: string, records: EvmRecord[] | null, o: ReadOptions = {}) => [read(chain, records, { ...o, provider: "rpc-a" }), read(chain, records, { ...o, provider: "rpc-b" })];
+const token = (alias: string, reads: EvmProviderRead[], chain = parseEvmAlias(alias).chain): EvmTokenEvidence => ({ chain, alias, reads });
+
+/** An Original anchored from its genesis on `chain`: genesis, a new version, then the anchoring entry. */
+async function original(chain = ROBINHOOD, seed = 41) {
+  const key = seeded(seed);
+  const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
+  const at = clock();
+  const sign = alice.signer(key, "orig");
+  const author = alice.ref("orig");
+  const genesis = await createOriginal({ versionTime: at(), name: "Harbor at dusk", resource: photo(`dusk v1 ${seed}`), author, sign, anchor: { chain, minter: A }, evm: PIN });
+  const id = (genesis.state as { id: string }).id;
+  const alias = derivedTokenAlias(id, { chain, minter: A }, PIN);
+  const v2 = await updateOriginal(genesis, { versionTime: at(), author, sign, resource: photo(`dusk v2 ${seed}`), evm: PIN });
+  const anchoring = await updateOriginal(v2, { versionTime: at(), author, sign, aliases: [alias], evm: PIN });
+  const log = [genesis, v2, anchoring];
+  const next = (previous: LogEntry, input: Omit<Parameters<typeof updateOriginal>[1], "versionTime" | "author" | "sign"> = {}, versionTime = at()) =>
+    updateOriginal(previous, { versionTime, author, sign, evm: PIN, ...input });
+  return { alice, key, at, sign, author, genesis, v2, anchoring, log, id, alias, next };
+}
+
+type Extra = Partial<Parameters<typeof verifyOriginal>[0]>;
+function verify(alice: VhAuthor, tokens: EvmTokenEvidence[], log?: LogEntry[], extra: Extra & { pin?: EvmAnchorPin | null; retained?: RetainedEvmBlock[] } = {}): Promise<OriginalsReport> {
+  const { pin, retained, ...rest } = extra;
+  return verifyOriginal({
+    ...(log ? { log } : {}),
+    authors: [alice.evidence()],
+    now: NOW,
+    bytes: (d) => describedBytes(d),
+    evm: { pin: pin === undefined ? PIN : pin, tokens, ...(retained ? { retained } : {}) },
+    ...rest,
+  });
+}
+
+const missingEvidence = (r: OriginalsReport) => {
+  expect(r.evm?.status).toBe("unverified");
+  expect(r.reasons).toContain("evm-evidence-missing");
+  expect(r.current).toBe(false);
+};
+
+describe("P9.27 the report of an Original anchored on an EVM chain", () => {
+  test("PR59 evm: 'Report for an Original anchored on an EVM chain': names the chain, its class, the token, the finalized block and the providers; never a Bitcoin anchor", async () => {
+    const o = await original();
+    const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log)]))]);
+    expect(r.history.status).toBe("valid");
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.anchoring).toBeNull();
+    expect(r.ownership).toBeNull();
+    expect(r.ordering).toBe("evm-attested-by-operator");
+    const s = r.evm!.stretches[0];
+    expect(s).toMatchObject({ chain: ROBINHOOD, name: "Robinhood Chain", class: "operator", layer: "attested", token: o.alias, block: { number: 1000, hash: blockHash(ROBINHOOD, 1000) }, providers: ["rpc-a", "rpc-b"] });
+    expect(s.caip19).toBe(`${ROBINHOOD}/erc721:${PIN.address}/${parseEvmAlias(o.alias).tokenId}`);
+    expect(r.evm!.owner).toMatchObject({ address: HOLDER, chain: ROBINHOOD, class: "operator", describes: "attested-by-operator", token: o.alias, block: { number: 1000 } });
+    expect(s.entries).toEqual([o.anchoring.versionId]);
+    expect(s.carried).toEqual([o.genesis.versionId, o.v2.versionId]);
+    // The body of the anchoring publication is the current version, read from the chain (P9.25).
+    expect(r.resources.versions[1]).toMatchObject({ bytes: "verified", onBitcoin: false, onEvm: ROBINHOOD });
+    expect(r.retain.evm).toEqual([{ chain: ROBINHOOD, number: 1000, hash: blockHash(ROBINHOOD, 1000) }]);
+  });
+
+  test("PR59 evm: 'Report for an Original anchored on a consortium or operator chain': attested by its validators or operator, never proven", async () => {
+    const tempo = await original(TEMPO, 42);
+    const r = await verify(tempo.alice, [token(tempo.alias, two(TEMPO, [rec(0, tempo.log)]))]);
+    expect(r.ordering).toBe("evm-attested-by-validators");
+    expect(r.evm!.stretches[0].uniqueness).toMatchObject({ status: "established-under-chain", describes: "attested-by-validators" });
+    expect(r.evm!.owner?.describes).toBe("attested-by-validators");
+    const eth = await original(ETHEREUM, 43);
+    const p = await verify(eth.alice, [token(eth.alias, two(ETHEREUM, [rec(0, eth.log)]))]);
+    expect(p.ordering).toBe("evm-proven");
+    expect(p.evm!.owner?.describes).toBe("proven");
+  });
+});
+
+describe("support: section 14, P9.19, P9.21", () => {
+  test("PR59 evm: 'Genesis entry with an anchor member while P14.21 pins no contract': unsupported, not invalid; nothing verified", async () => {
+    const o = await original();
+    const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log)]))], o.log, { pin: null });
+    expect(r.history.status).toBe("unsupported");
+    expect(r.history.failure).toMatchObject({ category: "unsupported-profile", code: "EVM_NO_ANCHOR_CONTRACT" });
+    expect(r.evm?.status).toBe("unsupported");
+    expect(r.validAsOf).toBeNull();
+    expect(r.state).toBeNull();
+    expect(r.current).toBe(false);
+  });
+
+  test("PR59 evm: 'Carried log with an anchor member naming a chain the reader's revision does not list, or read while P14.21 pins no contract': unsupported; nothing verified", async () => {
+    const o = await original();
+    // A log with no token evidence at all, as a carried log is read: still unsupported without a pin.
+    const unpinned = await verifyOriginal({ log: o.log, authors: [o.alice.evidence()], now: NOW });
+    expect(unpinned.history.status).toBe("unsupported");
+    expect(unpinned.validAsOf).toBeNull();
+    // A revision of P14.22 without Robinhood Chain: unsupported, not invalid (P9.19).
+    const without: EvmAnchorPin = { ...PIN, chains: EVM_CHAINS.filter((c) => c.chain !== ROBINHOOD) };
+    const r = await verify(o.alice, [], o.log, { pin: without });
+    expect(r.history.status).toBe("unsupported");
+    expect(r.history.failure?.code).toBe("EVM_CHAIN_NOT_LISTED");
+    expect(r.validAsOf).toBeNull();
+  });
+
+  test("PR59 evm: 'The pinned contract deployed on a chain that is not listed': unsupported", async () => {
+    const optimism: ListedChain = { name: "OP Mainnet", chain: "eip155:10", chainId: 10n, genesisHash: "0x" + "7a".repeat(32), classes: [{ from: 0, class: "exit-protected" }] };
+    const devnet: EvmAnchorPin = { ...PIN, chains: [...EVM_CHAINS, optimism] };
+    const key = seeded(44);
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
+    const genesis = await createOriginal({ versionTime: clock()(), name: "x", resource: photo("x44"), author: alice.ref("orig"), sign: alice.signer(key, "orig"), anchor: { chain: "eip155:10", minter: A }, evm: devnet });
+    const alias = derivedTokenAlias((genesis.state as { id: string }).id, { chain: "eip155:10", minter: A }, PIN);
+    // Providers serve the chain and the pinned code is there, but this verifier's P14.22 does not list it.
+    const r = await verify(alice, [token(alias, two("eip155:10", [rec(0, genesis)], { pin: devnet }))], [genesis]);
+    expect(r.history.status).toBe("unsupported");
+    expect(r.evm?.unsupported).toMatchObject({ code: "EVM_CHAIN_NOT_LISTED", chain: "eip155:10" });
+  });
+
+  test("PR59 evm: 'Code at the anchor contract address with another runtime code hash, or none': unsupported; never verified or not anchored", async () => {
+    const o = await original();
+    for (const codeHash of ["0x" + "ee".repeat(32), null]) {
+      const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log)], { codeHash }))], o.log);
+      expect(r.history.status).toBe("unsupported");
+      expect(r.evm).toMatchObject({ status: "unsupported", unsupported: { code: "EVM_ANCHOR_CODE_MISMATCH" } });
+      expect(r.reasons).not.toContain("anchor-not-found-on-evm");
+      expect(r.current).toBe(false);
+    }
+  });
+
+  test("PR59 evm: 'Provider reporting the listed chain ID whose block 0 has another hash': not that chain; its answers are not evidence", async () => {
+    const o = await original();
+    const impostor = read(ROBINHOOD, [rec(0, o.log)], { provider: "rpc-fake", genesisHash: "0x" + "99".repeat(32), owner: CAROL });
+    // With an honest provider beside it, the impostor is excluded, not a disagreement.
+    const r = await verify(o.alice, [token(o.alias, [read(ROBINHOOD, [rec(0, o.log)]), impostor])]);
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.evm!.stretches[0].excludedProviders).toEqual([{ provider: "rpc-fake", reason: "wrong-genesis-hash" }]);
+    expect(r.evm!.owner?.address).toBe(HOLDER);
+    // Alone, it leaves the evidence missing.
+    const alone = await verify(o.alice, [token(o.alias, [impostor])], o.log);
+    missingEvidence(alone);
+    expect(alone.evm!.stretches[0].missing?.code).toBe("EVM_NO_PROVIDER");
+  });
+
+  test("PR59 evm: 'Publication read from a chain other than the one anchor names': not a publication of the Original", async () => {
+    const o = await original();
+    // The token's alias, but read from Ethereum, where the same contract may also be deployed (P9.20).
+    const r = await verify(o.alice, [token(o.alias, two(ETHEREUM, [rec(0, o.log)]), ETHEREUM)], o.log);
+    missingEvidence(r);
+    expect(r.evm!.stretches[0].excludedProviders.map((x) => x.reason)).toEqual(["other-chain", "other-chain"]);
+    expect(r.history.entries).toBe(2); // only what precedes the anchoring entry (P7.14)
+  });
+});
+
+describe("P9.22 finality and providers", () => {
+  test("PR59 evm: 'Publication record present at the latest block but not in state at the finalized block': observed, not accepted; pending", async () => {
+    const o = await original();
+    const e4 = await o.next(o.anchoring, { name: "Harbor at dusk, cropped" });
+    const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log)], { observed: [rec(1, e4)] }))]);
+    expect(r.head).toBe(o.anchoring.versionId);
+    expect(r.evm!.stretches[0].observed).toEqual([{ index: 1, timestamp: TS0 + 12 }]);
+    expect(r.evm!.stretches[0].ignored).toContainEqual({ index: 1, reason: "observed-not-finalized" });
+    expect(r.current).toBe(true); // the finalized state is current as of its block
+  });
+
+  test("PR59 evm: 'Two providers report different hashes for the lower of their finalized blocks, or a different record, bytes or ownerOf': missing evidence until they agree", async () => {
+    const o = await original();
+    const e4 = await o.next(o.anchoring, { name: "Renamed" });
+    const ok = [rec(0, o.log), rec(1, e4)];
+    const cases: EvmProviderRead[][] = [
+      [read(ROBINHOOD, ok), read(ROBINHOOD, ok, { provider: "rpc-b", block: { number: 1000, hash: blockHash(ROBINHOOD, 1000, 1) } })],
+      [read(ROBINHOOD, ok), read(ROBINHOOD, [rec(0, o.log)], { provider: "rpc-b" })],
+      [read(ROBINHOOD, ok), read(ROBINHOOD, [rec(0, o.log), { ...rec(1, e4), body: bytes("other bytes") }], { provider: "rpc-b" })],
+      [read(ROBINHOOD, ok), read(ROBINHOOD, ok, { provider: "rpc-b", owner: CAROL })],
+    ];
+    for (const reads of cases) {
+      const r = await verify(o.alice, [token(o.alias, reads)], o.log);
+      missingEvidence(r);
+      expect(r.evm!.stretches[0].missing?.code).toBe("EVM_PROVIDERS_DISAGREE");
+      expect(r.evm!.owner).toBeNull();
+      expect(r.history.entries).toBe(2);
+    }
+  });
+
+  test("PR59 evm: 'One provider's finalized block is N and the other's is N+1, and they agree on block N': verified at block N", async () => {
+    const o = await original();
+    const at1000 = { number: 1000, hash: blockHash(ROBINHOOD, 1000) };
+    const r = await verify(o.alice, [token(o.alias, [read(ROBINHOOD, [rec(0, o.log)], { finalized: 1000 }), read(ROBINHOOD, [rec(0, o.log)], { provider: "rpc-b", finalized: 1001, block: at1000 })])]);
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.evm!.stretches[0].block).toEqual(at1000);
+    // A reader that read the ahead provider at its own finalized block did not read block N from both.
+    const unread = await verify(o.alice, [token(o.alias, [read(ROBINHOOD, [rec(0, o.log)], { finalized: 1000 }), read(ROBINHOOD, [rec(0, o.log)], { provider: "rpc-b", finalized: 1001 })])], o.log);
+    missingEvidence(unread);
+  });
+
+  test("PR59 evm: 'A block accepted as finalized is replaced': authoritative-source-changed and a finality failure", async () => {
+    const o = await original();
+    const tokens = [token(o.alias, two(ROBINHOOD, [rec(0, o.log)], { finalized: 1200, blockHashes: [{ number: 1000, hash: blockHash(ROBINHOOD, 1000, 5) }] }))];
+    const r = await verify(o.alice, tokens, undefined, { retained: [{ chain: ROBINHOOD, number: 1000, hash: blockHash(ROBINHOOD, 1000) }] });
+    expect(r.evm!.stretches[0].finality).toBe("failed");
+    expect(r.evm!.warnings).toEqual(["authoritative-source-changed"]);
+    expect(r.reasons).toEqual(expect.arrayContaining(["authoritative-source-changed", "evm-finality-failed"]));
+    expect(r.current).toBe(false);
+    expect(r.evm!.owner).toBeNull();
+    // The same block, unreplaced, holds.
+    const held = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log)]))], undefined, { retained: [{ chain: ROBINHOOD, number: 1000, hash: blockHash(ROBINHOOD, 1000) }] });
+    expect(held.evm!.stretches[0].finality).toBe("held");
+    expect(held.current).toBe(true);
+  });
+});
+
+describe("P9.23, P9.24 ownership and the anchor", () => {
+  test("PR59 evm: 'Token minted, no anchoring publication': not anchored; no owner", async () => {
+    const o = await original();
+    for (const records of [[], [rec(0, [o.genesis, o.v2])]]) {
+      const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, records))], o.log);
+      expect(r.evm?.status).toBe("not-anchored");
+      expect(r.evm?.owner).toBeNull();
+      expect(r.reasons).toContain("anchor-not-found-on-evm");
+      expect(r.current).toBe(false);
+    }
+  });
+
+  test("PR59 evm: 'Token held by a contract account': that contract is the owner", async () => {
+    const o = await original();
+    const safe = "0x" + "5a".repeat(20); // a multisig contract; ownerOf does not say which
+    const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log)], { owner: safe }))]);
+    expect(r.evm!.owner?.address).toBe(safe);
+  });
+
+  test("PR59 evm: 'Two anchoring entries from different branches published on the token' and 'Fork of an Original with an EVM anchor, then an anchoring entry accepted': the lower index is the anchor and settles the fork, as attested", async () => {
+    const o = await original();
+    const v2b = await o.next(o.genesis, { name: "Harbor at night" });
+    const anchoringB = await o.next(v2b, { aliases: [o.alias] });
+    const branchB = [o.genesis, v2b, anchoringB];
+    // The supplied copy and a second copy are the two branches of the fork (P6.6).
+    const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, branchB), rec(1, o.log)]))], o.log, { copies: [{ source: "other", log: branchB.map((e) => JSON.stringify(e) + "\n").join("") }] });
+    const s = r.evm!.stretches[0];
+    expect(s.anchor).toMatchObject({ index: 0, versionId: anchoringB.versionId });
+    expect(s.conflicting).toEqual([expect.objectContaining({ index: 1, versionId: o.anchoring.versionId })]);
+    expect(r.head).toBe(anchoringB.versionId);
+    expect(r.fork).toBeNull();
+    expect(s.uniqueness).toMatchObject({ status: "established-under-chain", describes: "attested-by-operator", providers: ["rpc-a", "rpc-b"] });
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+  });
+
+  test("PR59 evm: 'Two publications extending the same head, recorded in one block or in different blocks': the lower record index is accepted", async () => {
+    const o = await original();
+    const a = await o.next(o.anchoring, { name: "A" });
+    const b = await o.next(o.anchoring, { name: "B" });
+    for (const tsB of [TS0 + 12, TS0 + 24]) {
+      const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log), rec(1, a, TS0 + 12), rec(2, b, tsB)]))]);
+      expect(r.head).toBe(a.versionId);
+      expect(r.evm!.stretches[0].ignored).toContainEqual(expect.objectContaining({ index: 2, reason: "does-not-extend-head" }));
+    }
+  });
+
+  test("PR59 evm: 'Two successive publications, the second extending the first, recorded in one block': both accepted, in index order", async () => {
+    const o = await original();
+    const a = await o.next(o.anchoring, { name: "A" });
+    const b = await o.next(a, { name: "B" });
+    const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log, TS0), rec(1, a, TS0), rec(2, b, TS0)]))]);
+    expect(r.head).toBe(b.versionId);
+    expect(r.evm!.stretches[0].accepted.map((p) => p.index)).toEqual([1, 2]);
+    expect(r.current).toBe(true);
+  });
+});
+
+describe("P9.25, P14.20 records and bytes", () => {
+  test("PR59 evm: 'Record whose length fields exceed 350,000 bytes, as a provider reports it, after valid earlier records': rejected from its fields; history resolves; not missing", async () => {
+    const o = await original();
+    const huge: EvmRecord = { index: 1, timestamp: TS0 + 12, metadataLength: 350_001, bodyLength: 0, bodyOf: 1, mediaType: "image/jpeg" };
+    const longType: EvmRecord = { index: 2, timestamp: TS0 + 24, metadataLength: 10, bodyLength: 10, bodyOf: 2, mediaType: "x".repeat(256) };
+    const sameBodyHuge: EvmRecord = { index: 3, timestamp: TS0 + 36, metadataLength: 350_001, bodyLength: 5, bodyOf: 0, mediaType: "image/jpeg" };
+    const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log), huge, longType, sameBodyHuge]))]);
+    expect(r.evm?.status).toBe("anchored");
+    expect(r.evm!.stretches[0].ignored).toEqual([
+      { index: 1, reason: "too-large" }, { index: 2, reason: "media-type-too-long" }, { index: 3, reason: "too-large" },
+    ]);
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+  });
+
+  test("PR59 evm: 'Record of 350,000 bytes that is no valid publication, after valid earlier records': read and rejected; the earlier history resolves", async () => {
+    const o = await original();
+    const body = bytes("0123456789");
+    const metadata = new Uint8Array(350_000 - body.length).fill(0xff); // not one well-formed CBOR item (P14.12)
+    const junk: EvmRecord = { index: 1, timestamp: TS0 + 12, metadataLength: metadata.length, bodyLength: body.length, bodyOf: 1, mediaType: "image/jpeg", metadata, body };
+    const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log), junk]))]);
+    expect(r.evm!.stretches[0].ignored).toEqual([expect.objectContaining({ index: 1, reason: "undecodable" })]);
+    expect(r.current).toBe(true);
+  });
+
+  test("PR59 evm: 'Publication whose body digest, size or media type differs from the last entry's descriptor': rejected", async () => {
+    const o = await original();
+    const e4 = await o.next(o.anchoring, { name: "Renamed" });
+    const wrongBody = { ...rec(1, e4), body: bytes("not the photograph"), bodyLength: 18 };
+    const wrongType = { ...rec(1, e4), mediaType: "image/png" };
+    for (const [bad, reason] of [[wrongBody, "body-not-the-resource"], [wrongType, "content-type-mismatch"]] as const) {
+      const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log), bad]))]);
+      expect(r.head).toBe(o.anchoring.versionId);
+      expect(r.evm!.stretches[0].ignored).toContainEqual(expect.objectContaining({ index: 1, reason }));
+    }
+  });
+
+  test("PR59 evm: 'Publication that refers to an earlier record's body, the last entry not changing the resource': accepted, the body checked as if stored", async () => {
+    const o = await original();
+    const e4 = await o.next(o.anchoring, { name: "Renamed" });
+    const first = rec(0, o.log);
+    const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [first, sameBody(1, e4, first)]))]);
+    expect(r.head).toBe(e4.versionId);
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+  });
+
+  test("PR59 evm: 'Publication that refers to an earlier record's body whose digest differs from the last entry's descriptor': rejected", async () => {
+    const o = await original();
+    const e4 = await o.next(o.anchoring, { resource: photo("dusk v3") });
+    const first = rec(0, o.log);
+    const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [first, sameBody(1, e4, first)]))]);
+    expect(r.head).toBe(o.anchoring.versionId);
+    expect(r.evm!.stretches[0].ignored).toContainEqual(expect.objectContaining({ index: 1, reason: "body-not-the-resource" }));
+  });
+
+  test("PR59 evm: 'Publication known only from a Published event, or a token whose records or bytes cannot be read from state': resolution fails with missing evidence", async () => {
+    const o = await original();
+    const e4 = await o.next(o.anchoring, { name: "Renamed" });
+    // Records not read (a reader that found the publication only through an event has no record).
+    missingEvidence(await verify(o.alice, [token(o.alias, two(ROBINHOOD, null))], o.log));
+    // A record whose bytes were not read: never decided on the part that was (P9.25).
+    const unread = { ...rec(1, e4), metadata: undefined, body: undefined };
+    const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log), unread]))], o.log);
+    missingEvidence(r);
+    expect(r.evm!.stretches[0].missing?.code).toBe("EVM_RECORD_BYTES_UNREAD");
+    expect(r.history.entries).toBe(2);
+  });
+});
+
+describe("P9.15 with the inscription time of P9.20, P9.26", () => {
+  test("PR59 evm: 'did:webvh signer key removed before the timestamp the publication's record holds': rejected, as P9.15", async () => {
+    // A did:vh signer; P9.15 treats did:vh and did:webvh alike.
+    const o = await original();
+    o.alice.timeOverride = iso(TS0 - 600);
+    await o.alice.rotate([{ fragment: "next", signer: seeded(49) }]);
+    const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log)]))], o.log);
+    expect(r.evm?.status).toBe("not-anchored");
+    expect(r.evm!.stretches[0].ignored).toContainEqual(expect.objectContaining({ index: 0, reason: "author-key-not-valid-at-inscription-time" }));
+    // The record's inscription time is the greatest timestamp so far: an earlier timestamp on a later record does not reach back.
+    const p = await original(ROBINHOOD, 50);
+    const e4 = await p.next(p.anchoring, { name: "late" });
+    p.alice.timeOverride = iso(TS0 + 30);
+    await p.alice.rotate([{ fragment: "next", signer: seeded(51) }]);
+    // Record 2 holds an earlier timestamp than record 1; its inscription time is record 1's, after the removal.
+    const later = await verify(p.alice, [token(p.alias, two(ROBINHOOD, [rec(0, p.log, TS0), rec(1, p.genesis, TS0 + 60), rec(2, e4, TS0 + 20)]))]);
+    expect(later.evm!.stretches[0].ignored).toContainEqual(expect.objectContaining({ index: 2, reason: "author-key-not-valid-at-inscription-time" }));
+    expect(later.head).toBe(p.anchoring.versionId);
+  });
+
+  test("PR59 evm: 'Entry published on an Original's token, whose signer later removes the signing key': remains current; not historically authorized only; not claimed", async () => {
+    const o = await original();
+    o.alice.timeOverride = iso(TS0 + 3600);
+    await o.alice.rotate([{ fragment: "next", signer: seeded(52) }]);
+    const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log)]))]);
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.historicallyAuthorizedOnly).toEqual([]);
+    expect(r.ordering).toBe("evm-attested-by-operator");
+  });
+});
+
+describe("P7.14 copies of the log", () => {
+  test("PR59 evm: 'Carried file of an Original whose log has an anchor member, the chain readable': state from the token; the copy not preferred; chain and class named", async () => {
+    const o = await original();
+    const unpublished = await o.next(o.anchoring, { name: "Draft name" });
+    const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log)]))], [...o.log, unpublished]);
+    expect(r.head).toBe(o.anchoring.versionId);
+    expect(r.state?.name).toBe("Harbor at dusk");
+    expect(r.evm!.stretches[0]).toMatchObject({ chain: ROBINHOOD, class: "operator" });
+    expect(r.current).toBe(true);
+  });
+
+  test("PR59 evm: 'Complete evidence package of an anchored Original, read without access to the anchor': missing evidence; at most the entries before the first anchoring entry", async () => {
+    const o = await original();
+    const e4 = await o.next(o.anchoring, { name: "Renamed" });
+    const r = await verify(o.alice, [], [...o.log, e4]);
+    missingEvidence(r);
+    expect(r.history).toMatchObject({ status: "valid", entries: 2 });
+    expect(r.head).toBe(o.v2.versionId);
+    expect(r.ordering).toBe("claimed");
+    expect(r.validAsOf?.checkpoint).toBe(o.v2.versionId);
+  });
+});
+
+/** A Bitcoin index's read of a sat, its inscriptions placed there (P9.10). */
+function satRead(inscriptions: Array<Omit<SatInscription, "sat" | "network">>, owner: SatEvidence["owner"] = { output: "aa".repeat(32) + ":0", confirmations: 3 }): SatEvidence {
+  const { sat, network } = parseBtcoAlias(SAT);
+  return { sat: SAT, index: "ord-a", tip: { height: 119, hash: "bb".repeat(32) }, inscriptions: inscriptions.map((i) => ({ sat, network, ...i })), owner };
+}
+
+/** An Original anchored on Robinhood Chain, with a move entry to `to` (an EVM chain, or Bitcoin when null). */
+async function moving(to: string | null = ETHEREUM, seed = 61) {
+  const o = await original(ROBINHOOD, seed);
+  const dest = to ? derivedTokenAlias(o.id, { chain: to, minter: C }, PIN) : SAT;
+  const move = await o.next(o.anchoring, to ? { anchor: { chain: to, minter: C }, aliases: [dest] } : { anchor: null, aliases: [SAT] });
+  const through = [...o.log, move];
+  return { ...o, dest, move, through };
+}
+
+describe("P9.28, P9.29 moves", () => {
+  test("PR59 evm: 'Move entry from an attested chain to a proven chain or to Bitcoin, departed and arrived': anchored on the destination; the owner is its holder", async () => {
+    const m = await moving(ETHEREUM);
+    const r = await verify(m.alice, [
+      token(m.alias, two(ROBINHOOD, [rec(0, m.log), rec(1, m.move)])),
+      token(m.dest, two(ETHEREUM, [rec(0, m.through, TS0 + 600)], { owner: CAROL })),
+    ]);
+    expect(r.evm).toMatchObject({ status: "anchored", move: "confirmed" });
+    expect(r.evm!.owner).toMatchObject({ address: CAROL, chain: ETHEREUM, describes: "proven" });
+    expect(r.head).toBe(m.move.versionId);
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+
+    const b = await moving(null, 62);
+    const btc = await verify(b.alice, [token(b.alias, two(ROBINHOOD, [rec(0, b.log), rec(1, b.move)]))], undefined, {
+      bitcoin: [satRead([{ id: "ab".repeat(32) + "i0", height: 100, transactionIndex: 1, inscriptionIndex: 0, confirmations: 6, inscriptionTime: (TS0 + 7200) * 1000, ...carrying(b.through) } as Omit<SatInscription, "sat" | "network">])],
+    });
+    expect(btc.evm).toMatchObject({ status: "moved-to-bitcoin", move: "confirmed", owner: null });
+    expect(btc.anchoring).toMatchObject({ status: "anchored", sat: SAT });
+    expect(btc.ownership).toMatchObject({ status: "provisional", sat: SAT });
+    // The move entry keeps the ordering of the stretch it was accepted on (P9.29).
+    expect(btc.ordering).toBe("evm-attested-by-operator");
+    expect(btc.current, JSON.stringify(btc.reasons)).toBe(true);
+  });
+
+  test("PR59 evm: 'Report for an Original that moved from an attested chain to a proven chain': both chains, their classes and entries; the earlier stretch attested", async () => {
+    const m = await moving(ETHEREUM, 63);
+    const e5 = await m.next(m.move, { name: "On Ethereum" });
+    const r = await verify(m.alice, [
+      token(m.alias, two(ROBINHOOD, [rec(0, m.log), rec(1, m.move)])),
+      token(m.dest, two(ETHEREUM, [rec(0, m.through, TS0 + 600), rec(1, e5, TS0 + 612)], { owner: CAROL })),
+    ]);
+    const [left, here] = r.evm!.stretches;
+    expect(left).toMatchObject({ chain: ROBINHOOD, class: "operator", describes: "attested-by-operator", entries: [m.anchoring.versionId, m.move.versionId], providers: ["rpc-a", "rpc-b"], block: { number: 1000 } });
+    expect(left.departure).toMatchObject({ index: 1, versionId: m.move.versionId, destination: m.dest });
+    expect(here).toMatchObject({ chain: ETHEREUM, class: "consensus", describes: "proven", arrival: true, entries: [e5.versionId], carried: m.through.map((e) => e.versionId) });
+    expect(r.ordering).toBe("evm-proven");
+    expect(r.current).toBe(true);
+  });
+
+  test("PR59 evm: 'Arrival on the destination with no departure accepted on the chain left': not accepted; still anchored where it was", async () => {
+    const m = await moving(ETHEREUM, 64);
+    const r = await verify(m.alice, [
+      token(m.alias, two(ROBINHOOD, [rec(0, m.log)])),
+      token(m.dest, two(ETHEREUM, [rec(0, m.through, TS0 + 600)], { owner: A })),
+    ]);
+    expect(r.evm!.stretches.map((s) => s.chain)).toEqual([ROBINHOOD]);
+    expect(r.head).toBe(m.anchoring.versionId);
+    expect(r.evm!.owner?.address).toBe(HOLDER);
+  });
+
+  test("PR59 evm: 'Departure accepted, no arrival yet': departed, not arrived; the move entry's state; no owner", async () => {
+    const m = await moving(ETHEREUM, 65);
+    const r = await verify(m.alice, [
+      token(m.alias, two(ROBINHOOD, [rec(0, m.log), rec(1, m.move)])),
+      token(m.dest, two(ETHEREUM, [], { owner: null })),
+    ]);
+    expect(r.evm).toMatchObject({ status: "departed-not-arrived", destination: m.dest, owner: null });
+    expect(r.head).toBe(m.move.versionId);
+    expect(r.state?.anchor).toEqual({ chain: ETHEREUM, minter: C });
+    expect(r.reasons).toContain("departed-not-arrived");
+    expect(r.current).toBe(false);
+  });
+
+  test("PR59 evm: 'Publication on the token left behind, after the departure': not accepted; reported", async () => {
+    const m = await moving(ETHEREUM, 66);
+    const stray = await m.next(m.move, { name: "Published on the old token" });
+    const r = await verify(m.alice, [
+      token(m.alias, two(ROBINHOOD, [rec(0, m.log), rec(1, m.move), rec(2, stray)])),
+      token(m.dest, two(ETHEREUM, [rec(0, m.through, TS0 + 600)], { owner: CAROL })),
+    ]);
+    expect(r.evm!.stretches[0].ignored).toContainEqual(expect.objectContaining({ index: 2, reason: "after-departure" }));
+    expect(r.head).toBe(m.move.versionId);
+  });
+
+  test("PR59 evm: 'Arrival whose log differs from the entries accepted through the departure, or whose last entry is not the move entry': not an arrival", async () => {
+    const m = await moving(ETHEREUM, 67);
+    const other = await m.next(m.anchoring, { anchor: { chain: ETHEREUM, minter: C }, aliases: [m.dest], name: "Another move entry" });
+    for (const carried of [[...m.log, other], m.log]) {
+      const r = await verify(m.alice, [
+        token(m.alias, two(ROBINHOOD, [rec(0, m.log), rec(1, m.move)])),
+        token(m.dest, two(ETHEREUM, [rec(0, carried, TS0 + 600)], { owner: CAROL })),
+      ]);
+      expect(r.evm?.status).toBe("departed-not-arrived");
+      expect(r.evm!.stretches[1].ignored).toContainEqual(expect.objectContaining({ index: 0, reason: "not-an-arrival" }));
+    }
+  });
+
+  test("PR59 evm: 'Moved Original, a chain it left cannot be read': log verified; move unconfirmed; no owner and not current", async () => {
+    const m = await moving(ETHEREUM, 68);
+    const r = await verify(m.alice, [
+      token(m.alias, two(ROBINHOOD, null)),
+      token(m.dest, two(ETHEREUM, [rec(0, m.through, TS0 + 600)], { owner: CAROL })),
+    ], m.through);
+    expect(r.history).toMatchObject({ status: "valid", entries: 4 });
+    expect(r.evm).toMatchObject({ move: "unconfirmed", owner: null });
+    expect(r.reasons).toContain("move-unconfirmed");
+    expect(r.current).toBe(false);
+  });
+
+  test("PR59 evm: 'A chain the Original left later replaces the block that held the departure': finality failure there; move unconfirmed", async () => {
+    const m = await moving(ETHEREUM, 69);
+    const r = await verify(m.alice, [
+      token(m.alias, two(ROBINHOOD, [rec(0, m.log), rec(1, m.move)], { finalized: 1100, blockHashes: [{ number: 1000, hash: blockHash(ROBINHOOD, 1000, 3) }] })),
+      token(m.dest, two(ETHEREUM, [rec(0, m.through, TS0 + 600)], { owner: CAROL })),
+    ], undefined, { retained: [{ chain: ROBINHOOD, number: 1000, hash: blockHash(ROBINHOOD, 1000) }] });
+    expect(r.evm!.stretches[0].finality).toBe("failed");
+    expect(r.evm).toMatchObject({ move: "unconfirmed", owner: null, warnings: ["authoritative-source-changed"] });
+    expect(r.reasons).toEqual(expect.arrayContaining(["move-unconfirmed", "evm-finality-failed"]));
+    expect(r.current).toBe(false);
+  });
+
+  test("PR59 evm: 'Carried log holding a move entry, read without access to a chain in the path': missing evidence; at most the entries before the first anchoring entry", async () => {
+    const m = await moving(ETHEREUM, 70);
+    const r = await verify(m.alice, [token(m.alias, two(ROBINHOOD, [rec(0, m.log), rec(1, m.move)]))], m.through);
+    missingEvidence(r);
+    expect(r.history.entries).toBe(2);
+  });
+
+  test("PR59 evm: 'Move made to a proven chain that a later revision reclassifies operator': still accepted, judged at the departure; reported under the current class", async () => {
+    const m = await moving(BASE, 71);
+    const revised: EvmAnchorPin = {
+      ...PIN,
+      chains: EVM_CHAINS.map((c) => (c.chain !== BASE ? c : { ...c, classes: [{ from: Date.UTC(2026, 0, 1), class: "exit-protected" as const }, { from: Date.UTC(2026, 9, 20), class: "operator" as const }] })),
+    };
+    const r = await verify(m.alice, [
+      token(m.alias, two(ROBINHOOD, [rec(0, m.log), rec(1, m.move)])),
+      token(m.dest, two(BASE, [rec(0, m.through, TS0 + 600)], { owner: CAROL })),
+    ], undefined, { pin: revised });
+    expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
+    expect(r.evm?.status).toBe("anchored");
+    expect(r.evm!.stretches[1]).toMatchObject({ chain: BASE, class: "operator", describes: "attested-by-operator" });
+    expect(r.evm!.owner?.describes).toBe("attested-by-operator");
+  });
+
+  test("PR59 evm: 'Move entry to a chain the verifier's revision of P14.22 does not list': unsupported, not invalid", async () => {
+    const optimism: ListedChain = { name: "OP Mainnet", chain: "eip155:10", chainId: 10n, genesisHash: "0x" + "7a".repeat(32), classes: [{ from: 0, class: "exit-protected" }] };
+    const devnet: EvmAnchorPin = { ...PIN, chains: [...EVM_CHAINS, optimism] };
+    const o = await original(ROBINHOOD, 72);
+    const dest = derivedTokenAlias(o.id, { chain: "eip155:10", minter: C }, PIN);
+    const move = await updateOriginal(o.anchoring, { versionTime: o.at(), author: o.author, sign: o.sign, anchor: { chain: "eip155:10", minter: C }, aliases: [dest], evm: devnet });
+    const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log), rec(1, move)]))]);
+    expect(r.evm).toMatchObject({ status: "unsupported", unsupported: { code: "EVM_CHAIN_NOT_LISTED" } });
+    expect(r.history.status).not.toBe("invalid");
+    expect(r.current).toBe(false);
+  });
+
+  test("PR59 evm: 'Move entry's signing key removed, or its signer DID deactivated, after the departure and before the arrival': arrival accepted", async () => {
+    for (const how of ["rotate", "deactivate"] as const) {
+      const m = await moving(ETHEREUM, how === "rotate" ? 73 : 74);
+      m.alice.timeOverride = iso(TS0 + 300);
+      if (how === "rotate") await m.alice.rotate([{ fragment: "next", signer: seeded(75) }]);
+      else await m.alice.deactivate();
+      const r = await verify(m.alice, [
+        token(m.alias, two(ROBINHOOD, [rec(0, m.log), rec(1, m.move)])),
+        token(m.dest, two(ETHEREUM, [rec(0, m.through, TS0 + 600)], { owner: CAROL })),
+      ]);
+      expect(r.evm?.status, how).toBe("anchored");
+      expect(r.evm!.stretches[1].anchor?.versionId).toBe(m.move.versionId);
+      expect(r.evm!.owner?.address).toBe(CAROL);
+    }
+  });
+
+  test("PR59 evm: 'Move entry published as a departure when its signing key is not valid at the departure's inscription time': rejected; not departed", async () => {
+    const m = await moving(ETHEREUM, 76);
+    m.alice.timeOverride = iso(TS0 + 300);
+    await m.alice.rotate([{ fragment: "next", signer: seeded(77) }]);
+    const r = await verify(m.alice, [
+      token(m.alias, two(ROBINHOOD, [rec(0, m.log), rec(1, m.move, TS0 + 600)])),
+      token(m.dest, two(ETHEREUM, [rec(0, m.through, TS0 + 900)], { owner: CAROL })),
+    ]);
+    expect(r.evm!.stretches).toHaveLength(1);
+    expect(r.evm!.stretches[0].departure).toBeNull();
+    expect(r.evm!.stretches[0].ignored).toContainEqual(expect.objectContaining({ index: 1, reason: "author-key-not-valid-at-inscription-time" }));
+    expect(r.head).toBe(m.anchoring.versionId);
+  });
+
+  test("PR59 evm: 'Original that moved to Bitcoin grants a did:btco editor in or after the move entry': accepted by the state rules", async () => {
+    const o = await original(ROBINHOOD, 78);
+    const grant = [{ did: "did:btco:reg:5", name: true, metadata: false, resource: false }];
+    const move = await o.next(o.anchoring, { anchor: null, aliases: [SAT], editors: grant });
+    expect((move.state as { asset: { editors?: unknown } }).asset.editors).toEqual(grant);
+  });
+});
+
+describe("P3.9, P14.18 did:evm resolution", () => {
+  test("PR59 evm: 'did:evm alias resolved, the log accepted on its token listing it': the did:vh, state and report; the document derived", async () => {
+    const o = await original(ROBINHOOD, 81);
+    const res = await resolveDidEvm(o.alias, { authors: [o.alice.evidence()], now: NOW, evm: { pin: PIN, tokens: [token(o.alias, two(ROBINHOOD, [rec(0, o.log)]))] } });
+    expect(res.status).toBe("resolved");
+    expect(res.original).toBe(o.id);
+    expect(res.state?.aliases).toEqual([o.alias]);
+    expect(res.chain).toEqual({ chain: ROBINHOOD, name: "Robinhood Chain", class: "operator", describes: "attested-by-operator" });
+    expect(res.document).toMatchObject({ id: o.alias, alsoKnownAs: [o.id], service: [expect.objectContaining({ id: `${o.alias}#files` })] });
+    expect(res.report?.current).toBe(true);
+  });
+
+  test("PR59 evm: 'did:evm DID of a token with no accepted anchoring publication, or of a token whose accepted log does not list it': resolves to nothing", async () => {
+    const o = await original(ROBINHOOD, 82);
+    const minted = await resolveDidEvm(o.alias, { authors: [o.alice.evidence()], now: NOW, log: o.log, evm: { pin: PIN, tokens: [token(o.alias, two(ROBINHOOD, []))] } });
+    expect(minted).toMatchObject({ status: "not-found", state: null, document: null });
+    // Another token on the chain (another minter): the Original's accepted log does not list it.
+    const other = derivedTokenAlias(o.id, { chain: ROBINHOOD, minter: C }, PIN);
+    const notListed = await resolveDidEvm(other, { authors: [o.alice.evidence()], now: NOW, evm: { pin: PIN, tokens: [token(o.alias, two(ROBINHOOD, [rec(0, o.log)])), token(other, two(ROBINHOOD, [rec(0, o.log)]))] } });
+    expect(notListed.status).toBe("not-found");
+    // Another contract: not an Originals anchor at all.
+    const elsewhere = `did:evm:4663:0x${"cd".repeat(20)}:${parseEvmAlias(o.alias).tokenId}`;
+    expect((await resolveDidEvm(elsewhere, { authors: [], evm: { pin: PIN, tokens: [] } })).status).toBe("not-found");
+    // The form is the method's (P14.18).
+    await expect(resolveDidEvm(o.alias.replace(PIN.address, PIN.address.toUpperCase().replace("0X", "0x")), { authors: [], evm: { pin: PIN, tokens: [] } })).rejects.toMatchObject({ code: "STATE_ALIASES" });
+  });
+
+  test("PR59 evm: 'did:evm DID of a token the Original has left': reported as moved, naming the alias that replaced it; no state on that token as current", async () => {
+    const m = await moving(ETHEREUM, 83);
+    const tokens = [
+      token(m.alias, two(ROBINHOOD, [rec(0, m.log), rec(1, m.move)])),
+      token(m.dest, two(ETHEREUM, [rec(0, m.through, TS0 + 600)], { owner: CAROL })),
+    ];
+    const left = await resolveDidEvm(m.alias, { authors: [m.alice.evidence()], now: NOW, evm: { pin: PIN, tokens } });
+    expect(left).toMatchObject({ status: "moved", original: m.id, replacedBy: m.dest, state: null, document: null });
+    const here = await resolveDidEvm(m.dest, { authors: [m.alice.evidence()], now: NOW, evm: { pin: PIN, tokens } });
+    expect(here.status).toBe("resolved");
+    expect(here.document).toMatchObject({ id: m.dest, alsoKnownAs: [m.id] });
+  });
+});
