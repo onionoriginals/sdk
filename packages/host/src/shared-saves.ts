@@ -110,7 +110,7 @@ import { verifyProof, type DataIntegrityProof } from '@originals/vh/crypto';
 import { parseJson, isJsonObject, type JsonObject } from '@originals/vh/json';
 import { vhHash } from '@originals/vh/log';
 import { parseDidWebvh } from '@originals/vh/webvh';
-import { ORIGINALS_LIMITS, btcoAliasOf, resourceDigest, verifyOriginal, type AuthorDidEvidence, type OriginalsReport } from '@originals/vh/originals';
+import { ORIGINALS_LIMITS, btcoAliasOf, resourceDigestAsync, verifyOriginal, type AuthorDidEvidence, type OriginalsReport } from '@originals/vh/originals';
 import { signerPath } from '@originals/sdk/originals';
 import { json } from './router.js';
 import { deeperThan, logPrefix, MAX_WITNESS_DEPTH, parseWitnessFile, signedMediaType, verifiedSignerLog } from './hosted-layout.js';
@@ -536,7 +536,7 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     const added = new Set((entryState?.transitions ?? []).map((t) => t.to).filter((d): d is string => typeof d === 'string'));
     for (const [digest, bytes] of s.resources) {
       if (!added.has(digest)) return refuse(422, 'resource_not_in_entry', { digest });
-      if (resourceDigest(bytes) !== digest) return refuse(422, 'digest_mismatch', { digest });
+      if ((await resourceDigestAsync(bytes)) !== digest) return refuse(422, 'digest_mismatch', { digest });
     }
     const newBytes = new Map<string, Uint8Array>();
     for (const digest of added) {

@@ -69,6 +69,99 @@ export function decodeSha256Multihash(bytes: Uint8Array): Uint8Array {
 
 export { sha256 };
 
+/**
+ * Inputs shorter than this are hashed with noble: a native call costs more
+ * than it saves on a log line. Resource versions are usually far larger.
+ */
+export const NATIVE_SHA256_MIN_BYTES = 16 * 1024;
+
+interface DigestSubtle {
+  digest(algorithm: "SHA-256", data: Uint8Array): Promise<ArrayBuffer>;
+}
+
+function nativeSubtle(): DigestSubtle | undefined {
+  const subtle = (globalThis as { crypto?: { subtle?: Partial<DigestSubtle> } }).crypto?.subtle;
+  return typeof subtle?.digest === "function" ? (subtle as DigestSubtle) : undefined;
+}
+
+/**
+ * SHA-256 of exact bytes, with the platform's WebCrypto when it has one
+ * (browsers in a secure context, Node 20+, Bun, Deno): about eight times
+ * faster than noble on a large resource. The digest is SHA-256 either way
+ * (FIPS 180-4), so the result is byte-identical to `sha256`; where WebCrypto
+ * is missing or refuses the input (an insecure browser context), noble
+ * computes it. The bytes are read synchronously, when it is called: an input
+ * WebCrypto hashes is copied first, so a later change to the caller's view
+ * never reaches the digest.
+ */
+export async function sha256Async(bytes: Uint8Array): Promise<Uint8Array> {
+  // A private copy, taken now, before anything is awaited: the digest is of the
+  // bytes as they were at call time, whatever the caller does to its view while
+  // the digest is pending, with or without WebCrypto (see `snapshotBytes`).
+  const copy = snapshotBytes(bytes);
+  // Not a Uint8Array of any realm: noble refuses it as it always did.
+  if (copy === undefined) return sha256(bytes);
+  const subtle = copy.length >= NATIVE_SHA256_MIN_BYTES ? nativeSubtle() : undefined;
+  if (!subtle) return sha256(copy);
+  try {
+    return new Uint8Array(await subtle.digest("SHA-256", copy));
+  } catch {
+    // Unusable here: noble hashes the same private copy.
+    return sha256(copy);
+  }
+}
+
+const typedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype) as object;
+// The intrinsic getters, called with `.call`: they read internal slots, in any realm, and never
+// an own property of the array.
+const intrinsic = (key: PropertyKey) => {
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const get = Object.getOwnPropertyDescriptor(typedArrayPrototype, key)!.get!;
+  return (value: object) => get.call(value) as unknown;
+};
+const typedArrayTag = intrinsic(Symbol.toStringTag);
+const typedArrayLength = intrinsic("length");
+const typedArrayBuffer = intrinsic("buffer");
+const typedArrayByteOffset = intrinsic("byteOffset");
+
+/**
+ * A fresh view over exactly the memory a Uint8Array of any realm (another
+ * iframe's or `vm` context's too, which `instanceof Uint8Array` misses)
+ * covers, built from its internal slots: none of its own properties
+ * (`length`, `byteLength`, `buffer`, `slice`, ...) is consulted, and nothing
+ * is copied. Undefined for anything that is not a Uint8Array. A view of a
+ * detached buffer has no bytes: an empty view, the empty resource it always
+ * hashed as.
+ */
+export function bytesView(value: unknown): Uint8Array | undefined {
+  if (typeof value !== "object" || value === null || !ArrayBuffer.isView(value)) return undefined;
+  if (typedArrayTag(value) !== "Uint8Array") return undefined;
+  const length = typedArrayLength(value) as number;
+  if (length === 0) return new Uint8Array(0);
+  return new Uint8Array(typedArrayBuffer(value) as ArrayBuffer, typedArrayByteOffset(value) as number, length);
+}
+
+/**
+ * A private copy of a Uint8Array of any realm, read as `bytesView` reads it.
+ * The copy has an ordinary ArrayBuffer (WebCrypto refuses a
+ * SharedArrayBuffer view) and shares no memory with the input (a Node
+ * Buffer's own `slice` would). Undefined for anything that is not a
+ * Uint8Array.
+ */
+export function snapshotBytes(value: unknown): Uint8Array | undefined {
+  const view = bytesView(value);
+  return view === undefined ? undefined : new Uint8Array(view);
+}
+
+/** `sha256Multihash`, computed with `sha256Async`. */
+export async function sha256MultihashAsync(bytes: Uint8Array): Promise<Uint8Array> {
+  const out = new Uint8Array(34);
+  out[0] = SHA2_256;
+  out[1] = 32;
+  out.set(await sha256Async(bytes), 2);
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Multikey
 

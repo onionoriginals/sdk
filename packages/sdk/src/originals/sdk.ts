@@ -39,7 +39,7 @@
  *   on its own.
  */
 import { OriginalsError } from "@originals/vh";
-import { multibaseEncode } from "@originals/vh/crypto";
+import { bytesView, multibaseEncode, snapshotBytes } from "@originals/vh/crypto";
 import { isJsonObject, parseJson, type JsonObject } from "@originals/vh/json";
 import { serializeLog, vhHash, type LogEntry, type UnsignedEntry } from "@originals/vh/log";
 import {
@@ -48,6 +48,7 @@ import {
   prepareUpdateOriginal,
   checkAlias,
   resourceDigest,
+  resourceDigestAsync,
   signerLocation,
   verifyAuthorHistory,
   verifyOriginal,
@@ -390,6 +391,60 @@ function newestEvidence(candidates: HeldEvidence[]): { chosen: AuthorDidEvidence
 
 function sdkError(category: ConstructorParameters<typeof OriginalsError>[0], code: string, message: string, details?: Record<string, unknown>): never {
   throw new OriginalsError(category, code, message, details);
+}
+
+const typedArrayBufferOf = (() => {
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const get = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype) as object, "buffer")!.get!;
+  return (value: Uint8Array) => get.call(value) as ArrayBufferLike;
+})();
+// ArrayBuffer's own `detached` getter where the platform has it, called intrinsically: never a
+// property the caller could define on the buffer.
+// eslint-disable-next-line @typescript-eslint/unbound-method -- called with .call
+const detachedGetter = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, "detached")?.get;
+const isDetached = (buffer: ArrayBufferLike): boolean => {
+  if (!detachedGetter) return false;
+  try {
+    return detachedGetter.call(buffer) === true;
+  } catch {
+    return false; // a SharedArrayBuffer has no detached state
+  }
+};
+
+/**
+ * A private copy of caller bytes, from the view `bytesView` built (never the
+ * array's own properties: a Node Buffer's own `slice` would alias, and an
+ * own `constructor` could make `slice` return other bytes). An empty array
+ * is the empty resource, except that a detached or out-of-bounds view throws
+ * the TypeError it did: this realm's own `slice` validates the array before
+ * it would look at anything else, so for those it throws first.
+ */
+function copyBytes(view: Uint8Array, original: Uint8Array): Uint8Array {
+  if (view.length > 0) return new Uint8Array(view);
+  if (isDetached(typedArrayBufferOf(original))) Uint8Array.prototype.slice.call(original);
+  // Validates without creating anything: throws for an out-of-bounds view of a shrunk buffer.
+  Uint8Array.prototype.fill.call(original, 0, 0, 0);
+  return new Uint8Array(0);
+}
+
+/**
+ * The bytes of the resource version `digest` names (P4.3), or undefined: a
+ * private copy taken when this is called, before anything is awaited, and the
+ * copy is what is hashed and returned. Every size and every caller alike
+ * (`resourceBytes`, pending and refused drafts, `package`, kept evidence): the
+ * bytes returned, archived or stored are exactly the bytes whose digest was
+ * checked, whatever a store, host or caller later does to its own buffer. As
+ * when the digest was computed synchronously, the answer is the bytes as they
+ * were when read. An empty view (a detached buffer's, say) is the empty
+ * resource it hashed as; a value that is not a Uint8Array is hashed as given,
+ * and refused as it was.
+ */
+async function checkedBytes(data: Uint8Array, digest: string): Promise<Uint8Array | undefined> {
+  // A Uint8Array of any realm (an iframe's or a `vm` context's too) is copied through its internal
+  // slots; a store handing over another realm's buffer gets the same guarantee as any other.
+  const copy = snapshotBytes(data);
+  if (copy === undefined) return resourceDigest(data) === digest ? data : undefined;
+  return (await resourceDigestAsync(copy)) === digest ? copy : undefined;
 }
 
 function exactKeys(value: object, allowed: string[], where: string): void {
@@ -997,7 +1052,8 @@ export class OriginalsSDK {
    */
   async resourceBytes(digest: string): Promise<Uint8Array | undefined> {
     const data = await this.store.getResource(digest);
-    return data && resourceDigest(data) === digest ? data : undefined;
+    // The checked copy: the bytes returned are the ones whose digest matched (P4.3).
+    return data ? checkedBytes(data, digest) : undefined;
   }
 
   /**
@@ -1030,9 +1086,16 @@ export class OriginalsSDK {
     if (typeof r !== "object" || r === null) sdkError("invalid-evidence", "INPUT_INVALID", "an Original has exactly one resource: give `resource` (P4.1)");
     exactKeys(r, ["mediaType", "bytes"], "resource");
     if (!(r.bytes instanceof Uint8Array)) sdkError("invalid-evidence", "INPUT_INVALID", "resource.bytes must be a Uint8Array");
-    const digest = resourceDigest(r.bytes);
-    bytes.set(digest, r.bytes.slice());
-    const resource: ResourceDescriptor = { mediaType: r.mediaType, size: r.bytes.length, digest };
+    // Hashed now, synchronously, as before (like `prepareEdit`): the input is read exactly as it
+    // was, once per field and before anything is awaited, and the entry is built from it directly.
+    // Read through its internal slots (`bytesView`): the bytes hashed, kept and sized are one view.
+    const view = bytesView(r.bytes)!;
+    const digest = resourceDigest(view);
+    bytes.set(digest, copyBytes(view, r.bytes));
+    // `resource.bytes` is read as often and in the order as before (instanceof, digest, copy, then
+    // mediaType, then size): a getter on the resource sees what it saw. The size is the view's, so
+    // hashed, sized and kept agree.
+    const resource: ResourceDescriptor = { mediaType: r.mediaType, size: (void r.bytes, view.length), digest };
     const entry = prepareCreateOriginal({
       versionTime: this.versionTime(), name: input.name, ...(input.metadata !== undefined ? { metadata: input.metadata } : {}), resource, author: input.author,
       ...(input.editors !== undefined ? { editors: input.editors } : {}),
@@ -1079,9 +1142,14 @@ export class OriginalsSDK {
       if (r.expectedDigest !== undefined && current.digest !== r.expectedDigest) {
         sdkError("stale-parent", "STALE_DIGEST", `the resource is at ${current.digest}, not ${r.expectedDigest}`);
       }
-      const digest = resourceDigest(r.bytes);
-      bytes.set(digest, r.bytes.slice());
-      resource = { mediaType: r.mediaType ?? current.mediaType, size: r.bytes.length, digest };
+      // Hashed now, synchronously, as before: the entry keeps the caller's objects (metadata, author,
+      // editors), so it is built before anything is awaited. One version's digest costs little.
+      // Read through its internal slots (`bytesView`): the bytes hashed, kept and sized are one view.
+      const read = bytesView(r.bytes)!;
+      const digest = resourceDigest(read);
+      bytes.set(digest, copyBytes(read, r.bytes));
+      // Read as often and in the order as before (instanceof, digest, copy, mediaType, size); the size is the view's.
+      resource = { mediaType: r.mediaType ?? current.mediaType, size: (void r.bytes, read.length), digest };
     }
     const entry = prepareUpdateOriginal(head, {
       versionTime: this.versionTime(head.versionTime),
@@ -1315,7 +1383,8 @@ export class OriginalsSDK {
     const bytes = new Map<string, Uint8Array>();
     for (const t of (unsigned.state as unknown as EntryState).transitions) {
       const data = await this.store.getResource(t.to);
-      if (data && resourceDigest(data) === t.to) bytes.set(t.to, data);
+      const checked = data && (await checkedBytes(data, t.to));
+      if (checked) bytes.set(t.to, checked);
     }
     return { kind: "candidate", original: did, parent: record.parent, versionId: entry.versionId, entry, line: record.entry, summary: summarize(unsigned, previous), bytes };
   }
@@ -1335,7 +1404,8 @@ export class OriginalsSDK {
     const bytes = new Map<string, Uint8Array>();
     for (const t of (unsigned.state as unknown as EntryState).transitions) {
       const data = await this.store.getResource(t.to);
-      if (data && resourceDigest(data) === t.to) bytes.set(t.to, data);
+      const checked = data && (await checkedBytes(data, t.to));
+      if (checked) bytes.set(t.to, checked);
     }
     const summary = summarize(unsigned, previous);
     const draft: Draft = { kind: "draft", signed: false, original: did, parent: record.parent, entry: unsigned, summary, display: describeEntry(summary), bytes };
@@ -1416,7 +1486,9 @@ export class OriginalsSDK {
       }
       if (bytes[v.digest]) continue;
       const data = await this.store.getResource(v.digest);
-      if (data && resourceDigest(data) === v.digest) bytes[v.digest] = data;
+      // The bytes archived are the ones checked, never the store's buffer read again later.
+      const checked = data && (await checkedBytes(data, v.digest));
+      if (checked) bytes[v.digest] = checked;
       else missing.push({ kind: "resource", version: v.version, digest: v.digest, versionId: v.versionId });
     }
     const manifest: EvidenceManifest = {
@@ -1673,7 +1745,8 @@ export class OriginalsSDK {
 
   private async keepEvidence(contents: EvidenceContents, report: OriginalsReport, from: "package" | "host"): Promise<void> {
     for (const [digest, bytes] of Object.entries(contents.bytes)) {
-      if (resourceDigest(bytes) === digest) await this.store.putResource(digest, bytes);
+      const checked = await checkedBytes(bytes, digest);
+      if (checked) await this.store.putResource(digest, checked);
     }
     for (const evidence of contents.authors) {
       const history = await verifyAuthorHistory(evidence, { now: this.clock() });

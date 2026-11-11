@@ -43,8 +43,9 @@ import { anchoringIndex, assembleFromBitcoin, type AnchoringReport, type Ownersh
 import { chainOrder, type ChainPosition, type SatEvidence } from "./btco.js";
 import { authorKey, stillAuthorized, verifyAuthorHistory, versionNumberOf, type AuthorDidEvidence, type AuthorHistory, type EvidenceSource } from "./author.js";
 import { didWebvhLogUrl } from "../webvh/index.js";
+import { NATIVE_SHA256_MIN_BYTES, bytesView } from "../crypto/index.js";
 import { deriveDocument, exactNumberError, originalsSpecialisation } from "./profile.js";
-import { ORIGINALS_LIMITS, ORIGINALS_METHOD, resourceDigest, signerOf, type AssetState, type EntryState } from "./state.js";
+import { ORIGINALS_LIMITS, ORIGINALS_METHOD, resourceDigest, resourceDigestAsync, signerOf, type AssetState, type EntryState } from "./state.js";
 
 export interface VerifyOriginalOptions {
   /**
@@ -390,6 +391,13 @@ function checkLogForm(text: string): void {
   if (bad) throw new OriginalsError("invalid-evidence", "LOG_LINE_FORMAT", "the asset log is not compact JSON Lines, each line ending in one LF (P14.2)");
 }
 
+/**
+ * The most memory native hashing adds to one verification. Each version hashed natively costs
+ * twice its size: the private copy, held until every version is read, and WebCrypto's own copy
+ * of its input. Past the budget, versions are hashed with noble from a view, as before.
+ */
+const NATIVE_DIGEST_BUDGET = 64 * 1024 * 1024;
+
 function lookup(bytes: VerifyOriginalOptions["bytes"], digest: string): Uint8Array | undefined {
   if (!bytes) return undefined;
   return typeof bytes === "function" ? bytes(digest) : (Object.prototype.hasOwnProperty.call(bytes, digest) ? bytes[digest] : undefined);
@@ -401,16 +409,48 @@ function lookup(bytes: VerifyOriginalOptions["bytes"], digest: string): Uint8Arr
  * inscribed on the anchoring sat is read from there, already checked against its descriptor;
  * earlier ones need `bytes` (P9.17, P9.18; originals-spec #53).
  */
-function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOptions["bytes"], onSat: ReadonlyMap<string, Uint8Array>): ResourceVersion[] {
-  const out: ResourceVersion[] = [];
+function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOptions["bytes"], onSat: ReadonlyMap<string, Uint8Array>): Promise<ResourceVersion[]> {
+  // Every version's bytes are looked up and read in one synchronous pass, in version order, as
+  // when each was hashed in turn: nothing is awaited until all of them are read, and
+  // `resourceDigestAsync` reads (or copies) its input when called. A `bytes` callback, or a view
+  // it returned, that changes after the call cannot change the report.
+  //
+  // A version hashed natively is copied first, and every copy is held until the pass ends. Past
+  // NATIVE_DIGEST_BUDGET bytes of copies, a version is hashed with noble in the pass instead, as
+  // before: the same digest, read at the same moment, without another copy.
+  let budget = NATIVE_DIGEST_BUDGET;
+  const pending: Array<{ version: Omit<ResourceVersion, "bytes">; check: "missing" | "mismatch" | Promise<string> }> = [];
   for (const v of prefix) {
     const state = v.entry.state as unknown as EntryState;
     if (state.transitions.length === 0) continue;
     const d = state.asset.resource;
     const inscribed = onSat.get(d.digest);
     const supplied = inscribed ?? lookup(bytes, d.digest);
-    const check = supplied === undefined ? "missing" : supplied.length === d.size && resourceDigest(supplied) === d.digest ? "verified" : "mismatch";
-    out.push({ version: out.length + 1, digest: d.digest, mediaType: d.mediaType, size: d.size, versionId: v.entry.versionId, bytes: check, onBitcoin: inscribed !== undefined });
+    // Read now through the array's internal slots (`bytesView`, no copy): the size is checked before
+    // anything is copied, and the verdict is for exactly the bytes hashed. Not a Uint8Array of any
+    // realm: handled as before.
+    const view = supplied === undefined ? undefined : bytesView(supplied);
+    const size = view?.length;
+    const native = view !== undefined && size === d.size && size >= NATIVE_SHA256_MIN_BYTES && 2 * size <= budget;
+    if (native) budget -= 2 * size;
+    const check =
+      supplied === undefined ? "missing"
+      : view === undefined ? (supplied.length !== d.size ? "mismatch" : Promise.resolve(resourceDigest(supplied)))
+      : size !== d.size ? "mismatch"
+      // The same SHA-256 as resourceDigest, natively where the platform has it (sha256Async copies first).
+      : native ? resourceDigestAsync(view)
+      // Small or over the budget: hashed now with noble, from the view, without a copy.
+      : Promise.resolve(resourceDigest(view));
+    pending.push({ version: { version: pending.length + 1, digest: d.digest, mediaType: d.mediaType, size: d.size, versionId: v.entry.versionId, onBitcoin: inscribed !== undefined }, check });
+  }
+  return settleVersions(pending);
+}
+
+async function settleVersions(pending: Array<{ version: Omit<ResourceVersion, "bytes">; check: "missing" | "mismatch" | Promise<string> }>): Promise<ResourceVersion[]> {
+  const out: ResourceVersion[] = [];
+  for (const { version: v, check } of pending) {
+    const result = check === "missing" || check === "mismatch" ? check : (await check) === v.digest ? "verified" : "mismatch";
+    out.push({ version: v.version, digest: v.digest, mediaType: v.mediaType, size: v.size, versionId: v.versionId, bytes: result, onBitcoin: v.onBitcoin });
   }
   return out;
 }
@@ -421,6 +461,16 @@ function retainOriginal(head: string | undefined, retained: string | undefined, 
   return retained !== undefined && versionNumberOf(retained) > versionNumberOf(head) ? retained : head;
 }
 
+/**
+ * Verify an Original's log and report on it (section 7).
+ *
+ * Contract: the caller must not change `options`, or bytes it handed in or
+ * that its `bytes` callback returned, until the returned promise settles.
+ * Hashing is asynchronous (native SHA-256), so a change made while it runs
+ * may or may not be seen. The bytes are read and copied before hashing, so
+ * each version's verdict is for exactly the bytes that were read (owner
+ * decision, 10 November 2026).
+ */
 export async function verifyOriginal(options: VerifyOriginalOptions): Promise<OriginalsReport> {
   const reasons: string[] = [];
   const histories: AuthorHistory[] = [];
@@ -596,9 +646,11 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   }
   const prefix = selected ? log.entries.slice(0, selected.versionNumber) : [];
   // Only an anchor's sat supplies bytes: what Bitcoin accepted, never an ignored inscription (P9.17).
-  const versions = resourceVersions(prefix, options.bytes, onBitcoin ? assembly!.bytes : new Map());
-  const missing = versions.filter((v) => v.bytes === "missing");
-  const mismatched = versions.filter((v) => v.bytes === "mismatch");
+  // Every version's bytes are read here, as before; their digests are awaited below, together with
+  // the aliases, where the report was already awaited. What was read between the two (the retained
+  // anchor and version, the identity evidence, the aliases and `now`) is still read before anything
+  // is awaited: a `bytes` callback cannot change it, as before.
+  const checking = resourceVersions(prefix, options.bytes, onBitcoin ? assembly!.bytes : new Map());
   const state = selected ? (selected.entry.state as unknown as EntryState) : undefined;
 
   const bindingFailed = failure && (failure.category === "author-binding" || failure.category === "unauthorized-key" || failure.category === "outside-grant");
@@ -616,6 +668,22 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       ...(unverifiableNow.length > 0 ? { unverifiable: unverifiableNow } : {}), ...(acceptedNow.length > 0 ? { accepted: acceptedNow } : {}),
     }
     : options.retained?.anchor;
+  const identityEvidence: OriginalsReport["identityEvidence"] = {
+    status: identityIncomplete ? "incomplete" : "complete",
+    author: authorDid ?? history?.did ?? null,
+    latestVersionId: latest?.versionId ?? null,
+    freshness: signerFreshness(authorDid),
+    obtained: obtainedOf(authorDid ?? history?.did ?? null),
+    retainedVersionId: (authorDid && retainedAuthors[authorDid]) || null,
+    deactivated: latest?.deactivated ?? false,
+    ...(identityFailures[0] ? { failure: identityFailures[0] } : {}),
+    editors,
+  };
+  const retainedVersionId = options.retained?.original ?? null;
+  const aliasChecks = Promise.all((state?.asset.aliases ?? []).map((did) => checkAlias(`did:vh:${log.scid}`, options.aliases?.find((a) => a.did === did), did, options.now)));
+  const [versions, aliases] = await Promise.all([checking, aliasChecks]);
+  const missing = versions.filter((v) => v.bytes === "missing");
+  const mismatched = versions.filter((v) => v.bytes === "mismatch");
   const report: OriginalsReport = {
     profile: ORIGINALS_METHOD,
     original: log.scid ? `did:vh:${log.scid}` : null,
@@ -623,17 +691,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     head: head?.entry.versionId ?? null,
     history: { status: historyStatus(failure), entries: log.entries.length, ...(failure ? { failure } : {}) },
     authorBinding: { status: bindingFailed ? "failed" : !head || failure?.category === "incomplete-evidence" ? "incomplete" : "valid" },
-    identityEvidence: {
-      status: identityIncomplete ? "incomplete" : "complete",
-      author: authorDid ?? history?.did ?? null,
-      latestVersionId: latest?.versionId ?? null,
-      freshness: signerFreshness(authorDid),
-      obtained: obtainedOf(authorDid ?? history?.did ?? null),
-      retainedVersionId: (authorDid && retainedAuthors[authorDid]) || null,
-      deactivated: latest?.deactivated ?? false,
-      ...(identityFailures[0] ? { failure: identityFailures[0] } : {}),
-      editors,
-    },
+    identityEvidence,
     resources: {
       status: mismatched.length > 0 ? "digest-failure" : missing.length > 0 ? "partial" : "available",
       versions,
@@ -643,11 +701,11 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     assetFreshness: {
       // An anchored log is the sat's, as of the read's tip (P9.13, P9.17).
       status: stale ? "stale" : onBitcoin ? "anchored" : "not-established",
-      retainedVersionId: options.retained?.original ?? null,
+      retainedVersionId,
       copies,
     },
     fork,
-    aliases: await Promise.all((state?.asset.aliases ?? []).map((did) => checkAlias(`did:vh:${log.scid}`, options.aliases?.find((a) => a.did === did), did, options.now))),
+    aliases,
     anchoring: assembly?.report ?? null,
     ownership: assembly?.owner ?? null,
     ordering: anchored(selected) ? "anchored" : "claimed",
