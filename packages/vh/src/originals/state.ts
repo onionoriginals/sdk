@@ -327,7 +327,8 @@ const same = (a: JsonValue | undefined, b: JsonValue | undefined) => canonicaliz
  * P5.16, P5.17: an editor entry, checked against its parent. The grant is
  * the parent's; the author reference is the parent's; the operation is
  * update; and only the name, metadata and resource descriptor the grant
- * allows change. Grants, aliases and lifecycle are the author's.
+ * allows change. Grants, aliases, the anchor member (P9.28) and lifecycle are
+ * the author's.
  */
 export function checkEditorEntry(editor: EditorRef, operation: string, author: AuthorRef, asset: AssetState, previous: EntryState | undefined): void {
   const authorOnly: (message: string) => never = (message) => fail("outside-grant", "EDITOR_AUTHOR_ONLY", `${message}; only an author entry may (P5.16)`);
@@ -341,6 +342,8 @@ export function checkEditorEntry(editor: EditorRef, operation: string, author: A
   const before = previous.asset;
   if (!same(asset.editors as unknown as JsonValue, before.editors as unknown as JsonValue)) authorOnly("an editor entry cannot change the editor grants");
   if (!same(asset.aliases, before.aliases)) authorOnly("an editor entry cannot change aliases");
+  // P9.28: a move entry is signed by the author, not by an editor; changing `anchor` is a move.
+  if (!same(asset.anchor as unknown as JsonValue, before.anchor as unknown as JsonValue)) authorOnly("an editor entry cannot change the anchor member: a move entry is the author's (P9.28)");
   if (asset.status !== before.status) authorOnly("an editor entry cannot change the lifecycle status");
   const outside: (what: string) => never = (what) => fail("outside-grant", "EDITOR_OUTSIDE_GRANT", `${editor.did} is not granted ${what} (P5.16)`);
   if (asset.name !== before.name && !grant.name) outside("the name");

@@ -3496,11 +3496,10 @@
       "phases": [
         5
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
         "packages/vh/tests/evm-state.test.ts"
-      ],
-      "note": "A did:btco editor grant under an EVM anchor is tested; a did:btco author under one is not."
+      ]
     },
     {
       "id": "C12-263",
@@ -3551,11 +3550,10 @@
       "phases": [
         5
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
         "packages/vh/tests/evm-state.test.ts"
-      ],
-      "note": "Sideways and downward moves are tested; a move entry in an Original anchored on Bitcoin is not."
+      ]
     },
     {
       "id": "C12-267",
@@ -3565,11 +3563,10 @@
       "phases": [
         5
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
         "packages/vh/tests/evm-state.test.ts"
-      ],
-      "note": "A move before the anchoring entry and a move without the destination's alias are tested; a move entry signed by an editor (STATE_MOVE_BY_EDITOR) is not."
+      ]
     },
     {
       "id": "C12-268",
@@ -3801,11 +3798,10 @@
       "phases": [
         5
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
         "packages/vh/tests/evm-state.test.ts"
-      ],
-      "note": "The did:evm form (uppercase address, leading zeros, other contract) is tested; a CAIP-19 asset ID in aliases is not."
+      ]
     },
     {
       "id": "C12-283",
@@ -4056,7 +4052,10 @@
         2,
         5
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/evm-state.test.ts"
+      ]
     },
     {
       "id": "C12-301",
