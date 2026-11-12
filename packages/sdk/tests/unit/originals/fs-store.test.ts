@@ -503,3 +503,34 @@ describe("fileRecoveryStore: the Bitcoin writer's durable pairs (#975)", () => {
     }
   });
 });
+
+describe("FileStore: carried imports (originals-spec PR 59 P7.13, EXPERIMENTAL)", () => {
+  test("PR59b: \"Carried file imported, then read again with no separate opt-in to resolve\": the mark survives reopening, so a later read makes no resolver request", async () => {
+    const dir = tempDir();
+    const other = tempDir();
+    try {
+      const { sdk, signer, author, alice } = await withOriginal(other);
+      const c = await sdk.create({ name: "notes", resource: { mediaType: "text/plain", bytes: bytes("harbor notes\n") }, author, signer });
+      if (c.kind !== "original") throw new Error("expected an Original");
+      const file = await sdk.carry(c.original.did, { disclosed: await sdk.carriedDisclosure(c.original.did) });
+      const asked: string[] = [];
+      const resolver = async (did: string) => {
+        asked.push(did);
+        return did === alice.did ? alice.evidence() : undefined;
+      };
+      const store = await FileStore.open(dir);
+      await store.putAuthorEvidence({ ...alice.evidence(), obtainedAt: "2026-10-18T11:59:00.000Z", source: "retained" });
+      const reader = OriginalsSDK.create({ store, authors: resolver, clock: clock() });
+      expect((await reader.importCarried(file.bytes)).status).toBe("imported");
+      expect(await store.getCarriedImport(c.original.did)).toBe(true);
+      expect(await store.getCarriedImport("did:vh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ")).toBe(false);
+      const reopened = OriginalsSDK.create({ store: await FileStore.open(dir), authors: resolver, clock: clock() });
+      expect((await reopened.get(c.original.did)).checkpoint).toBe(c.original.checkpoint);
+      expect(asked).toEqual([]);
+      expect(await (await FileStore.open(dir)).list()).toEqual([c.original.did]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+});

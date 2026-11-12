@@ -1,8 +1,9 @@
 /**
  * Carried logs through the SDK (proposed; aviarytech/originals-spec PR 59 at
- * 3ed0f89): P7.11-P7.16. Each test cites its section 12 row by C12 id and a
- * quote of the row's first column. The carrier formats themselves are
- * tested in packages/vh/tests/carried.test.ts.
+ * a3ffdc1): P7.11-P7.16. Each test cites its section 12 row by C12 id and a
+ * quote of the row's first column; rows added at a3ffdc1, not yet in the
+ * registry, are cited as `PR59b:`. The carrier formats themselves are tested
+ * in packages/vh/tests/carried.test.ts.
  */
 import { describe, expect, test } from "bun:test";
 import type { AuthorDidEvidence } from "@originals/vh/originals";
@@ -98,6 +99,43 @@ describe("P7.13: resolution only on the caller's opt-in", () => {
     expect(r.verified).toEqual({ log: false, version: false });
   });
 
+  test("PR59b: \"Carried file imported, then read again with no separate opt-in to resolve\": no resolver request; the import is not an opt-in (P7.13)", async () => {
+    const env = await harbor();
+    const file = await carried(env);
+    // An offline import: Alice's history is already held, and the author source is a resolver.
+    const asked: string[] = [];
+    const store = new MemoryStore();
+    await store.putAuthorEvidence({ ...env.alice.evidence(), obtainedAt: "2026-10-18T12:59:00.000Z", source: "retained" });
+    const resolver = async (did: string) => {
+      asked.push(did);
+      return did === env.alice.did ? env.alice.evidence() : undefined;
+    };
+    const sdk = OriginalsSDK.create({ store, authors: resolver, clock: clock(Date.parse("2026-10-18T13:00:00Z")) });
+    const imported = await sdk.importCarried(file.bytes);
+    expect(imported.status).toBe("imported");
+    // The import stays offline, its own verification included.
+    expect(asked).toEqual([]);
+    // Later reads make no request without a separate opt-in...
+    expect((await sdk.get(env.did)).checkpoint).toBe(env.checkpoints[3]);
+    expect(await sdk.carriedDisclosure(env.did)).toMatchObject({ checkpoint: env.checkpoints[3] });
+    expect(asked).toEqual([]);
+    // ...and with one, the resolver is asked.
+    await sdk.get(env.did, { resolveSigners: true });
+    expect(asked).toEqual([env.alice.did]);
+    // The mark is kept by the store: a new SDK on the same store does not resolve either.
+    const again = OriginalsSDK.create({ store, authors: resolver, clock: clock(Date.parse("2026-10-18T13:00:00Z")) });
+    await again.get(env.did);
+    expect(asked).toEqual([env.alice.did]);
+
+    // An import the caller opted in to resolve for: that opt-in covers the import, not later reads.
+    const online = reader(env.alice);
+    await online.sdk.importCarried(file.bytes, { resolveSigners: true });
+    const during = online.asked.length;
+    expect(during).toBeGreaterThan(0);
+    await online.sdk.get(env.did);
+    expect(online.asked.length).toBe(during);
+  });
+
   test("a store's retained signer history is used without a request", async () => {
     const env = await harbor();
     const file = await carried(env);
@@ -123,6 +161,20 @@ describe("P7.15, P7.16: writing a carried file", () => {
     await expect(env.sdk.carriedDisclosure(env.did, { checkpoint: anchored.original.checkpoint })).rejects.toMatchObject({ code: "CARRIER_NOT_ACCEPTED" });
     // A checkpoint before the anchoring entry is still accepted.
     expect((await env.sdk.carriedDisclosure(env.did, { checkpoint: env.checkpoints[3] })).checkpoint).toBe(env.checkpoints[3]);
+  });
+
+  test("PR59b: \"Carried checkpoint from before the anchoring entry of an Original that is now anchored\": allowed; reported as a historical checkpoint, valid as of it, with no statement about current anchoring (P7.14, P7.15)", async () => {
+    const env = await harbor();
+    await env.sdk.anchor(env.did, { parent: env.checkpoints[3], author: env.author, signer: env.signer, sat: btcoAlias("regtest", "5000000000") });
+    // Written with no anchor evidence (P7.15).
+    const file = await carried(env, env.checkpoints[3]);
+    const r = await env.sdk.readCarried(file.bytes);
+    expect(r.anchoring.status).toBe("historical-checkpoint");
+    expect(r.overall).toEqual({ status: "verified", reason: null });
+    expect(r.validAsOf?.checkpoint).toBe(env.checkpoints[3]);
+    expect(r.current).toBe(false);
+    expect(r.reasons).not.toContain("not-anchored");
+    expect(r.statements.join(" ")).toContain("makes no statement about whether the Original has been anchored since");
   });
 
   test("C12-229: \"Writer about to write a carrier\": the user is told what the file discloses first; a JSON carrier says the data gains a member", async () => {
@@ -212,11 +264,27 @@ describe("P7.14, P7.5: importing a carried log", () => {
     const member = text.slice(text.indexOf(',"originalLog"'), -1);
     const stray = bytes(`{${member.slice(1)},"a":1}`);
     const { sdk } = reader(env.alice);
-    const r = await sdk.readCarried(stray, { resolveSigners: true });
+    const r = await sdk.readCarried(stray, { resolveSigners: true, hint: "data.json" });
     expect(r.carrierStatus).toBe("stray");
     expect(r.verified).toEqual({ log: true, version: false });
+    // The file as a whole fails, whatever the log's own result (P7.12).
+    expect(r.overall).toEqual({ status: "failed", reason: "json-member-not-last" });
     const imported = await sdk.importCarried(stray, { resolveSigners: true });
     expect(imported.status).toBe("imported");
     expect(await sdk.resourceBytes(imported.original.state.resource.digest)).toBeUndefined();
+  });
+
+  test("PR59b: \"Two root members named `originalLog`, including one spelled with escapes\": rejected; neither is read or imported (P14.17)", async () => {
+    const env = await harbor();
+    const json = await env.sdk.create({ name: "Data", resource: { mediaType: "application/json", bytes: bytes('{"a":1}') }, author: env.author, signer: env.signer });
+    if (json.kind !== "original") throw new Error("expected an Original");
+    const file = await env.sdk.carry(json.original.did, { disclosed: await env.sdk.carriedDisclosure(json.original.did) });
+    const text = new TextDecoder().decode(file.bytes);
+    const member = text.slice(text.indexOf(',"originalLog"') + 1, -1);
+    const twice = bytes(`{${member.replace('"originalLog"', '"original\\u004cog"')},"a":1,${member}}`);
+    const r = await env.sdk.readCarried(twice);
+    expect(r.carrierStatus).toBe("rejected");
+    expect(r.overall).toEqual({ status: "failed", reason: "json-member-repeated" });
+    await expect(env.sdk.importCarried(twice)).rejects.toMatchObject({ code: "IMPORT_REJECTED" });
   });
 });

@@ -386,9 +386,11 @@ export interface ReadCarriedOptions {
    * names, through the configured `authors` source when it is a function
    * (P7.13, P8.5). Without it only signer histories this store retained, or
    * the configured `authors` list, are used, and no request is made: a file
-   * opened or previewed never resolves a DID.
+   * opened, previewed or imported never resolves a DID.
    */
   resolveSigners?: boolean;
+  /** A file name, extension or declared media type: only a hint of which carrier to try first (P14.14). */
+  hint?: string;
   /** What an adapter read from the anchoring sat of an anchored Original (P7.14). */
   bitcoin?: SatEvidence[];
 }
@@ -695,9 +697,10 @@ function checkAnswer(answer: unknown, did: string): HostAnswer {
  * no carrier is defined, whose own result P7.12 reports separately; undefined
  * when there is none or it does not parse.
  */
-function carriedLogText(file: Uint8Array): string | undefined {
-  const found = locateCarrier(file);
-  const log = found.status === "found" ? found.log : found.stray?.log;
+function carriedLogText(file: Uint8Array, hint?: string): string | undefined {
+  const found = locateCarrier(file, hint !== undefined ? { hint } : {});
+  // Two root `originalLog` members: neither is read (P14.17).
+  const log = found.status === "found" ? found.log : found.status === "none" ? found.stray?.log : undefined;
   if (log?.status !== "parsed") return undefined;
   return log.entries.map((e) => `${JSON.stringify(e)}\n`).join("");
 }
@@ -763,6 +766,8 @@ function logResourceVersions(log: string): Array<{ version: number; digest: stri
 export class OriginalsSDK {
   private readonly store: OriginalsStore;
   private readonly clock: () => number;
+  /** Originals this instance first stored from a carried file, for a store that keeps no mark itself (P7.13). */
+  private readonly carriedImports = new Set<string>();
 
   private constructor(private readonly options: OriginalsSDKOptions) {
     this.store = options.store ?? new MemoryStore();
@@ -788,13 +793,14 @@ export class OriginalsSDK {
    * short of it is stale; evidence that diverges is an identity fork, reported
    * as incomplete identity evidence (AUTHOR_DID_FORK), never as the package's.
    */
-  private async authorEvidence(log: string, supplied: AuthorDidEvidence[] = [], others: string[] = [], retained?: RetainedVersions): Promise<AuthorDidEvidence[]> {
+  private async authorEvidence(log: string, supplied: AuthorDidEvidence[] = [], others: string[] = [], retained?: RetainedVersions, optIn?: boolean): Promise<AuthorDidEvidence[]> {
     const out: AuthorDidEvidence[] = [];
+    const resolve = await this.mayResolve(log, optIn);
     // Other branches compared with this log are verified too, and their editors may differ (P6.6).
     const dids = [...new Set([log, ...others].flatMap(signerDidsOf))];
     for (const did of dids) {
       const given = supplied.find((a) => a.did === did);
-      const candidates = [...(given ? [given] : []), ...(await this.configuredAndStored(did))];
+      const candidates = [...(given ? [given] : []), ...(await this.configuredAndStored(did, resolve))];
       const found = newestEvidence(await Promise.all(candidates.map((c) => this.held(c))));
       if (!found) continue;
       out.push(found.chosen);
@@ -807,10 +813,29 @@ export class OriginalsSDK {
     return out;
   }
 
-  /** The author source's evidence for `did`, then this store's, as candidates (P7.8). */
-  private async configuredAndStored(did: string): Promise<AuthorDidEvidence[]> {
+  /**
+   * P7.13 (originals-spec PR 59, EXPERIMENTAL): whether reading the Original
+   * `log` names may make resolver requests (a function `authors` source,
+   * `identityFetch`). Not for one first stored by importing a carried file,
+   * since the import was no opt-in to resolve, unless the caller opts in for
+   * this read (`optIn`).
+   */
+  private async mayResolve(log: string, optIn?: boolean): Promise<boolean> {
+    if (optIn === true) return true;
+    const did = originalOf(log);
+    if (did === undefined) return true;
+    if (this.carriedImports.has(did)) return false;
+    return !(await this.store.getCarriedImport?.(did));
+  }
+
+  /**
+   * The author source's evidence for `did`, then this store's, as candidates
+   * (P7.8). Without `resolve`, a function source, which may make a request,
+   * is not asked (P7.13).
+   */
+  private async configuredAndStored(did: string, resolve = true): Promise<AuthorDidEvidence[]> {
     const source = this.options.authors;
-    const found = Array.isArray(source) ? source.find((a) => a.did === did) : await source(did);
+    const found = Array.isArray(source) ? source.find((a) => a.did === did) : resolve ? await source(did) : undefined;
     const configured = found ? { ...found, source: found.source ?? ("supplied" as const) } : undefined;
     const kept = await this.store.getAuthorEvidence(did);
     // Kept by this store when it verified it (P7.8): when and where it was first obtained is kept with it.
@@ -862,10 +887,12 @@ export class OriginalsSDK {
     base: AuthorDidEvidence[],
     run: (authors: AuthorDidEvidence[]) => Promise<OriginalsReport>,
     retrieval?: Retrieval,
+    optIn?: boolean,
   ): Promise<{ report: OriginalsReport; authors: AuthorDidEvidence[] }> {
     let report = await run(base);
     let authors = base;
-    const fetch = this.identityFetcher();
+    // P7.13: no identity retrieval for an Original imported from a carried file, without the caller's opt-in.
+    const fetch = (await this.mayResolve(log, optIn)) ? this.identityFetcher() : undefined;
     if (!fetch) return { report, authors };
     const budget = retrieval ?? new Retrieval(fetch, this.options.retrievalLimits, this.options.archiveLimits, undefined, "identity retrieval");
     const tried = new Set<string>();
@@ -924,7 +951,7 @@ export class OriginalsSDK {
   /** The evidence a package carries for `log`: as `verify` used it, identity retrieval included. */
   private async packagedIdentities(log: string, report: OriginalsReport): Promise<AuthorDidEvidence[]> {
     const base = await this.authorEvidence(log);
-    const fetch = this.identityFetcher();
+    const fetch = (await this.mayResolve(log)) ? this.identityFetcher() : undefined;
     if (!fetch) return base;
     const budget = new Retrieval(fetch, this.options.retrievalLimits, this.options.archiveLimits, undefined, "identity retrieval");
     let out = base;
@@ -1084,7 +1111,7 @@ export class OriginalsSDK {
     return out;
   }
 
-  private async verify(log: string, checkpoint?: string, extra?: ReadonlyMap<string, Uint8Array>, bitcoin?: SatEvidence[]): Promise<OriginalsReport> {
+  private async verify(log: string, checkpoint?: string, extra?: ReadonlyMap<string, Uint8Array>, bitcoin?: SatEvidence[], optIn?: boolean): Promise<OriginalsReport> {
     const aliases = await this.aliasEvidence(log);
     const { bytes, checked } = await this.storedBytes(log, extra);
     const comparisons = await this.comparisons(log);
@@ -1100,8 +1127,8 @@ export class OriginalsSDK {
         ...comparisons,
         ...(checkpoint ? { checkpoint } : {}),
       });
-    const base = await this.authorEvidence(log, [], (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])), comparisons.retained);
-    return (await this.withIdentities(log, base, run)).report;
+    const base = await this.authorEvidence(log, [], (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])), comparisons.retained, optIn);
+    return (await this.withIdentities(log, base, run, undefined, optIn)).report;
   }
 
   private view(did: string, report: OriginalsReport): OriginalView {
@@ -1144,10 +1171,13 @@ export class OriginalsSDK {
    * checkpoint (P3.2). For an anchored Original, pass what an adapter read
    * from the anchoring sat (`satEvidence`): Bitcoin then decides the log from
    * the anchor on, and without it the result is unverified (P9.12, P9.13).
+   * For an Original first stored by importing a carried file, no resolver
+   * request is made unless `resolveSigners` is true: the import was no
+   * opt-in to resolve (P7.13).
    */
-  async get(did: string, options: { checkpoint?: string; bitcoin?: SatEvidence[] } = {}): Promise<OriginalView> {
+  async get(did: string, options: { checkpoint?: string; bitcoin?: SatEvidence[]; resolveSigners?: boolean } = {}): Promise<OriginalView> {
     const log = await this.stored(did);
-    const report = await this.verify(log, options.checkpoint, undefined, options.bitcoin);
+    const report = await this.verify(log, options.checkpoint, undefined, options.bitcoin, options.resolveSigners);
     await this.retain(report);
     if (options.checkpoint && report.checkpoint !== options.checkpoint) {
       sdkError("incomplete-evidence", "CHECKPOINT_NOT_FOUND", `${options.checkpoint} is not a verified checkpoint of ${did}`, { report });
@@ -1765,11 +1795,21 @@ export class OriginalsSDK {
    * history (P7.5): a prefix of the local log keeps the local one, and a
    * diverging branch is kept beside it and reported as a conflict.
    */
-  private async storeImport(contents: Pick<EvidenceContents, "log" | "authors" | "bytes">, r: OriginalsReport, from: "package" | "host" | "fetched"): Promise<ImportResult> {
+  private async storeImport(
+    contents: Pick<EvidenceContents, "log" | "authors" | "bytes">,
+    r: OriginalsReport,
+    from: "package" | "host" | "fetched",
+    carried?: { resolveSigners: boolean },
+  ): Promise<ImportResult> {
     const did = r.original!;
     const incoming = versionIds(contents.log);
     const local = (await this.store.get(did))?.log;
-    const result = async (status: ImportResult["status"]): Promise<ImportResult> => ({ status, original: await this.get(did) });
+    // P7.13: an Original first stored from a carried file is marked, so later reads make no resolver
+    // request without the caller's opt-in; the import's own read uses only the import's opt-in.
+    // The store keeps the mark once the log is committed (a FileStore lists an Original by its directory).
+    const marked = carried !== undefined && !local;
+    if (marked) this.carriedImports.add(did);
+    const result = async (status: ImportResult["status"]): Promise<ImportResult> => ({ status, original: await this.get(did, carried?.resolveSigners ? { resolveSigners: true } : {}) });
     if (local) {
       const have = versionIds(local);
       const sharesPrefix = (a: string[], b: string[]) => a.every((id, i) => b[i] === id);
@@ -1793,6 +1833,7 @@ export class OriginalsSDK {
     }
     await this.keepEvidence(contents, r, from);
     await this.store.commit(did, { expectedHead: headOf(local), log: contents.log });
+    if (marked) await this.store.putCarriedImport?.(did);
     return result("imported");
   }
 
@@ -1922,7 +1963,7 @@ export class OriginalsSDK {
       return [...(listed ? [{ ...listed, source: listed.source ?? ("supplied" as const) }] : []), ...(kept ? [{ ...kept, source: "retained" as const }] : [])];
     };
     const choose = async (candidates: AuthorDidEvidence[]) => newestEvidence(await Promise.all(candidates.map((c) => this.held(c))))?.chosen;
-    const text = carriedLogText(file);
+    const text = carriedLogText(file, options.hint);
     const authors: AuthorDidEvidence[] = [];
     for (const did of text ? signerDidsOf(text) : []) {
       const chosen = await choose(await given(did));
@@ -1940,6 +1981,7 @@ export class OriginalsSDK {
           }
         : undefined;
     const report = await readCarriedFile(file, {
+      ...(options.hint !== undefined ? { hint: options.hint } : {}),
       authors,
       ...(resolveSigners ? { resolveSigners } : {}),
       ...(options.bitcoin ? { bitcoin: options.bitcoin } : {}),
@@ -1960,7 +2002,7 @@ export class OriginalsSDK {
    * evidence package and makes no claim to be complete (P7.11).
    */
   async readCarried(file: Uint8Array, options?: ReadCarriedOptions): Promise<CarriedFileReport> {
-    options = optionsObject(options, ["resolveSigners", "bitcoin"], "readCarried options");
+    options = optionsObject(options, ["resolveSigners", "bitcoin", "hint"], "readCarried options");
     return (await this.carriedRead(file, options)).report;
   }
 
@@ -1969,10 +2011,13 @@ export class OriginalsSDK {
    * verifies to its last entry. It never replaces newer local history
    * (`kept-newer-local`), and a different branch is kept beside the local one
    * and reported as a conflict. The version's bytes are kept when they are
-   * that version. Importing signs nothing (P7.16).
+   * that version. Importing signs nothing (P7.16). Importing is not an
+   * opt-in to resolve: an offline import stays offline, and later reads of
+   * an Original it first stored make no resolver request unless the caller
+   * opts in again (`get(did, { resolveSigners: true })`; P7.13).
    */
   async importCarried(file: Uint8Array, options?: ImportCarriedOptions): Promise<ImportResult> {
-    options = optionsObject(options, ["resolveSigners", "bitcoin", "original"], "importCarried options");
+    options = optionsObject(options, ["resolveSigners", "bitcoin", "original", "hint"], "importCarried options");
     const { report: c, authors } = await this.carriedRead(file, options);
     const r = c.report;
     // As for a package (P7.5): the log verifies to its own last entry. A fork with local history
@@ -1984,12 +2029,12 @@ export class OriginalsSDK {
     if (options.original !== undefined && r.original !== options.original) {
       sdkError("invalid-evidence", "IMPORT_REJECTED", `the carried log is for ${r.original}, not ${options.original}`, { carried: c });
     }
-    const log = carriedLogText(file);
+    const log = carriedLogText(file, options.hint);
     if (log === undefined) sdkError("invalid-evidence", "IMPORT_REJECTED", "the file has no carried log", { carried: c });
     // The log is imported on its own result; the bytes only when they are its version (P7.12).
     const bytes: Record<string, Uint8Array> = c.verified.version && c.descriptor && c.version ? { [c.descriptor.digest]: c.version } : {};
     const evidence = authors.filter((a) => a.log !== undefined).map(({ did, log: l, witness }) => ({ did, log: l, ...(witness !== undefined ? { witness } : {}) }));
-    return this.storeImport({ log, authors: evidence, bytes }, r, "fetched");
+    return this.storeImport({ log, authors: evidence, bytes }, r, "fetched", { resolveSigners: options.resolveSigners === true });
   }
 }
 

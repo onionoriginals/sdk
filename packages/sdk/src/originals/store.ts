@@ -101,6 +101,15 @@ export interface OriginalsStore {
    */
   getRetainedAnchor?(did: string): Promise<RetainedAnchor | undefined>;
   putRetainedAnchor?(did: string, anchor: RetainedAnchor): Promise<void>;
+  /**
+   * Optional. Mark an Original first stored by importing a carried file, and
+   * ask whether one is marked. Reads of a marked Original make no resolver
+   * request without the caller's own opt-in, because importing is not one
+   * (originals-spec PR 59 P7.13; EXPERIMENTAL). A store without these keeps
+   * the mark only for the life of the SDK instance that imported it.
+   */
+  putCarriedImport?(did: string): Promise<void>;
+  getCarriedImport?(did: string): Promise<boolean>;
   /** Keep a valid branch of an Original that diverges from its committed log. */
   putBranch(did: string, log: string): Promise<void>;
   getBranches(did: string): Promise<string[]>;
@@ -154,6 +163,7 @@ export class MemoryStore implements OriginalsStore {
   private readonly branches = new Map<string, string[]>();
   private readonly refused = new Map<string, StoredRefused[]>();
   private readonly pending = new Map<string, StoredPending>();
+  private readonly carriedImports = new Set<string>();
 
   get(did: string): Promise<StoredOriginal | undefined> {
     return Promise.resolve(this.originals.get(did));
@@ -226,6 +236,15 @@ export class MemoryStore implements OriginalsStore {
   putRetainedAnchor(did: string, anchor: RetainedAnchor): Promise<void> {
     this.anchors.set(did, { ...anchor });
     return Promise.resolve();
+  }
+
+  putCarriedImport(did: string): Promise<void> {
+    this.carriedImports.add(did);
+    return Promise.resolve();
+  }
+
+  getCarriedImport(did: string): Promise<boolean> {
+    return Promise.resolve(this.carriedImports.has(did));
   }
 
   putBranch(did: string, log: string): Promise<void> {

@@ -150,14 +150,34 @@ on; it never reports an unanchored Original as current (P7.10). The
   preparation step.
 - **Entry size (P7.7; P14.13).** An entry is at most
   `ORIGINALS_LIMITS.entryBytes` (65,536) bytes, measured as the UTF-8 byte
-  length of its stored line without the line feed (previously UTF-16 code
-  units of the re-serialized entry), measured before the line is parsed and
-  never again after. Entries parsed with `parseLog` carry their stored line's
-  size, and `verifyLog` takes the sizes (`lineBytes`) from a caller that has
-  the lines; an entry with no stored line is measured as its JCS
-  serialization (PROVISIONAL). A commit of a larger entry fails with
-  `limit-exceeded` (`COMMIT_VERIFICATION_FAILED`), and a verifier reports the
-  log `limit-exceeded` at that entry (`ENTRY_TOO_LARGE`).
+  length of its JCS form, in every format: `did.jsonl`, an inscription, an
+  EVM publication and every carrier (originals-spec PR 59 at a3ffdc1;
+  previously the stored line, and before that UTF-16 code units). How the
+  entry is written (string escapes, number forms) does not count: a line
+  longer than the limit whose JCS form is within it is accepted, and a
+  shorter line whose JCS form is over it is rejected. `verifyLog` no longer
+  takes stored sizes (`lineBytes`), and `parseLog` keeps none. A commit of a
+  larger entry fails with `limit-exceeded` (`COMMIT_VERIFICATION_FAILED`),
+  and a verifier reports the log `limit-exceeded` at that entry
+  (`ENTRY_TOO_LARGE`).
+- **Carried files (P7.11-P7.16, P14.14-P14.17; EXPERIMENTAL,
+  originals-spec PR 59 at a3ffdc1).** `readCarried` reports an `overall`
+  result for the file: `failed` with an explicit reason whenever the file is
+  not a carried version (`file-digest-mismatch`,
+  `carrier-not-for-media-type`, `json-member-not-last`,
+  `json-member-repeated`, ...), even when the log's proofs verify, which stay
+  detail (P7.12). Every carrier is tried; `hint` (a file name or declared
+  type) only orders them (P14.14). A root object with two `originalLog`
+  members is `rejected` and neither is read; a member that is not last is
+  verified as a log but never as a version (P14.17). A carried log with no
+  anchoring entry is a `historical-checkpoint`: valid as of it, with no
+  statement about anchoring since, and an anchored Original's pre-anchor
+  checkpoint may be carried without anchor evidence (P7.14, P7.15).
+  Importing is not an opt-in to resolve (P7.13): an Original first stored by
+  `importCarried` is marked (`OriginalsStore.putCarriedImport`, optional;
+  `MemoryStore` and `FileStore` keep it), and later reads of it ask a
+  function `authors` source or `identityFetch` only with
+  `get(did, { resolveSigners: true })`.
 - **One resource (P4.1, P4.4, P14.4–P14.6; originals-spec #53).** `create`
   takes `resource: { mediaType, bytes }`, its version 1. `edit` takes
   `resource: { bytes, mediaType?, expectedDigest? }`, the next version:
