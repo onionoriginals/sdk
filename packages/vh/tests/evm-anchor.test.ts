@@ -10,6 +10,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import type { LogEntry } from "../src/log/index.js";
+import { canonicalize, type JsonValue } from "../src/json/index.js";
 import {
   EVM_CHAINS,
   createOriginal,
@@ -444,6 +445,40 @@ describe("P9.15 with the inscription time of P9.20, P9.26", () => {
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
     expect(r.historicallyAuthorizedOnly).toEqual([]);
     expect(r.ordering).toBe("evm-attested-by-operator");
+  });
+});
+
+describe("P14.13 the entry limit on a publication", () => {
+  test("C12-150: \"Entry whose JCS form is 65,536 / 65,537 UTF-8 bytes, in `did.jsonl`, an inscription, a publication or any carrier\": accepted / rejected, in an EVM publication", async () => {
+    const key = seeded(77);
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
+    const at = clock();
+    const sign = alice.signer(key, "orig");
+    const author = alice.ref("orig");
+    const atSize = async (target: number) => {
+      let pad = 65_000;
+      for (let i = 0; i < 40; i++) {
+        const genesis = await createOriginal({ versionTime: at(), name: "Harbor", metadata: { pad: "a".repeat(pad) }, resource: photo("limit"), author, sign, anchor: { chain: ROBINHOOD, minter: A }, evm: PIN });
+        const size = new TextEncoder().encode(canonicalize(genesis as unknown as JsonValue)).length;
+        if (size === target) {
+          const id = (genesis.state as { id: string }).id;
+          const alias = derivedTokenAlias(id, { chain: ROBINHOOD, minter: A }, PIN);
+          const anchoring = await updateOriginal(genesis, { versionTime: at(), author, sign, metadata: null, aliases: [alias], evm: PIN });
+          return { log: [genesis, anchoring], alias, anchoring };
+        }
+        pad += target - size;
+      }
+      throw new Error(`no entry of ${target} bytes`);
+    };
+    const fits = await atSize(65_536);
+    const ok = await verify(alice, [token(fits.alias, two(ROBINHOOD, [rec(0, fits.log)]))]);
+    expect(ok.evm?.status, JSON.stringify(ok.evm?.stretches[0]?.ignored)).toBe("anchored");
+    expect(ok.head).toBe(fits.anchoring.versionId);
+    const over = await atSize(65_537);
+    const r = await verify(alice, [token(over.alias, two(ROBINHOOD, [rec(0, over.log)]))]);
+    expect(r.evm?.status).toBe("not-anchored");
+    expect(r.evm?.stretches[0]?.ignored).toEqual([expect.objectContaining({ index: 0, code: "ENTRY_TOO_LARGE" })]);
+    expect(r.current).toBe(false);
   });
 });
 

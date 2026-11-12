@@ -2188,13 +2188,14 @@
       "phases": [
         1
       ],
-      "status": "partial",
-      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release. Reworded at a3ffdc1 (originals-spec PR 59); was: \"Entry whose UTF-8 line is 65,536 bytes / 65,537 bytes\" / \"Accepted / rejected (P14.13)\". The did.jsonl, inscription (packages/vh/tests/bitcoin.test.ts) and trailer and text block (packages/vh/tests/carried.test.ts) cases are tested; a publication on an EVM token and a JSON member are not tested at the limit, so the row is partial.",
+      "status": "covered",
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release. Reworded at a3ffdc1 (originals-spec PR 59); was: \"Entry whose UTF-8 line is 65,536 bytes / 65,537 bytes\" / \"Accepted / rejected (P14.13)\". Tested in did.jsonl, an inscription (packages/vh/tests/bitcoin.test.ts), an EVM publication (packages/vh/tests/evm-anchor.test.ts), and the trailer, text block and JSON member carriers (packages/vh/tests/carried.test.ts).",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/hosting.test.ts",
         "packages/sdk/tests/unit/originals/sdk.test.ts",
         "packages/vh/tests/bitcoin.test.ts",
         "packages/vh/tests/carried.test.ts",
+        "packages/vh/tests/evm-anchor.test.ts",
         "packages/vh/tests/originals.test.ts"
       ]
     },

@@ -685,6 +685,34 @@ describe("P14.17: JSON members", () => {
     }
   });
 
+  test("C12-150: \"Entry whose JCS form is 65,536 / 65,537 UTF-8 bytes, in `did.jsonl`, an inscription, a publication or any carrier\": accepted / rejected, in a JSON member", async () => {
+    const data = enc('{"a":1}');
+    const { alice, at, ref, sign } = await original([{ data, mediaType: "application/json" }]);
+    const atSize = async (target: number) => {
+      let pad = 65_000;
+      for (let i = 0; i < 40; i++) {
+        const e = await createOriginal({ versionTime: at(), name: "Big", metadata: { pad: "a".repeat(pad) }, resource: described(data, "application/json"), author: ref, sign });
+        const size = enc(canonicalize(e as unknown as JsonValue)).length;
+        if (size === target) return e;
+        pad += target - size;
+      }
+      throw new Error(`no entry of ${target} bytes`);
+    };
+    for (const [target, ok] of [[65_536, true], [65_537, false]] as const) {
+      const e = await atSize(target);
+      // Pretty-printed, so the member's text is longer than the JCS form: the JCS form is what counts.
+      const pretty = JSON.stringify(e, null, 2);
+      expect(enc(pretty).length).toBeGreaterThan(target);
+      const r = await readCarriedFile(enc(`{"a":1,"originalLog":[${pretty}]}`), { authors: [alice.evidence()], now: NOW });
+      expect(r.carrier).toEqual({ kind: "json-member" });
+      if (ok) expect(r.verified, JSON.stringify(r.report?.history.failure ?? r.chain)).toEqual({ log: true, version: true });
+      else {
+        expect(r.chain.failure).toMatchObject({ category: "limit-exceeded", code: "ENTRY_TOO_LARGE" });
+        expect(r.verified).toEqual({ log: false, version: false });
+      }
+    }
+  });
+
   test("C12-223: \"JSON document with a 64-bit integer or a nested duplicate key outside the member\": the member is still found", async () => {
     const { entries } = await jsonOriginal('{"a":1}');
     const doc = `{"big":18446744073709551615,"nested":{"k":1,"k":2},"originalLog":[${entries.map((e) => JSON.stringify(e)).join(",")}]}`;
