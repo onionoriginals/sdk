@@ -177,7 +177,9 @@ on; it never reports an unanchored Original as current (P7.10). The
   `importCarried` is marked (`OriginalsStore.putCarriedImport`, optional;
   `MemoryStore` and `FileStore` keep it), and later reads of it ask a
   function `authors` source or `identityFetch` only with
-  `get(did, { resolveSigners: true })`.
+  `get(did, { resolveSigners: true })`. After EVM anchoring, `carry` writes a
+  checkpoint from the anchoring entry on only once a token accepted it at
+  its finalized block (see [EVM anchoring](#evm-anchoring-experimental-originals-spec-pr-59)).
 - **One resource (P4.1, P4.4, P14.4–P14.6; originals-spec #53).** `create`
   takes `resource: { mediaType, bytes }`, its version 1. `edit` takes
   `resource: { bytes, mediaType?, expectedDigest? }`, the next version:
@@ -1374,3 +1376,121 @@ adds a delay per request):
 The counts are exact and asserted by `tests/unit/originals/clock-bench.test.ts`
 on a 20,000-header chain; the latencies exclude a real node's own cost of
 serving 900,000 headers, which bounds a production cold start.
+
+## EVM anchoring (EXPERIMENTAL; originals-spec PR 59)
+
+Built to originals-spec PR 59 at `a3ffdc1` (P9.18–P9.29, P14.18–P14.22).
+P14.21 pins no anchor contract, so nothing here works without an
+`EvmAnchorPin` you supply, as for a contract you deployed on a local devnet,
+and nothing built on one supports an interoperability claim. Without the
+SDK's `evm` option, `create` refuses an `anchor` member
+(`EVM_NO_ANCHOR_CONTRACT`, `unsupported-profile`), and a stored Original
+with one verifies as unsupported, never invalid (section 14). The wording of
+the notices, the label names, the retained-state shape and the error codes
+are PROVISIONAL.
+
+```ts
+import { MemoryStore, OriginalsSDK } from "@originals/sdk/originals";
+import { evmGenesisNotice } from "@originals/sdk/originals/evm";
+
+const sdk = OriginalsSDK.create({
+  store, authors,
+  evm: {
+    pin,                                     // { address, codeHash, chains?: [...EVM_CHAINS, devnet] }
+    providers: { "eip155:4663": [rpcA, { url: rpcB, name: "provider-b" }] }, // P9.22: two are compared
+    fetch,                                   // optional; the global fetch by default
+  },
+});
+
+// P9.27: tell the author what the first chain means, then pass the same notice back.
+const anchor = { chain: "eip155:4663", minter: "0x…" };
+const notice = evmGenesisNotice(anchor, pin);       // permanent, upward only, trust class, chain lifetime,
+                                                   // staged publications and cost, the minter fixed
+await sdk.create({ name, resource, author, signer, anchor, acknowledged: notice });
+// Without `acknowledged`, or with another anchor's notice: EVM_NOTICE_REQUIRED, nothing written.
+
+// The anchoring entry lists the one token the anchor member derives (P9.19, P14.19); `sat` is refused.
+await sdk.anchor(did, { parent, author, signer });
+
+// The minter mints the token; minting anchors nothing (P9.23).
+await sdk.mintEvm(did, { wallet });                 // EVM_WRONG_MINTER from any other wallet
+
+// Publish, one publication at a time. prepare verifies the committed log through the entry it publishes and the
+// identity evidence of every signer in it (P9.18 through P9.20), and refuses otherwise
+// (EVM_ANCHORING_NOT_VERIFIED, EVM_ENTRY_NOT_VERIFIED, EVM_ARRIVAL_NOT_VERIFIED). Nothing is sent.
+const plan = await sdk.prepareEvmPublication(did, { wallet });
+plan.kind;     // "anchoring" (genesis..anchoring entry) | "entry" (one entry) | "departure" | "arrival"
+plan.carries;  // the versionIds the metadata carries
+plan.prepared.plan; // { kind: "publish" } | { kind: "publishSameBody" } | { kind: "staged", appends, commit }
+plan.notice;   // show the author: what becomes public and permanent on the chain (P9.18)
+const sent = await sdk.submitEvmPublication(did, plan, { wallet, acknowledged: plan.notice });
+sent.status;   // "pending-evm-finality" | "submitted-unobserved" | "reverted" (P9.18 read through P9.27)
+const state = await sdk.evmPublicationStatus(did, sent);
+state.original; // once "finalized": the Original verified from its tokens (anchored, not anchored, incomplete)
+```
+
+- **Reads.** `get(did)` reads every token the log names (the token each
+  `anchor` member derives, and each did:evm alias listed) from every
+  configured provider of its chain at the finalized block (`readEvmToken`,
+  P9.21, P9.22), with records above it as observed. Or pass your own reads:
+  `get(did, { evm: [evidence] })`. The tokens decide from the anchoring entry
+  on (P9.20). With neither, the result is the committed log, unverified on
+  the chain (`evm-evidence-missing`) and never current, as an anchored
+  Original reads without Bitcoin evidence. `load` and `import` read the
+  configured providers too, or take `{ evm }`; a package is never read as
+  the local log (P7.14).
+- **Retained state (P9.22, P9.25).** The store keeps the finalized blocks a
+  verification relied on and its checkpoint per token
+  (`report.retain.evm`, `report.retain.evmCheckpoints`) through the optional
+  `getRetainedEvm` and `putRetainedEvm` (`MemoryStore`; `FileStore` under
+  `<root>/evm/`). The next read passes the blocks back, so a replaced block is
+  reported, and resumes each token from its checkpoint when the committed
+  log holds the checkpoint's head.
+- **Commits (P9.12, P9.13).** An entry committed after the anchoring entry is
+  verified as the local log and is never reported as accepted until a
+  publication of it is final. When a token the providers read accepted an
+  entry the committed log does not hold, as when the holder published
+  another branch, `edit` and every other commit refuse with
+  `EVM_HEAD_NOT_STORED` (`stale-parent`): nothing is rebased. After the token
+  alias is listed, an entry whose publication would store more than
+  350,000 bytes is not signed (`PUBLICATION_TOO_LARGE`, P9.25).
+- **Publishing.** The next publication follows what the tokens accepted at
+  the finalized block: the log through the anchoring entry, then the
+  successor of the accepted head, the body referring to the stored body
+  when it is unchanged (`publishSameBody`, P14.20). While a record is above
+  the finalized block, nothing else is prepared (`EVM_PUBLICATION_PENDING`).
+  An upload larger than `maxTxBytes` is staged; the writer learns the upload
+  ID from `UploadBegun` and the record is read back from state.
+- **Moves (P9.28, P9.29).** `prepareMove(did, { parent, author, to })`, where
+  `to` is `{ chain, minter }` or `{ sat }`, prepares an author entry that
+  replaces the `anchor` member, or removes it for Bitcoin, and the token
+  alias with the destination's alias. It returns the P9.29 notice, which
+  refuses a move that is not upward and one whose arrival would exceed
+  350,000 bytes (`MOVE_ARRIVAL_TOO_LARGE`). A sideways or downward move is
+  refused by the state rules (`STATE_MOVE_LAYER`), and a move before the
+  token alias is listed with `STATE_MOVE_BEFORE_ANCHOR`.
+  `move(did, { prepared, signer, acknowledged })` signs that exact draft
+  once the author acknowledged its notice. Then publish: the departure on the
+  token left, by its holder, then, once it is final, the arrival (the whole
+  log through the move entry) on the destination token, minted by the
+  destination's minter with `mintEvm`. For a move to Bitcoin,
+  `prepareEvmPublication` refuses the arrival (`EVM_ARRIVAL_ON_BITCOIN`,
+  naming the move entry and sat): it is the Bitcoin writer's anchoring
+  inscription. `prepareEntryInscription` inscribes the log through the move
+  entry on the sat, only once the departure is accepted and final on the
+  token left (`EVM_DEPARTURE_NOT_FINAL`). It verifies that log with
+  `verifyCommitted`, since a fresh reader of a package needs the chain the
+  Original is anchored on now (P7.14), and does not check the arrival
+  against its signer's later DID state (P9.29).
+- **Carried files (P7.15).** From the anchoring entry on, `carry` and
+  `carriedDisclosure` accept only a checkpoint a token accepted at its
+  finalized block (`CARRIER_NOT_ACCEPTED` otherwise, including when no token
+  could be read). A checkpoint before the anchoring entry is carried as
+  historical. `readCarried` and `importCarried` read with the configured pin
+  and the reads you pass as `evm`, and make no chain request of their own.
+
+The unit tests (`tests/unit/originals/evm-sdk.test.ts`) run this workflow
+against a fake anchor contract. `bun run --cwd packages/sdk test:evm-anvil`
+runs it on two local anvil devnets, one of class `operator` and one of class
+`consensus`, through a move from the first to the second. It skips without
+`anvil`. Only local chains are used.
