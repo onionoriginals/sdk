@@ -1,5 +1,5 @@
 /**
- * Carried logs (proposed; aviarytech/originals-spec PR 59 at 3ed0f89):
+ * Carried logs (proposed; aviarytech/originals-spec PR 59 at a3ffdc1):
  * P7.11-P7.16 and P14.14-P14.17. Everything here is PROVISIONAL, as the
  * subsection itself is.
  *
@@ -11,15 +11,19 @@
  *
  * - `carrierFor` is P14.14's table.
  * - `locateCarrier` finds and removes a carrier exactly, never decoding,
- *   re-encoding or normalizing what remains (P7.12). It tells "no carrier"
- *   from "a carrier with an invalid log".
+ *   re-encoding or normalizing what remains (P7.12). It tries every carrier's
+ *   detection; a file name or declared type is only a hint of which to try
+ *   first (P14.14). It tells "no carrier" from "a carrier with an invalid
+ *   log", and rejects a JSON document with two root `originalLog` members.
  * - `writeCarriedFile` adds one, with the refusals of P14.16, P14.17 and
  *   P7.15, after the caller acknowledges `carriedDisclosure` (P7.15).
  * - `readCarriedFile` verifies a carried file (P7.12-P7.14). It resolves no
  *   DID unless the caller passes `resolveSigners`, the opt-in P7.13 requires;
  *   without signer histories it checks only that the entries chain from the
  *   genesis the identifier binds and that the remaining bytes match the last
- *   descriptor, and reports nothing as verified.
+ *   descriptor, and reports nothing as verified. Its `overall` result fails,
+ *   with an explicit reason, whenever the file is not a carried version, even
+ *   when the log's proofs verify (P7.12).
  *
  * Pure and browser-safe: no I/O of its own.
  */
@@ -89,8 +93,9 @@ function asciiLower(value: string): string {
  * P14.14: the carrier for a version of `mediaType`, compared ASCII
  * case-insensitively, or null when it has none. Aliases (`audio/x-wav`,
  * `application/javascript`), other `+json` types, PDF, ZIP-based formats and
- * other `text/` types have none. PROVISIONAL: a media type with parameters
- * (`text/plain; charset=utf-8`) is compared whole and so has none.
+ * other `text/` types have none. A media type with a parameter
+ * (`text/plain; charset=utf-8`) is never matched with the parameter ignored:
+ * it has none, and a verifier rejects such a descriptor (P14.6).
  */
 export function carrierFor(mediaType: string): Carrier | null {
   const type = asciiLower(mediaType);
@@ -122,22 +127,25 @@ export interface CarriedLogFailure {
  * invalid log is still a carrier (P14.15, P14.16, P14.17), never content.
  */
 export type CarriedLog =
-  | { status: "parsed"; entries: JsonValue[]; /** For a trailer, each entry's line size (P14.13, P14.14). */ lineBytes?: number[] }
+  | { status: "parsed"; entries: JsonValue[] }
   | { status: "invalid"; entries: JsonValue[]; failure: CarriedLogFailure };
 
 /**
- * A log found where section 14 defines no carrier: an `originalLog` member
- * that is not the root object's last, or after an earlier root member of that
- * name (P14.17). It may be reported only as P7.12 allows: with a statement
- * that the file is not a version of the Original it names.
+ * A log found where section 14 defines no carrier: the root object's one
+ * `originalLog` member when it is not the last, as after a tool reorders
+ * members (P14.17). Its log is verified and reported separately, as P7.12
+ * allows, with a statement that the file is not a version of the Original it
+ * names: how such a member's bytes are removed is open (D4).
  */
 export interface StrayLog {
-  where: "json-member-not-last" | "json-member-repeated";
+  where: "json-member-not-last";
   log: CarriedLog;
 }
 
 export type CarrierLocation =
   | { status: "none"; stray?: StrayLog }
+  /** P14.17: a root object with more than one `originalLog` member, names compared after their escapes are decoded. Neither is chosen. */
+  | { status: "rejected"; reason: "json-member-repeated" }
   | {
       status: "found";
       carrier: Carrier;
@@ -195,7 +203,7 @@ function findTrailer(file: Uint8Array): { start: number; log: Uint8Array } | nul
   return { start: n - total, log: file.subarray(n - total, n - 24) };
 }
 
-/** P14.15, P14.2: `L` exactly as `did.jsonl`: compact JSON lines, each ending in one LF; each line measured as stored (P14.13). */
+/** P14.15, P14.2: `L` exactly as `did.jsonl`: compact JSON lines, each ending in one LF. Each entry is measured as its JCS form when verified (P14.13, P14.14). */
 function parseTrailerLog(bytes: Uint8Array): CarriedLog {
   const text = decodeUtf8(bytes);
   if (text === undefined) return invalidLog([], "LOG_ENCODING", "the trailer's log is not UTF-8 (P14.15, P14.2)");
@@ -203,14 +211,11 @@ function parseTrailerLog(bytes: Uint8Array): CarriedLog {
   if (!text.endsWith("\n")) return invalidLog([], "LOG_LINE_FORMAT", "the trailer's log does not end in a line feed (P14.2)");
   const lines = text.slice(0, -1).split("\n");
   const entries: JsonValue[] = [];
-  const lineBytes: number[] = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.length === 0) return invalidLog(entries, "JSONL_BLANK_LINE", `line ${i + 1} is empty (P14.2)`, i);
     const form = compactLineError(line);
     if (form) return invalidLog(entries, "LOG_LINE_FORMAT", `line ${i + 1}: ${form} (P14.2)`, i);
-    const size = encoder.encode(line).length;
-    if (size > ORIGINALS_LIMITS.entryBytes) return invalidLog(entries, "ENTRY_TOO_LARGE", `line ${i + 1} is ${size} bytes, over the entry limit (P14.13, P14.14)`, i, "limit-exceeded");
     const number = exactNumberError(line);
     if (number) return invalidLog(entries, "JSON_UNSAFE_NUMBER", `line ${i + 1}: ${number}`, i);
     try {
@@ -218,10 +223,9 @@ function parseTrailerLog(bytes: Uint8Array): CarriedLog {
     } catch (error) {
       return { status: "invalid", entries, failure: asFailure(error, i) };
     }
-    lineBytes.push(size);
   }
   if (entries.length > ORIGINALS_LIMITS.entries) return invalidLog(entries, "LOG_TOO_LONG", `the log has more than ${ORIGINALS_LIMITS.entries} entries (P14.13)`, undefined, "limit-exceeded");
-  return { status: "parsed", entries, lineBytes };
+  return { status: "parsed", entries };
 }
 
 const BEGIN = "=====BEGIN ORIGINAL=====";
@@ -259,8 +263,13 @@ interface Line {
  * must be preceded by a LF, which starts the carrier; the carrier runs to the
  * end of the file. A block with a non-ASCII byte, a CR not before its LF, the
  * closer before the closer line, or `--` inside a `<!--` comment outside its
- * opener and closer, is no carrier. Lines between the markers that are not
- * valid entry lines make an invalid log, not content.
+ * opener and closer, is no carrier; so is a malformed marker structure: a
+ * closer line not directly preceded by the END line, or in a block comment a
+ * BEGIN line not directly preceded by the opener line. Lines between the
+ * markers that are not valid entry lines make an invalid log, not content.
+ * PROVISIONAL (D4): whether the CR rule covers the whitespace after the last
+ * line is open; that whitespace, CRs included, is removed before the last
+ * line is read and stays part of the carrier.
  */
 function findTextBlock(file: Uint8Array): { start: number; comment: CommentSyntax; log: CarriedLog } | null {
   let end = file.length;
@@ -295,6 +304,7 @@ function findTextBlock(file: Uint8Array): { start: number; comment: CommentSynta
     return line;
   };
   if (closer) {
+    // P14.16: the closer line is directly preceded by the END line, or there is no carrier.
     const endLine = previous();
     if (!endLine || endLine.text !== END) return null;
     lines.push(endLine);
@@ -308,7 +318,7 @@ function findTextBlock(file: Uint8Array): { start: number; comment: CommentSynta
   }
   if (closer) {
     const opener = previous();
-    if (!opener || opener.text !== comment) return null; // PROVISIONAL: a BEGIN marker not right after the opener is no block
+    if (!opener || opener.text !== comment) return null; // P14.16: a BEGIN line not directly preceded by the opener is no carrier
     lines.push(opener);
   }
   const first = lines[lines.length - 1];
@@ -356,8 +366,8 @@ function parseEntryLines(lines: string[], comment: CommentSyntax): CarriedLog {
 // --------------------------------------------------------------------- JSON
 
 /**
- * P14.17: a document nested deeper than this outside the entries has no JSON
- * member. PROVISIONAL: the root object counts as level 1.
+ * P14.17: a document nested deeper than this outside the entries, the root
+ * object counting as level 1, has no JSON member.
  */
 export const JSON_MEMBER_MAX_DEPTH = 1024;
 const ORIGINAL_LOG = "originalLog";
@@ -609,45 +619,94 @@ function parseMemberLog(file: Uint8Array, member: RootMember): CarriedLog {
   return { status: "parsed", entries };
 }
 
-function findJsonMember(file: Uint8Array): { found: RootMember } | { stray: StrayLog } | null {
+/**
+ * P14.17: the root object's one member named `originalLog`, wherever it is.
+ * Two or more, names compared after their escapes are decoded, are rejected
+ * and neither is chosen; a member of that name nested below the root is not
+ * one. Only the last member has carrier bytes to remove; one that is not
+ * last is a stray log (P7.12).
+ */
+function findJsonMember(file: Uint8Array): { found: RootMember } | { stray: StrayLog } | { rejected: "json-member-repeated" } | null {
   const members = rootMembers(file);
   if (!members || members.length === 0) return null;
   const named = members.filter((m) => m.name === ORIGINAL_LOG);
   if (named.length === 0) return null;
+  if (named.length > 1) return { rejected: "json-member-repeated" };
   const last = members[members.length - 1];
-  if (last.name === ORIGINAL_LOG && named.length === 1) {
+  if (last.name === ORIGINAL_LOG) {
     if (last.valueEnd - last.from > CARRIER_MAX_BYTES) return null;
     return { found: last };
   }
-  // PROVISIONAL: of several members of that name, the last is the log reported, as P7.12 allows.
-  const where = last.name === ORIGINAL_LOG ? "json-member-repeated" : "json-member-not-last";
-  return { stray: { where, log: parseMemberLog(file, named[named.length - 1]) } };
+  return { stray: { where: "json-member-not-last", log: parseMemberLog(file, named[0]) } };
+}
+
+export interface LocateCarrierOptions {
+  /**
+   * A file name, extension or declared media type: only a hint of which
+   * carrier to try first. Every other carrier is still tried when it is
+   * wrong or absent (P14.14).
+   */
+  hint?: string;
+}
+
+type CarrierKind = Carrier["kind"];
+
+const TRAILER_EXTENSIONS = ["png", "jpg", "jpeg", "jpe", "gif", "tif", "tiff", "heic", "heif", "m4a", "mp4", "wav", "aif", "aiff"];
+const JSON_EXTENSIONS = ["json", "geojson"];
+const TEXT_EXTENSIONS = ["txt", "md", "markdown", "html", "htm", "xhtml", "svg", "xml", "css", "js", "mjs", "cjs", "ts", "c", "h", "cc", "cpp", "cxx", "hpp", "java", "go", "rs", "swift", "kt", "kts", "py", "sh", "bash", "yaml", "yml", "toml", "sql"];
+
+/** The carrier kind a hint suggests trying first, if it suggests one. */
+function hintedKind(hint: string | undefined): CarrierKind | undefined {
+  if (typeof hint !== "string" || hint.length === 0) return undefined;
+  const byType = carrierFor(hint);
+  if (byType) return byType.kind;
+  const dot = hint.lastIndexOf(".");
+  if (dot < 0) return undefined;
+  const ext = asciiLower(hint.slice(dot + 1));
+  if (TRAILER_EXTENSIONS.includes(ext)) return "trailer";
+  if (JSON_EXTENSIONS.includes(ext)) return "json-member";
+  if (TEXT_EXTENSIONS.includes(ext)) return "text-block";
+  return undefined;
 }
 
 /**
- * Find the carrier in `file` and remove exactly its bytes (P7.12). At most
+ * Find the carrier in `file` and remove exactly its bytes (P7.12). The media
+ * type is not known before the log is found, so every carrier's detection is
+ * tried; `options.hint` only decides which is tried first (P14.14). At most
  * one carrier kind can match: a trailer ends in its magic, a text block in a
  * closer or END line, a JSON document in `}`. Whether it is the carrier the
  * version's media type requires is checked against the log's last entry
- * (`readCarriedFile`), which cannot be known before the carrier is found.
+ * (`readCarriedFile`).
  */
-export function locateCarrier(file: Uint8Array): CarrierLocation {
+export function locateCarrier(file: Uint8Array, options: LocateCarrierOptions = {}): CarrierLocation {
   const bytes = snapshotBytes(file);
   if (!bytes) fail("invalid-evidence", "INPUT_INVALID", "a carried file is a Uint8Array");
-  const trailer = findTrailer(bytes);
-  if (trailer) {
-    return { status: "found", carrier: { kind: "trailer" }, start: trailer.start, end: bytes.length, version: bytes.slice(0, trailer.start), log: parseTrailerLog(trailer.log) };
+  const first = hintedKind(options?.hint);
+  const order: CarrierKind[] = ["trailer", "text-block", "json-member"];
+  if (first) order.sort((a, b) => (a === first ? -1 : b === first ? 1 : 0));
+  let stray: StrayLog | undefined;
+  for (const kind of order) {
+    if (kind === "trailer") {
+      const trailer = findTrailer(bytes);
+      if (trailer) {
+        return { status: "found", carrier: { kind: "trailer" }, start: trailer.start, end: bytes.length, version: bytes.slice(0, trailer.start), log: parseTrailerLog(trailer.log) };
+      }
+    } else if (kind === "text-block") {
+      const block = findTextBlock(bytes);
+      if (block) {
+        return { status: "found", carrier: { kind: "text-block", comment: block.comment }, start: block.start, end: bytes.length, version: bytes.slice(0, block.start), log: block.log };
+      }
+    } else {
+      const json = findJsonMember(bytes);
+      if (json && "rejected" in json) return { status: "rejected", reason: json.rejected };
+      if (json && "found" in json) {
+        const m = json.found;
+        return { status: "found", carrier: { kind: "json-member" }, start: m.from, end: m.valueEnd, version: without(bytes, m.from, m.valueEnd), log: parseMemberLog(bytes, m) };
+      }
+      if (json && "stray" in json) stray = json.stray;
+    }
   }
-  const block = findTextBlock(bytes);
-  if (block) {
-    return { status: "found", carrier: { kind: "text-block", comment: block.comment }, start: block.start, end: bytes.length, version: bytes.slice(0, block.start), log: block.log };
-  }
-  const json = findJsonMember(bytes);
-  if (json && "found" in json) {
-    const m = json.found;
-    return { status: "found", carrier: { kind: "json-member" }, start: m.from, end: m.valueEnd, version: without(bytes, m.from, m.valueEnd), log: parseMemberLog(bytes, m) };
-  }
-  return json && "stray" in json ? { status: "none", stray: json.stray } : { status: "none" };
+  return stray ? { status: "none", stray } : { status: "none" };
 }
 
 // ---------------------------------------------------------------------------
@@ -804,7 +863,11 @@ export function asciiEntryLine(value: JsonValue, comment: CommentSyntax): string
   return out;
 }
 
-/** Whether the version's own lines end in CR LF: some do and none ends in a bare LF (P14.16). PROVISIONAL for mixed endings. */
+/**
+ * Whether the version's own lines end in CR LF: some do and none ends in a
+ * bare LF (P14.16). PROVISIONAL: which line end a writer uses for a version
+ * with mixed line ends is open (D4); here it is LF.
+ */
 function usesCrLf(text: string): boolean {
   return text.includes("\r\n") && !/(^|[^\r])\n/.test(text);
 }
@@ -933,8 +996,8 @@ export async function writeCarriedFile(version: Uint8Array, entries: LogEntry[],
  * a carried file's bytes: with the carrier they do not match the descriptor.
  * A copy of the file itself when it has none.
  */
-export function removeCarrier(file: Uint8Array): Uint8Array {
-  const found = locateCarrier(file);
+export function removeCarrier(file: Uint8Array, options: LocateCarrierOptions = {}): Uint8Array {
+  const found = locateCarrier(file, options);
   return found.status === "found" ? found.version : (snapshotBytes(file) as Uint8Array);
 }
 
@@ -942,6 +1005,8 @@ export function removeCarrier(file: Uint8Array): Uint8Array {
 // Reading (P7.12-P7.14)
 
 export interface ReadCarriedOptions {
+  /** A file name, extension or declared media type: only a hint of which carrier to try first (P14.14). */
+  hint?: string;
   /** Signer DID histories the caller retained or was given (P7.13). Using them makes no request. */
   authors?: AuthorDidEvidence[];
   /**
@@ -980,13 +1045,26 @@ export interface CarriedFileReport {
   kind: "carried-file";
   completeness: "no-claim";
   /**
+   * The result for the file as a whole (P7.12). verified: the file is the
+   * version its carried log names, and that log verified. failed: it is not,
+   * with an explicit `reason` (`file-digest-mismatch`,
+   * `carrier-not-for-media-type`, `json-member-not-last`,
+   * `json-member-repeated`, `carried-log-invalid`, `no-carrier`, ...): proofs
+   * that verified are detail (`verified.log`, `report`) and never make it a
+   * pass. incomplete: nothing contradicts it, but evidence is missing
+   * (`proofs-unchecked`, `bitcoin-evidence-missing`, ...). unsupported: the
+   * log names an anchor this reader cannot support (P14.21): not invalid.
+   */
+  overall: { status: "verified" | "failed" | "incomplete" | "unsupported"; reason: string | null };
+  /**
    * found: a carrier, the one the last entry's media type requires (comment
    * syntax included). none: no carrier. mismatch: another carrier, or one for
    * a media type with none: the file is not a carried version (P7.12). stray:
-   * a log where section 14 defines no carrier, such as an `originalLog` member
-   * that is not the root's last (P14.17).
+   * a log where section 14 defines no carrier: the root's `originalLog`
+   * member when it is not the last (P14.17). rejected: a root object with
+   * more than one `originalLog` member; neither is read (P14.17).
    */
-  carrierStatus: "found" | "none" | "mismatch" | "stray";
+  carrierStatus: "found" | "none" | "mismatch" | "stray" | "rejected";
   carrier: Carrier | null;
   /** The carrier P14.14 assigns the last entry's media type, when the log names one. */
   expectedCarrier: Carrier | null;
@@ -1014,13 +1092,17 @@ export interface CarriedFileReport {
   identityEvidence: "complete" | "incomplete";
   authorBinding: "valid" | "failed" | "incomplete";
   /**
-   * P7.14. not-anchored: no anchor named. bitcoin: the anchoring sat was read
-   * and decides the state. bitcoin-unread: a did:btco anchor the reader did
-   * not read: missing evidence. unsupported: an `anchor` member, on a chain
-   * this revision pins no contract for (P14.21): unsupported, not invalid.
+   * P7.14. historical-checkpoint: the carried log holds no anchoring entry; it
+   * is valid as of its checkpoint at most, and nothing is said about whether
+   * the Original has been anchored since, even when an `anchor` member would
+   * let the token be derived (P7.14, P7.15). bitcoin: the anchoring sat was
+   * read and decides the state. bitcoin-unread: a did:btco anchor the reader
+   * did not read: missing evidence. evm / evm-unread: likewise for a token.
+   * unsupported: an `anchor` member, on a chain this revision pins no
+   * contract for (P14.21): unsupported, not invalid. not-checked: no log.
    */
   anchoring: {
-    status: "not-anchored" | "bitcoin" | "bitcoin-unread" | "evm" | "evm-unread" | "unsupported";
+    status: "not-checked" | "historical-checkpoint" | "bitcoin" | "bitcoin-unread" | "evm" | "evm-unread" | "unsupported";
     sat?: string;
     chain?: string;
     /** Entries from the anchoring entry on not checked against the anchor (P7.14, P9.12, P9.15). */
@@ -1041,10 +1123,10 @@ export interface CarriedFileReport {
 
 const ENGINE_LIMITS = { maxEntries: ORIGINALS_LIMITS.entries, maxEntryBytes: ORIGINALS_LIMITS.entryBytes };
 
-/** P7.13: every rule but each signer's authorization and signature. */
-async function chainCheck(entries: JsonValue[], lineBytes: number[] | undefined, now: number | Date | undefined): Promise<CarriedFileReport["chain"]> {
+/** P7.13: every rule but each signer's authorization and signature. Entries are measured as their JCS form (P14.13, P14.14). */
+async function chainCheck(entries: JsonValue[], now: number | Date | undefined): Promise<CarriedFileReport["chain"]> {
   const all = new Set(entries.map((_, i) => i));
-  const v: LogVerification = await verifyLog(entries, { specialisation: originalsSpecialisation([]), unauthorized: all, now, limits: ENGINE_LIMITS }, lineBytes);
+  const v: LogVerification = await verifyLog(entries, { specialisation: originalsSpecialisation([]), unauthorized: all, now, limits: ENGINE_LIMITS });
   if (!v.failure && v.entries.length === entries.length) return { status: "chains-from-genesis", entries: v.entries.length };
   const f = v.failure!;
   return { status: "broken", entries: v.entries.length, failure: { category: f.error.category, code: f.error.code, message: f.error.message, index: f.index } };
@@ -1054,6 +1136,7 @@ function blankReport(): CarriedFileReport {
   return {
     kind: "carried-file",
     completeness: "no-claim",
+    overall: { status: "failed", reason: "no-carrier" },
     carrierStatus: "none",
     carrier: null,
     expectedCarrier: null,
@@ -1069,7 +1152,7 @@ function blankReport(): CarriedFileReport {
     history: "unchecked",
     identityEvidence: "incomplete",
     authorBinding: "incomplete",
-    anchoring: { status: "not-anchored", notCheckedAgainstAnchor: [] },
+    anchoring: { status: "not-checked", notCheckedAgainstAnchor: [] },
     verified: { log: false, version: false },
     validAsOf: null,
     current: false,
@@ -1093,8 +1176,17 @@ function versionIdOf(entry: unknown): string | null {
  */
 export async function readCarriedFile(file: Uint8Array, options: ReadCarriedOptions = {}): Promise<CarriedFileReport> {
   const report = blankReport();
-  const found = locateCarrier(file);
+  const found = locateCarrier(file, options.hint !== undefined ? { hint: options.hint } : {});
   let log: CarriedLog;
+  if (found.status === "rejected") {
+    // P14.17: two root `originalLog` members; neither is chosen, so no log is read.
+    report.carrierStatus = "rejected";
+    report.reasons.push(found.reason);
+    report.overall = { status: "failed", reason: found.reason };
+    report.statements.push("This file's JSON root object has more than one originalLog member: it is rejected, and neither log is read.");
+    report.statements.push("A carried file is not an evidence package and makes no claim to be complete.");
+    return report;
+  }
   if (found.status === "none") {
     if (!found.stray) {
       report.reasons.push("no-carrier");
@@ -1113,6 +1205,7 @@ export async function readCarriedFile(file: Uint8Array, options: ReadCarriedOpti
   report.log = { status: log.status, entries: log.entries.length, ...(log.status === "invalid" ? { failure: log.failure } : {}) };
   if (log.status === "invalid") {
     report.reasons.push("carried-log-invalid");
+    report.overall = { status: "failed", reason: "carried-log-invalid" };
     report.statements.push("This file has a carried log, but the log is invalid: nothing in it is verified.");
     return report;
   }
@@ -1140,16 +1233,18 @@ export async function readCarriedFile(file: Uint8Array, options: ReadCarriedOpti
     const why = options.evm?.pin ? "this reader's revision of P14.22 does not list it" : "no anchor contract is pinned (P14.21)";
     report.anchoring = { status: "unsupported", chain: evm.chain, notCheckedAgainstAnchor: entries.map(versionIdOf).filter((v): v is string => v !== null) };
     report.reasons.push("anchor-chain-unsupported");
+    report.overall = { status: "unsupported", reason: "anchor-chain-unsupported" };
     report.statements.push(
       `This file carries the log of an Original anchored on ${evm.chain}, which this reader does not support: ${why}. The Original is unsupported, not invalid, and nothing is verified.`,
     );
     return report;
   }
 
-  report.chain = await chainCheck(entries, found.status === "found" && found.carrier.kind === "trailer" && log.status === "parsed" ? log.lineBytes : undefined, options.now);
+  report.chain = await chainCheck(entries, options.now);
   if (carried && descriptor && report.version) {
     const remaining = report.version;
     report.bytes = remaining.length === descriptor.size && (await resourceDigestAsync(remaining)) === descriptor.digest ? "match" : "mismatch";
+    if (report.bytes === "mismatch") report.reasons.push("file-digest-mismatch");
   }
 
   // P7.13: signer histories as given, then resolved only on the caller's opt-in.
@@ -1171,15 +1266,20 @@ export async function readCarriedFile(file: Uint8Array, options: ReadCarriedOpti
   }
 
   // The anchoring entry: the first that lists a did:btco alias, or for an `anchor` member, a token alias (P9.10, P9.20).
+  // With none, the carried log is a historical checkpoint (P7.14, P7.15): no anchor evidence is used, and
+  // nothing is said about whether the Original has been anchored since.
   const k = evm ? entries.findIndex((e) => tokenNamedBy(e) !== undefined) : anchoringIndex(entries);
+  const historical = k < 0;
   const sat = k >= 0 ? (entryState(entries[k])?.asset.aliases ?? []).find((a) => typeof a === "string" && a.startsWith("did:btco:")) : undefined;
   const fromAnchor = k >= 0 ? entries.slice(k).map(versionIdOf).filter((v): v is string => v !== null) : [];
   const onBitcoin = k >= 0 && (options.bitcoin?.length ?? 0) > 0;
   const onEvm = evm !== undefined && (options.evm?.tokens.length ?? 0) > 0;
-  if (evm) {
+  if (historical) {
+    report.anchoring = { status: "historical-checkpoint", notCheckedAgainstAnchor: [] };
+  } else if (evm) {
     // P7.14: the anchor is the token; without its evidence, missing evidence and at most the entries before the anchoring entry.
     report.anchoring = onEvm ? { status: "evm", chain: evm.chain, notCheckedAgainstAnchor: [] } : { status: "evm-unread", chain: evm.chain, notCheckedAgainstAnchor: fromAnchor };
-  } else if (k >= 0) {
+  } else {
     report.anchoring = onBitcoin
       ? { status: "bitcoin", ...(sat ? { sat } : {}), notCheckedAgainstAnchor: [] }
       : { status: "bitcoin-unread", ...(sat ? { sat } : {}), notCheckedAgainstAnchor: fromAnchor };
@@ -1197,8 +1297,9 @@ export async function readCarriedFile(file: Uint8Array, options: ReadCarriedOpti
   };
   let verified: OriginalsReport | null = null;
   if (authors.length > 0) {
-    if (evm) verified = await verifyOriginal({ ...common, log: entries, evm: options.evm!, ...(options.bitcoin ? { bitcoin: options.bitcoin } : {}) });
-    else if (k < 0) verified = await verifyOriginal({ ...common, log: entries });
+    // A historical checkpoint is verified as the prefix it is: no token or sat is read (P7.14).
+    if (historical) verified = await verifyOriginal({ ...common, log: entries, ...(evm ? { evm: { pin: options.evm!.pin, tokens: [] } } : {}) });
+    else if (evm) verified = await verifyOriginal({ ...common, log: entries, evm: options.evm!, ...(options.bitcoin ? { bitcoin: options.bitcoin } : {}) });
     else if (onBitcoin) verified = await verifyOriginal({ ...common, log: entries, bitcoin: options.bitcoin! });
     // P7.14: without the anchor, at most the entries before the anchoring entry.
     else if (k > 0) verified = await verifyOriginal({ ...common, log: entries.slice(0, k) });
@@ -1210,7 +1311,9 @@ export async function readCarriedFile(file: Uint8Array, options: ReadCarriedOpti
     report.identityEvidence = verified.identityEvidence.status;
     report.authorBinding = verified.authorBinding.status;
     report.validAsOf = verified.validAsOf;
-    for (const r of verified.reasons) if (!report.reasons.includes(r)) report.reasons.push(r);
+    // P7.14: a historical checkpoint makes no statement about anchoring, either way.
+    const anchoringReasons = ["not-anchored", "bitcoin-evidence-missing", "evm-evidence-missing", "anchor-not-found-on-evm"];
+    for (const r of verified.reasons) if (!report.reasons.includes(r) && !(historical && anchoringReasons.includes(r))) report.reasons.push(r);
   } else {
     report.reasons.push("proofs-unchecked");
   }
@@ -1218,7 +1321,10 @@ export async function readCarriedFile(file: Uint8Array, options: ReadCarriedOpti
 
   const valid = verified !== null && verified.validAsOf !== null;
   let logVerified = false;
-  if (evm) {
+  if (historical) {
+    logVerified = valid && verified!.checkpoint === report.checkpoint;
+    report.reasons.push("historical-checkpoint");
+  } else if (evm) {
     // State from the token; the carried log counts only where the anchors accepted every entry of it (P7.14, P9.13, P9.29).
     const r = verified?.evm;
     const accepted = new Set((r?.stretches ?? []).filter((x) => x.status === "anchored").flatMap((x) => [...x.carried, ...x.entries]));
@@ -1229,8 +1335,7 @@ export async function readCarriedFile(file: Uint8Array, options: ReadCarriedOpti
     if (!onAnchor) report.anchoring.notCheckedAgainstAnchor = fromAnchor;
     report.current = verified?.current === true;
     if (!onEvm && !report.reasons.includes("evm-evidence-missing")) report.reasons.push("evm-evidence-missing");
-  } else if (k < 0) logVerified = valid && verified!.checkpoint === report.checkpoint;
-  else if (onBitcoin) {
+  } else if (onBitcoin) {
     // State from the anchor; the carried log counts only where Bitcoin accepted every entry of it (P7.14, P9.13).
     const a = verified?.anchoring;
     logVerified = valid && a?.status === "anchored" && a.copy === "agrees" && a.superseded === 0;
@@ -1262,6 +1367,11 @@ export async function readCarriedFile(file: Uint8Array, options: ReadCarriedOpti
   } else if (report.verified.log) {
     report.statements.push(`The carried log of ${named} verifies, valid as of that checkpoint${report.current ? "" : ", never current"}.`);
   }
+  if (historical) {
+    report.statements.push(
+      `This carried log holds no anchoring entry: it is a historical checkpoint, valid as of ${report.checkpoint ?? "its last entry"} at most. This reader makes no statement about whether the Original has been anchored since.`,
+    );
+  }
   if (report.anchoring.status === "evm-unread") {
     report.statements.push(
       `This Original is anchored on ${report.anchoring.chain}, which this reader did not read: evidence is missing. At most the entries before the anchoring entry are reported; the anchoring entry and every later entry are not checked against the anchor.`,
@@ -1272,6 +1382,28 @@ export async function readCarriedFile(file: Uint8Array, options: ReadCarriedOpti
       `This Original is anchored on Bitcoin (${report.anchoring.sat ?? "unknown sat"}), which this reader did not read: evidence is missing. At most the entries before the anchoring entry are reported, valid as of the checkpoint before it with claimed ordering; the anchoring entry and every later entry are not checked against the anchor.`,
     );
   }
+  report.overall = overallResult(report);
+  if (report.overall.status === "failed") report.statements.push(`The file is not verified: ${report.overall.reason}.`);
   report.statements.push("A carried file is not an evidence package and makes no claim to be complete.");
   return report;
+}
+
+/**
+ * P7.12: the file's overall result. Anything that makes the file not a
+ * carried version fails it with that reason, whatever the log's own result;
+ * then a log that does not verify; then missing evidence.
+ */
+function overallResult(report: CarriedFileReport): CarriedFileReport["overall"] {
+  const failed = (reason: string) => ({ status: "failed" as const, reason });
+  if (report.carrierStatus === "mismatch") return failed("carrier-not-for-media-type");
+  if (report.carrierStatus === "stray") return failed("json-member-not-last");
+  if (report.bytes === "mismatch") return failed("file-digest-mismatch");
+  if (report.chain.status === "broken") return failed("log-does-not-chain");
+  if (report.history === "invalid" || report.history === "limit-exceeded") return failed(`log-${report.history}`);
+  if (report.authorBinding === "failed") return failed("author-binding-failed");
+  if (report.reasons.includes("carried-log-not-accepted-on-anchor")) return failed("carried-log-not-accepted-on-anchor");
+  if (report.history === "unsupported") return { status: "unsupported", reason: "unsupported-profile" };
+  if (report.verified.version) return { status: "verified", reason: null };
+  const missing = ["proofs-unchecked", "bitcoin-evidence-missing", "evm-evidence-missing", "identity-evidence-incomplete"].find((r) => report.reasons.includes(r));
+  return { status: "incomplete", reason: missing ?? report.reasons.find((r) => r !== "historical-checkpoint") ?? "not-verified" };
 }

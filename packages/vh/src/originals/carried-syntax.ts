@@ -1,14 +1,27 @@
 /**
- * P14.16: when a writer must refuse a text block because "the version's
- * syntax would make the appended lines content rather than a comment".
+ * P14.16 (originals-spec PR 59 at a3ffdc1): a writer refuses a text block
+ * unless the appended block, parsed under the version's own syntax, is a
+ * separate comment and nothing else. The test is the parse of the resulting
+ * file; P14.16 lists the checks known for each type:
  *
- * PROVISIONAL throughout. The spec gives examples ("among others": a YAML
- * document whose last node is a block scalar; Markdown or HTML ending inside
- * an unclosed code fence, `<pre>`, `<script>` or comment; a version ending
- * inside an unterminated string, heredoc or block comment of its language)
- * but no closed list, so this is a best-effort lexer per comment family, not
- * a parser of each language. It errs towards refusing: a refusal costs the
- * user a separate log file, a wrong carrier costs them visible content.
+ * - `text/html`, `application/xhtml+xml`: an ending inside a comment, or
+ *   inside `script`, `style`, `textarea`, `title`, `xmp`, `plaintext` or
+ *   `noscript`, whose content is not parsed as markup. An unclosed `pre` is
+ *   no reason to refuse.
+ * - `text/markdown`: an unclosed code fence, or one of those HTML contexts.
+ * - `image/svg+xml`, `application/xml`, `text/xml`: a comment or CDATA section.
+ * - `text/css`: an unterminated comment or string.
+ * - `application/yaml`: a last node that is a block scalar.
+ * - the line-comment types: an unterminated string, heredoc or block comment,
+ *   or a last line ending in a line continuation.
+ *
+ * PROVISIONAL: P14.16 says the list is not yet complete and testable for
+ * every type (D4). This is a lexer per comment family, not a parser of each
+ * language, and it errs towards refusing: a refusal costs the user a separate
+ * log file, a wrong carrier costs them visible content. Beyond the listed
+ * checks it also refuses an ending inside a tag or processing instruction,
+ * and, for HTML, inside `iframe`, `noembed` or `noframes`, which an HTML
+ * parser also reads as raw text, since the parse test fails there too.
  *
  * Everything here is pure and browser-safe.
  */
@@ -19,6 +32,7 @@ export type TextBlockRefusal =
   | "unclosed-fence"
   | "unclosed-element"
   | "unclosed-comment"
+  | "unclosed-cdata"
   | "unclosed-tag"
   | "unterminated-string"
   | "unterminated-heredoc"
@@ -27,34 +41,41 @@ export type TextBlockRefusal =
 const lower = (s: string) => s.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
 
 /**
- * Elements whose content is not parsed for comments in HTML (raw text and
- * escapable raw text), plus `<pre>`, which P14.16 names. PROVISIONAL: the
- * spec names `<pre>` and `<script>`; `<pre>` content is parsed normally in
- * HTML, while `<style>`, `<textarea>`, `<title>` and the rest really do turn a
- * following `<!--` into text.
+ * P14.16: elements whose content an HTML parser does not parse as markup, so
+ * a `<!--` inside them is text. The first seven are P14.16's; `iframe`,
+ * `noembed` and `noframes` are raw text to an HTML parser too (PROVISIONAL).
+ * `pre` is not among them: its content is markup.
  */
-const RAW_ELEMENTS = ["script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes", "noscript", "pre"];
+const RAW_ELEMENTS = ["script", "style", "textarea", "title", "xmp", "noscript", "iframe", "noembed", "noframes"];
 
 /**
- * Markup (`<!--` comments): HTML, XHTML, SVG, XML, and the HTML inside
- * Markdown. Refuses when the text ends inside a comment, CDATA section,
- * processing instruction, tag, or one of RAW_ELEMENTS; `<plaintext>` never ends.
+ * Markup (`<!--` comments). `html`: HTML, XHTML and the HTML inside Markdown,
+ * refused when the text ends inside a comment, a CDATA section, a processing
+ * instruction, a tag, or one of RAW_ELEMENTS; `<plaintext>` never ends.
+ * `xml`: SVG and XML, refused when it ends inside a comment, a CDATA section,
+ * a processing instruction or a tag; element content is always markup there.
  */
-function markupRefusal(text: string): TextBlockRefusal | undefined {
+function markupRefusal(text: string, dialect: "html" | "xml"): TextBlockRefusal | undefined {
   const t = lower(text);
   let i = 0;
   while (i < t.length) {
     const lt = t.indexOf("<", i);
     if (lt < 0) return undefined;
     if (t.startsWith("<!--", lt)) {
-      const end = t.indexOf("-->", lt + 4);
-      if (end < 0) return "unclosed-comment";
-      i = end + 3;
+      // HTML closes `<!-->` and `<!--->` at once, and a comment at `--!>` as well as `-->`.
+      if (dialect === "html" && (t.startsWith("<!-->", lt) || t.startsWith("<!--->", lt))) {
+        i = t.indexOf(">", lt) + 1;
+        continue;
+      }
+      const ends = [t.indexOf("-->", lt + 4), dialect === "html" ? t.indexOf("--!>", lt + 4) : -1].filter((e) => e >= 0);
+      if (ends.length === 0) return "unclosed-comment";
+      const end = Math.min(...ends);
+      i = end + (t.startsWith("--!>", end) ? 4 : 3);
       continue;
     }
     if (t.startsWith("<![cdata[", lt)) {
       const end = t.indexOf("]]>", lt + 9);
-      if (end < 0) return "unclosed-element";
+      if (end < 0) return "unclosed-cdata";
       i = end + 3;
       continue;
     }
@@ -82,7 +103,7 @@ function markupRefusal(text: string): TextBlockRefusal | undefined {
     }
     if (j >= t.length) return "unclosed-tag";
     i = j + 1;
-    if (name) {
+    if (name && dialect === "html") {
       const element = name[1];
       if (element === "plaintext") return "unclosed-element";
       if (RAW_ELEMENTS.includes(element) && t[j - 1] !== "/") {
@@ -115,7 +136,7 @@ function markdownRefusal(text: string): TextBlockRefusal | undefined {
     outside.push(line);
   }
   if (fence) return "unclosed-fence";
-  return markupRefusal(outside.join("\n"));
+  return markupRefusal(outside.join("\n"), "html");
 }
 
 /**
@@ -175,8 +196,6 @@ interface Lexer {
   heredoc?: boolean;
   /** A line comment starts only at the start of a word (shell `#`). */
   wordComment?: boolean;
-  /** A backslash at the very end of the version, outside strings, joins the next line (Python, shell). */
-  continuation?: boolean;
 }
 
 const C_LIKE: Lexer = { line: ["//"], block: { open: "/*", close: "*/" }, singleLine: ['"', "'"] };
@@ -199,14 +218,12 @@ const LEXERS: Record<string, Lexer> = {
     line: ["#"],
     singleLine: ['"', "'"],
     multiLine: [{ open: '"""', close: '"""', escapes: true }, { open: "'''", close: "'''", escapes: true }],
-    continuation: true,
   },
   "text/x-shellscript": {
     line: ["#"],
     wordComment: true,
     multiLine: [{ open: "'", close: "'", escapes: false }, { open: '"', close: '"', escapes: true }, { open: "`", close: "`", escapes: true }],
     heredoc: true,
-    continuation: true,
   },
   "application/toml": { line: ["#"], singleLine: ['"', "'"], multiLine: [{ open: '"""', close: '"""', escapes: true }, { open: "'''", close: "'''", escapes: false }] },
   "application/sql": {
@@ -340,8 +357,23 @@ function lexRefusal(text: string, lexer: Lexer): TextBlockRefusal | undefined {
     i++;
   }
   if (heredocs.length > 0) return "unterminated-heredoc";
-  if (lexer.continuation && /\\\r?$/.test(text)) return "line-continuation";
   return undefined;
+}
+
+/** P14.16: the media types whose text block is a line comment (`//`, `#`, `--`). */
+const LINE_COMMENT_TYPES = [
+  "text/javascript", "application/typescript", "text/x-c", "text/x-c++", "text/x-java-source", "text/x-go", "text/x-rust", "text/x-swift", "text/x-kotlin",
+  "text/x-python", "text/x-shellscript", "application/yaml", "application/toml", "application/sql",
+];
+
+/**
+ * P14.16: the version's last line ends in a backslash, which in shell, the C
+ * family and Python joins the next line, so the block's first line would not
+ * be a separate comment. Applied to every line-comment type, as P14.16 lists
+ * it for them. The last line is the one before a final line end, if any.
+ */
+function endsInContinuation(text: string): boolean {
+  return /\\(\r?\n|\r)?$/.test(text);
 }
 
 /**
@@ -356,15 +388,18 @@ export function textBlockRefusal(text: string, mediaType: string): TextBlockRefu
       return markdownRefusal(text);
     case "text/html":
     case "application/xhtml+xml":
+      return markupRefusal(text, "html");
     case "image/svg+xml":
     case "application/xml":
     case "text/xml":
-      return markupRefusal(text);
+      return markupRefusal(text, "xml");
     case "application/yaml":
-      return yamlRefusal(text);
+      return yamlRefusal(text) ?? (endsInContinuation(text) ? "line-continuation" : undefined);
     default: {
       const lexer = LEXERS[mediaType];
-      return lexer ? lexRefusal(text, lexer) : undefined;
+      const lexed = lexer ? lexRefusal(text, lexer) : undefined;
+      if (lexed) return lexed;
+      return LINE_COMMENT_TYPES.includes(mediaType) && endsInContinuation(text) ? "line-continuation" : undefined;
     }
   }
 }

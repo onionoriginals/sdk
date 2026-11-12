@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { base58btcEncode, createProof, multibaseEncode, sha256 } from "../src/crypto/index.js";
 import { OriginalsError } from "../src/errors.js";
-import { parseJson, type JsonObject } from "../src/json/index.js";
+import { canonicalize, parseJson, type JsonObject } from "../src/json/index.js";
 import { appendEntry, createLog, parseLog, serializeLog, signWith, verifyLog, type LogEntry, type Specialisation } from "../src/log/index.js";
 import { resolveDidVh } from "../src/didvh/index.js";
 import {
@@ -650,8 +650,8 @@ describe("creating needs a well-formed entry", () => {
   });
 });
 
-describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7; P14.13)", () => {
-  /** A genesis entry whose stored line, without its line feed, is exactly `target` UTF-8 bytes, mostly two-byte characters. */
+describe("C12-150: \"Entry whose JCS form is 65,536 / 65,537 UTF-8 bytes, in `did.jsonl`, an inscription, a publication or any carrier\": accepted / rejected (P7.7; P14.13)", () => {
+  /** A genesis entry whose JCS form (here also its stored line, without its line feed) is exactly `target` UTF-8 bytes, mostly two-byte characters. */
   async function genesisOf(target: number) {
     const key = seeded(21);
     const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
@@ -668,7 +668,7 @@ describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7;
     throw new Error(`no entry of ${target} bytes`);
   }
 
-  test("a line of 65,536 bytes is accepted and one of 65,537 bytes is rejected, however few UTF-16 code units it has", async () => {
+  test("an entry of 65,536 bytes is accepted and one of 65,537 bytes is rejected, however few UTF-16 code units it has", async () => {
     const atLimit = await genesisOf(65_536);
     expect(atLimit.codeUnits).toBeLessThan(40_000);
     const ok = await verifyOriginal({ log: `${atLimit.line}\n`, authors: [atLimit.alice.evidence()], now: NOW, bytes: allBytes(B1) });
@@ -677,12 +677,12 @@ describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7;
     const r = await verifyOriginal({ log: `${over.line}\n`, authors: [over.alice.evidence()], now: NOW, bytes: allBytes(B1) });
     failedWith(r, 0, "ENTRY_TOO_LARGE", "limit-exceeded");
     expect(r.history.status).toBe("limit-exceeded");
-    // Parsed entries are measured as the line they serialize to.
+    // Parsed entries are measured the same way: as their JCS form.
     const parsed = await verifyOriginal({ log: [JSON.parse(over.line)], authors: [over.alice.evidence()], now: NOW, bytes: allBytes(B1) });
     failedWith(parsed, 0, "ENTRY_TOO_LARGE", "limit-exceeded");
   });
 
-  test("the stored line is measured, never its parsed form re-serialized: a 65,536-byte line that re-serializes longer is accepted", async () => {
+  test("the JCS form is measured, never the stored line: a 65,536-byte line whose JCS form is longer is rejected, a longer line whose JCS form is 65,536 bytes accepted (P14.13 at a3ffdc1)", async () => {
     const key = seeded(21);
     const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
     // `1.5e-6` re-serializes as `0.0000015`: the same entry, and the same versionId and proof, three bytes longer each time.
@@ -696,13 +696,17 @@ describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7;
         pad += 65_536 - size;
         continue;
       }
-      expect(new TextEncoder().encode(JSON.stringify(JSON.parse(line))).length).toBe(66_136);
-      const r = await verifyOriginal({ log: `${line}\n`, authors: [alice.evidence()], now: NOW, bytes: allBytes(B1) });
-      expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
-      // Entries parsed with parseLog carry their stored line's size; one parsed elsewhere is measured as its JCS line.
-      const parsed = await verifyOriginal({ log: parseLog(`${line}\n`), authors: [alice.evidence()], now: NOW, bytes: allBytes(B1) });
-      expect(parsed.history.status, JSON.stringify(parsed.history.failure)).toBe("valid");
-      failedWith(await verifyOriginal({ log: [JSON.parse(line)], authors: [alice.evidence()], now: NOW, bytes: allBytes(B1) }), 0, "ENTRY_TOO_LARGE", "limit-exceeded");
+      expect(new TextEncoder().encode(canonicalize(JSON.parse(line))).length).toBe(66_136);
+      // As text, parsed with parseLog, or parsed elsewhere: the JCS form is over the limit.
+      for (const log of [`${line}\n`, parseLog(`${line}\n`), [JSON.parse(line)]]) {
+        failedWith(await verifyOriginal({ log, authors: [alice.evidence()], now: NOW, bytes: allBytes(B1) }), 0, "ENTRY_TOO_LARGE", "limit-exceeded");
+      }
+      // A line longer than the limit whose JCS form is within it: `\u` escapes that JCS writes as one byte each.
+      const atLimit = await genesisOf(65_536);
+      const escaped = atLimit.line.replace("aaaaaaaaaa", "\\u0061".repeat(10));
+      expect(new TextEncoder().encode(escaped).length).toBe(65_586);
+      const ok = await verifyOriginal({ log: `${escaped}\n`, authors: [atLimit.alice.evidence()], now: NOW, bytes: allBytes(B1) });
+      expect(ok.history.status, JSON.stringify(ok.history.failure)).toBe("valid");
       return;
     }
     throw new Error("no entry of 65,536 bytes");

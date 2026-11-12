@@ -1133,8 +1133,8 @@ describe("the sat's holder cannot make an anchored Original incomplete (P9.12, P
   });
 });
 
-describe("C12-150 on Bitcoin: an inscribed entry's size is its stored line (P14.13)", () => {
-  /** An anchored log whose genesis line, as stored, is exactly 65,536 bytes and re-serializes longer. */
+describe("C12-150 on Bitcoin: \"Entry whose JCS form is 65,536 / 65,537 UTF-8 bytes, in `did.jsonl`, an inscription, a publication or any carrier\" (P14.13)", () => {
+  /** An anchored log whose genesis line, as stored, is exactly 65,536 bytes and whose JCS form is longer. */
   async function storedAtLimit() {
     const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);
     const sign = alice.signer(KEY, "orig");
@@ -1179,12 +1179,11 @@ describe("C12-150 on Bitcoin: an inscribed entry's size is its stored line (P14.
     expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ reason: "invalid-entry", code: "ENTRY_TOO_LARGE" })]);
   });
 
-  test("an anchored copy given as text is measured as stored too", async () => {
-    const { alice, anchor, text } = await storedAtLimit();
+  test("an anchored copy given as text is measured as its JCS form too, not as stored (P14.13 at a3ffdc1)", async () => {
+    const { alice, text } = await storedAtLimit();
     const r = await verifyOriginal({ log: text, authors: [alice.evidence()], now: NOW, bytes: allBytes });
-    expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
-    expect(r.head).toBe(anchor.versionId);
-    expect(r.anchoring?.status).toBe("unverified");
+    expect(r.history.failure).toMatchObject({ index: 0, category: "limit-exceeded", code: "ENTRY_TOO_LARGE" });
+    expect(r.head).toBeNull();
   });
 });
 

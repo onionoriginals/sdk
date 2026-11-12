@@ -23,7 +23,7 @@
  * ever a result.
  */
 import { OriginalsError, type ErrorCategory } from "@originals/vh";
-import { isJsonObject, parseJson } from "@originals/vh/json";
+import { canonicalize, isJsonObject, parseJson } from "@originals/vh/json";
 import { utf8Length } from "@originals/vh/log";
 import { ORIGINALS_LIMITS, checkAsset, checkAuthorRef, checkEditorRef } from "@originals/vh/originals";
 import { RETRIEVAL_LIMITS, type HostedFetch, type RetrievalLimits } from "./hosting.js";
@@ -50,9 +50,9 @@ export function retrievalPlan(log: string): { authors: string[]; digests: string
   const digests = new Set<string>();
   lines.forEach((line, i) => {
     try {
-      // P7.7; P14.13: an entry is at most this many UTF-8 bytes as stored.
-      if (utf8Length(line) > ORIGINALS_LIMITS.entryBytes) unplannable("limit-exceeded", i, "ENTRY_TOO_LARGE", `entry exceeds ${ORIGINALS_LIMITS.entryBytes} bytes`);
       const entry = parseJson(line);
+      // P7.7; P14.13: an entry is at most this many UTF-8 bytes as its JCS form, however it is written.
+      if (utf8Length(canonicalize(entry)) > ORIGINALS_LIMITS.entryBytes) unplannable("limit-exceeded", i, "ENTRY_TOO_LARGE", `entry exceeds ${ORIGINALS_LIMITS.entryBytes} bytes`);
       if (!isJsonObject(entry) || !isJsonObject(entry.state)) unplannable("invalid-evidence", i, "ENTRY_STATE", "an entry is an object with a state object");
       const author = checkAuthorRef(entry.state.author);
       if (!DID.test(author.did)) unplannable("invalid-evidence", i, "STATE_AUTHOR", "state.author.did is not a DID");

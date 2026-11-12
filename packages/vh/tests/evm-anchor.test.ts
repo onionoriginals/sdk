@@ -475,6 +475,26 @@ describe("P7.14 copies of the log", () => {
     expect(nopin.anchoring.status).toBe("unsupported");
   });
 
+  test("PR59b: 'Carried checkpoint from before the anchoring entry of an Original that is now anchored': allowed; a historical checkpoint, valid as of it, with no statement about current anchoring, even though the anchor member would let the token be derived (P7.14, P7.15)", async () => {
+    const o = await original();
+    const d = (o.v2.state as { asset: { resource: { digest: string } } }).asset.resource.digest;
+    const file = await writeCarriedFile(describedBytes(d)!, [o.genesis, o.v2], { disclosed: carriedDisclosure([o.genesis, o.v2]) });
+    // With the token readable and showing the Original anchored, and with nothing read: the same report.
+    for (const tokens of [[token(o.alias, two(ROBINHOOD, [rec(0, o.log)]))], []]) {
+      const r = await readCarriedFile(file, { authors: [o.alice.evidence()], now: NOW, evm: { pin: PIN, tokens } });
+      expect(r.anchoring).toEqual({ status: "historical-checkpoint", notCheckedAgainstAnchor: [] });
+      expect(r.verified, JSON.stringify(r.reasons)).toEqual({ log: true, version: true });
+      expect(r.overall).toEqual({ status: "verified", reason: null });
+      expect(r.validAsOf?.checkpoint).toBe(o.v2.versionId);
+      expect(r.current).toBe(false);
+      // No token was read: the verifier's own detail has no anchored stretch, and the carried report uses none of it.
+      expect(r.report?.evm?.stretches.every((s) => s.status !== "anchored" && s.providers.length === 0)).toBe(true);
+      expect(r.reasons).not.toEqual(expect.arrayContaining(["evm-evidence-missing"]));
+      expect(r.reasons).not.toContain("anchor-not-found-on-evm");
+      expect(r.statements.join(" ")).toContain("makes no statement about whether the Original has been anchored since");
+    }
+  });
+
   test("C12-297: 'Complete evidence package of an anchored Original, read without access to the anchor': missing evidence; at most the entries before the first anchoring entry", async () => {
     const o = await original();
     const e4 = await o.next(o.anchoring, { name: "Renamed" });
