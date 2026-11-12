@@ -1056,3 +1056,37 @@ describe("originals-spec PR 59 a3ffdc1: P3.9 did:evm candidate", () => {
     expect(here).toMatchObject({ status: "resolved", original: m.id });
   });
 });
+
+describe("the writer's own committed log, before publishing (P9.18 read through P9.20; EXPERIMENTAL)", () => {
+  test("C12-28: 'After anchoring, author-signed entry not inscribed on the sat': with `localCopy` and no token read, the local log verifies whole, unverified on the chain and never current", async () => {
+    const o = await original(ROBINHOOD, 140);
+    const later = await o.next(o.anchoring, { name: "Harbor, later" });
+    const log = [...o.log, later];
+    const r = await verifyOriginal({ log, authors: [o.alice.evidence()], now: NOW, bytes: (d) => describedBytes(d), evm: { pin: PIN, tokens: [], localCopy: true } });
+    expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
+    expect(r.history.entries).toBe(4);
+    expect(r.head).toBe(later.versionId);
+    missingEvidence(r);
+    expect(r.ordering).toBe("claimed");
+    expect(r.evm?.owner).toBeNull();
+    // Without the opt-in, as for a carried log or a package (P7.14): at most the entries before the anchoring entry.
+    const copy = await verify(o.alice, [], log);
+    expect(copy.history.entries).toBe(2);
+    expect(copy.head).toBe(o.v2.versionId);
+  });
+
+  test("P7.14: a token read decides even with `localCopy`: the local log is never preferred to the anchor", async () => {
+    const o = await original(ROBINHOOD, 141);
+    const later = await o.next(o.anchoring, { name: "Harbor, later" });
+    const r = await verifyOriginal({ log: [...o.log, later], authors: [o.alice.evidence()], now: NOW, bytes: (d) => describedBytes(d), evm: { pin: PIN, tokens: [token(o.alias, two(ROBINHOOD, [rec(0, o.log)]))], localCopy: true } });
+    expect(r.evm?.status).toBe("anchored");
+    expect(r.head).toBe(o.anchoring.versionId);
+  });
+
+  test("`localCopy` without a pin is still unsupported, never verified (section 14, P14.21)", async () => {
+    const o = await original(ROBINHOOD, 142);
+    const r = await verifyOriginal({ log: o.log, authors: [o.alice.evidence()], now: NOW, evm: { pin: null, tokens: [], localCopy: true } });
+    expect(r.evm?.status).toBe("unsupported");
+    expect(r.validAsOf).toBeNull();
+  });
+});

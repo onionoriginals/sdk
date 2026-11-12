@@ -373,7 +373,8 @@
       "status": "covered",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts",
-        "packages/vh/tests/bitcoin.test.ts"
+        "packages/vh/tests/bitcoin.test.ts",
+        "packages/vh/tests/evm-anchor.test.ts"
       ]
     },
     {
