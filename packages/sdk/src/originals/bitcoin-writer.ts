@@ -152,6 +152,15 @@ function parseLines(did: string, text: string): StoredLog {
   return { lines, ids: entries.map((e) => e.versionId), anchor, sat: parseBtcoAlias(alias) };
 }
 
+/** Whether the Original's genesis entry has an `anchor` member: it started on an EVM chain (P9.19; EXPERIMENTAL). */
+function fromEvm(log: StoredLog): boolean {
+  try {
+    return (JSON.parse(log.lines[0]) as { state?: { asset?: { anchor?: unknown } } }).state?.asset?.anchor !== undefined;
+  } catch {
+    return false;
+  }
+}
+
 /** The Original's committed log, exactly as stored, and the anchoring sat it names (P9.10). */
 async function storedLog(sdk: OriginalsSDK, did: string): Promise<StoredLog> {
   return parseLines(did, await sdk.committedLog(did));
@@ -363,17 +372,34 @@ async function verifyThrough(sdk: OriginalsSDK, did: string, log: StoredLog, ind
   const versionId = log.ids[index];
   const code = index === log.anchor ? "ANCHORING_NOT_VERIFIED" : "ENTRY_NOT_VERIFIED";
   const what = index === log.anchor ? "the anchoring entry" : `entry ${versionId}`;
-  let pkg: EvidencePackage;
-  try {
-    pkg = await sdk.package(did, { checkpoint: versionId });
-  } catch (error) {
-    if (!(error instanceof OriginalsError)) throw error;
-    const report = (error.details as { report?: OriginalsReport } | undefined)?.report;
-    const category = report?.history.failure?.category ?? error.category;
-    refuse(category, code, `${did} does not verify through ${what}; not inscribed (P9.18): ${error.message}`, { cause: error.code, ...(report ? { report } : {}) });
+  // EXPERIMENTAL (originals-spec PR 59, P9.28, P9.29): an Original that moved here from an EVM chain. A fresh reader of
+  // its package needs the chain it is anchored on now (P7.14), so the log through the entry is verified as this store's
+  // own; and its anchoring inscription is the arrival, inscribed only once the departure is accepted and final on the
+  // token it left. The arrival is not checked against its signer's later DID state (P9.29).
+  const movedFromEvm = fromEvm(log);
+  const arrival = movedFromEvm && index === log.anchor;
+  let r: OriginalsReport;
+  if (movedFromEvm) {
+    if (arrival) {
+      const view = await sdk.get(did).catch(() => undefined);
+      if (!view?.report.evm?.stretches.some((st) => st.departure?.versionId === versionId)) {
+        refuse("incomplete-evidence", "EVM_DEPARTURE_NOT_FINAL", `the move entry ${versionId} is not accepted and final on the token ${did} leaves, as the configured EVM providers read it; its arrival is not inscribed before (P9.29)`, view ? { report: view.report } : {});
+      }
+    }
+    r = await sdk.verifyCommitted(did, versionId);
+  } else {
+    let pkg: EvidencePackage;
+    try {
+      pkg = await sdk.package(did, { checkpoint: versionId });
+    } catch (error) {
+      if (!(error instanceof OriginalsError)) throw error;
+      const report = (error.details as { report?: OriginalsReport } | undefined)?.report;
+      const category = report?.history.failure?.category ?? error.category;
+      refuse(category, code, `${did} does not verify through ${what}; not inscribed (P9.18): ${error.message}`, { cause: error.code, ...(report ? { report } : {}) });
+    }
+    const loaded: LoadedEvidence = await sdk.load(pkg.bytes);
+    r = loaded.report;
   }
-  const loaded: LoadedEvidence = await sdk.load(pkg.bytes);
-  const r = loaded.report;
   const problems: string[] = [];
   if (r.history.status !== "valid" || r.checkpoint !== versionId) problems.push(`history-${r.history.status}`);
   if (r.authorBinding.status !== "valid") problems.push(`author-binding-${r.authorBinding.status}`);
@@ -381,7 +407,7 @@ async function verifyThrough(sdk: OriginalsSDK, did: string, log: StoredLog, ind
   // Bitcoin would refuse an entry that a fresh reader finds historically authorized only: its key
   // is no longer in its signer's latest DID state, its editor DID or the author DID is deactivated
   // (P7.9, P9.15, P5.18).
-  const historical = r.historicallyAuthorizedOnly.find((h) => h.versionId === versionId);
+  const historical = arrival ? undefined : r.historicallyAuthorizedOnly.find((h) => h.versionId === versionId);
   if (historical) problems.push(historical.reason);
   if (problems.length > 0) {
     const category = problems.every((p) => p === "identity-evidence-incomplete") ? "incomplete-evidence" : r.history.failure?.category ?? "invalid-evidence";

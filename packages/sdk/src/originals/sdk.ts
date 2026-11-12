@@ -37,6 +37,18 @@
  *   fetches and verifies the host's new head and has the caller's signer sign
  *   the caller's reconciled change against it; the SDK never merges or signs
  *   on its own.
+ * - EVM anchoring (originals-spec PR 59, P9.19-P9.29; EXPERIMENTAL, under an
+ *   `evm` pin the caller supplies, since P14.21 pins none): `create` with an
+ *   `anchor` member once the author acknowledged the P9.27 notice; `anchor`
+ *   lists the derived token alias; `mintEvm`, `prepareEvmPublication`,
+ *   `submitEvmPublication` and `evmPublicationStatus` publish the committed
+ *   log on the token, one publication at a time, after verifying it through
+ *   the entry published (P9.18 through P9.20); `prepareMove` and `move` write
+ *   a move entry up a layer (P9.28, P9.29). Reads use the configured
+ *   providers (`readEvmToken`) or the caller's evidence, and the store keeps
+ *   the finalized blocks and checkpoints they retain (P9.22, P9.25). Commits
+ *   are verified as the local log, never as accepted, and are refused when
+ *   the token accepted an entry the local log does not hold (P9.12, P9.13).
  */
 import { OriginalsError } from "@originals/vh";
 import { bytesView, multibaseEncode, snapshotBytes } from "@originals/vh/crypto";
@@ -77,6 +89,12 @@ import {
   type SatEvidence,
   type ValidAsOf,
   type VerifyOriginalOptions,
+  derivedTokenAlias,
+  parseEvmAlias,
+  type EvmAnchor,
+  type EvmAnchorPin,
+  type EvmEvidence,
+  type EvmTokenEvidence,
 } from "@originals/vh/originals";
 import { didWebvhFilesUrl, didWebvhLogUrl, parseDidWebvh } from "@originals/vh/webvh";
 import { inscriptionMetadata } from "./inscription.js";
@@ -87,6 +105,21 @@ import { describeEntry, summarize, type EntrySummary, type OriginalsSigner } fro
 import type { HostAnswer, SharedHost } from "./shared.js";
 import { MemoryStore, headOf, higherVersion, refusedVersionId, staleHead, type OriginalsStore, type StoredRefused } from "./store.js";
 import type { ZipLimits } from "./zip.js";
+import { readEvmToken, type EvmProvider } from "./evm-reader.js";
+import {
+  evmPublicationStatus as tokenPublicationStatus,
+  mintEvmToken,
+  prepareEvmPublication as prepareTokenPublication,
+  submitEvmPublication as submitTokenPublication,
+  type EvmPublicationResult,
+  type EvmTxStatus,
+  type EvmWallet,
+  type EvmWriterContext,
+  type MintResult,
+  type PreparedEvmPublication,
+} from "./evm-writer.js";
+import { evmGenesisNotice, evmMoveNotice, type EvmGenesisNotice, type EvmMoveNotice, type EvmPublicationNotice } from "./evm-notice.js";
+import type { EvmFetch } from "./evm-rpc.js";
 
 export type AuthorSource = AuthorDidEvidence[] | ((did: string) => Promise<AuthorDidEvidence | undefined>);
 
@@ -129,6 +162,38 @@ export interface OriginalsSDKOptions {
    * option nothing is ever requested.
    */
   identityFetch?: HostedFetch;
+  /**
+   * EXPERIMENTAL (originals-spec PR 59): EVM anchoring. Without it, an
+   * Original with an `anchor` member is unsupported, never invalid (section
+   * 14, P14.21), and none can be created.
+   */
+  evm?: OriginalsEvmOptions;
+}
+
+/**
+ * EXPERIMENTAL (originals-spec PR 59, P9.19-P9.29). P14.21 pins no anchor
+ * contract, so the caller supplies one (`pin`), as for a local devnet, and
+ * nothing built on it supports an interoperability claim.
+ */
+export interface OriginalsEvmOptions {
+  /** The anchor contract pin, with any devnet chains it adds (P14.21, P14.22). */
+  pin: EvmAnchorPin;
+  /**
+   * JSON-RPC providers per chain (`eip155:<id>`). Reads use every provider of
+   * a chain (P9.22: two are compared at the lower finalized block); the
+   * writer uses the first unless given `rpc`. Without providers for a chain,
+   * the SDK reads nothing from it: an Original anchored there verifies as the
+   * local log only (unverified on the chain, never current), as an anchored
+   * Original does without Bitcoin evidence.
+   */
+  providers?: Readonly<Record<string, ReadonlyArray<string | EvmProvider>>>;
+  fetch?: EvmFetch;
+  /** Bytes per `metadata`/`body` read (P14.20 ranges). Default 65,536. */
+  rangeBytes?: number;
+  /** Receipt polling for the writer, ms. */
+  pollMs?: number;
+  timeoutMs?: number;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 /**
@@ -162,6 +227,18 @@ export interface CreateInput {
   author: AuthorRef;
   /** Editor grants (P5.15; PROVISIONAL member names, D4). */
   editors?: EditorGrant[];
+  /**
+   * EXPERIMENTAL (originals-spec PR 59, P9.19, P14.18): anchor the Original on
+   * an EVM chain listed in the pin, with this minter, fixed at genesis.
+   * Requires the SDK's `evm` option and `acknowledged`.
+   */
+  anchor?: EvmAnchor;
+  /**
+   * P9.27: the notice the author was shown and acknowledged before the
+   * genesis entry is written, exactly as `evmGenesisNotice(anchor, pin)`
+   * returns it. Without it, or for another anchor, nothing is written.
+   */
+  acknowledged?: EvmGenesisNotice;
 }
 
 export interface EditInput {
@@ -362,6 +439,13 @@ export interface ImportResult {
 export interface CarryOptions {
   checkpoint?: string;
   bitcoin?: SatEvidence[];
+  /**
+   * EXPERIMENTAL: what providers read from the Original's tokens
+   * (`readEvmToken`). Without it the configured providers are read; a
+   * checkpoint from the anchoring entry on is accepted only once it is
+   * accepted on the token at its finalized block (P7.15, P9.22).
+   */
+  evm?: EvmTokenEvidence[];
 }
 
 /**
@@ -393,6 +477,13 @@ export interface ReadCarriedOptions {
   hint?: string;
   /** What an adapter read from the anchoring sat of an anchored Original (P7.14). */
   bitcoin?: SatEvidence[];
+  /**
+   * EXPERIMENTAL: what providers read from the tokens of an Original whose
+   * carried log has an `anchor` member (P7.14, P9.20). Reading a carried
+   * file makes no chain request of its own; it is read with the configured
+   * pin and this evidence.
+   */
+  evm?: EvmTokenEvidence[];
 }
 
 export interface ImportCarriedOptions extends ReadCarriedOptions {
@@ -763,6 +854,137 @@ function logResourceVersions(log: string): Array<{ version: number; digest: stri
   return out;
 }
 
+// ---------------------------------------------------------------- EVM anchoring (EXPERIMENTAL)
+
+/**
+ * How a verification gets EVM evidence: read with the configured providers
+ * (`fallback` says what an unreadable chain leaves: the local log for this
+ * store's own committed log, nothing for evidence from elsewhere, P7.14), the
+ * local log only (a commit, P9.18 through P9.20), or the caller's reads.
+ */
+type EvmMode = { kind: "read"; fallback: "local" | "none" } | { kind: "local" } | { kind: "supplied"; tokens: EvmTokenEvidence[] };
+
+const OWN_LOG: EvmMode = { kind: "read", fallback: "local" };
+const LOCAL: EvmMode = { kind: "local" };
+
+/** The genesis entry's `anchor` member, before verification (P9.19); undefined without one. */
+function genesisAnchorOf(log: string): unknown {
+  try {
+    const first = JSON.parse(lines(log)[0] ?? "null") as { state?: { asset?: { anchor?: unknown } } } | null;
+    return first?.state?.asset?.anchor;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The `anchor` member of an entry's asset state, when it is one. */
+function anchorOfLine(line: string): EvmAnchor | undefined {
+  const a = (parseJson(line) as { state?: { asset?: { anchor?: Partial<EvmAnchor> } } }).state?.asset?.anchor;
+  return typeof a === "object" && a !== null && typeof a.chain === "string" && typeof a.minter === "string" ? { chain: a.chain, minter: a.minter } : undefined;
+}
+
+/** The aliases an entry lists. */
+function aliasesOfLine(line: string): string[] {
+  const a = (parseJson(line) as { state?: { asset?: { aliases?: unknown } } }).state?.asset?.aliases;
+  return Array.isArray(a) ? a.filter((x): x is string => typeof x === "string") : [];
+}
+
+/**
+ * Every token the log can be anchored on, before verification (P9.19,
+ * P9.29): the token each `anchor` member derives (P14.19), and each did:evm
+ * alias listed. The verifier decides which of them count.
+ */
+function tokenAliasesOf(log: string, pin: EvmAnchorPin): string[] {
+  const did = originalOf(log);
+  const out = new Set<string>();
+  for (const line of lines(log)) {
+    try {
+      const a = anchorOfLine(line);
+      if (a && did) out.add(derivedTokenAlias(did, a, pin));
+      for (const alias of aliasesOfLine(line)) if (alias.startsWith("did:evm:")) out.add(alias);
+    } catch {
+      // Verification reports the malformed line.
+    }
+  }
+  return [...out];
+}
+
+/** The index of the first entry listing a did:evm token alias: the EVM anchoring entry (P9.19), or -1. */
+function evmAnchoringIndex(all: string[]): number {
+  return all.findIndex((line) => {
+    try {
+      return aliasesOfLine(line).some((a) => a.startsWith("did:evm:"));
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** Whether a notice the caller passes back is the one the SDK would show now. */
+function sameNotice(given: { kind?: unknown; text?: unknown } | undefined, expected: { kind: string; text: string }): boolean {
+  return typeof given === "object" && given !== null && given.kind === expected.kind && given.text === expected.text;
+}
+
+/** Where a move goes (P9.28): a listed EVM chain and its minter, or a Bitcoin sat. */
+export type MoveDestination = EvmAnchor | { sat: string };
+
+export interface PrepareMoveInput {
+  /** The checkpoint the move entry builds on. */
+  parent: string;
+  /** The author: only the author signs a move entry (P9.28). */
+  author: AuthorRef;
+  to: MoveDestination;
+}
+
+export interface PreparedMove {
+  draft: Draft;
+  /** What the author must be told first (P9.29); pass it back as `acknowledged`. */
+  notice: EvmMoveNotice;
+}
+
+/** What a publication on a token is for (P9.17 through P9.20, P9.29). */
+export type EvmPublicationKind = "anchoring" | "entry" | "departure" | "arrival";
+
+export interface EvmPublicationPlan {
+  original: string;
+  kind: EvmPublicationKind;
+  /** The token alias published on (P14.18). */
+  alias: string;
+  chain: string;
+  /** The last entry the publication carries. */
+  versionId: string;
+  /** Every entry it carries, in order: the log through the anchoring or move entry, or one entry. */
+  carries: string[];
+  /** Entries still to publish after this one on the path the Original is on. */
+  remaining: number;
+  /** What becomes public and permanent (P9.18 through P9.20): show it, then pass it back to `submitEvmPublication`. */
+  notice: EvmPublicationNotice;
+  prepared: PreparedEvmPublication;
+}
+
+export interface EvmPublicationOptions {
+  /** The wallet that sends: the token's holder or an address it approved (P9.23). */
+  wallet: EvmWallet;
+  /** The JSON-RPC endpoint to write through. Default: the chain's first configured provider. */
+  rpc?: string;
+}
+
+export interface SubmittedEvmPublication extends EvmPublicationResult {
+  original: string;
+  chain: string;
+  versionId: string;
+  /** P9.18 read through P9.27: pending while pooled or in a block not yet finalized; submitted, not observed, otherwise (PROVISIONAL names). */
+  status: EvmTxStatus;
+}
+
+export interface EvmPublicationState {
+  status: EvmTxStatus;
+  transactions: Array<{ hash: string; status: EvmTxStatus }>;
+  finalized: number | null;
+  /** Once finalized, the Original verified from its tokens: anchored, not anchored, or anchored with incomplete identity evidence (P9.18). */
+  original?: OriginalView;
+}
+
 export class OriginalsSDK {
   private readonly store: OriginalsStore;
   private readonly clock: () => number;
@@ -1099,6 +1321,68 @@ export class OriginalsSDK {
     if (report.original && report.retain.original) await this.store.putRetained(report.original, report.retain.original);
     for (const [did, versionId] of Object.entries(report.retain.authors)) await this.store.putRetained(did, versionId);
     if (report.original && report.retain.anchor && this.store.putRetainedAnchor) await this.store.putRetainedAnchor(report.original, report.retain.anchor);
+    // P9.22, P9.25: the finalized blocks relied on and the checkpoints per token, as the verifier left them.
+    if (report.original && (report.retain.evm || report.retain.evmCheckpoints) && this.store.putRetainedEvm) {
+      await this.store.putRetainedEvm(report.original, { blocks: report.retain.evm ?? [], checkpoints: report.retain.evmCheckpoints ?? [] });
+    }
+  }
+
+  /**
+   * The EVM evidence to verify `log` with (P9.19-P9.25), or undefined when its
+   * genesis entry has no `anchor` member. Without the SDK's `evm` option the
+   * pin is null, so the Original is unsupported, never invalid (section 14).
+   * A read uses every configured provider of each token's chain, the
+   * finalized blocks this store retained (P9.22), and resumes from a retained
+   * checkpoint whose head `log` holds (P9.25).
+   */
+  private async evmEvidence(log: string, mode: EvmMode): Promise<EvmEvidence | undefined> {
+    if (genesisAnchorOf(log) === undefined && mode.kind !== "supplied") return undefined;
+    const evm = this.options.evm;
+    const pin = evm?.pin ?? null;
+    const did = originalOf(log);
+    let kept: Awaited<ReturnType<NonNullable<OriginalsStore["getRetainedEvm"]>>>;
+    try {
+      kept = did && this.store.getRetainedEvm ? await this.store.getRetainedEvm(did) : undefined;
+    } catch (error) {
+      if (!(error instanceof OriginalsError)) throw error;
+    }
+    const blocks = kept?.blocks ?? [];
+    const base = { pin, ...(blocks.length > 0 ? { retained: blocks } : {}) };
+    if (mode.kind === "supplied") return { ...base, tokens: mode.tokens, ...(kept && kept.checkpoints.length > 0 ? { checkpoints: kept.checkpoints } : {}) };
+    if (mode.kind === "local" || !pin || !evm?.providers) return { ...base, tokens: [], ...(mode.kind === "local" || mode.fallback === "local" ? { localCopy: true } : {}) };
+    const ids = new Set(versionIds(log));
+    const tokens: EvmTokenEvidence[] = [];
+    const used: NonNullable<EvmEvidence["checkpoints"]> = [];
+    for (const alias of tokenAliasesOf(log, pin)) {
+      let chain: string;
+      try {
+        chain = parseEvmAlias(alias).chain;
+      } catch (error) {
+        if (error instanceof OriginalsError) continue;
+        throw error;
+      }
+      const providers = evm.providers[chain];
+      if (!providers || providers.length === 0) continue;
+      // P9.25 (MAY): resume only from a checkpoint whose head this log holds, as the verifier requires.
+      const checkpoint = kept?.checkpoints.find((c) => c.token === alias && ids.has(c.head));
+      try {
+        const read = await readEvmToken({ alias }, {
+          pin, providers, observe: true,
+          ...(evm.fetch ? { fetch: evm.fetch } : {}),
+          ...(evm.rangeBytes !== undefined ? { rangeBytes: evm.rangeBytes } : {}),
+          ...(blocks.length > 0 ? { retained: blocks } : {}),
+          ...(checkpoint ? { from: checkpoint.records } : {}),
+        });
+        tokens.push(read.evidence);
+        if (checkpoint) used.push(checkpoint);
+      } catch (error) {
+        // An alias of another contract or an unlisted chain: the verifier reports it (P9.19, P9.21).
+        if (!(error instanceof OriginalsError)) throw error;
+      }
+    }
+    if (tokens.length === 0) return { ...base, tokens: [], ...(mode.fallback === "local" ? { localCopy: true } : {}) };
+    const others = (kept?.checkpoints ?? []).filter((c) => !used.includes(c));
+    return { ...base, tokens, ...(used.length + others.length > 0 ? { checkpoints: [...used, ...others] } : {}) };
   }
 
   /** Alias logs this store keeps for the aliases a log lists (stored with the DID evidence). */
@@ -1111,14 +1395,16 @@ export class OriginalsSDK {
     return out;
   }
 
-  private async verify(log: string, checkpoint?: string, extra?: ReadonlyMap<string, Uint8Array>, bitcoin?: SatEvidence[], optIn?: boolean): Promise<OriginalsReport> {
+  private async verify(log: string, checkpoint?: string, extra?: ReadonlyMap<string, Uint8Array>, bitcoin?: SatEvidence[], optIn?: boolean, evmMode: EvmMode = OWN_LOG): Promise<OriginalsReport> {
     const aliases = await this.aliasEvidence(log);
     const { bytes, checked } = await this.storedBytes(log, extra);
     const comparisons = await this.comparisons(log);
+    const evm = await this.evmEvidence(log, evmMode);
     const run = (authors: AuthorDidEvidence[]) =>
       verifyOriginal({
         log,
         ...(bitcoin ? { bitcoin } : {}),
+        ...(evm ? { evm } : {}),
         aliases,
         authors,
         bytes,
@@ -1174,10 +1460,26 @@ export class OriginalsSDK {
    * For an Original first stored by importing a carried file, no resolver
    * request is made unless `resolveSigners` is true: the import was no
    * opt-in to resolve (P7.13).
+   *
+   * EXPERIMENTAL: for an Original with an `anchor` member, its tokens decide
+   * from the anchoring entry on (P9.20): pass `evm`, what providers read
+   * (`readEvmToken`), or configure `evm.providers` and the SDK reads every
+   * token the log names at the finalized block, with the blocks and
+   * checkpoints this store retained (P9.22, P9.25). With neither, the result
+   * is the committed log, unverified on the chain and never current.
    */
-  async get(did: string, options: { checkpoint?: string; bitcoin?: SatEvidence[]; resolveSigners?: boolean } = {}): Promise<OriginalView> {
+  async get(did: string, options: { checkpoint?: string; bitcoin?: SatEvidence[]; resolveSigners?: boolean; evm?: EvmTokenEvidence[] } = {}): Promise<OriginalView> {
+    return this.read(did, options, options.evm ? { kind: "supplied", tokens: options.evm } : OWN_LOG);
+  }
+
+  /**
+   * `get` with the EVM evidence `mode` gives (EXPERIMENTAL). With the
+   * configured providers by default; `local` verifies the committed log
+   * itself, as a commit does, never as accepted on a token (P9.12).
+   */
+  private async read(did: string, options: { checkpoint?: string; bitcoin?: SatEvidence[]; resolveSigners?: boolean }, mode: EvmMode): Promise<OriginalView> {
     const log = await this.stored(did);
-    const report = await this.verify(log, options.checkpoint, undefined, options.bitcoin, options.resolveSigners);
+    const report = await this.verify(log, options.checkpoint, undefined, options.bitcoin, options.resolveSigners, mode);
     await this.retain(report);
     if (options.checkpoint && report.checkpoint !== options.checkpoint) {
       sdkError("incomplete-evidence", "CHECKPOINT_NOT_FOUND", `${options.checkpoint} is not a verified checkpoint of ${did}`, { report });
@@ -1193,7 +1495,9 @@ export class OriginalsSDK {
   }
 
   async prepareCreate(input: CreateInput): Promise<Draft> {
-    exactKeys(input, ["name", "metadata", "resource", "author", "signer", "editors"], "create input");
+    exactKeys(input, ["name", "metadata", "resource", "author", "signer", "editors", "anchor", "acknowledged"], "create input");
+    // P9.27, P14.21 (EXPERIMENTAL): an anchor member only under a pin, and only once the author was told what it means.
+    const pin = input.anchor !== undefined ? this.evmAnchorAcknowledged(input.anchor, input.acknowledged) : undefined;
     const bytes = new Map<string, Uint8Array>();
     const r = input.resource;
     if (typeof r !== "object" || r === null) sdkError("invalid-evidence", "INPUT_INVALID", "an Original has exactly one resource: give `resource` (P4.1)");
@@ -1212,9 +1516,27 @@ export class OriginalsSDK {
     const entry = prepareCreateOriginal({
       versionTime: this.versionTime(), name: input.name, ...(input.metadata !== undefined ? { metadata: input.metadata } : {}), resource, author: input.author,
       ...(input.editors !== undefined ? { editors: input.editors } : {}),
+      ...(input.anchor !== undefined ? { anchor: input.anchor, evm: pin } : {}),
     });
     const summary = summarize(entry);
     return Promise.resolve({ kind: "draft", signed: false, original: entry.state.id as string, parent: null, entry, summary, display: describeEntry(summary), bytes });
+  }
+
+  /** The configured pin, or unsupported-profile: P14.21 pins no anchor contract (section 14). */
+  private evmPin(): EvmAnchorPin {
+    const pin = this.options.evm?.pin;
+    if (!pin) sdkError("unsupported-profile", "EVM_NO_ANCHOR_CONTRACT", "P14.21 pins no anchor contract, so no anchor member is written; configure the experimental `evm` option with a pin to do so anyway");
+    return pin;
+  }
+
+  /** P9.27: the genesis notice for `anchor` under the pin, which the author must have acknowledged. */
+  private evmAnchorAcknowledged(anchor: EvmAnchor, acknowledged: EvmGenesisNotice | undefined): EvmAnchorPin {
+    const pin = this.evmPin();
+    const notice = evmGenesisNotice(anchor, pin);
+    if (!sameNotice(acknowledged, notice)) {
+      sdkError("invalid-evidence", "EVM_NOTICE_REQUIRED", "show the author evmGenesisNotice(anchor, pin) first and pass it back as `acknowledged`: the first chain is permanent and fixes the minter (P9.27)", { notice });
+    }
+    return pin;
   }
 
   /** Create an Original, or return an unsigned draft when no signer is given. */
@@ -1226,7 +1548,8 @@ export class OriginalsSDK {
 
   private async parentOf(did: string, parent: string): Promise<{ log: string; head: LogEntry; view: OriginalView }> {
     const log = await this.stored(did);
-    const view = this.view(did, await this.verify(log));
+    // The committed log itself, as for Bitcoin without evidence: an entry is extended locally before it is published (P9.18).
+    const view = this.view(did, await this.verify(log, undefined, undefined, undefined, undefined, LOCAL));
     if (view.report.history.status !== "valid" || view.report.identityEvidence.status !== "complete") {
       sdkError("incomplete-evidence", "PARENT_NOT_VERIFIED", `${did} does not fully verify; it cannot be extended`, { report: view.report });
     }
@@ -1241,7 +1564,7 @@ export class OriginalsSDK {
     return this.prepareUpdate(did, input);
   }
 
-  private async prepareUpdate(did: string, input: EditInput, aliases?: string[]): Promise<Draft> {
+  private async prepareUpdate(did: string, input: EditInput, aliases?: string[], anchor?: EvmAnchor | null): Promise<Draft> {
     const { head, view } = await this.parentOf(did, input.parent);
     const bytes = new Map<string, Uint8Array>();
     let resource: ResourceDescriptor | undefined;
@@ -1273,6 +1596,9 @@ export class OriginalsSDK {
       ...(input.editor !== undefined ? { editor: input.editor } : {}),
       ...(input.editors !== undefined ? { editors: input.editors } : {}),
       ...(aliases ? { aliases } : {}),
+      ...(anchor !== undefined ? { anchor } : {}),
+      // A token alias is checked against the pinned contract (P14.18, P14.21).
+      ...(this.options.evm ? { evm: this.options.evm.pin } : {}),
     });
     const summary = summarize(entry, head.state as unknown as EntryState);
     return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary, display: describeEntry(summary), bytes };
@@ -1321,21 +1647,294 @@ export class OriginalsSDK {
    * resource version as its body, so an Original whose log and current
    * version together would exceed 350,000 bytes is refused before anything
    * is committed (ANCHORING_LOG_TOO_LARGE, P9.17; originals-spec #53).
+   *
+   * EXPERIMENTAL (originals-spec PR 59): for an Original whose genesis entry
+   * has an `anchor` member, the anchoring entry lists the one token alias
+   * that member derives (P9.19, P14.19) and takes no `sat`; it counts once
+   * published on the token and final (`prepareEvmPublication`, P9.22). The
+   * anchoring publication carries the same log and version, under the same
+   * 350,000-byte limit (P9.25).
    */
-  async anchor(did: string, input: { parent: string; author: AuthorRef; signer: OriginalsSigner; sat: string }): Promise<CommitResult> {
+  async anchor(did: string, input: { parent: string; author: AuthorRef; signer: OriginalsSigner; sat?: string }): Promise<CommitResult> {
     exactKeys(input, ["parent", "author", "signer", "sat"], "anchor input");
-    parseBtcoAlias(input.sat);
-    const aliases = (await this.get(did)).state.aliases;
-    if (aliases.some((a) => a.startsWith("did:btco:"))) sdkError("invalid-evidence", "ALREADY_ANCHORED", `${did} is already anchored (P9.10)`);
-    const draft = await this.prepareUpdate(did, { parent: input.parent, author: input.author }, [...aliases, input.sat]);
+    const { state } = await this.read(did, {}, LOCAL);
+    const aliases = state.aliases;
+    let alias: string;
+    if (state.anchor !== undefined) {
+      // EXPERIMENTAL (P9.19, P14.19): the anchoring entry lists the one token the anchor member derives.
+      if (input.sat !== undefined) sdkError("invalid-evidence", "ANCHOR_IS_EVM", `${did} names ${state.anchor.chain} as its anchor chain at genesis: it is anchored on its token, never on a sat (P9.19)`);
+      if (aliases.some((a) => a.startsWith("did:evm:"))) sdkError("invalid-evidence", "ALREADY_ANCHORED", `${did} already lists its token alias (P9.19)`);
+      alias = derivedTokenAlias(did, state.anchor, this.evmPin());
+    } else {
+      if (typeof input.sat !== "string") sdkError("invalid-evidence", "INPUT_INVALID", "anchor input.sat is the anchoring sat's did:btco alias (P9.10)");
+      parseBtcoAlias(input.sat);
+      if (aliases.some((a) => a.startsWith("did:btco:"))) sdkError("invalid-evidence", "ALREADY_ANCHORED", `${did} is already anchored (P9.10)`);
+      alias = input.sat;
+    }
+    const draft = await this.prepareUpdate(did, { parent: input.parent, author: input.author }, [...aliases, alias]);
     // The anchoring inscription carries the whole log through the anchoring entry as metadata and
     // the current version as its body, so together they must fit: refuse before committing (P9.17).
     const candidate = await this.sign(draft, input.signer);
     const carried = [...lines(await this.stored(did)), candidate.line];
     const size = inscriptionMetadata(carried).length + (candidate.entry.state as unknown as EntryState).asset.resource.size;
     if (size > ORIGINALS_INSCRIPTION_MAX_BYTES) {
-      sdkError("limit-exceeded", "ANCHORING_LOG_TOO_LARGE", `the log of ${did} through the anchoring entry and its current version would be ${size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, { size, limit: ORIGINALS_INSCRIPTION_MAX_BYTES });
+      sdkError("limit-exceeded", "ANCHORING_LOG_TOO_LARGE", `the log of ${did} through the anchoring entry and its current version would be ${size} bytes; an inscription or publication holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17, P9.25)`, { size, limit: ORIGINALS_INSCRIPTION_MAX_BYTES });
     }
+    return this.commitCandidate(candidate);
+  }
+
+  // ---------------------------------------------------------------- EVM anchoring (EXPERIMENTAL)
+
+  /** A writer context for `chain` (P9.21): the configured pin, and `rpc` or the chain's first configured provider. */
+  private writer(chain: string, wallet: EvmWallet, rpc?: string): EvmWriterContext {
+    const pin = this.evmPin();
+    const evm = this.options.evm!;
+    const first = evm.providers?.[chain]?.[0];
+    const url = rpc ?? (typeof first === "string" ? first : first?.url);
+    if (!url) sdkError("incomplete-evidence", "EVM_PROVIDERS_REQUIRED", `name a JSON-RPC provider for ${chain} in options.evm.providers, or pass rpc`);
+    return {
+      chain, pin, wallet, rpc: url,
+      ...(evm.fetch ? { fetch: evm.fetch } : {}),
+      ...(evm.pollMs !== undefined ? { pollMs: evm.pollMs } : {}),
+      ...(evm.timeoutMs !== undefined ? { timeoutMs: evm.timeoutMs } : {}),
+      ...(evm.sleep ? { sleep: evm.sleep } : {}),
+    };
+  }
+
+  /**
+   * Mint the token of the Original's current `anchor` member from its minter
+   * (P14.19): the genesis chain's before anchoring, the destination's after a
+   * move entry is committed (P9.29). Minting anchors nothing (P9.23). Returns
+   * the existing token if it was minted before.
+   */
+  async mintEvm(did: string, options: EvmPublicationOptions): Promise<MintResult> {
+    options = optionsObject(options, ["wallet", "rpc"], "mint options");
+    const { state } = await this.read(did, {}, LOCAL);
+    if (!state.anchor) sdkError("invalid-evidence", "NOT_EVM_ANCHORED", `${did} has no anchor member: its anchor chain is Bitcoin (P9.19)`);
+    return mintEvmToken(this.writer(state.anchor.chain, options.wallet, options.rpc), { original: did, anchor: state.anchor });
+  }
+
+  /**
+   * The next publication the tokens can accept, from what the configured
+   * providers read at the finalized block (P9.13, P9.20, P9.22): the log
+   * through the anchoring entry, then the successor of the accepted head, a
+   * move entry as the departure on the token left, then the whole log through
+   * the move entry as the arrival on the destination (P9.17, P9.29).
+   */
+  private async evmNext(did: string): Promise<{ kind: EvmPublicationKind; start: number; index: number; alias: string; all: string[]; ids: string[] }> {
+    const pin = this.evmPin();
+    const log = await this.stored(did);
+    if (genesisAnchorOf(log) === undefined) sdkError("invalid-evidence", "NOT_EVM_ANCHORED", `${did} has no anchor member: its anchor chain is Bitcoin (P9.19); publish it with the Bitcoin writer`);
+    const all = lines(log);
+    const ids = versionIds(log);
+    const report = await this.verify(log, undefined, undefined, undefined, undefined, { kind: "read", fallback: "none" });
+    const e = report.evm!;
+    if (e.status === "unsupported") sdkError("unsupported-profile", e.unsupported?.code ?? "EVM_UNSUPPORTED", e.unsupported?.message ?? `${did} is anchored where this SDK's pin cannot follow (P9.19, P9.21)`, { report });
+    if (e.status === "moved-to-bitcoin") sdkError("invalid-evidence", "MOVED_TO_BITCOIN", `${did} has moved to Bitcoin: publish its entries with the Bitcoin writer (P9.28)`, { report });
+    // P9.29: a departure to Bitcoin is final and the sat was not read here: the arrival is the Bitcoin writer's.
+    const departed = [...e.stretches].reverse().find((st) => st.departure)?.departure;
+    const departedLine = departed ? all[ids.indexOf(departed.versionId)] : undefined;
+    if ((e.status === "unverified" || e.status === "departed-not-arrived") && departedLine !== undefined && anchorOfLine(departedLine) === undefined) {
+      const sat = aliasesOfLine(departedLine).find((a) => a.startsWith("did:btco:"));
+      sdkError("invalid-evidence", "EVM_ARRIVAL_ON_BITCOIN", `the move entry ${departed!.versionId} of ${did} is accepted and final on ${departed!.token}; its arrival is the anchoring inscription on ${sat ?? "the destination sat"}, carrying the log through the move entry: inscribe it with the Bitcoin writer (prepareEntryInscription), not on a token (P9.28, P9.29, P9.17)`, { versionId: departed!.versionId, sat });
+    }
+    if (e.status === "unverified") {
+      const why = e.stretches.flatMap((st) => (st.missing ? [`${st.token}: ${st.missing.message}`] : []));
+      sdkError("incomplete-evidence", "EVM_EVIDENCE_MISSING", `what the tokens of ${did} accepted could not be read at their finalized blocks${why.length ? `: ${why.join("; ")}` : ""}; nothing is published while it is unknown (P9.22, P9.25)`, { report });
+    }
+    const pending = e.stretches.flatMap((st) => st.observed.map((o) => `${st.token} record ${o.index}`));
+    if (pending.length > 0) {
+      sdkError("incomplete-evidence", "EVM_PUBLICATION_PENDING", `${pending.join(", ")} is recorded above the finalized block: wait until it is final before publishing again, so a publication never extends a head the chain has not settled (P9.13, P9.22)`, { pending });
+    }
+    const last = e.stretches[e.stretches.length - 1];
+    if (e.status === "not-anchored") {
+      const k = evmAnchoringIndex(all);
+      if (k < 0 || !aliasesOfLine(all[k]).includes(last.token)) sdkError("invalid-evidence", "NOT_ANCHORED", `${did} lists no token alias yet: write the anchoring entry with anchor() first (P9.19)`);
+      return { kind: "anchoring", start: 0, index: k, alias: last.token, all, ids };
+    }
+    const head = report.head ?? "";
+    const at = ids.indexOf(head);
+    if (at < 0) sdkError("stale-parent", "EVM_HEAD_NOT_STORED", `the token accepted ${head}, which the committed log does not hold; nothing is rebased (P9.13, P2.1)`, { report });
+    if (e.status === "departed-not-arrived") {
+      // Not Bitcoin: that was refused above.
+      return { kind: "arrival", start: 0, index: at, alias: derivedTokenAlias(did, anchorOfLine(all[at])!, pin), all, ids };
+    }
+    if (at + 1 >= ids.length) sdkError("invalid-evidence", "NOTHING_TO_PUBLISH", `${last.token} already shows the committed head ${head}`);
+    const before = anchorOfLine(all[at]);
+    const after = anchorOfLine(all[at + 1]);
+    const departs = before !== undefined && (after?.chain !== before.chain || after?.minter !== before.minter);
+    return { kind: departs ? "departure" : "entry", start: at + 1, index: at + 1, alias: last.token, all, ids };
+  }
+
+  /**
+   * The committed log through `checkpoint`, verified as this store's own log
+   * with no anchor evidence: what a writer checks before publishing the
+   * entry (P9.18, read through P9.20 for a token). It is never a statement
+   * that the entry is accepted on an anchor (P9.12). EXPERIMENTAL: the Bitcoin
+   * writer uses it for an Original whose genesis entry has an `anchor`
+   * member, whose fresh reader needs the chain it is anchored on now (P7.14).
+   */
+  async verifyCommitted(did: string, checkpoint: string): Promise<OriginalsReport> {
+    const all = lines(await this.stored(did));
+    const at = versionIds(all.join("\n")).indexOf(checkpoint);
+    if (at < 0) sdkError("incomplete-evidence", "CHECKPOINT_NOT_FOUND", `${checkpoint} is not a committed checkpoint of ${did}`);
+    return this.verify(`${all.slice(0, at + 1).join("\n")}\n`, undefined, undefined, undefined, undefined, LOCAL);
+  }
+
+  /**
+   * P9.18 through P9.20: before publishing, the committed log through the
+   * entry published verifies, with the identity evidence of every signer of
+   * an entry in it, and the entry is not historically authorized only (P7.9,
+   * P9.15). An arrival is not checked against its signer's later DID state
+   * (P9.29).
+   */
+  private async verifiedThrough(did: string, through: string[], kind: EvmPublicationKind): Promise<void> {
+    const versionId = versionIds(through[through.length - 1])[0];
+    const r = await this.verifyCommitted(did, versionId);
+    const problems: string[] = [];
+    if (r.history.status !== "valid" || r.history.entries !== through.length || r.head !== versionId) problems.push(`history-${r.history.status}`);
+    if (r.authorBinding.status !== "valid") problems.push(`author-binding-${r.authorBinding.status}`);
+    if (r.identityEvidence.status !== "complete") problems.push("identity-evidence-incomplete");
+    const historical = kind === "arrival" ? undefined : r.historicallyAuthorizedOnly.find((h) => h.versionId === versionId);
+    if (historical) problems.push(historical.reason);
+    if (problems.length === 0) return;
+    const code = kind === "anchoring" ? "EVM_ANCHORING_NOT_VERIFIED" : kind === "arrival" ? "EVM_ARRIVAL_NOT_VERIFIED" : "EVM_ENTRY_NOT_VERIFIED";
+    const category = problems.every((p) => p === "identity-evidence-incomplete") ? "incomplete-evidence" : r.history.failure?.category ?? "invalid-evidence";
+    sdkError(category, code, `${did} does not verify through ${versionId}; not published (P9.18, P9.20): ${problems.join(", ")}`, { problems, report: r });
+  }
+
+  /**
+   * Prepare the next publication on a token (P9.17, P9.20, P9.25, P9.29),
+   * after verifying the committed log through the entry it publishes
+   * (P9.18). Nothing is sent: show `notice` to the author, then pass it back
+   * to `submitEvmPublication`. While a publication is recorded above the
+   * finalized block nothing else is prepared (EVM_PUBLICATION_PENDING). The
+   * body is the stored version the last entry names; an unchanged version
+   * refers to the body the token already stores (`publishSameBody`, P14.20).
+   * A departure to Bitcoin is followed by the Bitcoin writer's anchoring
+   * inscription (EVM_ARRIVAL_ON_BITCOIN).
+   */
+  async prepareEvmPublication(did: string, options: EvmPublicationOptions & { maxTxBytes?: number; sameBody?: "auto" | number | false }): Promise<EvmPublicationPlan> {
+    options = optionsObject(options, ["wallet", "rpc", "maxTxBytes", "sameBody"], "EVM publication options");
+    const t = await this.evmNext(did);
+    const through = t.all.slice(0, t.index + 1);
+    await this.verifiedThrough(did, through, t.kind);
+    const descriptor = (parseJson(t.all[t.index]) as unknown as { state: EntryState }).state.asset.resource;
+    const body = await this.resourceBytes(descriptor.digest);
+    if (!body) sdkError("incomplete-evidence", "RESOURCE_BYTES_MISSING", `the publication of ${t.ids[t.index]} carries resource version ${descriptor.digest} as its body, and this store does not hold those bytes (P9.17, P9.25)`, { digest: descriptor.digest });
+    const chain = parseEvmAlias(t.alias).chain;
+    const prepared = await prepareTokenPublication(this.writer(chain, options.wallet, options.rpc), {
+      alias: t.alias, lines: t.all.slice(t.start, t.index + 1), body,
+      ...(options.maxTxBytes !== undefined ? { maxTxBytes: options.maxTxBytes } : {}),
+      ...(options.sameBody !== undefined ? { sameBody: options.sameBody } : {}),
+    });
+    return {
+      original: did, kind: t.kind, alias: t.alias, chain, versionId: t.ids[t.index], carries: t.ids.slice(t.start, t.index + 1),
+      remaining: t.ids.length - 1 - t.index, notice: prepared.notice, prepared,
+    };
+  }
+
+  /**
+   * Send a prepared publication (P14.20) once the author acknowledged its
+   * notice (P9.18), after checking it is still the next one the tokens can
+   * accept. The result is labelled as P9.18 reads through P9.27: pending while
+   * a pool holds its transactions or its block is not finalized, submitted,
+   * not observed, otherwise. It counts only once final (P9.22): ask
+   * `evmPublicationStatus`.
+   */
+  async submitEvmPublication(did: string, plan: EvmPublicationPlan, options: EvmPublicationOptions & { acknowledged: EvmPublicationNotice }): Promise<SubmittedEvmPublication> {
+    options = optionsObject(options, ["wallet", "rpc", "acknowledged"], "EVM submission options");
+    if (plan?.original !== did || !plan.prepared) sdkError("invalid-evidence", "INPUT_INVALID", "submitEvmPublication takes a plan from prepareEvmPublication for this Original");
+    if (!sameNotice(options.acknowledged, plan.notice)) {
+      sdkError("invalid-evidence", "EVM_NOTICE_REQUIRED", "show the author the plan's notice first and pass it back as `acknowledged`: what the publication carries becomes public and permanent (P9.18, P9.20)", { notice: plan.notice });
+    }
+    const t = await this.evmNext(did);
+    if (t.ids[t.index] !== plan.versionId || t.alias !== plan.alias || t.kind !== plan.kind) {
+      sdkError("stale-parent", "HEAD_NOT_NEXT", `${plan.versionId} on ${plan.alias} is no longer the next publication: ${t.ids[t.index]} on ${t.alias} is; prepare again (P9.13)`);
+    }
+    const ctx = this.writer(plan.chain, options.wallet, options.rpc);
+    const result = await submitTokenPublication(ctx, plan.prepared);
+    const state = await tokenPublicationStatus(ctx.rpc, result.txHashes, ctx.fetch ? { fetch: ctx.fetch } : {});
+    return { ...result, original: did, chain: plan.chain, versionId: plan.versionId, status: state.status };
+  }
+
+  /**
+   * P9.18 read through P9.27: the label of a submitted publication, and once
+   * it is finalized the Original verified from its tokens: anchored, not
+   * anchored, or anchored with incomplete identity evidence.
+   */
+  async evmPublicationStatus(did: string, submitted: Pick<SubmittedEvmPublication, "chain" | "txHashes">, options: { rpc?: string } = {}): Promise<EvmPublicationState> {
+    options = optionsObject(options, ["rpc"], "EVM status options");
+    const ctx = this.writer(submitted.chain, { address: "0x" + "00".repeat(20), sendTransaction: () => Promise.reject(new Error("read only")) }, options.rpc);
+    const state = await tokenPublicationStatus(ctx.rpc, submitted.txHashes, ctx.fetch ? { fetch: ctx.fetch } : {});
+    if (state.status !== "finalized") return state;
+    return { ...state, original: await this.get(did) };
+  }
+
+  /**
+   * Prepare a move entry (P9.28): an author entry that replaces the `anchor`
+   * member with the destination's, or removes it for Bitcoin, and the token
+   * alias with the destination's alias. Only from a chain whose token alias
+   * the Original lists, and only upward. Returns the P9.29 notice, which
+   * refuses a move that is not upward and one whose arrival would exceed
+   * 350,000 bytes (MOVE_NOT_UPWARD, MOVE_ARRIVAL_TOO_LARGE).
+   */
+  async prepareMove(did: string, input: PrepareMoveInput): Promise<PreparedMove> {
+    exactKeys(input, ["parent", "author", "to"], "move input");
+    const pin = this.evmPin();
+    const { view, log } = await this.parentOf(did, input.parent);
+    const from = view.state.anchor;
+    if (!from) {
+      const btco = view.state.aliases.some((a) => a.startsWith("did:btco:"));
+      sdkError("invalid-evidence", "MOVE_NOT_FROM_EVM", btco ? `${did} is anchored on Bitcoin, which is terminal: it does not move (P9.10, P9.28)` : `${did} has no anchor member: it is on the path to Bitcoin and has no chain to move from (P9.19)`);
+    }
+    const current = derivedTokenAlias(did, from, pin);
+    if (!view.state.aliases.includes(current)) sdkError("invalid-evidence", "STATE_MOVE_BEFORE_ANCHOR", `${did} does not list its token alias yet: it moves only from a chain it is anchored on; anchor it first (P9.28)`);
+    const to = input.to;
+    if (typeof to !== "object" || to === null) sdkError("invalid-evidence", "INPUT_INVALID", "move input.to is {chain, minter} or {sat}");
+    let anchor: EvmAnchor | null;
+    let destination: string;
+    if ("sat" in to) {
+      exactKeys(to, ["sat"], "move input.to");
+      parseBtcoAlias(to.sat);
+      anchor = null;
+      destination = to.sat;
+    } else {
+      exactKeys(to, ["chain", "minter"], "move input.to");
+      anchor = { chain: to.chain, minter: to.minter };
+      destination = derivedTokenAlias(did, anchor, pin);
+    }
+    const aliases = view.state.aliases.map((a) => (a === current ? destination : a));
+    const draft = await this.prepareUpdate(did, { parent: input.parent, author: input.author }, aliases, anchor);
+    // P9.29: the arrival carries the whole log through the move entry, sized with the shortest proof a signature encodes to.
+    const proof = [{ type: "DataIntegrityProof", cryptosuite: "eddsa-jcs-2022", verificationMethod: input.author.verificationMethod, proofPurpose: "assertionMethod", proofValue: multibaseEncode(new Uint8Array(64)) }];
+    const notice = evmMoveNotice({ from, to: anchor, lines: [...lines(log), JSON.stringify({ ...draft.entry, proof })], version: view.state.resource, pin });
+    return { draft, notice };
+  }
+
+  /**
+   * Sign and commit the prepared move entry (P9.28) once the author
+   * acknowledged its P9.29 notice, recomputed here from the draft and its
+   * parent. It is then published as the departure on the token left, by that
+   * token's holder, and as the arrival: on the destination token, minted by
+   * the destination's minter, or by the Bitcoin writer on the sat.
+   */
+  async move(did: string, input: { prepared: PreparedMove; signer: OriginalsSigner; acknowledged: EvmMoveNotice }): Promise<CommitResult> {
+    exactKeys(input, ["prepared", "signer", "acknowledged"], "move input");
+    const draft = input.prepared?.draft;
+    if (draft?.kind !== "draft" || draft.original !== did || draft.parent === null) sdkError("invalid-evidence", "INPUT_INVALID", "move takes a prepared move from prepareMove for this Original");
+    const pin = this.evmPin();
+    const { view, log } = await this.parentOf(did, draft.parent);
+    const to = (draft.entry.state as unknown as EntryState).asset.anchor ?? null;
+    if (!view.state.anchor) sdkError("invalid-evidence", "MOVE_NOT_FROM_EVM", `${did} has no anchor member to move from (P9.28)`);
+    const notice = (line: string) => evmMoveNotice({ from: view.state.anchor!, to, lines: [...lines(log), line], version: view.state.resource, pin });
+    const proof = [{ type: "DataIntegrityProof", cryptosuite: "eddsa-jcs-2022", verificationMethod: (draft.entry.state as unknown as EntryState).author.verificationMethod, proofPurpose: "assertionMethod", proofValue: multibaseEncode(new Uint8Array(64)) }];
+    if (!sameNotice(input.acknowledged, notice(JSON.stringify({ ...draft.entry, proof })))) {
+      sdkError("invalid-evidence", "EVM_NOTICE_REQUIRED", "show the author the notice prepareMove returned for this draft and pass it back as `acknowledged`: a move cannot be reversed (P9.29)");
+    }
+    const candidate = await this.sign(draft, input.signer);
+    // P9.29: the SDK MUST refuse a move whose arrival would exceed 350,000 bytes, checked again with the signed entry.
+    notice(candidate.line);
     return this.commitCandidate(candidate);
   }
 
@@ -1387,6 +1986,23 @@ export class OriginalsSDK {
       }
     };
     if (afterAnchor) checkInscribable({ ...draft.entry, proof: [{ ...proofOptions, proofValue: multibaseEncode(new Uint8Array(64)) }] });
+    // EXPERIMENTAL, P9.25 through P9.20: after the token alias is listed, each entry is a publication of its own on the
+    // token, storing its metadata and, when it changes the resource, the new version; an unchanged one refers to the
+    // body already stored there (P14.20). One that could never be published is not signed into history.
+    const parentState = parentEntry?.state as unknown as EntryState | undefined;
+    const onToken = (parentState?.asset?.aliases ?? []).some((a) => a.startsWith("did:evm:"));
+    const checkPublishable = (e: LogEntry) => {
+      const state = e.state as unknown as EntryState;
+      const changes = state.transitions.length > 0;
+      const size = inscriptionMetadata([JSON.stringify(e)]).length + (changes ? state.asset.resource.size : 0);
+      if (size > ORIGINALS_INSCRIPTION_MAX_BYTES) {
+        sdkError("limit-exceeded", "PUBLICATION_TOO_LARGE", `entry ${e.versionId}${changes ? " and the resource version it adds" : ""} would store ${size} bytes on the token; a publication holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.25, P14.20)`, { size, limit: ORIGINALS_INSCRIPTION_MAX_BYTES });
+      }
+    };
+    if (onToken) {
+      checkPublishable({ ...draft.entry, proof: [{ ...proofOptions, proofValue: multibaseEncode(new Uint8Array(64)) }] });
+      await this.tokenHeadHeld(draft.original, stored);
+    }
     const signature = await signer.sign({
       entry: draft.entry, proofOptions, summary: draft.summary, display: draft.display ?? describeEntry(draft.summary),
       ...(parentEntry ? { parent: { entry: parentEntry, ...(predecessor ? { predecessor } : {}) } } : {}),
@@ -1394,8 +2010,10 @@ export class OriginalsSDK {
     const entry: LogEntry = { ...draft.entry, proof: [{ ...proofOptions, proofValue: multibaseEncode(signature) }] };
     const candidate = stored + serializeLog([entry]);
     if (afterAnchor) checkInscribable(entry);
+    if (onToken) checkPublishable(entry);
 
-    const report = await this.verify(candidate, undefined, draft.bytes);
+    // The candidate as the local log: never as accepted on a token, which only a publication can make it (P9.12, P9.18).
+    const report = await this.verify(candidate, undefined, draft.bytes, undefined, undefined, LOCAL);
     const added = report.resources.versions.filter((v) => v.versionId === entry.versionId);
     if (
       report.history.status !== "valid" || report.history.entries !== lines(candidate).length ||
@@ -1423,6 +2041,27 @@ export class OriginalsSDK {
     return this.commitCandidate(await this.sign(draft, signer));
   }
 
+  /**
+   * EXPERIMENTAL, P9.12 and P9.13 through P9.20: once the token alias is
+   * listed, a commit extends only history the tokens agree with. When a token
+   * the configured providers read has accepted an entry the committed log does
+   * not hold (another branch, published by the holder), the local log has
+   * diverged from the Original's history and nothing is signed: load the
+   * accepted history first. Nothing is rebased (P2.1, P4.5).
+   */
+  private async tokenHeadHeld(did: string, log: string): Promise<void> {
+    if (!this.options.evm?.providers || genesisAnchorOf(log) === undefined) return;
+    const report = await this.verify(log, undefined, undefined, undefined, undefined, { kind: "read", fallback: "none" });
+    const e = report.evm;
+    if (!e || (e.status !== "anchored" && e.status !== "departed-not-arrived" && e.status !== "moved-to-bitcoin")) return;
+    const ids = versionIds(log);
+    const accepted = e.stretches.flatMap((s) => (s.status === "anchored" ? [...s.entries, ...(s.departure ? [s.departure.versionId] : [])] : []));
+    const missing = accepted.find((id) => !ids.includes(id)) ?? (report.head !== null && !ids.includes(report.head) ? report.head : undefined);
+    if (missing !== undefined) {
+      sdkError("stale-parent", "EVM_HEAD_NOT_STORED", `${did}'s token accepted ${missing}, which the committed log does not hold: the Original's history is the token's from its anchor on, so this log is not extended (P9.12, P9.13); nothing is rebased`, { accepted: missing, report });
+    }
+  }
+
   /** Store a verified candidate's new bytes, then replace the log atomically (P6.2). */
   private async commitCandidate(candidate: SignedCandidate): Promise<CommitResult> {
     await this.notRefused(candidate.original, candidate.versionId);
@@ -1431,7 +2070,8 @@ export class OriginalsSDK {
     for (const [digest, bytes] of candidate.bytes) await this.store.putResource(digest, bytes);
     await this.store.commit(candidate.original, { expectedHead: candidate.parent, log });
     const signed = this.signedReports.get(candidate);
-    const report = signed?.log === log ? signed.report : await this.verify(log);
+    // A commit is the local log, never accepted on a token until published (P9.12): its view says so.
+    const report = signed?.log === log ? signed.report : await this.verify(log, undefined, undefined, undefined, undefined, LOCAL);
     await this.retain(report);
     return { status: "committed", original: this.view(candidate.original, report) };
   }
@@ -1578,7 +2218,8 @@ export class OriginalsSDK {
     if (options.checkpoint !== undefined && typeof options.checkpoint !== "string") sdkError("invalid-evidence", "INPUT_INVALID", "package options.checkpoint is a versionId");
     const omit = omittedResources(options.omitResources);
     const log = await this.stored(did);
-    const view = await this.get(did, options.checkpoint !== undefined ? { checkpoint: options.checkpoint } : {});
+    // The committed log, as committed: a reader of the package verifies it against the anchor (P7.14).
+    const view = await this.read(did, options.checkpoint !== undefined ? { checkpoint: options.checkpoint } : {}, LOCAL);
     const ids = versionIds(log);
     const prefix = `${lines(log).slice(0, ids.indexOf(view.checkpoint) + 1).join("\n")}\n`;
     // A did:btco signer's history is read from Bitcoin, not packaged; it is listed as missing (P5.13).
@@ -1621,8 +2262,8 @@ export class OriginalsSDK {
    * no network unless `identityFetch` is configured; its requests are then
    * bounded by a budget of their own (`retrievalLimits`).
    */
-  async load(zip: Uint8Array, options: { bitcoin?: SatEvidence[] } = {}): Promise<LoadedEvidence> {
-    return this.loadContents(readEvidence(zip, this.options.archiveLimits), "package", [], undefined, options.bitcoin);
+  async load(zip: Uint8Array, options: { bitcoin?: SatEvidence[]; evm?: EvmTokenEvidence[] } = {}): Promise<LoadedEvidence> {
+    return this.loadContents(readEvidence(zip, this.options.archiveLimits), "package", [], undefined, options.bitcoin, options.evm);
   }
 
   private async loadContents(
@@ -1631,12 +2272,16 @@ export class OriginalsSDK {
     aliases: AliasEvidence[] = [],
     retrieval?: Retrieval,
     bitcoin?: SatEvidence[],
+    tokens?: EvmTokenEvidence[],
   ): Promise<LoadedEvidence> {
     const aliasEvidence = await this.aliasEvidence(contents.log, aliases);
     const comparisons = await this.comparisons(contents.log);
+    // P7.14: evidence from elsewhere is never the local log; without token reads, at most the entries before anchoring.
+    const evm = await this.evmEvidence(contents.log, tokens ? { kind: "supplied", tokens } : { kind: "read", fallback: "none" });
     const run = (authors: AuthorDidEvidence[]) =>
       verifyOriginal({
         ...(bitcoin ? { bitcoin } : {}),
+        ...(evm ? { evm } : {}),
         aliases: aliasEvidence,
         log: contents.log,
         authors,
@@ -1906,10 +2551,30 @@ export class OriginalsSDK {
     const checkpoint = options.checkpoint ?? ids[ids.length - 1];
     const at = ids.indexOf(checkpoint);
     if (at < 0) sdkError("invalid-evidence", "CARRIER_NOT_ACCEPTED", `${checkpoint} is not a committed checkpoint of ${did}: a carrier is written only for an accepted checkpoint, never a draft (P7.15, P6.3)`);
-    const view = await this.get(did, { checkpoint, ...(options.bitcoin ? { bitcoin: options.bitcoin } : {}) });
-    if (!view.validAsOf) sdkError("invalid-evidence", "CARRIER_NOT_ACCEPTED", `${checkpoint} does not verify, so it is not an accepted checkpoint (P7.15)`, { report: view.report });
-    const entries = lines(log).slice(0, at + 1).map((line) => parseJson(line) as unknown as LogEntry);
-    const k = anchoringIndex(entries);
+    const all = lines(log);
+    const tokenAt = evmAnchoringIndex(all);
+    const onToken = tokenAt >= 0 && at >= tokenAt;
+    // On a token, the head the tokens accepted is read and the checkpoint looked up in it below.
+    const view = await this.read(did, { ...(onToken ? {} : { checkpoint }), ...(options.bitcoin ? { bitcoin: options.bitcoin } : {}) }, options.evm ? { kind: "supplied", tokens: options.evm } : OWN_LOG).catch((error: unknown) => {
+      if (onToken && error instanceof OriginalsError && error.code === "ORIGINAL_NOT_VERIFIED") sdkError("invalid-evidence", "CARRIER_NOT_ACCEPTED", `${checkpoint} is not accepted on the Original's token: nothing verifies from it (P7.15)`, { cause: error.code });
+      throw error;
+    });
+    const entries = all.slice(0, at + 1).map((line) => parseJson(line) as unknown as LogEntry);
+    if (onToken) {
+      // EXPERIMENTAL, P7.15 through P9.20: from the EVM anchoring entry on, only an entry accepted on a token at its
+      // finalized block (P9.22) is an accepted checkpoint, on whichever chain accepted it (P9.29).
+      const e = view.report.evm;
+      const accepted = (e?.stretches ?? []).flatMap((st) => (st.status === "anchored" && st.finality !== "failed" ? [...st.entries, ...(st.departure ? [st.departure.versionId] : [])] : []));
+      // After a move to Bitcoin (P9.28), what Bitcoin accepted from the arrival on.
+      const b = view.report.anchoring;
+      if (b?.status === "anchored") accepted.push(b.anchor!.versionId, ...b.accepted.map((p) => p.versionId));
+      if (!accepted.includes(checkpoint)) {
+        sdkError("invalid-evidence", "CARRIER_NOT_ACCEPTED", `${checkpoint} is at or after the anchoring entry and not accepted on the Original's token at its finalized block${e?.status === "unverified" || !e ? " (no token was read)" : ""} (P7.15, P9.12, P9.22)`, { report: view.report });
+      }
+    } else if (!view.validAsOf) {
+      sdkError("invalid-evidence", "CARRIER_NOT_ACCEPTED", `${checkpoint} does not verify, so it is not an accepted checkpoint (P7.15)`, { report: view.report });
+    }
+    const k = tokenAt >= 0 ? -1 : anchoringIndex(entries);
     if (k >= 0) {
       // P7.15, P9.12: after anchoring, only an entry accepted on the anchor is an accepted checkpoint.
       const a = view.report.anchoring;
@@ -1931,7 +2596,7 @@ export class OriginalsSDK {
    * member. Show it to the user, then pass it to `carry`.
    */
   async carriedDisclosure(did: string, options?: CarryOptions): Promise<CarriedDisclosure> {
-    options = optionsObject(options, ["checkpoint", "bitcoin"], "carry options");
+    options = optionsObject(options, ["checkpoint", "bitcoin", "evm"], "carry options");
     const { entries } = await this.carriedCheckpoint(did, options);
     return carriedDisclosure(entries);
   }
@@ -1946,7 +2611,7 @@ export class OriginalsSDK {
    * the Original does not change (P7.16).
    */
   async carry(did: string, options: CarryOptions & { disclosed: CarriedDisclosure }): Promise<CarriedFile> {
-    options = optionsObject(options, ["checkpoint", "bitcoin", "disclosed"], "carry options");
+    options = optionsObject(options, ["checkpoint", "bitcoin", "evm", "disclosed"], "carry options");
     const { entries, version } = await this.carriedCheckpoint(did, options);
     const bytes = await writeCarriedFile(version, entries, { disclosed: options.disclosed });
     const disclosure = carriedDisclosure(entries);
@@ -1985,6 +2650,8 @@ export class OriginalsSDK {
       authors,
       ...(resolveSigners ? { resolveSigners } : {}),
       ...(options.bitcoin ? { bitcoin: options.bitcoin } : {}),
+      // EXPERIMENTAL (P7.14): the configured pin and the caller's token reads; reading a file makes no chain request.
+      ...(this.options.evm || options.evm ? { evm: { pin: this.options.evm?.pin ?? null, tokens: options.evm ?? [] } } : {}),
       ...(text ? await this.comparisons(text) : {}),
       now: this.clock(),
     });
@@ -2002,7 +2669,7 @@ export class OriginalsSDK {
    * evidence package and makes no claim to be complete (P7.11).
    */
   async readCarried(file: Uint8Array, options?: ReadCarriedOptions): Promise<CarriedFileReport> {
-    options = optionsObject(options, ["resolveSigners", "bitcoin", "hint"], "readCarried options");
+    options = optionsObject(options, ["resolveSigners", "bitcoin", "evm", "hint"], "readCarried options");
     return (await this.carriedRead(file, options)).report;
   }
 
@@ -2017,13 +2684,13 @@ export class OriginalsSDK {
    * opts in again (`get(did, { resolveSigners: true })`; P7.13).
    */
   async importCarried(file: Uint8Array, options?: ImportCarriedOptions): Promise<ImportResult> {
-    options = optionsObject(options, ["resolveSigners", "bitcoin", "original", "hint"], "importCarried options");
+    options = optionsObject(options, ["resolveSigners", "bitcoin", "evm", "original", "hint"], "importCarried options");
     const { report: c, authors } = await this.carriedRead(file, options);
     const r = c.report;
     // As for a package (P7.5): the log verifies to its own last entry. A fork with local history
     // leaves it unverified as a whole, and is kept as a branch below, never dropped.
     const verifies = r !== null && r.original !== null && r.history.status === "valid" && r.authorBinding.status === "valid" && r.identityEvidence.status === "complete" && r.head === c.checkpoint;
-    if (!verifies || c.anchoring.status === "bitcoin-unread" || c.anchoring.status === "unsupported") {
+    if (!verifies || c.anchoring.status === "bitcoin-unread" || c.anchoring.status === "evm-unread" || c.anchoring.status === "unsupported") {
       sdkError("invalid-evidence", "IMPORT_REJECTED", "the carried log does not verify to its last entry", { carried: c });
     }
     if (options.original !== undefined && r.original !== options.original) {
