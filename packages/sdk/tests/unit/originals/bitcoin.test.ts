@@ -693,5 +693,44 @@ describe("did:btco author DIDs through the SDK (P5.13; plan 011 PR 9b)", () => {
     expect(pkg.manifest.missing).toEqual([{ kind: "identity", did: author, role: "author" }]);
     expect(readEvidence(pkg.bytes).authors).toEqual([]);
   });
+
+  test("C12-298: an evidence package of an Original with a did:btco signer, read offline: that history is not in it; identity evidence incomplete until read from Bitcoin (P7.1, P14.10, P5.6)", async () => {
+    const AUTHOR_SAT = "9000000001";
+    const author = btcoAlias("regtest", AUTHOR_SAT);
+    const key = localSigner("Ed25519", KEY);
+    const doc = {
+      "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/multikey/v1"],
+      id: author,
+      verificationMethod: [{ id: `${author}#orig`, type: "Multikey", controller: author, publicKeyMultibase: key.publicKeyMultibase }],
+      assertionMethod: [`${author}#orig`],
+    };
+    const docId = `${"e".repeat(64)}i0`;
+    const read = await satEvidence(snapshot([{ id: docId, height: 2, content: "art", mediaType: "image/png", metadata: encodeCbor(doc) }], 10, AUTHOR_SAT), { clock: clockOver(HEADERS), ownerConfirmations: 4, index: "ord-a" });
+    let t = Date.parse("2026-10-18T13:00:00Z");
+    const writer = OriginalsSDK.create({ store: new MemoryStore(), authors: async (did) => (did === author ? { did, bitcoin: read } : undefined), clock: () => (t += 1000) });
+    const ref = { did: author, verificationMethod: `${author}#orig`, versionId: docId };
+    const c = await writer.create({ name: "By a did:btco author", resource: { mediaType: "image/jpeg", bytes: bytes("one") }, author: ref, signer: keySigner({ keyType: "Ed25519", secretKey: KEY, verificationMethod: ref.verificationMethod }) });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    const pkg = await writer.package(c.original.did);
+    const contents = readEvidence(pkg.bytes);
+    // The signer's history is never in the package, complete or not (P7.1, P14.10): no signers/ entry for it.
+    expect(contents.authors).toEqual([]);
+    expect([...readZip(pkg.bytes).keys()].some((name) => name.startsWith(signerPath(author)))).toBe(false);
+    expect(contents.log).toContain(author);
+    // Offline: no Bitcoin read of the signer's sat. Identity evidence is incomplete, never trusted from the key alone (P5.6).
+    const offline = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => undefined, clock: () => (t += 1000) });
+    const r = await offline.load(pkg.bytes);
+    expect(r.report.history.status).not.toBe("valid");
+    expect(r.report.identityEvidence.status).toBe("incomplete");
+    expect(r.report.authorBinding.status).not.toBe("valid");
+    expect(r.report.validAsOf).toBeNull();
+    expect(r.report.current).toBe(false);
+    // Read from Bitcoin, the same package verifies.
+    const online = OriginalsSDK.create({ store: new MemoryStore(), authors: async (did) => (did === author ? { did, bitcoin: read } : undefined), clock: () => (t += 1000) });
+    const ok = await online.load(pkg.bytes);
+    expect(ok.report.history.status).toBe("valid");
+    expect(ok.report.identityEvidence.status).toBe("complete");
+    expect(ok.report.validAsOf?.checkpoint).toBe(c.original.checkpoint);
+  });
 });
 

@@ -4034,7 +4034,11 @@
         1,
         4
       ],
-      "status": "todo"
+      "status": "partial",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin.test.ts"
+      ],
+      "note": "Read offline, the package holds no history for the did:btco signer and identity evidence is incomplete until it is read from Bitcoin. Not settled: the SDK lists that signer as a missing identity item and labels the package partial (sdk.ts package()), and loading a package labelled complete reports manifest-completeness-mismatch (loadContents()), while P7.1 says that history is never in a package, complete or not. So the SDK writes no complete package for such an Original."
     },
     {
       "id": "C12-299",
@@ -4140,7 +4144,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/privacy.test.ts"
+      ]
     },
     {
       "id": "C12-316",
