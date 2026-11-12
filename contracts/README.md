@@ -3,7 +3,7 @@
 > **EXPERIMENTAL. NOT REVIEWED. NOT AUDITED. NOT THE P14.21 PIN.**
 >
 > This is a test implementation of the anchor contract proposed in
-> originals-spec PR 59 (head `3ed0f89`), P14.19–P14.21. The spec pins no
+> originals-spec PR 59 (head `a3ffdc1`), P14.19–P14.21. The spec pins no
 > contract, compiler, EVM version, address or code hash yet. An Original
 > anchored on a deployment of this code is supported only by an experiment
 > that supplies its own `EvmAnchorPin` (`@originals/vh`). Nothing built on it
@@ -15,28 +15,28 @@
   to the caller, and reverts if that token exists (P14.19).
 - `publish`, `publishSameBody`, `begin`/`append`/`commit`/`commitSameBody`,
   `publicationCount`, `publication`, and ranged `metadata`/`body` reads, and the
-  `Published` event, exactly as P14.20 declares them.
+  `Published` and `UploadBegun` events, exactly as P14.20 declares them.
+- A record that refers to an earlier body (`publishSameBody`, `commitSameBody`)
+  holds that body's length as its `bodyLength`, and only its newly stored
+  metadata counts toward the limit. `bodyOf` indexes the selected token's own
+  records, so another token's body can never be selected (P14.20).
 - Bytes stored as the code of contracts it creates (SSTORE2 style). Each
   contract's code is a zero byte (STOP) followed by at most 24,575 bytes
   (EIP-170). The anchor keeps their addresses in storage. The contract emits
   no publication bytes in events.
 - The limits: 350,000 bytes per publication and per upload, and 255 bytes per
-  media type. Only the token's holder, or an operator approved for it at that
-  moment, can publish, begin or commit. Only the caller of `begin` can
+  media type. Only, at that moment, the token's holder, the address approved
+  for it through `approve`, or an operator the holder approved through
+  `setApprovalForAll` can publish, begin or commit (P9.23, P14.20). Only the caller of `begin` can
   `append` or `commit`, and an upload can be committed only once.
 - `tokenURI` is a `data:` URI computed from the contract's own state (P14.21).
   It is never the did:evm DID document (P3.9).
 - No owner, administrator, proxy, upgrade, pause or self-destruct path (P14.21).
 
-It has one PROVISIONAL addition to P14.20's interface:
-`event UploadBegun(bytes32 indexed upload, uint256 indexed tokenId, address indexed opener)`.
-`begin` returns the upload ID, but a transaction's return value cannot be
-observed off chain, so a writer has no other way to learn it (see "Spec
-findings" below).
-
-ERC-721 approvals: this contract counts both `setApprovalForAll` operators and
-the token's `approve` address as "an operator approved for it" (P9.23,
-P14.20). That reading is PROVISIONAL.
+`begin` emits `event UploadBegun(uint256 indexed tokenId, bytes32 upload, address by)`
+(P14.20, added at `a3ffdc1` from finding 2 below), because a transaction's
+return value cannot be observed off chain. Like `Published`, it is a discovery
+aid and never evidence.
 
 ## Build settings (this experiment's choices, PROVISIONAL)
 
@@ -57,20 +57,27 @@ is 32 zero bytes followed by the init code.
 
 | | |
 |---|---|
-| Init code hash | `0x89b510251de5f01d616d3af6b84e9c23f8575510aa5a393724fd193a4a0ab625` |
-| CREATE2 address | `0x92aa49faf844dee74ab85de1a42a0705e8ea8b08` |
-| Runtime code hash (keccak256) | `0x8d731c48c1f0a4f4df923f04141da8ee4cbf9316ab7900d400539a0eb7a994f7` |
-| Runtime code size | 8,847 bytes |
+| Init code hash | `0xadd0b6e6fa707ff1c7738cc5b029a5f4bd4c397b9851c7ad507a496894717b00` |
+| CREATE2 address | `0x48f382c1d6c079bde4971c89e316841d2c9e79c2` |
+| Runtime code hash (keccak256) | `0x0a97a92302c38e4084f1d15ea5ff08fa8892f3161a54aa63e650f62a8f3f05f0` |
+| Runtime code size | 8,857 bytes |
 
 `test/Deploy.t.sol` asserts the address and logs both hashes. The same address
 and code hash came out of anvil, which predeploys the proxy. Any change to the
-source or settings changes all three.
+source or settings changes all three. The values above are for the build at
+PR 59 `a3ffdc1`, whose `UploadBegun` changed from the earlier build's
+(`0x92aa…8b08` at `3ed0f89`).
+
+P14.21 (from `a3ffdc1`) allows a pinned address per chain where the proxy is
+unavailable or the pinned bytecode cannot be deployed through it. The runtime
+code hash stays common. `EvmAnchorPin.addresses` (`@originals/vh`) carries such
+a map, with `address` as the default.
 
 ## Gas (anvil 1.9.0, hardfork `Bpo1`, receipts' `gasUsed`)
 
 | Transaction | Gas used |
 |---|---|
-| Deployment through the proxy | 1,970,235 |
+| Deployment through the proxy | 1,972,407 |
 | `mint` | 68,595 |
 | `publish`, 2,000 B metadata + 100,000 B body (102,276 B of calldata) | **22,518,216** |
 | `publish`, 2,000 B metadata + 60,000 B body | 13,737,056 |
@@ -99,7 +106,7 @@ but they still count against a provider's `eth_call` gas cap.
 curl -L https://foundry.paradigm.xyz | bash && foundryup   # local tooling only
 cd contracts
 forge build
-forge test -vv          # 20 tests; Deploy.t.sol logs the address, hashes and gas
+forge test -vv          # 23 tests; Deploy.t.sol logs the address, hashes and gas
 ```
 
 The SDK's end-to-end test (`packages/sdk/tests/integration/evm-anvil.test.ts`,
@@ -108,16 +115,23 @@ proxy on a fresh anvil and publishes through the SDK writer. The SDK's `test`
 script includes it, but it skips unless `anvil` is on the PATH or in
 `~/.foundry/bin` (CI has neither), and it always skips with
 `ORIGINALS_EVM_ANVIL=0`.
-Gas it measured (sums over each publication's transactions):
+Gas it measured at the `a3ffdc1` build (sums over each publication's transactions):
 
 | Publication through the SDK writer | Transactions | Gas used |
 |---|---|---|
 | Anchoring publication: 2 entries + 20 kB body | `publish` | 5,004,151 |
-| One entry + 100 kB body, over the 60,000-byte budget | `begin`, 2 `append`, `commit` | 22,447,193 |
-| A 30,000-byte entry that keeps the body, 24,000-byte budget | `begin`, 2 `append`, `commitSameBody` | 6,864,517 |
-| A name-only entry, about 30 kB because it carries the whole asset state | `publishSameBody` | 6,696,652 |
+| One entry + 100 kB body, over the 60,000-byte budget | `begin`, 2 `append`, `commit` | 22,446,773 |
+| A 30,000-byte entry that keeps the body, 24,000-byte budget | `begin`, 2 `append`, `commitSameBody` | 6,864,309 |
+| A name-only entry, about 30 kB because it carries the whole asset state | `publishSameBody` | 6,696,864 |
 
 ## Spec findings (originals-spec PR 59, `3ed0f89`)
+
+Findings 1–9 were triaged into PR 59 `a3ffdc1`: 1 and 7 (staging, cost of
+full-state entries) as P14.20 text and P9.27 disclosures; 2 as the
+`UploadBegun` event; 3 as both approvals named; 4 as resumable checkpoints
+with no record cap (P9.25); 5 as P9.22's provider requirement; 6 as a
+per-chain address (P14.21); 8 as P9.23's open-minting statement; 9 as the
+reworded C12-260 row. They are kept below as found.
 
 1. **P14.20 / P9.25: one `publish` cannot carry 350,000 bytes on real
    chains.** Storing a byte as code costs about 220 gas, so a 350,000-byte

@@ -2,7 +2,7 @@
 pragma solidity 0.8.38;
 
 /// @title OriginalsAnchor (EXPERIMENTAL)
-/// @notice The anchor contract of originals-spec PR 59 (3ed0f89), P14.19-P14.21: an ERC-721 whose
+/// @notice The anchor contract of originals-spec PR 59 (a3ffdc1), P14.19-P14.21: an ERC-721 whose
 /// token for an Original is derived from the Original and its minter, and which keeps, per token,
 /// an append-only list of publication records whose metadata and body bytes live in contract state
 /// (P9.25), as the code of contracts it creates.
@@ -23,10 +23,9 @@ contract OriginalsAnchor {
     /// P14.20: helps a reader find records; never evidence (P9.25).
     event Published(uint256 indexed tokenId, uint32 index);
 
-    /// PROVISIONAL extension, not in P14.20: `begin` returns the upload ID, but a transaction's
-    /// return value is not observable off chain, so a writer learns it from this event. Never
-    /// evidence of anything (P9.25).
-    event UploadBegun(bytes32 indexed upload, uint256 indexed tokenId, address indexed opener);
+    /// P14.20: `begin` emits the upload ID, which a transaction receipt does not otherwise return,
+    /// so that the writer can learn it. A discovery aid; never evidence (P9.25).
+    event UploadBegun(uint256 indexed tokenId, bytes32 upload, address by);
 
     // ------------------------------------------------------------------ errors
 
@@ -149,7 +148,7 @@ contract OriginalsAnchor {
             upload = keccak256(abi.encode(tokenId, msg.sender, ++_uploadNonce));
         }
         _uploads[upload] = Upload(tokenId, msg.sender, 0, false);
-        emit UploadBegun(upload, tokenId, msg.sender);
+        emit UploadBegun(tokenId, upload, msg.sender);
     }
 
     /// Stores the next bytes of the upload. Reverts if they would take it past 350,000 bytes.
@@ -319,9 +318,8 @@ contract OriginalsAnchor {
         return caller == owner || _operatorApprovals[owner][caller] || _tokenApprovals[tokenId] == caller;
     }
 
-    /// P14.20, P9.23: the token's holder, or an operator approved for it at this moment (ERC-721
-    /// `setApprovalForAll`, or `approve` for this token: PROVISIONAL reading of "an operator approved
-    /// for it").
+    /// P14.20, P9.23: at this moment, the token's holder, the address approved for that token
+    /// through `approve`, or an operator the holder approved through `setApprovalForAll`.
     function _requirePublisher(uint256 tokenId) private view {
         address owner = _owners[tokenId];
         if (owner == address(0)) revert NonexistentToken(tokenId);

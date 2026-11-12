@@ -4,6 +4,12 @@ pragma solidity 0.8.38;
 /// The few Foundry cheatcodes these tests use, declared here so the project has no dependencies
 /// (no forge-std submodule in the monorepo).
 interface Vm {
+    struct Log {
+        bytes32[] topics;
+        bytes data;
+        address emitter;
+    }
+
     function prank(address) external;
     function startPrank(address) external;
     function stopPrank() external;
@@ -13,6 +19,8 @@ interface Vm {
     function etch(address, bytes calldata) external;
     function getCode(string calldata) external view returns (bytes memory);
     function getNonce(address) external view returns (uint64);
+    function recordLogs() external;
+    function getRecordedLogs() external returns (Log[] memory);
 }
 
 abstract contract Base {
