@@ -34,6 +34,8 @@ export interface FakeChain {
   /** Return fewer bytes than asked from ranged reads. */
   shortRanges?: boolean;
   down?: boolean;
+  /** State is kept only from this block on: reads at earlier blocks fail as a pruned node's do (P9.22). */
+  stateFrom?: number;
   /** Pool and receipts for status tests. */
   pool?: Set<string>;
   receipts?: Map<string, { block: number; status: 1 | 0 }>;
@@ -57,6 +59,7 @@ export interface Call {
 }
 
 class Revert extends Error {}
+class Pruned extends Error {}
 
 export function fakeProvider(chain: FakeChain, calls: Call[] = []): EvmFetch {
   const blockOf = (param: unknown): number => {
@@ -77,11 +80,12 @@ export function fakeProvider(chain: FakeChain, calls: Call[] = []): EvmFetch {
         return { number: `0x${n.toString(16)}`, hash: n === 0 ? chain.genesisHash : blockHash(chain, n), timestamp: `0x${(1_800_000_000 + n).toString(16)}` };
       }
       case "eth_getCode":
-        blockOf(params[1]);
+        if (chain.stateFrom !== undefined && blockOf(params[1]) < chain.stateFrom) throw new Pruned("missing trie node");
         return params[0] === chain.address ? toHex(chain.code) : "0x";
       case "eth_call": {
         const { to, data } = params[0] as { to: string; data: string };
         const at = blockOf(params[1]);
+        if (chain.stateFrom !== undefined && at < chain.stateFrom) throw new Pruned("missing trie node");
         if (to !== chain.address || chain.code.length === 0) return "0x";
         const fn = SELECTORS[data.slice(0, 10)];
         if (!fn) throw new Error(`unknown selector ${data.slice(0, 10)}`);
@@ -146,8 +150,9 @@ export function fakeProvider(chain: FakeChain, calls: Call[] = []): EvmFetch {
     try {
       payload = { jsonrpc: "2.0", id, result: handle(method, params) };
     } catch (error) {
-      if (!(error instanceof Revert)) throw error;
-      payload = { jsonrpc: "2.0", id, error: { code: 3, message: `execution reverted: ${error.message}` } };
+      if (error instanceof Pruned) payload = { jsonrpc: "2.0", id, error: { code: -32000, message: error.message } };
+      else if (!(error instanceof Revert)) throw error;
+      else payload = { jsonrpc: "2.0", id, error: { code: 3, message: `execution reverted: ${error.message}` } };
     }
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
   };

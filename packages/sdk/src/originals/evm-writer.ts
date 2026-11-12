@@ -30,6 +30,7 @@
 import { OriginalsError } from "@originals/vh";
 import {
   ORIGINALS_INSCRIPTION_MAX_BYTES,
+  anchorAddress,
   evmAliasOf,
   originalHash,
   requireSupported,
@@ -93,8 +94,8 @@ export const ANCHOR_WRITES = {
 export const ANCHOR_EVENTS = {
   Transfer: eventTopic("Transfer(address,address,uint256)"),
   Published: eventTopic("Published(uint256,uint32)"),
-  /** PROVISIONAL extension of P14.20: how a writer learns the upload `begin` opened. */
-  UploadBegun: eventTopic("UploadBegun(bytes32,uint256,address)"),
+  /** P14.20: `event UploadBegun(uint256 indexed tokenId, bytes32 upload, address by)`, how a writer learns the upload `begin` opened; never evidence. */
+  UploadBegun: eventTopic("UploadBegun(uint256,bytes32,address)"),
 } as const;
 
 /**
@@ -114,6 +115,8 @@ const addressWord = (a: string) => `0x${a.slice(2).toLowerCase().padStart(64, "0
 
 interface Target {
   rpc: EvmRpc;
+  /** The anchor contract's address on this chain (P14.21: it may differ per chain). */
+  address: string;
   chainId: bigint;
   from: string;
 }
@@ -127,13 +130,14 @@ async function target(ctx: EvmWriterContext): Promise<Target> {
   if (chainId !== listed.chainId || genesis?.hash !== listed.genesisHash.toLowerCase()) {
     refuse("unsupported-profile", "EVM_WRONG_CHAIN", `${ctx.rpc} does not serve ${listed.name} (${listed.chain}): chain ID ${chainId}, block 0 ${genesis?.hash ?? "none"} (P9.21)`);
   }
-  const code = await rpc.code(ctx.pin.address, "latest");
+  const address = anchorAddress(ctx.pin, listed.chain);
+  const code = await rpc.code(address, "latest");
   const codeHash = code.length === 0 ? null : keccakHex(code);
   if (codeHash !== ctx.pin.codeHash.toLowerCase()) {
-    refuse("unsupported-profile", "EVM_ANCHOR_CODE", `the code at ${ctx.pin.address} on ${listed.chain} is ${codeHash ?? "absent"}, not the pinned ${ctx.pin.codeHash} (P9.21)`);
+    refuse("unsupported-profile", "EVM_ANCHOR_CODE", `the code at ${address} on ${listed.chain} is ${codeHash ?? "absent"}, not the pinned ${ctx.pin.codeHash} (P9.21)`);
   }
   if (!/^0x[0-9a-fA-F]{40}$/.test(ctx.wallet.address)) refuse("invalid-evidence", "INPUT_INVALID", "wallet.address is 0x and 40 hex digits");
-  return { rpc, chainId, from: ctx.wallet.address.toLowerCase() };
+  return { rpc, address, chainId, from: ctx.wallet.address.toLowerCase() };
 }
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -152,7 +156,7 @@ export async function waitForEvmReceipt(rpc: EvmRpc, hash: string, options: Pick
 }
 
 async function send(ctx: EvmWriterContext, t: Target, data: Uint8Array, what: string): Promise<EvmReceipt> {
-  const hash = await ctx.wallet.sendTransaction({ from: t.from, to: ctx.pin.address, data: toHex(data), chainId: t.chainId });
+  const hash = await ctx.wallet.sendTransaction({ from: t.from, to: t.address, data: toHex(data), chainId: t.chainId });
   const receipt = await waitForEvmReceipt(t.rpc, hash, ctx);
   if (receipt.status !== "success") refuse("invalid-evidence", "EVM_TX_REVERTED", `${what} (${hash}) reverted`, { hash, what });
   return receipt;
@@ -177,15 +181,15 @@ export async function mintEvmToken(ctx: EvmWriterContext, input: { original: str
     refuse("invalid-evidence", "EVM_WRONG_MINTER", `the wallet ${t.from} is not the minter ${anchor.minter}: it would mint another token, which is not the Original's (P14.19, P9.24)`);
   }
   const tokenId = tokenIdOf(input.original, anchor.minter);
-  const alias = evmAliasOf(anchor.chain, ctx.pin.address, tokenId);
+  const alias = evmAliasOf(anchor.chain, t.address, tokenId);
   try {
-    const [owner] = await t.rpc.call(ctx.pin.address, ANCHOR_READS.ownerOf, ["uint256"], [tokenId], ["address"], "latest");
+    const [owner] = await t.rpc.call(t.address, ANCHOR_READS.ownerOf, ["uint256"], [tokenId], ["address"], "latest");
     return { tokenId, alias, txHash: null, owner: owner as string, gasUsed: 0n };
   } catch (error) {
     if (!(error instanceof EvmRevert)) throw error;
   }
   const receipt = await send(ctx, t, encodeCall(ANCHOR_WRITES.mint, ["bytes32"], [originalHash(input.original)]), "mint");
-  const minted = receipt.logs.some((l) => l.address === ctx.pin.address && l.topics[0] === ANCHOR_EVENTS.Transfer && l.topics[3] === word(tokenId));
+  const minted = receipt.logs.some((l) => l.address === t.address && l.topics[0] === ANCHOR_EVENTS.Transfer && l.topics[3] === word(tokenId));
   if (!minted) refuse("incomplete-evidence", "EVM_MINT_UNSEEN", `the mint receipt ${receipt.transactionHash} shows no transfer of token ${tokenId}`);
   return { tokenId, alias, txHash: receipt.transactionHash, owner: t.from, gasUsed: receipt.gasUsed };
 }
@@ -230,7 +234,7 @@ export interface PreparedEvmPublication {
  */
 export async function prepareEvmPublication(ctx: EvmWriterContext, input: PrepareEvmPublicationInput): Promise<PreparedEvmPublication> {
   const parsed = parseEvmAlias(input.alias);
-  if (parsed.chain !== ctx.chain || parsed.contract !== ctx.pin.address) refuse("invalid-evidence", "EVM_ALIAS_CONTRACT", `${input.alias} is not a token of the pinned contract on ${ctx.chain} (P14.18)`);
+  if (parsed.chain !== ctx.chain || parsed.contract !== anchorAddress(ctx.pin, ctx.chain)) refuse("invalid-evidence", "EVM_ALIAS_CONTRACT", `${input.alias} is not a token of the pinned contract on ${ctx.chain} (P14.18)`);
   if (input.lines.length === 0) refuse("invalid-evidence", "INPUT_INVALID", "a publication carries at least one entry (P9.17)");
   if (!(input.body instanceof Uint8Array)) refuse("invalid-evidence", "INPUT_INVALID", "body is a Uint8Array");
   const version = descriptorOfLine(input.lines[input.lines.length - 1]);
@@ -245,7 +249,7 @@ export async function prepareEvmPublication(ctx: EvmWriterContext, input: Prepar
   if (!Number.isSafeInteger(maxTxBytes) || maxTxBytes < 1) refuse("invalid-evidence", "INPUT_INVALID", "maxTxBytes is a positive integer");
   const metadata = inscriptionMetadata(input.lines);
   const t = await target(ctx);
-  const sameBodyOf = await storedBody(t, ctx.pin.address, parsed.tokenId, input.body, version, input.sameBody ?? "auto");
+  const sameBodyOf = await storedBody(t, t.address, parsed.tokenId, input.body, version, input.sameBody ?? "auto");
   const storedBytes = sameBodyOf === null ? metadata.length + input.body.length : metadata.length;
   if (storedBytes > ORIGINALS_INSCRIPTION_MAX_BYTES) {
     refuse("limit-exceeded", "PUBLICATION_TOO_LARGE", `the publication would store ${storedBytes} bytes; the anchor contract holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} per publication (P9.25, P14.20)`, { size: storedBytes, limit: ORIGINALS_INSCRIPTION_MAX_BYTES });
@@ -309,9 +313,12 @@ export async function submitEvmPublication(ctx: EvmWriterContext, prepared: Prep
   } else {
     const begun = await send(ctx, t, encodeCall(ANCHOR_WRITES.begin, ["uint256"], [tokenId]), "begin");
     receipts.push(begun);
-    const log = begun.logs.find((l) => l.address === ctx.pin.address && l.topics[0] === ANCHOR_EVENTS.UploadBegun && l.topics[2] === word(tokenId) && l.topics[3] === addressWord(t.from));
+    // P14.20: tokenId is the only indexed field; the data is the upload ID, then `by`.
+    const data = (l: { data: string }) => l.data.toLowerCase().replace(/^0x/, "");
+    const log = begun.logs.find((l) => l.address === t.address && l.topics.length === 2 && l.topics[0] === ANCHOR_EVENTS.UploadBegun && l.topics[1] === word(tokenId) &&
+      data(l).length === 128 && `0x${data(l).slice(64)}` === addressWord(t.from));
     if (!log) refuse("incomplete-evidence", "EVM_UPLOAD_UNSEEN", `the begin receipt ${begun.transactionHash} names no upload`);
-    const upload = fromHex(log.topics[1]);
+    const upload = fromHex(`0x${data(log).slice(0, 64)}`);
     const payload = sameBodyOf === null ? concatBytes(metadata, body) : metadata;
     for (let at = 0; at < payload.length; at += prepared.maxTxBytes) {
       const part = payload.slice(at, at + prepared.maxTxBytes);
@@ -324,7 +331,7 @@ export async function submitEvmPublication(ctx: EvmWriterContext, prepared: Prep
     );
   }
   const last = receipts[receipts.length - 1];
-  const published = last.logs.find((l) => l.address === ctx.pin.address && l.topics[0] === ANCHOR_EVENTS.Published && l.topics[1] === word(tokenId));
+  const published = last.logs.find((l) => l.address === t.address && l.topics[0] === ANCHOR_EVENTS.Published && l.topics[1] === word(tokenId));
   if (!published) refuse("incomplete-evidence", "EVM_PUBLICATION_UNSEEN", `the receipt ${last.transactionHash} shows no publication on token ${tokenId}`);
   const index = Number(BigInt(published.data));
   return {

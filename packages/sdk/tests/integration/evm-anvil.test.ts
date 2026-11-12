@@ -110,7 +110,7 @@ describe.skipIf(!enabled)("EVM anchoring on anvil (PR 59, experimental)", () => 
     const deployed = await rpc.request<string>("eth_sendTransaction", [{ from: DEPLOYER, to: PROXY, data: `0x${"00".repeat(32)}${init.slice(2)}` }]);
     const receipt = await waitForEvmReceipt(rpc, deployed, { pollMs: 50 });
     gas.deploy = receipt.gasUsed;
-    const address = "0x92aa49faf844dee74ab85de1a42a0705e8ea8b08"; // contracts/README.md
+    const address = "0x48f382c1d6c079bde4971c89e316841d2c9e79c2"; // contracts/README.md (build at PR 59 a3ffdc1)
     const code = await rpc.code(address, "latest");
     const genesis = (await rpc.block(0))!;
     const devnet: ListedChain = { name: "Anvil devnet", chain: "eip155:31337", chainId: 31337n, genesisHash: genesis.hash, classes: [{ from: 0, class: "operator" }] };
@@ -123,7 +123,7 @@ describe.skipIf(!enabled)("EVM anchoring on anvil (PR 59, experimental)", () => 
   });
 
   test("deployed at the README's CREATE2 address with the recorded runtime code hash (P14.21)", () => {
-    expect(pin.codeHash).toBe("0x8d731c48c1f0a4f4df923f04141da8ee4cbf9316ab7900d400539a0eb7a994f7");
+    expect(pin.codeHash).toBe("0x0a97a92302c38e4084f1d15ea5ff08fa8892f3161a54aa63e650f62a8f3f05f0");
   });
 
   test("create with anchor, mint, publish in one tx / in stages / by sameBody, read the finalized evidence", async () => {
@@ -139,7 +139,7 @@ describe.skipIf(!enabled)("EVM anchoring on anvil (PR 59, experimental)", () => 
     // P9.27: the author is told what the anchor choice means before genesis is written.
     const notice = evmGenesisNotice(anchor, pin);
     expect(notice.chain).toMatchObject({ name: "Anvil devnet", trustClass: "operator", layer: "attested" });
-    expect(notice.points[4]).toContain(MINTER);
+    expect(notice.points[5]).toContain(MINTER);
 
     let t = Date.parse("2026-11-11T12:00:00Z");
     const at = () => new Date((t += 1_000)).toISOString().replace(".000Z", "Z");
@@ -253,5 +253,22 @@ describe.skipIf(!enabled)("EVM anchoring on anvil (PR 59, experimental)", () => 
     const rereport = await verifyOriginal({ authors, evm: { pin, tokens: [again.evidence], retained: report.retain.evm } });
     expect(rereport.evm?.warnings).toEqual([]);
     expect(rereport.current).toBe(true);
+    // P9.24 (a3ffdc1): on an operator chain, uniqueness is attested by the operator, under its finality and these providers.
+    expect(report.evm?.stretches[0]?.uniqueness).toMatchObject({ status: "attested-by-operator", class: "operator", block: { number: finalized.number } });
+
+    // PR59b: "Token with many records, verifier holding a checkpoint": once record 4 is final, the
+    // reader resumes at the retained checkpoint's index and the verifier reads only that record (P9.25).
+    const [checkpoint] = report.retain.evmCheckpoints ?? [];
+    expect(checkpoint).toMatchObject({ token: alias, records: 4, head: rename.versionId });
+    await rpc.request("anvil_mine", ["0x3"]);
+    const resumed = await readEvmToken({ original: did, anchor }, { pin, providers: [{ url, name: "anvil-a" }, { url, name: "anvil-b" }], from: checkpoint!.records, fetch: realFetch });
+    expect(resumed.failures).toEqual([]);
+    expect(resumed.evidence.reads.map((r) => r.records!.map((x) => x.index))).toEqual([[4], [4]]);
+    const log = [genesis, anchoring, edit, bigMeta, rename];
+    const next = await verifyOriginal({ log, authors, evm: { pin, tokens: [resumed.evidence], checkpoints: [checkpoint!] } });
+    expect(next.history.status, JSON.stringify(next.history.failure)).toBe("valid");
+    expect(next.head).toBe(later.versionId);
+    expect(next.evm?.stretches[0]?.resumedFrom).toEqual({ records: 4, block: checkpoint!.block });
+    expect(next.current, JSON.stringify(next.reasons)).toBe(true);
   }, 180_000);
 });
