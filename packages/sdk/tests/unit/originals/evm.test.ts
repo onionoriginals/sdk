@@ -187,7 +187,7 @@ describe("readEvmToken (P9.21, P9.22, P9.25)", () => {
     expect(failures).toEqual([expect.objectContaining({ provider: "down", code: "EVM_PROVIDER_UNAVAILABLE" })]);
   });
 
-  test("PR59b: \"Provider that cannot serve state at the finalized block because finality trails its retained state\": reported unusable for the read, not dropped (P9.22)", async () => {
+  test("C12-325: \"Provider that cannot serve state at the finalized block because finality trails its retained state\": reported unusable for the read, not dropped (P9.22)", async () => {
     const fetch = fakeNetwork({ archive: fakeProvider(chain({ finalized: 10 }, records())), pruned: fakeProvider(chain({ finalized: 10, stateFrom: 11 }, records())) });
     const { evidence, failures } = await readEvmToken({ alias: ALIAS }, { pin: PIN, providers: ["archive", "pruned"], fetch });
     expect(evidence.reads.map((r) => r.provider)).toEqual(["archive", "pruned"]);
@@ -196,7 +196,7 @@ describe("readEvmToken (P9.21, P9.22, P9.25)", () => {
     expect(failures).toEqual([expect.objectContaining({ provider: "pruned" })]);
   });
 
-  test("PR59b: \"Token with many records, verifier holding a checkpoint\": `from` reads only the later records, with a referring record's body (P9.25)", async () => {
+  test("C12-328: \"Token with many records, verifier holding a checkpoint\": `from` reads only the later records, with a referring record's body (P9.25)", async () => {
     const calls: Call[] = [];
     const { evidence } = await readEvmToken({ alias: ALIAS }, { pin: PIN, providers: ["p"], from: 1, fetch: fakeNetwork({ p: fakeProvider(chain({ finalized: 12 }, records()), calls) }) });
     const r = evidence.reads[0];
@@ -255,7 +255,7 @@ describe("P9.27 / P9.29 disclosures", () => {
     expect(n.points[1]).toMatch(/stays dependent on every chain/);
     expect(n.points[2]).toMatch(/trust class operator.*attested by its operator, never as proven/);
     expect(n.points[3]).toMatch(/last only as long as Robinhood Chain's nodes keep its state/);
-    // PR59b: "Writer creating an Original with an EVM `anchor`" (C12-278 as changed at a3ffdc1): large
+    // C12-278 (reworded at a3ffdc1): "Writer creating an Original with an EVM `anchor`": large
     // publications can need staged transactions and large metadata makes later edits cost more.
     expect(n.points).toHaveLength(6);
     expect(n.points[4]).toMatch(/several staged transactions.*full asset state.*large metadata makes each later edit.*cost more/);

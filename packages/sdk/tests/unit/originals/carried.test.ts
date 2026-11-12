@@ -1,8 +1,7 @@
 /**
  * Carried logs through the SDK (proposed; aviarytech/originals-spec PR 59 at
  * a3ffdc1): P7.11-P7.16. Each test cites its section 12 row by C12 id and a
- * quote of the row's first column; rows added at a3ffdc1, not yet in the
- * registry, are cited as `PR59b:`. The carrier formats themselves are tested
+ * quote of the row's first column. The carrier formats themselves are tested
  * in packages/vh/tests/carried.test.ts.
  */
 import { describe, expect, test } from "bun:test";
@@ -99,7 +98,7 @@ describe("P7.13: resolution only on the caller's opt-in", () => {
     expect(r.verified).toEqual({ log: false, version: false });
   });
 
-  test("PR59b: \"Carried file imported, then read again with no separate opt-in to resolve\": no resolver request; the import is not an opt-in (P7.13)", async () => {
+  test("C12-316: \"Carried file imported, then read again with no separate opt-in to resolve\": no resolver request; the import is not an opt-in (P7.13)", async () => {
     const env = await harbor();
     const file = await carried(env);
     // An offline import: Alice's history is already held, and the author source is a resolver.
@@ -163,7 +162,7 @@ describe("P7.15, P7.16: writing a carried file", () => {
     expect((await env.sdk.carriedDisclosure(env.did, { checkpoint: env.checkpoints[3] })).checkpoint).toBe(env.checkpoints[3]);
   });
 
-  test("PR59b: \"Carried checkpoint from before the anchoring entry of an Original that is now anchored\": allowed; reported as a historical checkpoint, valid as of it, with no statement about current anchoring (P7.14, P7.15)", async () => {
+  test("C12-317: \"Carried checkpoint from before the anchoring entry of an Original that is now anchored\": allowed; reported as a historical checkpoint, valid as of it, with no statement about current anchoring (P7.14, P7.15)", async () => {
     const env = await harbor();
     await env.sdk.anchor(env.did, { parent: env.checkpoints[3], author: env.author, signer: env.signer, sat: btcoAlias("regtest", "5000000000") });
     // Written with no anchor evidence (P7.15).
@@ -274,7 +273,7 @@ describe("P7.14, P7.5: importing a carried log", () => {
     expect(await sdk.resourceBytes(imported.original.state.resource.digest)).toBeUndefined();
   });
 
-  test("PR59b: \"Two root members named `originalLog`, including one spelled with escapes\": rejected; neither is read or imported (P14.17)", async () => {
+  test("C12-308: \"Two root members named `originalLog`, including one spelled with escapes\": rejected; neither is read or imported (P14.17)", async () => {
     const env = await harbor();
     const json = await env.sdk.create({ name: "Data", resource: { mediaType: "application/json", bytes: bytes('{"a":1}') }, author: env.author, signer: env.signer });
     if (json.kind !== "original") throw new Error("expected an Original");

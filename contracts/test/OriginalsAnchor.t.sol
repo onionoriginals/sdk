@@ -101,7 +101,7 @@ contract OriginalsAnchorTest is Base {
 
     // ----------------------------------------------------------------- who may publish (P14.20, P9.23)
 
-    /// C12-252, as reworded at PR 59 a3ffdc1: PR59b: "Publication by an address that is not the
+    /// C12-252 (reworded at a3ffdc1): "Publication by an address that is not the
     /// holder, the address approved for the token through `approve`, or an operator approved
     /// through `setApprovalForAll`": reverted by the contract; no record. Both approvals publish.
     function test_publicationByNonHolderReverts() public {
@@ -360,7 +360,7 @@ contract OriginalsAnchorTest is Base {
         eq(a.body(id, index, 0, type(uint32).max), b, "record 0's body");
     }
 
-    /// C12-260, as reworded at PR 59 a3ffdc1: PR59b: "`publishSameBody` or `commitSameBody` naming
+    /// C12-260 (reworded at a3ffdc1): "`publishSameBody` or `commitSameBody` naming
     /// an index that is not an earlier record of the selected token, or a record that itself refers
     /// to another": reverted by the contract; no record.
     function test_sameBodyMisuseReverts() public {
@@ -394,7 +394,7 @@ contract OriginalsAnchorTest is Base {
         eq(a.body(id, 1, 0, 10), hex"09", "record 1 has record 0's body, not the other token's");
     }
 
-    /// PR59b: "The same record index on two tokens, used in `publishSameBody` on one of them": the
+    /// C12-310: "The same record index on two tokens, used in `publishSameBody` on one of them": the
     /// body is that of the selected token's own record; another token's body cannot be selected
     /// (P14.20: `bodyOf` is token-local).
     function test_bodyOfIsTokenLocal() public {
@@ -413,7 +413,7 @@ contract OriginalsAnchorTest is Base {
         eq(a.body(id, index, 0, 10), hex"0a", "its body, not the other token's");
     }
 
-    /// PR59b: "Record that refers to an earlier body": its `bodyLength` is the referred body's
+    /// C12-311: "Record that refers to an earlier body": its `bodyLength` is the referred body's
     /// length; only its metadata counts toward the 350,000-byte limit (P14.20).
     function test_referringRecordBodyLengthAndLimit() public {
         uint256 id = minted();
@@ -436,7 +436,7 @@ contract OriginalsAnchorTest is Base {
         vm.stopPrank();
     }
 
-    /// PR59b: "Writer staging an upload": learns the upload ID from `UploadBegun`; the event is
+    /// C12-329: "Writer staging an upload": learns the upload ID from `UploadBegun`; the event is
     /// never evidence. P14.20: `event UploadBegun(uint256 indexed tokenId, bytes32 upload, address by)`.
     function test_uploadBegunEvent() public {
         uint256 id = minted();

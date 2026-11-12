@@ -7,8 +7,6 @@
  *
  * Section 12 rows are cited by C12 id, followed by the start of the row's
  * first column. Contract-revert rows belong to the contract's own tests.
- * Rows that PR 59 added at a3ffdc1, not yet in the registry, are cited as
- * `PR59b:` with a quote of the row's first column.
  */
 import { describe, expect, test } from "bun:test";
 import type { LogEntry } from "../src/log/index.js";
@@ -479,7 +477,7 @@ describe("P7.14 copies of the log", () => {
     expect(nopin.anchoring.status).toBe("unsupported");
   });
 
-  test("PR59b: 'Carried checkpoint from before the anchoring entry of an Original that is now anchored': allowed; a historical checkpoint, valid as of it, with no statement about current anchoring, even though the anchor member would let the token be derived (P7.14, P7.15)", async () => {
+  test("C12-317: 'Carried checkpoint from before the anchoring entry of an Original that is now anchored': allowed; a historical checkpoint, valid as of it, with no statement about current anchoring, even though the anchor member would let the token be derived (P7.14, P7.15)", async () => {
     const o = await original();
     const d = (o.v2.state as { asset: { resource: { digest: string } } }).asset.resource.digest;
     const file = await writeCarriedFile(describedBytes(d)!, [o.genesis, o.v2], { disclosed: carriedDisclosure([o.genesis, o.v2]) });
@@ -613,7 +611,7 @@ describe("P9.28, P9.29 moves", () => {
     }
   });
 
-  test("C12-273 (changed at a3ffdc1), PR59b: 'Carried log holding a move entry, the current chain read and a chain it left unreadable': proofs and hash links verified from genesis; move unconfirmed; that stretch's ordering claimed only; no owner and not current", async () => {
+  test("C12-273 (changed at a3ffdc1), C12-315: 'Carried log holding a move entry, the current chain read and a chain it left unreadable': proofs and hash links verified from genesis; move unconfirmed; that stretch's ordering claimed only; no owner and not current", async () => {
     const m = await moving(ETHEREUM, 68);
     const r = await verify(m.alice, [
       token(m.alias, two(ROBINHOOD, null)),
@@ -640,7 +638,7 @@ describe("P9.28, P9.29 moves", () => {
     expect(r.current).toBe(false);
   });
 
-  test("C12-289 (changed at a3ffdc1), PR59b: 'Departure final, destination chain cannot be read': departure finalized, destination unreachable; missing evidence; no arrival claimed; at most the entries before the first anchoring entry", async () => {
+  test("C12-289 (changed at a3ffdc1), C12-312: 'Departure final, destination chain cannot be read': departure finalized, destination unreachable; missing evidence; no arrival claimed; at most the entries before the first anchoring entry", async () => {
     const m = await moving(ETHEREUM, 70);
     for (const dest of [[], [token(m.dest, two(ETHEREUM, null, { owner: CAROL }))]]) {
       const r = await verify(m.alice, [token(m.alias, two(ROBINHOOD, [rec(0, m.log), rec(1, m.move)])), ...dest], m.through);
@@ -763,7 +761,7 @@ describe("P3.9, P14.18 did:evm resolution", () => {
 });
 
 describe("originals-spec PR 59 a3ffdc1: P9.22 providers and finality", () => {
-  test("PR59b: 'Provider that cannot serve state at the finalized block because finality trails its retained state': not usable for that read; missing evidence", async () => {
+  test("C12-325: 'Provider that cannot serve state at the finalized block because finality trails its retained state': not usable for that read; missing evidence", async () => {
     const o = await original(ROBINHOOD, 101);
     const gone: EvmProviderRead = { ...read(ROBINHOOD, null, { provider: "rpc-b", codeHash: null, owner: null }), stateUnavailable: true };
     // Beside a provider that served it: still missing, never decided on the other provider alone.
@@ -775,7 +773,7 @@ describe("originals-spec PR 59 a3ffdc1: P9.22 providers and finality", () => {
     expect(r.history.entries).toBe(2);
   });
 
-  test("PR59b: 'Provider read at its own, later finalized block, compared with the other provider at the lower block': not evidence for the comparison", async () => {
+  test("C12-326: 'Provider read at its own, later finalized block, compared with the other provider at the lower block': not evidence for the comparison", async () => {
     const o = await original(ROBINHOOD, 102);
     const r = await verify(o.alice, [token(o.alias, [
       read(ROBINHOOD, [rec(0, o.log)], { finalized: 1000 }),
@@ -785,7 +783,7 @@ describe("originals-spec PR 59 a3ffdc1: P9.22 providers and finality", () => {
     expect(r.evm!.stretches[0].missing?.code).toBe("EVM_READ_NOT_AT_FINALIZED");
   });
 
-  test("PR59b: 'Verification repeated with no evidence of a finality failure': earlier finalized hashes need not be read again; when evidence appears, a warning, and retained results resting on that block are discarded", async () => {
+  test("C12-327: 'Verification repeated with no evidence of a finality failure': earlier finalized hashes need not be read again; when evidence appears, a warning, and retained results resting on that block are discarded", async () => {
     const o = await original(ROBINHOOD, 103);
     const e4 = await o.next(o.anchoring, { name: "Published on the replaced fork" });
     // A first verification at block 1000, on what later turns out to be a replaced fork.
@@ -817,7 +815,7 @@ describe("originals-spec PR 59 a3ffdc1: P9.22 providers and finality", () => {
 });
 
 describe("originals-spec PR 59 a3ffdc1: P9.25 checkpoints", () => {
-  test("PR59b: 'Token with many records, verifier holding a checkpoint': MAY resume from the checkpoint and read only later records; no record cap", async () => {
+  test("C12-328: 'Token with many records, verifier holding a checkpoint': MAY resume from the checkpoint and read only later records; no record cap", async () => {
     const o = await original(ROBINHOOD, 104);
     const e4 = await o.next(o.anchoring, { name: "Four" });
     const e5 = await o.next(e4, { name: "Five" });
@@ -854,7 +852,7 @@ describe("originals-spec PR 59 a3ffdc1: P9.25 checkpoints", () => {
 });
 
 describe("originals-spec PR 59 a3ffdc1: P9.19, P9.23 not anchored", () => {
-  test("PR59b: 'Signed anchoring entry not published, genesis `anchor` member alone, or token minted with no publication': not anchored", async () => {
+  test("C12-331: 'Signed anchoring entry not published, genesis `anchor` member alone, or token minted with no publication': not anchored", async () => {
     const o = await original(ROBINHOOD, 105);
     const cases: Array<[LogEntry[], EvmProviderRead[]]> = [
       [o.log, two(ROBINHOOD, [], { owner: HOLDER })], // the anchoring entry signed, the token minted, nothing published
@@ -871,7 +869,7 @@ describe("originals-spec PR 59 a3ffdc1: P9.19, P9.23 not anchored", () => {
     }
   });
 
-  test("PR59b: 'Token minted by anyone, with a `tokenURI` but no verified history': not shown to be an Original", async () => {
+  test("C12-324: 'Token minted by anyone, with a `tokenURI` but no verified history': not shown to be an Original", async () => {
     const o = await original(ROBINHOOD, 106);
     const junk: EvmRecord = { index: 0, timestamp: TS0, metadataLength: 3, bodyLength: 1, bodyOf: 0, mediaType: "text/plain", metadata: Uint8Array.of(0x83, 1, 2), body: Uint8Array.of(0x41) };
     const tokens = [token(o.alias, two(ROBINHOOD, [junk], { owner: CAROL }))];
@@ -885,7 +883,7 @@ describe("originals-spec PR 59 a3ffdc1: P9.19, P9.23 not anchored", () => {
 });
 
 describe("originals-spec PR 59 a3ffdc1: P9.29 moves", () => {
-  test("PR59b: 'Verifier that retained the anchor on the token left, then reads a verified move': a move with its source and destination; not a conflicting anchor or a change of anchor", async () => {
+  test("C12-313: 'Verifier that retained the anchor on the token left, then reads a verified move': a move with its source and destination; not a conflicting anchor or a change of anchor", async () => {
     const m = await moving(ETHEREUM, 107);
     const before = await verify(m.alice, [token(m.alias, two(ROBINHOOD, [rec(0, m.log)]))]);
     expect(before.retain.anchor?.sat).toBe(m.alias);
@@ -906,7 +904,7 @@ describe("originals-spec PR 59 a3ffdc1: P9.29 moves", () => {
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 
-  test("PR59b: 'Entries from before the first anchoring entry, in a report for a moved Original': carried, with claimed ordering", async () => {
+  test("C12-314: 'Entries from before the first anchoring entry, in a report for a moved Original': carried, with claimed ordering", async () => {
     const o = await original(ROBINHOOD, 108);
     const dest = derivedTokenAlias(o.id, { chain: ETHEREUM, minter: C }, PIN);
     const toEth = await o.next(o.anchoring, { anchor: { chain: ETHEREUM, minter: C }, aliases: [dest] });
@@ -934,7 +932,7 @@ describe("originals-spec PR 59 a3ffdc1: P9.29 moves", () => {
 });
 
 describe("originals-spec PR 59 a3ffdc1: P9.28 provisional layers", () => {
-  test("PR59b: 'Move entry prepared before any departure record exists': layers judged provisionally by the current classes; by the classes at the departure record's timestamp once it is read", async () => {
+  test("C12-330: 'Move entry prepared before any departure record exists': layers judged provisionally by the current classes; by the classes at the departure record's timestamp once it is read", async () => {
     // Base was exit-protected until 20 October 2026 and is operator from then (a later revision).
     const revised: EvmAnchorPin = {
       ...PIN,
@@ -957,7 +955,7 @@ describe("originals-spec PR 59 a3ffdc1: P9.28 provisional layers", () => {
 });
 
 describe("originals-spec PR 59 a3ffdc1: P14.20 records, P14.21 per-chain address", () => {
-  test("PR59b: 'Record that refers to an earlier body': its `bodyLength` is the referred body's length; only its metadata counts toward the 350,000-byte limit", async () => {
+  test("C12-311: 'Record that refers to an earlier body': its `bodyLength` is the referred body's length; only its metadata counts toward the 350,000-byte limit", async () => {
     const o = await original(ROBINHOOD, 111);
     const e4 = await o.next(o.anchoring, { name: "Renamed" });
     const r0 = rec(0, o.log);
@@ -1002,7 +1000,7 @@ describe("originals-spec PR 59 a3ffdc1: P14.20 records, P14.21 per-chain address
 });
 
 describe("originals-spec PR 59 a3ffdc1: P3.9 did:evm candidate", () => {
-  test("PR59b: 'did:evm DID resolved from token reads alone, the token's first record being junk or another Original's log': candidate from an anchoring or arrival publication, verified with its link to the queried token; the junk record does not decide", async () => {
+  test("C12-323: 'did:evm DID resolved from token reads alone, the token's first record being junk or another Original's log': candidate from an anchoring or arrival publication, verified with its link to the queried token; the junk record does not decide", async () => {
     const o = await original(ROBINHOOD, 113);
     const other = await original(ROBINHOOD, 114);
     const junk: EvmRecord = { index: 0, timestamp: TS0, metadataLength: 3, bodyLength: 1, bodyOf: 0, mediaType: "text/plain", metadata: Uint8Array.of(0x83, 1, 2), body: Uint8Array.of(0x41) };

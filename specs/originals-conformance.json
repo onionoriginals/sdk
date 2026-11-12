@@ -1,8 +1,8 @@
 {
-  "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row, pinned to originals-spec 3ed0f89, the head of open PR 59 (carried logs and EVM anchoring, experimental), which sits on master 915b726 (#58 merged); it is not master. Rows 193 to 285 are #58's additions and rows 286 to 300 PR 59's (ids C12-200 to C12-307); PR 59 rewords C12-23 and C12-188. Each row is covered by a test that references its id, or stays status=todo. status=partial means some layers are tested and the note says what remains; coveredBy lists the citing test files (checked by packages/vh/tests/conformance/registry.test.ts). Phases follow spec section 10 and plans/011; phase 5 is section 10's step 6 (EVM anchoring), which plans/011 does not yet schedule (PROVISIONAL). status=not-applicable means an owner decision makes the row moot pending a spec edit; its note names the decision. Ids are stable across re-pins: position is the row's place in the pinned table. Pinned rows are in table order, positions 1 to N; rows from open pull requests follow them, and two pull requests can each propose a row at the same position. A proposal can also insert rows between pinned ones, and reword pinned rows, whose note then gives the proposed wording. A row with `proposal` is not in the pinned table: it comes from the named open spec pull request, is implemented provisionally, and its position is its place in that pull request's table. A row the pinned table no longer has is listed under `retired` with the commit and reason; its id is never reused, and no test cites it.",
+  "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row, pinned to originals-spec a3ffdc1, the head of open PR 59 (carried logs and EVM anchoring, experimental), which sits on master 915b726 (#58 merged); it is not master. Rows 193 to 285 were #58's additions and rows 286 to 300 PR 59's at 3ed0f89 (ids C12-200 to C12-307); PR 59 rewords C12-23 and C12-188, and at a3ffdc1 rewords C12-150, C12-201, C12-210, C12-218, C12-222, C12-227, C12-249, C12-252, C12-260, C12-273, C12-278 and C12-289 and adds 24 rows, C12-308 to C12-331, so the table has 324 rows. Each row is covered by a test that references its id, or stays status=todo. status=partial means some layers are tested and the note says what remains; coveredBy lists the citing test files (checked by packages/vh/tests/conformance/registry.test.ts). Phases follow spec section 10 and plans/011; phase 5 is section 10's step 6 (EVM anchoring), which plans/011 does not yet schedule (PROVISIONAL). status=not-applicable means an owner decision makes the row moot pending a spec edit; its note names the decision. Ids are stable across re-pins: position is the row's place in the pinned table. Pinned rows are in table order, positions 1 to N; rows from open pull requests follow them, and two pull requests can each propose a row at the same position. A proposal can also insert rows between pinned ones, and reword pinned rows, whose note then gives the proposed wording. A row with `proposal` is not in the pinned table: it comes from the named open spec pull request, is implemented provisionally, and its position is its place in that pull request's table. A row the pinned table no longer has is listed under `retired` with the commit and reason; its id is never reused, and no test cites it.",
   "spec": {
     "repository": "aviarytech/originals-spec",
-    "commit": "3ed0f89",
+    "commit": "a3ffdc1",
     "section": "12",
     "openProposals": []
   },
@@ -2183,17 +2183,18 @@
     {
       "id": "C12-150",
       "position": 161,
-      "test": "Entry whose UTF-8 line is 65,536 bytes / 65,537 bytes",
+      "test": "Entry whose JCS form is 65,536 / 65,537 UTF-8 bytes, in `did.jsonl`, an inscription, a publication or any carrier",
       "requiredResult": "Accepted / rejected (P14.13)",
       "phases": [
         1
       ],
-      "status": "covered",
-      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release.",
+      "status": "partial",
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release. Reworded at a3ffdc1 (originals-spec PR 59); was: \"Entry whose UTF-8 line is 65,536 bytes / 65,537 bytes\" / \"Accepted / rejected (P14.13)\". The did.jsonl, inscription (packages/vh/tests/bitcoin.test.ts) and trailer and text block (packages/vh/tests/carried.test.ts) cases are tested; a publication on an EVM token and a JSON member are not tested at the limit, so the row is partial.",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/hosting.test.ts",
         "packages/sdk/tests/unit/originals/sdk.test.ts",
         "packages/vh/tests/bitcoin.test.ts",
+        "packages/vh/tests/carried.test.ts",
         "packages/vh/tests/originals.test.ts"
       ]
     },
@@ -2632,14 +2633,15 @@
       "id": "C12-201",
       "position": 194,
       "test": "Carried file whose remaining bytes differ by one byte, or by changed line endings",
-      "requiredResult": "Bytes not verified; MAY report the log it carries only with a statement that the file is not a version of that Original (P7.12)",
+      "requiredResult": "Bytes not verified; overall file verification fails with an explicit reason such as file digest mismatch, and verified proofs shown as detail do not make it a pass; MAY report the log it carries only with a statement that the file is not a version of that Original (P7.12)",
       "phases": [
         1
       ],
       "status": "covered",
       "coveredBy": [
         "packages/vh/tests/carried.test.ts"
-      ]
+      ],
+      "note": "Reworded at a3ffdc1 (originals-spec PR 59); was: \"Carried file whose remaining bytes differ by one byte, or by changed line endings\" / \"Bytes not verified; MAY report the log it carries only with a statement that the file is not a version of that Original (P7.12)\"."
     },
     {
       "id": "C12-202",
@@ -2751,14 +2753,15 @@
       "id": "C12-210",
       "position": 203,
       "test": "Trailer entry line of 70,000 bytes whose JCS form is 60,000 bytes",
-      "requiredResult": "Over the entry limit, as in `did.jsonl` (P14.14, P14.13)",
+      "requiredResult": "Within the entry limit, which is measured over the JCS form in every format (P14.14, P14.13)",
       "phases": [
         1
       ],
       "status": "covered",
       "coveredBy": [
         "packages/vh/tests/carried.test.ts"
-      ]
+      ],
+      "note": "Reworded at a3ffdc1 (originals-spec PR 59); was: \"Trailer entry line of 70,000 bytes whose JCS form is 60,000 bytes\" / \"Over the entry limit, as in `did.jsonl` (P14.14, P14.13)\"."
     },
     {
       "id": "C12-211",
@@ -2855,14 +2858,15 @@
       "id": "C12-218",
       "position": 211,
       "test": "Text block in a CR LF file whose separator is CR LF, not a single LF",
-      "requiredResult": "The added CR is not part of the version; digest mismatch (P14.16, P7.12)",
+      "requiredResult": "The added CR is left in the remaining bytes: digest mismatch, and file verification fails (P14.16, P7.12)",
       "phases": [
         1
       ],
       "status": "covered",
       "coveredBy": [
         "packages/vh/tests/carried.test.ts"
-      ]
+      ],
+      "note": "Reworded at a3ffdc1 (originals-spec PR 59); was: \"Text block in a CR LF file whose separator is CR LF, not a single LF\" / \"The added CR is not part of the version; digest mismatch (P14.16, P7.12)\"."
     },
     {
       "id": "C12-219",
@@ -2906,8 +2910,36 @@
     {
       "id": "C12-222",
       "position": 215,
-      "test": "JSON member that is not last, or an earlier root member of the same name, including one spelled with escapes",
-      "requiredResult": "Not a carrier; MAY report the log only as P7.12 allows (P7.12, P14.17)",
+      "test": "JSON member that is not the root object’s last, as after a tool reorders members",
+      "requiredResult": "Found; its log verified and reported separately; the file not verified as a version, because removing a member that is not last is not yet defined (P7.12, P14.17)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/carried.test.ts"
+      ],
+      "note": "Reworded at a3ffdc1 (originals-spec PR 59); was: \"JSON member that is not last, or an earlier root member of the same name, including one spelled with escapes\" / \"Not a carrier; MAY report the log only as P7.12 allows (P7.12, P14.17)\". At a3ffdc1 the row is split: its first case keeps this id with a reversed result; 'Two root members named `originalLog`' is C12-308 and 'Member named `originalLog` nested below the root' is C12-309."
+    },
+    {
+      "id": "C12-308",
+      "position": 216,
+      "test": "Two root members named `originalLog`, including one spelled with escapes",
+      "requiredResult": "Rejected; neither is chosen (P14.17)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/carried.test.ts",
+        "packages/vh/tests/carried.test.ts"
+      ]
+    },
+    {
+      "id": "C12-309",
+      "position": 217,
+      "test": "Member named `originalLog` nested below the root",
+      "requiredResult": "Not a JSON member (P14.17)",
       "phases": [
         1
       ],
@@ -2918,7 +2950,7 @@
     },
     {
       "id": "C12-223",
-      "position": 216,
+      "position": 218,
       "test": "JSON document with a 64-bit integer or a nested duplicate key outside the member",
       "requiredResult": "The member is still found; only the entries are subject to P14.3 (P14.17)",
       "phases": [
@@ -2931,7 +2963,7 @@
     },
     {
       "id": "C12-224",
-      "position": 217,
+      "position": 219,
       "test": "JSON document whose root is an array, or has a root member named `originalLog` anywhere",
       "requiredResult": "Writer refuses (P7.15, P14.17)",
       "phases": [
@@ -2944,7 +2976,7 @@
     },
     {
       "id": "C12-225",
-      "position": 218,
+      "position": 220,
       "test": "JSON last root member `originalLog` whose value is `5` or `[1]`",
       "requiredResult": "JSON member with an invalid log (P14.17)",
       "phases": [
@@ -2957,7 +2989,7 @@
     },
     {
       "id": "C12-226",
-      "position": 219,
+      "position": 221,
       "test": "JSON document `{\"originalLog\":[…]}` with a leading byte order mark / with no other member",
       "requiredResult": "Member found; the version is the byte order mark and `{}` / `{}` (P14.17)",
       "phases": [
@@ -2970,8 +3002,8 @@
     },
     {
       "id": "C12-227",
-      "position": 220,
-      "test": "JSON document nested 1,025 levels outside the entries",
+      "position": 222,
+      "test": "JSON document nested 1,025 levels outside the entries, counting the root object as level 1",
       "requiredResult": "No JSON member (P14.17)",
       "phases": [
         1
@@ -2979,11 +3011,12 @@
       "status": "covered",
       "coveredBy": [
         "packages/vh/tests/carried.test.ts"
-      ]
+      ],
+      "note": "Reworded at a3ffdc1 (originals-spec PR 59); was: \"JSON document nested 1,025 levels outside the entries\" / \"No JSON member (P14.17)\"."
     },
     {
       "id": "C12-228",
-      "position": 221,
+      "position": 223,
       "test": "Writer asked to carry a draft, a version other than the last entry’s, or, after anchoring, an entry not accepted on the anchor",
       "requiredResult": "Refused (P7.15)",
       "phases": [
@@ -2997,7 +3030,7 @@
     },
     {
       "id": "C12-229",
-      "position": 222,
+      "position": 224,
       "test": "Writer about to write a carrier",
       "requiredResult": "User told what the file discloses first; a JSON carrier says the data gains a member (P7.15)",
       "phases": [
@@ -3011,7 +3044,7 @@
     },
     {
       "id": "C12-230",
-      "position": 223,
+      "position": 225,
       "test": "Carried file presented by an SDK or UI",
       "requiredResult": "Never labelled an evidence package or complete (P7.11)",
       "phases": [
@@ -3025,7 +3058,7 @@
     },
     {
       "id": "C12-231",
-      "position": 224,
+      "position": 226,
       "test": "Carrier added or removed",
       "requiredResult": "No entry signed; the version is unchanged (P7.16)",
       "phases": [
@@ -3038,7 +3071,7 @@
     },
     {
       "id": "C12-232",
-      "position": 225,
+      "position": 227,
       "test": "Carried log older than the reader’s local history, or on another branch",
       "requiredResult": "Local history kept; a branch reported as a conflict (P7.14, P7.5)",
       "phases": [
@@ -3051,7 +3084,7 @@
     },
     {
       "id": "C12-233",
-      "position": 226,
+      "position": 228,
       "test": "Anchored Original whose carried log disagrees with its anchor",
       "requiredResult": "State from the anchor; the carried log is not preferred (P7.14, P9.13)",
       "phases": [
@@ -3065,7 +3098,7 @@
     },
     {
       "id": "C12-234",
-      "position": 227,
+      "position": 229,
       "test": "Anchored Original’s carried log read without access to the anchor",
       "requiredResult": "Missing evidence; at most the entries before the anchoring entry valid as of the checkpoint before it; the anchoring entry and later entries not checked against the anchor (P7.14, P3.3, P9.15)",
       "phases": [
@@ -3080,7 +3113,7 @@
     },
     {
       "id": "C12-235",
-      "position": 228,
+      "position": 230,
       "test": "Original without `anchor` whose later entry adds one; Original with `anchor` whose later entry, not a move entry, changes or removes it",
       "requiredResult": "Rejected (P9.19)",
       "phases": [
@@ -3093,7 +3126,7 @@
     },
     {
       "id": "C12-236",
-      "position": 229,
+      "position": 231,
       "test": "Original with an EVM `anchor` listing a did:btco alias, or a token alias other than its derived token’s; Original without `anchor` listing a token alias",
       "requiredResult": "Rejected (P9.19, P14.19)",
       "phases": [
@@ -3106,7 +3139,7 @@
     },
     {
       "id": "C12-237",
-      "position": 230,
+      "position": 232,
       "test": "`anchor.chain` not `eip155:` with a canonical decimal chain ID / `minter` in mixed case",
       "requiredResult": "Rejected (P14.18)",
       "phases": [
@@ -3119,7 +3152,7 @@
     },
     {
       "id": "C12-238",
-      "position": 231,
+      "position": 233,
       "test": "`anchor.chain` well formed but not in the verifier’s revision of P14.22",
       "requiredResult": "Unsupported, not invalid; a writer refuses to write it (P9.19, P14.22)",
       "phases": [
@@ -3132,7 +3165,7 @@
     },
     {
       "id": "C12-239",
-      "position": 232,
+      "position": 234,
       "test": "Genesis entry with an `anchor` member while P14.21 pins no contract",
       "requiredResult": "Unsupported, not invalid; a writer refuses to write it (section 14, P14.21)",
       "phases": [
@@ -3146,7 +3179,7 @@
     },
     {
       "id": "C12-240",
-      "position": 233,
+      "position": 235,
       "test": "Provider reporting the listed chain ID whose block 0 has another hash than P14.22 lists",
       "requiredResult": "Not that chain; its answers are not evidence (P9.21)",
       "phases": [
@@ -3160,7 +3193,7 @@
     },
     {
       "id": "C12-241",
-      "position": 234,
+      "position": 236,
       "test": "Code at the anchor contract address with another runtime code hash, or none, on a listed chain",
       "requiredResult": "Unsupported; never verified or reported as not anchored (P9.21)",
       "phases": [
@@ -3174,7 +3207,7 @@
     },
     {
       "id": "C12-242",
-      "position": 235,
+      "position": 237,
       "test": "The pinned contract deployed on a chain that is not listed",
       "requiredResult": "Unsupported (P9.21)",
       "phases": [
@@ -3187,7 +3220,7 @@
     },
     {
       "id": "C12-243",
-      "position": 236,
+      "position": 238,
       "test": "Publication read from a chain other than the one `anchor` names",
       "requiredResult": "Not a publication of the Original (P9.20)",
       "phases": [
@@ -3200,7 +3233,7 @@
     },
     {
       "id": "C12-244",
-      "position": 237,
+      "position": 239,
       "test": "Publication record present at the latest block but not in state at the finalized block",
       "requiredResult": "Observed, not accepted; pending (P9.22, P9.27)",
       "phases": [
@@ -3213,7 +3246,7 @@
     },
     {
       "id": "C12-245",
-      "position": 238,
+      "position": 240,
       "test": "Two providers report different hashes for the lower of their finalized blocks, or a different record, bytes or `ownerOf` at that block",
       "requiredResult": "Missing evidence until they agree (P9.22)",
       "phases": [
@@ -3226,7 +3259,7 @@
     },
     {
       "id": "C12-246",
-      "position": 239,
+      "position": 241,
       "test": "One provider’s finalized block is N and the other’s is N+1, and they agree on block N’s hash and on the state at it",
       "requiredResult": "Verified at block N; a provider that is behind is not a disagreement (P9.22)",
       "phases": [
@@ -3239,7 +3272,7 @@
     },
     {
       "id": "C12-247",
-      "position": 240,
+      "position": 242,
       "test": "A block accepted as finalized is replaced",
       "requiredResult": "`authoritative-source-changed` and a finality failure reported (P9.22)",
       "phases": [
@@ -3252,7 +3285,7 @@
     },
     {
       "id": "C12-248",
-      "position": 241,
+      "position": 243,
       "test": "Token minted, no anchoring publication",
       "requiredResult": "Not anchored; no owner (P9.23)",
       "phases": [
@@ -3265,20 +3298,21 @@
     },
     {
       "id": "C12-249",
-      "position": 242,
+      "position": 244,
       "test": "Two anchoring entries from different branches published on the token",
-      "requiredResult": "The one with the lower record index is the anchor; the other a conflicting anchor; uniqueness MAY be reported as established under the chain’s finality and class (P9.24, P9.16)",
+      "requiredResult": "The one with the lower record index is the anchor; the other a conflicting anchor; uniqueness MAY be reported in the terms of the chain’s class: established on a proven chain, attested by the operator or the validators on an attested one (P9.24, P9.16)",
       "phases": [
         5
       ],
       "status": "covered",
       "coveredBy": [
         "packages/vh/tests/evm-anchor.test.ts"
-      ]
+      ],
+      "note": "Reworded at a3ffdc1 (originals-spec PR 59); was: \"Two anchoring entries from different branches published on the token\" / \"The one with the lower record index is the anchor; the other a conflicting anchor; uniqueness MAY be reported as established under the chain’s finality and class (P9.24, P9.16)\"."
     },
     {
       "id": "C12-250",
-      "position": 243,
+      "position": 245,
       "test": "Two publications extending the same head, recorded in one block or in different blocks",
       "requiredResult": "The one with the lower record index is accepted (P9.13, P9.20)",
       "phases": [
@@ -3291,7 +3325,7 @@
     },
     {
       "id": "C12-251",
-      "position": 244,
+      "position": 246,
       "test": "Two successive publications, the second extending the first, recorded in one block, or in two blocks of a rollup that share one parent-chain block number",
       "requiredResult": "Both accepted, in index order (P9.13, P9.20)",
       "phases": [
@@ -3305,18 +3339,18 @@
     },
     {
       "id": "C12-252",
-      "position": 245,
-      "test": "Publication by an address that is neither the holder nor an approved operator",
+      "position": 247,
+      "test": "Publication by an address that is not the holder, the address approved for the token through `approve`, or an operator approved through `setApprovalForAll`",
       "requiredResult": "Reverted by the contract; no record (P14.20)",
       "phases": [
         5
       ],
       "status": "todo",
-      "note": "Contract behavior, tested in Solidity: contracts/test/OriginalsAnchor.t.sol test_publicationByNonHolderReverts (forge test; outside the Bun roots this registry scans, and not run in CI), citing C12-252."
+      "note": "Contract behavior, tested in Solidity: contracts/test/OriginalsAnchor.t.sol test_publicationByNonHolderReverts (forge test; outside the Bun roots this registry scans, and not run in CI), citing C12-252. Reworded at a3ffdc1 (originals-spec PR 59); was: \"Publication by an address that is neither the holder nor an approved operator\" / \"Reverted by the contract; no record (P14.20)\"."
     },
     {
       "id": "C12-253",
-      "position": 246,
+      "position": 248,
       "test": "Upload opened and never committed",
       "requiredResult": "Ignored (P14.20)",
       "phases": [
@@ -3327,7 +3361,7 @@
     },
     {
       "id": "C12-254",
-      "position": 247,
+      "position": 249,
       "test": "`publish` or `publishSameBody` whose bytes exceed 350,000, an `append` that would take an upload past 350,000 bytes, or a media type longer than 255 bytes",
       "requiredResult": "Reverted by the contract; no record and no stored bytes (P14.20)",
       "phases": [
@@ -3338,7 +3372,7 @@
     },
     {
       "id": "C12-255",
-      "position": 248,
+      "position": 250,
       "test": "Record whose length fields exceed 350,000 bytes, as a provider reports it, after valid earlier records",
       "requiredResult": "Rejected from its fields without reading its bytes; the earlier accepted history resolves and evidence is not missing (P9.25)",
       "phases": [
@@ -3352,7 +3386,7 @@
     },
     {
       "id": "C12-256",
-      "position": 249,
+      "position": 251,
       "test": "Record of 350,000 bytes that is no valid publication, after valid earlier records, read from a provider that limits the size of a response",
       "requiredResult": "Read in ranges and rejected; the earlier accepted history resolves (P9.25, P14.20)",
       "phases": [
@@ -3366,7 +3400,7 @@
     },
     {
       "id": "C12-257",
-      "position": 250,
+      "position": 252,
       "test": "Publication whose body digest, size or media type differs from the last entry’s descriptor",
       "requiredResult": "Rejected (P14.20, P9.17)",
       "phases": [
@@ -3379,7 +3413,7 @@
     },
     {
       "id": "C12-258",
-      "position": 251,
+      "position": 253,
       "test": "Publication that refers to an earlier record’s body, the last entry not changing the resource",
       "requiredResult": "Accepted; the body is checked against the descriptor as if stored (P9.25, P14.20)",
       "phases": [
@@ -3392,7 +3426,7 @@
     },
     {
       "id": "C12-259",
-      "position": 252,
+      "position": 254,
       "test": "Publication that refers to an earlier record’s body whose digest differs from the last entry’s descriptor",
       "requiredResult": "Rejected (P9.25, P14.20)",
       "phases": [
@@ -3405,18 +3439,43 @@
     },
     {
       "id": "C12-260",
-      "position": 253,
-      "test": "`publishSameBody` or `commitSameBody` naming a later record, a record of another token, or a record that itself refers to another",
+      "position": 255,
+      "test": "`publishSameBody` or `commitSameBody` naming an index that is not an earlier record of the selected token, or a record that itself refers to another",
       "requiredResult": "Reverted by the contract; no record (P14.20)",
       "phases": [
         5
       ],
       "status": "todo",
-      "note": "Contract behavior, tested in Solidity: contracts/test/OriginalsAnchor.t.sol test_sameBodyMisuseReverts (forge test; outside the Bun roots this registry scans, and not run in CI), citing C12-260."
+      "note": "Contract behavior, tested in Solidity: contracts/test/OriginalsAnchor.t.sol test_sameBodyMisuseReverts (forge test; outside the Bun roots this registry scans, and not run in CI), citing C12-260. Reworded at a3ffdc1 (originals-spec PR 59); was: \"`publishSameBody` or `commitSameBody` naming a later record, a record of another token, or a record that itself refers to another\" / \"Reverted by the contract; no record (P14.20)\". At a3ffdc1 'The same record index on two tokens' (C12-310) and 'Record that refers to an earlier body' (C12-311) follow it."
+    },
+    {
+      "id": "C12-310",
+      "position": 256,
+      "test": "The same record index on two tokens, used in `publishSameBody` on one of them",
+      "requiredResult": "The body is that of the selected token’s own record; another token’s body cannot be selected (P14.20)",
+      "phases": [
+        5
+      ],
+      "status": "todo",
+      "note": "Contract behavior, tested in Solidity: contracts/test/OriginalsAnchor.t.sol test_bodyOfIsTokenLocal (forge test; outside the Bun roots this registry scans, and not run in CI), citing C12-310."
+    },
+    {
+      "id": "C12-311",
+      "position": 257,
+      "test": "Record that refers to an earlier body",
+      "requiredResult": "Its `bodyLength` is the referred body’s length; only its metadata counts toward the 350,000-byte limit (P14.20)",
+      "phases": [
+        5
+      ],
+      "status": "covered",
+      "note": "Also tested in Solidity: contracts/test/OriginalsAnchor.t.sol test_referringRecordBodyLengthAndLimit (forge test, not run in CI).",
+      "coveredBy": [
+        "packages/vh/tests/evm-anchor.test.ts"
+      ]
     },
     {
       "id": "C12-261",
-      "position": 254,
+      "position": 258,
       "test": "Publication known only from a `Published` event, or a token whose records or bytes cannot be read from state at the finalized block",
       "requiredResult": "Never accepted from the event; resolution fails with missing evidence (P9.25)",
       "phases": [
@@ -3430,7 +3489,7 @@
     },
     {
       "id": "C12-262",
-      "position": 255,
+      "position": 259,
       "test": "Original with an EVM `anchor` naming a did:btco author or editor",
       "requiredResult": "Rejected (P9.26)",
       "phases": [
@@ -3444,7 +3503,7 @@
     },
     {
       "id": "C12-263",
-      "position": 256,
+      "position": 260,
       "test": "did:webvh signer key removed before the timestamp the publication’s record holds",
       "requiredResult": "Rejected, as P9.15 with the publication’s inscription time (P9.20, P9.26)",
       "phases": [
@@ -3457,7 +3516,7 @@
     },
     {
       "id": "C12-264",
-      "position": 257,
+      "position": 261,
       "test": "Token held by a contract account",
       "requiredResult": "That contract is the owner (P9.23)",
       "phases": [
@@ -3470,7 +3529,7 @@
     },
     {
       "id": "C12-265",
-      "position": 258,
+      "position": 262,
       "test": "Move entry from an attested chain to a proven chain or to Bitcoin, or from a proven chain to Bitcoin, departed and arrived",
       "requiredResult": "Accepted; anchored on the destination; the owner is the holder of the destination token or sat (P9.28, P9.29)",
       "phases": [
@@ -3485,7 +3544,7 @@
     },
     {
       "id": "C12-266",
-      "position": 259,
+      "position": 263,
       "test": "Move entry to a chain in the same layer or a lower one; move entry in an Original anchored on Bitcoin",
       "requiredResult": "Rejected (P9.28)",
       "phases": [
@@ -3499,7 +3558,7 @@
     },
     {
       "id": "C12-267",
-      "position": 260,
+      "position": 264,
       "test": "Move entry signed by an editor; move entry before the Original’s anchoring entry; entry that changes `anchor` without listing the destination’s alias",
       "requiredResult": "Rejected (P9.28)",
       "phases": [
@@ -3513,7 +3572,7 @@
     },
     {
       "id": "C12-268",
-      "position": 261,
+      "position": 265,
       "test": "Move entry to a chain the verifier’s revision of P14.22 does not list",
       "requiredResult": "Unsupported, not invalid (P9.19, P9.28)",
       "phases": [
@@ -3527,7 +3586,7 @@
     },
     {
       "id": "C12-269",
-      "position": 262,
+      "position": 266,
       "test": "Arrival on the destination with no departure accepted on the chain left, as when the author moves alone after a sale",
       "requiredResult": "Not accepted; the Original is still anchored where it was (P9.29)",
       "phases": [
@@ -3540,7 +3599,7 @@
     },
     {
       "id": "C12-270",
-      "position": 263,
+      "position": 267,
       "test": "Departure accepted, no arrival yet",
       "requiredResult": "Departed, not arrived; the move entry’s state; no owner (P9.29)",
       "phases": [
@@ -3553,7 +3612,7 @@
     },
     {
       "id": "C12-271",
-      "position": 264,
+      "position": 268,
       "test": "Publication on the token left behind, after the departure",
       "requiredResult": "Not accepted; reported (P9.29)",
       "phases": [
@@ -3566,7 +3625,7 @@
     },
     {
       "id": "C12-272",
-      "position": 265,
+      "position": 269,
       "test": "Arrival whose log differs from the entries accepted through the departure, or whose last entry is not the move entry",
       "requiredResult": "Not an arrival (P9.29)",
       "phases": [
@@ -3579,9 +3638,49 @@
     },
     {
       "id": "C12-273",
-      "position": 266,
+      "position": 270,
       "test": "Moved Original, a chain it left cannot be read",
-      "requiredResult": "Log verified; move unconfirmed; no owner and not current (P9.29)",
+      "requiredResult": "Log’s proofs and hash links verified from genesis; move unconfirmed; ordering of the stretch on that chain claimed only; no owner and not current (P9.29)",
+      "phases": [
+        5
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/evm-anchor.test.ts"
+      ],
+      "note": "Reworded at a3ffdc1 (originals-spec PR 59); was: \"Moved Original, a chain it left cannot be read\" / \"Log verified; move unconfirmed; no owner and not current (P9.29)\"."
+    },
+    {
+      "id": "C12-312",
+      "position": 271,
+      "test": "Departure final, destination chain cannot be read",
+      "requiredResult": "Departure reported as finalized, destination as unreachable; missing evidence; no arrival claimed (P9.29)",
+      "phases": [
+        5
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/evm-anchor.test.ts"
+      ]
+    },
+    {
+      "id": "C12-313",
+      "position": 272,
+      "test": "Verifier that retained the anchor on the token left, then reads a verified move",
+      "requiredResult": "Reported as a move with its source and destination; not a conflicting anchor or a change of anchor (P9.16, P9.29)",
+      "phases": [
+        5
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/evm-anchor.test.ts"
+      ]
+    },
+    {
+      "id": "C12-314",
+      "position": 273,
+      "test": "Entries from before the first anchoring entry, in a report for a moved Original",
+      "requiredResult": "Described as carried, with claimed ordering (P9.29)",
       "phases": [
         5
       ],
@@ -3592,7 +3691,7 @@
     },
     {
       "id": "C12-274",
-      "position": 267,
+      "position": 274,
       "test": "A chain the Original left later replaces the block that held the departure",
       "requiredResult": "Finality failure there; move unconfirmed (P9.22, P9.29)",
       "phases": [
@@ -3605,7 +3704,7 @@
     },
     {
       "id": "C12-275",
-      "position": 268,
+      "position": 275,
       "test": "Move made to a proven chain that a later revision reclassifies `operator`",
       "requiredResult": "Still accepted, judged by the class at the departure record’s timestamp; reported under the current class (P9.28, P14.22)",
       "phases": [
@@ -3618,7 +3717,7 @@
     },
     {
       "id": "C12-276",
-      "position": 269,
+      "position": 276,
       "test": "Report for an Original that moved from an attested chain to a proven chain",
       "requiredResult": "Lists both chains with their classes and the entries accepted on each; the earlier stretch described as attested, never as proven (P9.29)",
       "phases": [
@@ -3631,7 +3730,7 @@
     },
     {
       "id": "C12-277",
-      "position": 270,
+      "position": 277,
       "test": "Writer moving an Original",
       "requiredResult": "Author told the move cannot be reversed, the layers left above the destination, the dependence on the chain left, and what becomes public; refused if the arrival would exceed 350,000 bytes (P9.29)",
       "phases": [
@@ -3644,20 +3743,21 @@
     },
     {
       "id": "C12-278",
-      "position": 271,
+      "position": 278,
       "test": "Writer creating an Original with an EVM `anchor`",
-      "requiredResult": "Author told the first chain is permanent and the Original can move only upward, that it stays dependent on every chain it was anchored on, the chain’s trust class and what it means, that publications last only while the chain’s state is kept, and the minter fixed (P9.27)",
+      "requiredResult": "Author told the first chain is permanent and the Original can move only upward, that it stays dependent on every chain it was anchored on, the chain’s trust class and what it means, that publications last only while the chain’s state is kept, that large publications can need staged transactions and large metadata makes later edits cost more, and the minter fixed (P9.27)",
       "phases": [
         5
       ],
       "status": "covered",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/evm.test.ts"
-      ]
+      ],
+      "note": "Reworded at a3ffdc1 (originals-spec PR 59); was: \"Writer creating an Original with an EVM `anchor`\" / \"Author told the first chain is permanent and the Original can move only upward, that it stays dependent on every chain it was anchored on, the chain’s trust class and what it means, that publications last only while the chain’s state is kept, and the minter fixed (P9.27)\"."
     },
     {
       "id": "C12-279",
-      "position": 272,
+      "position": 279,
       "test": "Report for an Original anchored on an EVM chain",
       "requiredResult": "Names the chain, its trust class, the token, the finalized block and the providers; never called a Bitcoin anchor (P9.27)",
       "phases": [
@@ -3670,7 +3770,7 @@
     },
     {
       "id": "C12-280",
-      "position": 273,
+      "position": 280,
       "test": "Report for an Original anchored on a `consortium` or `operator` chain",
       "requiredResult": "Ordering, ownership, uniqueness and the settlement of a fork described as attested by the chain’s validators or operator, never as proven (P9.27)",
       "phases": [
@@ -3683,7 +3783,7 @@
     },
     {
       "id": "C12-281",
-      "position": 274,
+      "position": 281,
       "test": "Entry of 30,000 bytes that does not change the resource, on a chain that accepts 24,000 bytes in one transaction",
       "requiredResult": "Uploaded in stages and recorded by `commitSameBody`, referring to the stored body (P14.20)",
       "phases": [
@@ -3694,7 +3794,7 @@
     },
     {
       "id": "C12-282",
-      "position": 275,
+      "position": 282,
       "test": "`aliases` holding the token’s CAIP-19 asset ID, or a did:evm DID with an uppercase address, a leading zero in its chain ID or token ID, or a contract address other than P14.21’s",
       "requiredResult": "Rejected (P14.18)",
       "phases": [
@@ -3708,7 +3808,7 @@
     },
     {
       "id": "C12-283",
-      "position": 276,
+      "position": 283,
       "test": "did:evm alias resolved, the log accepted on its token listing it",
       "requiredResult": "The Original’s did:vh, state and report, with the chain and its trust class; the document derived, with `alsoKnownAs` the did:vh (P3.9, P14.18)",
       "phases": [
@@ -3721,7 +3821,7 @@
     },
     {
       "id": "C12-284",
-      "position": 277,
+      "position": 284,
       "test": "did:evm DID of a token with no accepted anchoring publication, or of a token whose accepted log does not list it",
       "requiredResult": "Resolves to nothing; not an alias (P3.9, P9.23)",
       "phases": [
@@ -3734,7 +3834,7 @@
     },
     {
       "id": "C12-285",
-      "position": 278,
+      "position": 285,
       "test": "did:evm DID of a token the Original has left",
       "requiredResult": "Reported as moved, naming the alias that replaced it; the state on that token never returned as current (P3.9, P9.29)",
       "phases": [
@@ -3747,7 +3847,7 @@
     },
     {
       "id": "C12-286",
-      "position": 279,
+      "position": 286,
       "test": "Document returned by the token’s `tokenURI`, offered as the did:evm DID document",
       "requiredResult": "Not used (P3.9, P3.8)",
       "phases": [
@@ -3757,7 +3857,7 @@
     },
     {
       "id": "C12-287",
-      "position": 280,
+      "position": 287,
       "test": "Carried file of an Original whose log has an `anchor` member, the chain readable",
       "requiredResult": "State from the token at the finalized block; the carried log not preferred; the report names the chain and its trust class (P7.14, P9.20, P9.27)",
       "phases": [
@@ -3771,7 +3871,7 @@
     },
     {
       "id": "C12-288",
-      "position": 281,
+      "position": 288,
       "test": "Carried log with an `anchor` member naming a chain the reader’s revision does not list, or read while P14.21 pins no contract",
       "requiredResult": "Unsupported, not invalid; nothing reported as verified (P7.14, P9.19, P14.21)",
       "phases": [
@@ -3786,9 +3886,24 @@
     },
     {
       "id": "C12-289",
-      "position": 282,
-      "test": "Carried log holding a move entry, read without access to a chain in the path",
+      "position": 289,
+      "test": "Carried log holding a move entry, read without access to the chain the Original is anchored on now",
       "requiredResult": "Missing evidence; at most the entries before the first anchoring entry reported (P7.14, P9.29)",
+      "phases": [
+        1,
+        5
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/evm-anchor.test.ts"
+      ],
+      "note": "Reworded at a3ffdc1 (originals-spec PR 59); was: \"Carried log holding a move entry, read without access to a chain in the path\" / \"Missing evidence; at most the entries before the first anchoring entry reported (P7.14, P9.29)\"."
+    },
+    {
+      "id": "C12-315",
+      "position": 290,
+      "test": "Carried log holding a move entry, the current chain read and a chain it left unreadable",
+      "requiredResult": "Reported as P9.29 requires: proofs and hash links checked, move unconfirmed, ordering on the unread chain claimed only (P7.14, P9.29)",
       "phases": [
         1,
         5
@@ -3800,7 +3915,7 @@
     },
     {
       "id": "C12-290",
-      "position": 283,
+      "position": 291,
       "test": "Writer asked to inscribe or publish a carried file as a body",
       "requiredResult": "The carrier is removed first; the body is the version’s bytes (P7.16, P9.17, P9.25)",
       "phases": [
@@ -3815,7 +3930,7 @@
     },
     {
       "id": "C12-291",
-      "position": 284,
+      "position": 292,
       "test": "Writer making a carried file from an accepted publication’s body and entries",
       "requiredResult": "Allowed, as for any accepted checkpoint (P7.16, P7.15)",
       "phases": [
@@ -3831,7 +3946,7 @@
     },
     {
       "id": "C12-292",
-      "position": 285,
+      "position": 293,
       "test": "Writer about to write a carrier for a log with an `anchor` member",
       "requiredResult": "User told that the file discloses the chain and the minter’s address (P7.15)",
       "phases": [
@@ -3845,7 +3960,7 @@
     },
     {
       "id": "C12-293",
-      "position": 286,
+      "position": 294,
       "test": "Entry published on an Original’s token, whose did:vh or did:webvh signer later removes the signing key",
       "requiredResult": "Remains current, as for an inscribed entry; not reported as historically authorized only, and its ordering not labelled claimed (P7.6, P7.9, P9.20)",
       "phases": [
@@ -3858,7 +3973,7 @@
     },
     {
       "id": "C12-294",
-      "position": 287,
+      "position": 295,
       "test": "Fork of an Original with an EVM `anchor`, then an anchoring entry accepted on its token",
       "requiredResult": "Settled by that anchor’s branch, under the chain’s finality and trust class; on a `consortium` or `operator` chain the settlement is described as attested, never as proven (P6.6, P9.20, P9.24, P9.27)",
       "phases": [
@@ -3871,7 +3986,7 @@
     },
     {
       "id": "C12-295",
-      "position": 288,
+      "position": 296,
       "test": "Move entry’s signing key removed, or its signer DID deactivated, after the departure and before the arrival",
       "requiredResult": "Arrival accepted; the move entry’s signer is checked at the departure only (P9.29)",
       "phases": [
@@ -3884,7 +3999,7 @@
     },
     {
       "id": "C12-296",
-      "position": 289,
+      "position": 297,
       "test": "Move entry published as a departure when its signing key is not valid at the departure’s inscription time",
       "requiredResult": "Rejected; not departed (P9.15, P9.29)",
       "phases": [
@@ -3897,7 +4012,7 @@
     },
     {
       "id": "C12-297",
-      "position": 290,
+      "position": 298,
       "test": "Complete evidence package of an anchored Original, read without access to the anchor",
       "requiredResult": "Missing evidence; at most the entries before the first anchoring entry reported; the package not preferred to the anchor (P7.1, P7.14)",
       "phases": [
@@ -3912,7 +4027,7 @@
     },
     {
       "id": "C12-298",
-      "position": 291,
+      "position": 299,
       "test": "Complete evidence package of an Original with a did:btco signer, read offline",
       "requiredResult": "That signer’s history is not in the package; identity evidence incomplete until it is read from Bitcoin (P7.1, P14.10, P5.6)",
       "phases": [
@@ -3923,7 +4038,7 @@
     },
     {
       "id": "C12-299",
-      "position": 292,
+      "position": 300,
       "test": "`aliases` holding a DID of any other method, or the same DID twice",
       "requiredResult": "Rejected (P14.5)",
       "phases": [
@@ -3933,7 +4048,7 @@
     },
     {
       "id": "C12-300",
-      "position": 293,
+      "position": 301,
       "test": "Grant naming the Original’s did:webvh alias or its token alias",
       "requiredResult": "Rejected (P5.15)",
       "phases": [
@@ -3944,7 +4059,7 @@
     },
     {
       "id": "C12-301",
-      "position": 294,
+      "position": 302,
       "test": "Original that moved to Bitcoin grants a did:btco editor in or after the move entry",
       "requiredResult": "Accepted; the same grant in an entry carrying an `anchor` member is rejected (P9.26)",
       "phases": [
@@ -3959,7 +4074,7 @@
     },
     {
       "id": "C12-302",
-      "position": 295,
+      "position": 303,
       "test": "Signer asked to sign input that is not a well-formed Originals entry, or without showing the signer, the Original, the operation and the resource changes",
       "requiredResult": "Refused (P5.11)",
       "phases": [
@@ -3969,7 +4084,7 @@
     },
     {
       "id": "C12-303",
-      "position": 296,
+      "position": 304,
       "test": "Exact-checkpoint resolution of a checkpoint the resolver cannot supply",
       "requiredResult": "Reports why; the latest checkpoint is not substituted (P3.2)",
       "phases": [
@@ -3979,7 +4094,7 @@
     },
     {
       "id": "C12-304",
-      "position": 297,
+      "position": 305,
       "test": "Report for an anchored Original",
       "requiredResult": "States the confirmation depth relied on and whether more than one independent index agreed on the sat’s location (P9.5, P9.11)",
       "phases": [
@@ -3989,7 +4104,7 @@
     },
     {
       "id": "C12-305",
-      "position": 298,
+      "position": 306,
       "test": "Genesis parameters other than exactly `method` and `scid`; a later entry with a non-empty parameters object that is not a deactivation; a null parameter value",
       "requiredResult": "Rejected (P14.1)",
       "phases": [
@@ -3999,7 +4114,7 @@
     },
     {
       "id": "C12-306",
-      "position": 299,
+      "position": 307,
       "test": "Plaintext metadata, base64 content or raw storage",
       "requiredResult": "Never labelled encrypted (P8.2)",
       "phases": [
@@ -4008,8 +4123,222 @@
       "status": "todo"
     },
     {
+      "id": "C12-316",
+      "position": 308,
+      "test": "Carried file imported, then read again with no separate opt-in to resolve",
+      "requiredResult": "No resolver request; the import is not an opt-in (P7.13)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/carried.test.ts",
+        "packages/sdk/tests/unit/originals/fs-store.test.ts"
+      ]
+    },
+    {
+      "id": "C12-317",
+      "position": 309,
+      "test": "Carried checkpoint from before the anchoring entry of an Original that is now anchored",
+      "requiredResult": "Allowed; reported as a historical checkpoint, valid as of it, with no statement about current anchoring (P7.14, P7.15)",
+      "phases": [
+        1,
+        4,
+        5
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/carried.test.ts",
+        "packages/vh/tests/carried.test.ts",
+        "packages/vh/tests/evm-anchor.test.ts"
+      ]
+    },
+    {
+      "id": "C12-318",
+      "position": 310,
+      "test": "Carried file with a wrong or missing file name extension",
+      "requiredResult": "The extension is only a hint; the other carriers are tried, and the carrier found is checked against the verified descriptor’s `mediaType` (P14.14)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/carried.test.ts"
+      ]
+    },
+    {
+      "id": "C12-319",
+      "position": 311,
+      "test": "Descriptor `mediaType` with a parameter, such as `text/plain; charset=utf-8`",
+      "requiredResult": "Rejected; the parameter is not ignored (P14.6, P14.14)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/carried.test.ts"
+      ]
+    },
+    {
+      "id": "C12-320",
+      "position": 312,
+      "test": "Text block whose closer line is not directly preceded by the END marker, or whose BEGIN marker in a block comment is not directly preceded by the opener",
+      "requiredResult": "No carrier (P14.16)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/carried.test.ts"
+      ]
+    },
+    {
+      "id": "C12-321",
+      "position": 313,
+      "test": "HTML version ending inside an open `script`, `style` or `textarea` element / inside an open `pre` element",
+      "requiredResult": "Writer refuses / writer accepts; the block parses as a separate comment (P14.16)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/carried.test.ts"
+      ]
+    },
+    {
+      "id": "C12-322",
+      "position": 314,
+      "test": "Shell or C-family version whose last line ends in a line continuation",
+      "requiredResult": "Writer refuses (P14.16)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/carried.test.ts"
+      ]
+    },
+    {
+      "id": "C12-323",
+      "position": 315,
+      "test": "did:evm DID resolved from token reads alone, the token’s first record being junk or another Original’s log",
+      "requiredResult": "Candidate taken from an anchoring or arrival publication, then verified with its link to the queried token; the junk record does not decide (P3.9)",
+      "phases": [
+        5
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/evm-anchor.test.ts"
+      ]
+    },
+    {
+      "id": "C12-324",
+      "position": 316,
+      "test": "Token minted by anyone, with a `tokenURI` but no verified history",
+      "requiredResult": "Not shown to be an Original (P9.23)",
+      "phases": [
+        5
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/evm-anchor.test.ts"
+      ]
+    },
+    {
+      "id": "C12-325",
+      "position": 317,
+      "test": "Provider that cannot serve state at the finalized block because finality trails its retained state",
+      "requiredResult": "Not usable for that read; missing evidence (P9.22)",
+      "phases": [
+        5
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/evm.test.ts",
+        "packages/vh/tests/evm-anchor.test.ts"
+      ]
+    },
+    {
+      "id": "C12-326",
+      "position": 318,
+      "test": "Provider read at its own, later finalized block, compared with the other provider at the lower block",
+      "requiredResult": "Not evidence for the comparison (P9.22)",
+      "phases": [
+        5
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/evm-anchor.test.ts"
+      ]
+    },
+    {
+      "id": "C12-327",
+      "position": 319,
+      "test": "Verification repeated with no evidence of a finality failure",
+      "requiredResult": "Earlier finalized block hashes need not be read again; when evidence appears, a warning is reported and retained results resting on that block are discarded (P9.22)",
+      "phases": [
+        5
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/evm-anchor.test.ts"
+      ]
+    },
+    {
+      "id": "C12-328",
+      "position": 320,
+      "test": "Token with many records, verifier holding a checkpoint",
+      "requiredResult": "MAY resume from the checkpoint and read only later records; no record cap or reader budget (P9.25)",
+      "phases": [
+        5
+      ],
+      "status": "covered",
+      "note": "Also exercised against a contract on anvil: packages/sdk/tests/integration/evm-anvil.test.ts (gated on a local chain).",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/evm.test.ts",
+        "packages/vh/tests/evm-anchor.test.ts"
+      ]
+    },
+    {
+      "id": "C12-329",
+      "position": 321,
+      "test": "Writer staging an upload",
+      "requiredResult": "Learns the upload ID from `UploadBegun`; the event is never evidence (P14.20)",
+      "phases": [
+        5
+      ],
+      "status": "todo",
+      "note": "Contract behavior, tested in Solidity: contracts/test/OriginalsAnchor.t.sol test_uploadBegunEvent (forge test; outside the Bun roots this registry scans, and not run in CI), citing C12-329; the writer's use of the event is exercised only by the staged upload in packages/sdk/tests/integration/evm-anvil.test.ts (gated on a local chain). packages/sdk/tests/unit/originals/evm.test.ts checks the event's topic without citing the row."
+    },
+    {
+      "id": "C12-330",
+      "position": 322,
+      "test": "Move entry prepared before any departure record exists",
+      "requiredResult": "Layers judged provisionally by the current classes; by the classes at the departure record’s timestamp once it is read (P9.28)",
+      "phases": [
+        5
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/evm-anchor.test.ts"
+      ]
+    },
+    {
+      "id": "C12-331",
+      "position": 323,
+      "test": "Signed anchoring entry not published, genesis `anchor` member alone, or token minted with no publication",
+      "requiredResult": "Not anchored (P9.19, P9.23)",
+      "phases": [
+        5
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/evm-anchor.test.ts"
+      ]
+    },
+    {
       "id": "C12-307",
-      "position": 300,
+      "position": 324,
       "test": "Two entries whose `versionTime` values differ by less than one millisecond, or a `versionTime` with more than three fractional digits",
       "requiredResult": "Rejected (P14.2)",
       "phases": [

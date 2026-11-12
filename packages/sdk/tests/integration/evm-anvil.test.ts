@@ -256,7 +256,7 @@ describe.skipIf(!enabled)("EVM anchoring on anvil (PR 59, experimental)", () => 
     // P9.24 (a3ffdc1): on an operator chain, uniqueness is attested by the operator, under its finality and these providers.
     expect(report.evm?.stretches[0]?.uniqueness).toMatchObject({ status: "attested-by-operator", class: "operator", block: { number: finalized.number } });
 
-    // PR59b: "Token with many records, verifier holding a checkpoint": once record 4 is final, the
+    // C12-328: "Token with many records, verifier holding a checkpoint": once record 4 is final, the
     // reader resumes at the retained checkpoint's index and the verifier reads only that record (P9.25).
     const [checkpoint] = report.retain.evmCheckpoints ?? [];
     expect(checkpoint).toMatchObject({ token: alias, records: 4, head: rename.versionId });

@@ -1,8 +1,7 @@
 /**
  * Carried logs (proposed; aviarytech/originals-spec PR 59 at a3ffdc1):
  * P7.11-P7.16, P14.14-P14.17. Each test cites its section 12 row by C12 id,
- * followed by a quote of the row's first column. Rows added at a3ffdc1, not
- * yet in the registry, are cited as `PR59b:` with a quote of their first column.
+ * followed by a quote of the row's first column.
  */
 import { describe, expect, test } from "bun:test";
 import { serializeLog, type LogEntry } from "../src/log/index.js";
@@ -91,7 +90,7 @@ describe("P14.14: the carrier for a media type", () => {
     expect(carrierFor("text/marKdown".replace("K", "K"))).toBeNull();
   });
 
-  test("PR59b: \"Descriptor `mediaType` with a parameter, such as `text/plain; charset=utf-8`\": rejected; the parameter is not ignored (P14.6, P14.14)", async () => {
+  test("C12-319: \"Descriptor `mediaType` with a parameter, such as `text/plain; charset=utf-8`\": rejected; the parameter is not ignored (P14.6, P14.14)", async () => {
     for (const mediaType of ["text/plain; charset=utf-8", "text/plain;charset=utf-8", "application/json; profile=x"]) {
       expect(carrierFor(mediaType)).toBeNull();
       // A verifier rejects the descriptor itself (P14.6): no entry can name it.
@@ -109,7 +108,7 @@ describe("P14.14: the carrier for a media type", () => {
     expect(r.verified).toEqual({ log: false, version: false });
   });
 
-  test("PR59b: \"Carried file with a wrong or missing file name extension\": the extension is only a hint; the other carriers are tried, and the carrier found is checked against the verified descriptor's `mediaType` (P14.14)", async () => {
+  test("C12-318: \"Carried file with a wrong or missing file name extension\": the extension is only a hint; the other carriers are tried, and the carrier found is checked against the verified descriptor's `mediaType` (P14.14)", async () => {
     const png = await original([{ data: PNG, mediaType: "image/png" }]);
     const file = await carry(PNG, png.entries);
     for (const hint of [undefined, "harbor.png", "harbor.json", "harbor.md", "harbor", "text/plain", "application/json", "image/png"]) {
@@ -460,7 +459,7 @@ describe("P14.16: text blocks", () => {
     expect(r.overall).toEqual({ status: "failed", reason: "file-digest-mismatch" });
   });
 
-  test("PR59b: \"Text block whose closer line is not directly preceded by the END marker, or whose BEGIN marker in a block comment is not directly preceded by the opener\": no carrier (P14.16)", async () => {
+  test("C12-320: \"Text block whose closer line is not directly preceded by the END marker, or whose BEGIN marker in a block comment is not directly preceded by the opener\": no carrier (P14.16)", async () => {
     const { entries } = await original([{ data: MD1, mediaType: "text/markdown" }]);
     const file = dec(await carry(MD1, entries));
     const block = file.slice(MD1.length);
@@ -545,7 +544,7 @@ describe("P14.16, P7.15: text block writer refusals", () => {
     expect(await refusal(enc("# Notes\n\n```js\nconst x = 1;\n```\n"), "text/markdown")).toBeUndefined();
     // P14.16's other examples.
     expect((await refusal(enc("<p>hi</p>\n<script>\nlet a = 1;\n"), "text/html"))?.reason).toBe("unclosed-element");
-    // An unclosed `pre` is no longer a reason to refuse (P14.16 at a3ffdc1): see the PR59b row below.
+    // An unclosed `pre` is no longer a reason to refuse (P14.16 at a3ffdc1): see C12-321 below.
     expect((await refusal(enc("<p>hi</p>\n<script>\nlet a = 1;\n"), "text/markdown"))?.reason).toBe("unclosed-element");
     expect((await refusal(enc("<p>hi <!-- note\n"), "text/html"))?.reason).toBe("unclosed-comment");
     expect((await refusal(enc("const s = `multi\nline"), "text/javascript"))?.reason).toBe("unterminated-string");
@@ -555,7 +554,7 @@ describe("P14.16, P7.15: text block writer refusals", () => {
     expect((await refusal(enc("echo a \\"), "text/x-shellscript"))?.reason).toBe("line-continuation");
   });
 
-  test("PR59b: \"HTML version ending inside an open `script`, `style` or `textarea` element / inside an open `pre` element\": writer refuses / writer accepts; the block parses as a separate comment (P14.16)", async () => {
+  test("C12-321: \"HTML version ending inside an open `script`, `style` or `textarea` element / inside an open `pre` element\": writer refuses / writer accepts; the block parses as a separate comment (P14.16)", async () => {
     for (const mediaType of ["text/html", "application/xhtml+xml", "text/markdown"]) {
       for (const element of ["script", "style", "textarea", "title", "xmp", "noscript"]) {
         expect(await refusal(enc(`<p>hi</p>\n<${element}>\nsome text\n`), mediaType)).toEqual({ code: "CARRIER_CANNOT_ADD", reason: "unclosed-element" });
@@ -584,7 +583,7 @@ describe("P14.16, P7.15: text block writer refusals", () => {
     expect(await refusal(enc('a { content: "closed" }\n'), "text/css")).toBeUndefined();
   });
 
-  test("PR59b: \"Shell or C-family version whose last line ends in a line continuation\": writer refuses (P14.16)", async () => {
+  test("C12-322: \"Shell or C-family version whose last line ends in a line continuation\": writer refuses (P14.16)", async () => {
     for (const mediaType of ["text/x-shellscript", "text/x-c", "text/x-c++", "text/javascript", "text/x-python", "application/sql", "application/toml", "application/yaml"]) {
       for (const text of ["x \\", "x \\\n", "x \\\r\n"]) {
         expect(await refusal(enc(`first\n${text}`), mediaType)).toEqual({ code: "CARRIER_CANNOT_ADD", reason: "line-continuation" });
@@ -623,7 +622,7 @@ describe("P14.17: JSON members", () => {
     expect(r.verified).toEqual({ log: true, version: true });
   });
 
-  test("PR59b: \"JSON member that is not the root object's last, as after a tool reorders members\": found; its log verified and reported separately; the file not verified as a version (P7.12, P14.17)", async () => {
+  test("C12-222: \"JSON member that is not the root object's last, as after a tool reorders members\": found; its log verified and reported separately; the file not verified as a version (P7.12, P14.17)", async () => {
     const { alice, entries } = await jsonOriginal('{"a":1}');
     const log = `[${entries.map((e) => JSON.stringify(e)).join(",")}]`;
     for (const doc of [`{"originalLog":${log},"a":1}`, `{"b":2,"originalLog":${log},"a":1}`]) {
@@ -645,7 +644,7 @@ describe("P14.17: JSON members", () => {
     }
   });
 
-  test("PR59b: \"Two root members named `originalLog`, including one spelled with escapes\": rejected; neither is chosen (P14.17)", async () => {
+  test("C12-308: \"Two root members named `originalLog`, including one spelled with escapes\": rejected; neither is chosen (P14.17)", async () => {
     const { alice, entries } = await jsonOriginal('{"a":1}');
     const log = `[${entries.map((e) => JSON.stringify(e)).join(",")}]`;
     for (const doc of [`{"originalLog":[],"a":1,"originalLog":${log}}`, `{"original\\u004cog":${log},"a":1,"originalLog":${log}}`, `{"a":1,"originalLog":${log},"originalLog":${log}}`]) {
@@ -660,7 +659,7 @@ describe("P14.17: JSON members", () => {
     }
   });
 
-  test("PR59b: \"Member named `originalLog` nested below the root\": not a JSON member (P14.17)", async () => {
+  test("C12-309: \"Member named `originalLog` nested below the root\": not a JSON member (P14.17)", async () => {
     const { entries } = await jsonOriginal('{"a":1}');
     const log = `[${entries.map((e) => JSON.stringify(e)).join(",")}]`;
     expect(locateCarrier(enc(`{"a":1,"inner":{"originalLog":${log}}}`))).toEqual({ status: "none" });
@@ -871,7 +870,7 @@ describe("P7.14: anchored Originals", () => {
     expect(agreeing.verified).toEqual({ log: true, version: true });
   });
 
-  test("PR59b: \"Carried checkpoint from before the anchoring entry of an Original that is now anchored\": allowed; reported as a historical checkpoint, valid as of it, with no statement about current anchoring (P7.14, P7.15)", async () => {
+  test("C12-317: \"Carried checkpoint from before the anchoring entry of an Original that is now anchored\": allowed; reported as a historical checkpoint, valid as of it, with no statement about current anchoring (P7.14, P7.15)", async () => {
     const { alice, genesis, renamed, anchor } = await anchored();
     // P7.15: the writer MAY carry it, with no anchor evidence.
     const file = await carry(bytes(B1), [genesis, renamed]);
