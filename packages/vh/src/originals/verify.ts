@@ -46,7 +46,7 @@ import { didWebvhLogUrl } from "../webvh/index.js";
 import { NATIVE_SHA256_MIN_BYTES, bytesView } from "../crypto/index.js";
 import { deriveDocument, exactNumberError, originalsSpecialisation } from "./profile.js";
 import { assembleFromEvm, type EvmAnchoringReport, type EvmAssembly, type EvmEvidence } from "./evm-anchor.js";
-import type { RetainedEvmBlock } from "./evm.js";
+import type { EvmCheckpoint, RetainedEvmBlock } from "./evm.js";
 import { ORIGINALS_LIMITS, ORIGINALS_METHOD, resourceDigest, resourceDigestAsync, signerOf, type AssetState, type EntryState } from "./state.js";
 
 export interface VerifyOriginalOptions {
@@ -335,7 +335,11 @@ export interface OriginalsReport {
    * rather than silent (P9.16), with the inscriptions reported unverifiable,
    * so accepting one later is a reported change of head (P9.15).
    */
-  retain: { original: string | null; authors: Record<string, string>; anchor?: RetainedAnchor; evm?: RetainedEvmBlock[] };
+  retain: {
+    original: string | null; authors: Record<string, string>; anchor?: RetainedAnchor; evm?: RetainedEvmBlock[];
+    /** P9.25 (PR 59 a3ffdc1): verified checkpoints per token, to resume from (`EvmEvidence.checkpoints`). EXPERIMENTAL. */
+    evmCheckpoints?: EvmCheckpoint[];
+  };
 }
 
 function toFailure(index: number, versionId: string | undefined, error: OriginalsError): ReportFailure {
@@ -741,12 +745,19 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   // With the anchor, the inscriptions reported unverifiable: one accepted later is a reported change of head (P9.15).
   const unverifiableNow = onBitcoin?.unverifiable.map((u) => u.inscription) ?? [];
   const acceptedNow = onBitcoin?.accepted.map((a) => a.inscription) ?? [];
+  // P9.22 (PR 59 a3ffdc1): evidence that a finalized block was replaced discards every retained result
+  // and checkpoint that rested on it or a later block of that chain. A retained token anchor rested on
+  // the chain's retained block, so it goes with it; what this read found is kept.
+  const replaced = evmAssembly?.replaced ?? [];
+  const onReplaced = (chain: string, number: number) => replaced.some((r) => r.chain === chain && number >= r.from);
+  const retainedTokenChain = options.retained?.anchor?.sat.startsWith("did:evm:") ? `eip155:${options.retained.anchor.sat.split(":")[2]}` : undefined;
+  const keptAnchor = retainedTokenChain !== undefined && replaced.some((r) => r.chain === retainedTokenChain) ? undefined : options.retained?.anchor;
   const retainedAnchor: RetainedAnchor | undefined = onBitcoin
     ? {
       inscription: onBitcoin.anchor!.inscription, sat: onBitcoin.sat, owner: assembly!.owner?.output ?? null,
       ...(unverifiableNow.length > 0 ? { unverifiable: unverifiableNow } : {}), ...(acceptedNow.length > 0 ? { accepted: acceptedNow } : {}),
     }
-    : evmAssembly?.retainedAnchor ?? options.retained?.anchor;
+    : evmAssembly?.retainedAnchor ?? keptAnchor;
   const identityEvidence: OriginalsReport["identityEvidence"] = {
     status: identityIncomplete ? "incomplete" : "complete",
     author: authorDid ?? history?.did ?? null,
@@ -802,12 +813,18 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     // An anchored log whose anchor Bitcoin has not shown is not retained past what was (P9.12).
     // After a change of anchor, the new anchor's branch is the history (P9.16).
     retain: {
-      original: (assembly || evmAssembly) && !onBitcoin && !onEvm
+      // P9.22: after a replaced block the retained head is discarded; only what this read verified is kept.
+      original: replaced.length > 0
+        ? (onEvm || onBitcoin ? (head?.entry.versionId ?? null) : null)
+        : (assembly || evmAssembly) && !onBitcoin && !onEvm
         ? (options.retained?.original ?? null)
         : onBitcoin?.change || evmReport?.stretches.some((s) => s.change) ? (head?.entry.versionId ?? null) : retainOriginal(head?.entry.versionId, options.retained?.original, fork !== null),
       authors: retainedAuthors,
       ...(retainedAnchor ? { anchor: retainedAnchor } : {}),
-      ...(evmAssembly && evmAssembly.retainedBlocks.length > 0 ? { evm: retainedEvm(evmAssembly.retainedBlocks, options.evm?.retained) } : {}),
+      ...(evmAssembly && evmAssembly.retainedBlocks.length > 0 ? { evm: retainedEvm(evmAssembly.retainedBlocks, options.evm?.retained, onReplaced) } : {}),
+      ...(evmAssembly && (evmAssembly.checkpoints.length > 0 || (options.evm?.checkpoints?.length ?? 0) > 0)
+        ? { evmCheckpoints: retainedCheckpoints(evmAssembly.checkpoints, options.evm?.checkpoints, onReplaced) }
+        : {}),
     },
   };
   for (const h of histories) {
@@ -842,6 +859,8 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     const reason = why[evmReport.status];
     if (reason) reasons.push(reason);
     if (evmReport.move === "unconfirmed") reasons.push("move-unconfirmed");
+    // P9.29: a final departure whose destination could not be read; no arrival claimed or denied.
+    if (evmReport.arrival === "unknown" && evmReport.destination !== null) reasons.push("evm-destination-unreachable");
     if (evmReport.stretches.some((s) => s.finality === "failed")) reasons.push("evm-finality-failed");
     if (evmReport.warnings.includes("authoritative-source-changed") && !reasons.includes("authoritative-source-changed")) reasons.push("authoritative-source-changed");
     if (evmReport.stretches.some((s) => s.change)) reasons.push("anchor-changed");
@@ -881,9 +900,15 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
 }
 
 /** The finalized blocks relied on now, and the retained ones of chains not read this time (P9.22). */
-function retainedEvm(now: RetainedEvmBlock[], before: RetainedEvmBlock[] | undefined): RetainedEvmBlock[] {
+function retainedEvm(now: RetainedEvmBlock[], before: RetainedEvmBlock[] | undefined, replaced: (chain: string, number: number) => boolean): RetainedEvmBlock[] {
   const chains = new Set(now.map((b) => b.chain));
-  return [...(before ?? []).filter((b) => !chains.has(b.chain)), ...now];
+  return [...(before ?? []).filter((b) => !chains.has(b.chain) && !replaced(b.chain, b.number)), ...now];
+}
+
+/** P9.25: this read's checkpoints, and earlier ones for tokens it did not read, unless they rest on a replaced block (P9.22). */
+function retainedCheckpoints(now: EvmCheckpoint[], before: EvmCheckpoint[] | undefined, replaced: (chain: string, number: number) => boolean): EvmCheckpoint[] {
+  const tokens = new Set(now.map((c) => c.token));
+  return [...(before ?? []).filter((c) => !tokens.has(c.token) && !replaced(c.chain, c.block.number)), ...now];
 }
 
 /**

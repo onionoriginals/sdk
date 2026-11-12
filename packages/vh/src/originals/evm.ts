@@ -65,7 +65,7 @@ const assessed = Date.UTC(2026, 10, 11);
 const row = (name: string, id: number, genesisHash: string, cls: TrustClass): ListedChain =>
   Object.freeze({ name, chain: `eip155:${id}`, chainId: BigInt(id), genesisHash, classes: Object.freeze([Object.freeze({ from: assessed, class: cls })]) });
 
-/** P14.22 as of originals-spec PR 59 (3ed0f89), assessed 11 November 2026. PROVISIONAL. */
+/** P14.22 as of originals-spec PR 59 (a3ffdc1; the table is unchanged since 3ed0f89), assessed 11 November 2026. PROVISIONAL. */
 export const EVM_CHAINS: ReadonlyArray<ListedChain> = Object.freeze([
   row("Ethereum", 1, "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3", "consensus"),
   row("Monad", 143, "0x0c47353304f22b1c15706367d739b850cda80b5c87bbc335014fef3d88deaac9", "consensus"),
@@ -85,12 +85,24 @@ export const EVM_CHAINS: ReadonlyArray<ListedChain> = Object.freeze([
  * claim.
  */
 export interface EvmAnchorPin {
-  /** The contract address, lowercase 0x hex (P14.21). */
+  /** The contract address, lowercase 0x hex (P14.21): the common one, and the default for every chain. */
   address: string;
+  /**
+   * P14.21 (PR 59 a3ffdc1): the address on a chain where the common one is
+   * unavailable, keyed by `eip155:<id>`, each lowercase 0x hex. The runtime
+   * code hash stays common. Use `anchorAddress` to look one up.
+   */
+  addresses?: Readonly<Record<string, string>>;
   /** keccak256 of the runtime code, lowercase 0x hex (P9.21). */
   codeHash: string;
   /** Chains to use instead of `EVM_CHAINS`, as for a devnet. Default `EVM_CHAINS`. */
   chains?: ReadonlyArray<ListedChain>;
+}
+
+/** The address P14.21 fixes for `chain`: its own where the pin lists one, else the common one (P14.18, P14.21). */
+export function anchorAddress(pin: EvmAnchorPin, chain: string): string {
+  const own = pin.addresses?.[chain];
+  return own ?? pin.address;
 }
 
 /** The P14.21 pin of the spec revision this code follows: none (originals-spec PR 59). */
@@ -247,15 +259,32 @@ export interface EvmProviderRead {
   block: { number: number; hash: string };
   codeHash: string | null;
   owner: string | null;
-  /** Every record of the token at `block`, in index order, or null if they could not be read (P9.25). */
+  /**
+   * Every record of the token at `block` from index `from`, in index order, or
+   * null if they could not be read (P9.25).
+   */
   records: EvmRecord[] | null;
+  /**
+   * P9.25 (PR 59 a3ffdc1, MAY): the first record index read, when the reader
+   * resumed from a retained checkpoint (`EvmCheckpoint.records`). Default 0:
+   * every record. A verifier accepts a later start only with that checkpoint.
+   */
+  from?: number;
+  /**
+   * P9.22 (PR 59 a3ffdc1): the provider could not serve the contract's state
+   * at `block`, as when finality trails the state it keeps. It is not usable
+   * for that read, and its failure is missing evidence. Its other fields then
+   * carry no state.
+   */
+  stateUnavailable?: boolean;
   /** Records seen above `block` (observed, never accepted; P9.22), for pending labels. */
   observed?: EvmRecord[];
   /**
    * Optional: the hashes this provider reports for earlier block numbers the
    * verifier retained (`RetainedEvmBlock`), so a replaced finalized block below
-   * `block` is found (P9.22). Without it only a retained block at `block`'s
-   * number can be checked.
+   * `block` is found (P9.22). P9.22 assumes finality and does not require
+   * these reads; without them only a retained block at `block`'s number can be
+   * checked. A hash that differs is evidence of a replaced block.
    */
   blockHashes?: Array<{ number: number; hash: string }>;
 }
@@ -278,4 +307,50 @@ export interface RetainedEvmBlock {
   chain: string;
   number: number;
   hash: string;
+}
+
+/**
+ * P9.25 (PR 59 a3ffdc1, MAY): a retained verified checkpoint of one token, from
+ * which a verifier resumes and reads only later records. It is the accepted
+ * head at a record index and the finalized block it was read at, with what
+ * the verifier needs to continue the P9.13-P9.15 rules from there without
+ * re-reading earlier records: the anchor (or arrival), what was accepted
+ * after it, each with the timestamp its record holds, and the greatest
+ * record timestamp so far (P9.20). PROVISIONAL shape; the spec defines no
+ * format. A checkpoint resting on a block the chain replaced is discarded
+ * (P9.22). The verifier resumes only with a copy of the log that holds the
+ * checkpoint's head (P7.14: the copy is checked against the checkpoint, never
+ * preferred to the token).
+ */
+export interface EvmCheckpoint {
+  chain: string;
+  /** The token alias (P14.18). */
+  token: string;
+  /** The number of records read: the next index a resumed read starts at. */
+  records: number;
+  /** The finalized block the checkpoint was read at (P9.22). */
+  block: { number: number; hash: string };
+  /** The accepted head's versionId. */
+  head: string;
+  /** Whether the anchor is an arrival (P9.29). */
+  arrival: boolean;
+  /**
+   * The anchor or arrival, the publications accepted after it in index order,
+   * and the conflicting anchors: record index, versionId, the timestamp the
+   * record holds (s) and its inscription time (ms; P9.20).
+   */
+  anchor: EvmCheckpointPlacement;
+  accepted: EvmCheckpointPlacement[];
+  conflicting: EvmCheckpointPlacement[];
+  /** The greatest timestamp among the records read (s), for the inscription time of later ones (P9.20). */
+  latest: number;
+  /** Whether a move entry was accepted: nothing later is accepted on this token (P9.29). */
+  departed: boolean;
+}
+
+export interface EvmCheckpointPlacement {
+  index: number;
+  versionId: string;
+  timestamp: number;
+  time: number;
 }
