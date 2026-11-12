@@ -10,6 +10,15 @@
  * one by `publishSameBody` (P14.20). The reader then reads the evidence at
  * the finalized block (P9.21, P9.22, P9.25).
  *
+ * The second journey drives the SDK workflow (`OriginalsSDK`) end to end on
+ * two anvil devnets of different trust classes, both added to the pin's
+ * chains: chain 31337 as `operator` (an attested chain) and 31338 as
+ * `consensus` (a proven chain). It creates an Original with an `anchor`
+ * member, anchors, mints and publishes it, publishes an edit, verifies it
+ * from the providers, then moves it up from the attested chain to the proven
+ * one: the move entry is the departure on the first token and the arrival on
+ * the second, minted by the destination's minter (P9.28, P9.29).
+ *
  * Gated like the regtest journeys, on local tooling: the package's `test`
  * script includes this file, but it skips unless `anvil` is found (on the
  * PATH or in ~/.foundry/bin) and the contract is built or `forge` can build
@@ -47,6 +56,7 @@ import {
   type EvmWriterContext,
 } from "../../src/originals/evm.js";
 import { inscriptionMetadata } from "../../src/originals/inscription.js";
+import { MemoryStore, OriginalsSDK } from "../../src/originals/index.js";
 import { Author, seed } from "../unit/originals/helpers.js";
 
 const ROOT = resolve(import.meta.dir, "../../../..");
@@ -72,6 +82,33 @@ const enabled = ANVIL !== null && (existsSync(ARTIFACT) || FORGE !== null);
 /** Anvil's unlocked dev accounts (its public, well-known test mnemonic): no key is handled here. */
 const DEPLOYER = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
 const MINTER = "0x70997970c51812dc3a010c7d01b50e0d17dc79c8";
+const CAROL = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc";
+const ADDRESS = "0x48f382c1d6c079bde4971c89e316841d2c9e79c2"; // contracts/README.md (build at PR 59 a3ffdc1)
+
+/** A disposable local anvil node with the given chain ID; finalized trails latest by two blocks. */
+async function startAnvil(chainId: number): Promise<{ proc: ReturnType<typeof Bun.spawn>; url: string; rpc: EvmRpc }> {
+  const port = 20_000 + Math.floor(Math.random() * 30_000);
+  const proc = Bun.spawn([ANVIL!, "--port", String(port), "--chain-id", String(chainId), "--slots-in-an-epoch", "1", "--silent"], { stdout: "ignore", stderr: "ignore" });
+  const url = `http://127.0.0.1:${port}`;
+  const rpc = new EvmRpc(url, { fetch: realFetch });
+  for (let i = 0; ; i++) {
+    try {
+      await rpc.chainId();
+      break;
+    } catch (error) {
+      if (i > 100) throw error;
+      await Bun.sleep(100);
+    }
+  }
+  return { proc, url, rpc };
+}
+
+/** P14.21: CREATE2 through the deterministic deployment proxy, zero salt. */
+async function deploy(rpc: EvmRpc): Promise<bigint> {
+  const init = (JSON.parse(readFileSync(ARTIFACT, "utf8")) as { bytecode: { object: string } }).bytecode.object;
+  const deployed = await rpc.request<string>("eth_sendTransaction", [{ from: DEPLOYER, to: PROXY, data: `0x${"00".repeat(32)}${init.slice(2)}` }]);
+  return (await waitForEvmReceipt(rpc, deployed, { pollMs: 50 })).gasUsed;
+}
 
 /** An injected wallet backed by anvil's unlocked accounts (`eth_sendTransaction`). */
 const anvilWallet = (rpc: EvmRpc, address: string): EvmWallet => ({
@@ -81,8 +118,11 @@ const anvilWallet = (rpc: EvmRpc, address: string): EvmWallet => ({
 
 describe.skipIf(!enabled)("EVM anchoring on anvil (PR 59, experimental)", () => {
   let proc: ReturnType<typeof Bun.spawn> | undefined;
+  let procB: ReturnType<typeof Bun.spawn> | undefined;
   let url = "";
+  let urlB = "";
   let rpc: EvmRpc;
+  let rpcB: EvmRpc;
   let pin: EvmAnchorPin;
   const gas: Record<string, bigint> = {};
 
@@ -91,34 +131,25 @@ describe.skipIf(!enabled)("EVM anchoring on anvil (PR 59, experimental)", () => 
       const build = Bun.spawnSync([FORGE!, "build"], { cwd: CONTRACTS, stdout: "pipe", stderr: "pipe" });
       if (build.exitCode !== 0) throw new Error(`forge build failed: ${build.stderr.toString()}`);
     }
-    const port = 20_000 + Math.floor(Math.random() * 30_000);
     // Finalized trails latest by two blocks (anvil: 2 x slots per epoch), so pending is observable.
-    proc = Bun.spawn([ANVIL!, "--port", String(port), "--slots-in-an-epoch", "1", "--silent"], { stdout: "ignore", stderr: "ignore" });
-    url = `http://127.0.0.1:${port}`;
-    rpc = new EvmRpc(url, { fetch: realFetch });
-    for (let i = 0; ; i++) {
-      try {
-        await rpc.chainId();
-        break;
-      } catch (error) {
-        if (i > 100) throw error;
-        await Bun.sleep(100);
-      }
-    }
-    // P14.21: CREATE2 through the deterministic deployment proxy, zero salt.
-    const init = (JSON.parse(readFileSync(ARTIFACT, "utf8")) as { bytecode: { object: string } }).bytecode.object;
-    const deployed = await rpc.request<string>("eth_sendTransaction", [{ from: DEPLOYER, to: PROXY, data: `0x${"00".repeat(32)}${init.slice(2)}` }]);
-    const receipt = await waitForEvmReceipt(rpc, deployed, { pollMs: 50 });
-    gas.deploy = receipt.gasUsed;
-    const address = "0x48f382c1d6c079bde4971c89e316841d2c9e79c2"; // contracts/README.md (build at PR 59 a3ffdc1)
+    ({ proc, url, rpc } = await startAnvil(31337));
+    ({ proc: procB, url: urlB, rpc: rpcB } = await startAnvil(31338));
+    gas.deploy = await deploy(rpc);
+    await deploy(rpcB);
+    // P9.21: the pinned code is read at the finalized block, so the deployment must be final before any read.
+    for (const r of [rpc, rpcB]) await r.request("anvil_mine", ["0x3"]);
+    const address = ADDRESS;
     const code = await rpc.code(address, "latest");
-    const genesis = (await rpc.block(0))!;
-    const devnet: ListedChain = { name: "Anvil devnet", chain: "eip155:31337", chainId: 31337n, genesisHash: genesis.hash, classes: [{ from: 0, class: "operator" }] };
-    pin = { address, codeHash: keccakHex(code), chains: [...EVM_CHAINS, devnet] };
+    // The same address and runtime code on both devnets (P14.21).
+    expect(keccakHex(await rpcB.code(address, "latest"))).toBe(keccakHex(code));
+    const devnet: ListedChain = { name: "Anvil devnet", chain: "eip155:31337", chainId: 31337n, genesisHash: (await rpc.block(0))!.hash, classes: [{ from: 0, class: "operator" }] };
+    const proven: ListedChain = { name: "Anvil proven devnet", chain: "eip155:31338", chainId: 31338n, genesisHash: (await rpcB.block(0))!.hash, classes: [{ from: 0, class: "consensus" }] };
+    pin = { address, codeHash: keccakHex(code), chains: [...EVM_CHAINS, devnet, proven] };
   }, 120_000);
 
   afterAll(() => {
     proc?.kill();
+    procB?.kill();
     if (Object.keys(gas).length) console.log("gasUsed on anvil:", Object.fromEntries(Object.entries(gas).map(([k, v]) => [k, v.toString()])));
   });
 
@@ -270,5 +301,87 @@ describe.skipIf(!enabled)("EVM anchoring on anvil (PR 59, experimental)", () => 
     expect(next.head).toBe(later.versionId);
     expect(next.evm?.stretches[0]?.resumedFrom).toEqual({ records: 4, block: checkpoint!.block });
     expect(next.current, JSON.stringify(next.reasons)).toBe(true);
+  }, 180_000);
+  test("the SDK workflow: create with anchor, anchor, mint, publish, edit, verify, then move from an operator chain to a consensus chain (P9.18-P9.29)", async () => {
+    const KEY = seed(53);
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const signer = alice.signer("orig", KEY);
+    const author = alice.ref("orig");
+    const A = "eip155:31337";
+    const B = "eip155:31338";
+    const store = new MemoryStore();
+    const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], evm: { pin, providers: { [A]: [url, { url, name: "anvil-a2" }], [B]: [urlB] }, fetch: realFetch, pollMs: 50 } });
+    const minter = anvilWallet(rpc, MINTER);
+    const carol = anvilWallet(rpcB, CAROL);
+    const final = async (r: EvmRpc) => void (await r.request("anvil_mine", ["0x3"]));
+
+    // P9.27: the author acknowledges the genesis notice before the anchor member is written.
+    const anchor = { chain: A, minter: MINTER };
+    const created = await sdk.create({ name: "Harbor at dusk", resource: { mediaType: "image/png", bytes: Uint8Array.from({ length: 4_000 }, (_, i) => i % 251) }, author, signer, anchor, acknowledged: evmGenesisNotice(anchor, pin) });
+    if (created.kind !== "original") throw new Error("expected an Original");
+    const did = created.original.did;
+    const anchoring = await sdk.anchor(did, { parent: created.original.checkpoint, author, signer });
+    expect(anchoring.original.state.aliases).toEqual([derivedTokenAlias(did, anchor, pin)]);
+    expect((await sdk.mintEvm(did, { wallet: minter })).owner).toBe(MINTER);
+
+    // The anchoring publication: verified first (P9.18), labelled pending, then final and verified.
+    const plan = await sdk.prepareEvmPublication(did, { wallet: minter });
+    expect(plan).toMatchObject({ kind: "anchoring", carries: [created.original.checkpoint, anchoring.original.checkpoint] });
+    const sent = await sdk.submitEvmPublication(did, plan, { wallet: minter, acknowledged: plan.notice });
+    expect(sent.status).toBe("pending-evm-finality");
+    await final(rpc);
+    const status = await sdk.evmPublicationStatus(did, sent);
+    expect(status.status).toBe("finalized");
+    expect(status.original?.report.evm?.status).toBe("anchored");
+    expect(status.original?.report.ordering).toBe("evm-attested-by-operator");
+    expect(status.original?.current, JSON.stringify(status.original?.report.reasons)).toBe(true);
+
+    // An edit is the local log until published, then current (P9.12).
+    const edit = await sdk.edit(did, { parent: anchoring.original.checkpoint, name: "Harbor at night", author, signer });
+    expect(edit.original.current).toBe(false);
+    const p1 = await sdk.prepareEvmPublication(did, { wallet: minter });
+    expect(p1.prepared.plan).toEqual({ kind: "publishSameBody" });
+    await sdk.submitEvmPublication(did, p1, { wallet: minter, acknowledged: p1.notice });
+    await final(rpc);
+    const read = await sdk.get(did);
+    expect(read.head).toBe(edit.original.checkpoint);
+    expect(read.current, JSON.stringify(read.report.reasons)).toBe(true);
+    expect(read.report.evm?.stretches[0]?.providers).toEqual([url, "anvil-a2"]);
+    expect((await store.getRetainedEvm(did))?.checkpoints[0]).toMatchObject({ records: 2, head: edit.original.checkpoint });
+
+    // P9.28, P9.29: up from the attested chain to the proven one.
+    const to = { chain: B, minter: CAROL };
+    const prepared = await sdk.prepareMove(did, { parent: edit.original.checkpoint, author, to });
+    expect(prepared.notice).toMatchObject({ from: { trustClass: "operator", layer: "attested" }, to: { trustClass: "consensus", layer: "proven" }, layersAbove: ["bitcoin"] });
+    const moved = await sdk.move(did, { prepared, signer, acknowledged: prepared.notice });
+    expect((await sdk.mintEvm(did, { wallet: carol })).owner).toBe(CAROL);
+    const departure = await sdk.prepareEvmPublication(did, { wallet: minter });
+    expect(departure).toMatchObject({ kind: "departure", carries: [moved.original.checkpoint] });
+    await sdk.submitEvmPublication(did, departure, { wallet: minter, acknowledged: departure.notice });
+    await final(rpc);
+    const between = await sdk.get(did);
+    expect(between.report.evm).toMatchObject({ status: "departed-not-arrived", owner: null });
+    const arrival = await sdk.prepareEvmPublication(did, { wallet: carol });
+    expect(arrival).toMatchObject({ kind: "arrival", chain: B, carries: [created.original.checkpoint, anchoring.original.checkpoint, edit.original.checkpoint, moved.original.checkpoint] });
+    gas["arrival on the proven devnet"] = (await sdk.submitEvmPublication(did, arrival, { wallet: carol, acknowledged: arrival.notice })).gasUsed;
+    await final(rpcB);
+    const after = await sdk.get(did);
+    expect(after.report.evm).toMatchObject({ status: "anchored", move: "confirmed", arrival: "arrived" });
+    expect(after.report.evm?.stretches.map((s) => [s.chain, s.class, s.describes])).toEqual([[A, "operator", "attested-by-operator"], [B, "consensus", "proven"]]);
+    expect(after.report.evm?.owner).toMatchObject({ address: CAROL, chain: B });
+    // P9.29: the move entry keeps the ordering of the stretch that accepted it; moving up does not raise it.
+    expect(after.report.ordering).toBe("evm-attested-by-operator");
+    expect(after.current, JSON.stringify(after.report.reasons)).toBe(true);
+    // A later entry goes on the destination token, by its holder.
+    const later = await sdk.edit(did, { parent: moved.original.checkpoint, name: "Harbor, proven", author, signer });
+    const p2 = await sdk.prepareEvmPublication(did, { wallet: carol });
+    expect(p2).toMatchObject({ kind: "entry", chain: B });
+    await sdk.submitEvmPublication(did, p2, { wallet: carol, acknowledged: p2.notice });
+    await final(rpcB);
+    const proven = await sdk.get(did);
+    expect(proven.head).toBe(later.original.checkpoint);
+    // What is published from now on is proven on the consensus devnet (P9.27).
+    expect(proven.report.ordering).toBe("evm-proven");
+    expect(proven.current, JSON.stringify(proven.report.reasons)).toBe(true);
   }, 180_000);
 });
