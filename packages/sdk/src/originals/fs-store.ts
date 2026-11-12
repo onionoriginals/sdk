@@ -14,6 +14,8 @@
  *   <root>/resources/<digest>           content-addressed bytes
  *   <root>/authors/<sha256(did)>.json   author DID evidence from imports
  *   <root>/retained/<sha256(did)>.json  the highest versionId verified per DID
+ *   <root>/evm/<sha256(did)>.json       EVM finalized blocks and checkpoints the last
+ *                                       verification retained (P9.22, P9.25; EXPERIMENTAL)
  *
  * Every write goes to a temporary file that is fsynced and then renamed over
  * its target, and the directory is fsynced after the rename, so a commit is
@@ -71,7 +73,7 @@ import type { AuthorDidEvidence, RetainedAnchor } from "@originals/vh/originals"
 import { hex } from "@scure/base";
 import type { InscriptionRecoveryRecord, InscriptionRecoveryStore } from "../bitcoin/inscription-recovery.js";
 import type { ClockStore } from "./bitcoin.js";
-import { headOf, higherVersion, refusedVersionId, staleHead, type CommitUpdate, type OriginalsStore, type StoredOriginal, type StoredPending, type StoredRefused } from "./store.js";
+import { headOf, higherVersion, refusedVersionId, staleHead, type CommitUpdate, type OriginalsStore, type RetainedEvm, type StoredOriginal, type StoredPending, type StoredRefused } from "./store.js";
 
 export interface FileStoreFaults {
   /** Called after the new log is durably written, before it replaces the old one. */
@@ -442,6 +444,7 @@ export class FileStore implements OriginalsStore {
     await mkdir(join(root, "authors"), { recursive: true });
     await mkdir(join(root, "retained"), { recursive: true });
     await mkdir(join(root, "anchors"), { recursive: true });
+    await mkdir(join(root, "evm"), { recursive: true });
     const key = await realpath(root);
     const shared = await FileStore.attach(root, key);
     const { writing } = shared;
@@ -459,7 +462,7 @@ export class FileStore implements OriginalsStore {
         await sweep(dir, await readdir(dir).catch(() => [] as string[]));
       }
     }
-    for (const dir of ["resources", "authors", "retained", "anchors"]) await sweep(join(root, dir), await readdir(join(root, dir)));
+    for (const dir of ["resources", "authors", "retained", "anchors", "evm"]) await sweep(join(root, dir), await readdir(join(root, dir)));
     // Lock candidates a crashed opener left behind.
     for (const name of await readdir(root)) {
       const pid = Number(/^\.lock\.(?:break\.[0-9a-f]+\.)?(\d+)\.[0-9a-f]+\.new$/.exec(name)?.[1]);
@@ -672,6 +675,25 @@ export class FileStore implements OriginalsStore {
 
   async putRetainedAnchor(did: string, anchor: RetainedAnchor): Promise<void> {
     return this.track(() => this.writeAtomically(join(this.root, "anchors"), this.didFile(did), JSON.stringify({ did, anchor })));
+  }
+
+  /** EXPERIMENTAL: what the last EVM verification retained (P9.22, P9.25), read back only when well formed. */
+  async getRetainedEvm(did: string): Promise<RetainedEvm | undefined> {
+    const text = await this.readText(join(this.root, "evm", this.didFile(did)));
+    if (text === undefined) return undefined;
+    const record = JSON.parse(text) as { did?: unknown; blocks?: unknown; checkpoints?: unknown };
+    if (record.did !== did || !Array.isArray(record.blocks) || !Array.isArray(record.checkpoints)) return undefined;
+    const block = (b: unknown) => typeof b === "object" && b !== null && typeof (b as { number?: unknown }).number === "number" && typeof (b as { hash?: unknown }).hash === "string";
+    const blocks = record.blocks.filter((b) => block(b) && typeof (b as { chain?: unknown }).chain === "string") as RetainedEvm["blocks"];
+    const checkpoints = record.checkpoints.filter((c) => {
+      const k = c as Record<string, unknown> | null;
+      return typeof k === "object" && k !== null && typeof k.chain === "string" && typeof k.token === "string" && typeof k.head === "string" && typeof k.records === "number" && block(k.block);
+    }) as RetainedEvm["checkpoints"];
+    return { blocks, checkpoints };
+  }
+
+  async putRetainedEvm(did: string, retained: RetainedEvm): Promise<void> {
+    return this.track(() => this.writeAtomically(join(this.root, "evm"), this.didFile(did), JSON.stringify({ did, blocks: retained.blocks, checkpoints: retained.checkpoints })));
   }
 
   async putCarriedImport(did: string): Promise<void> {

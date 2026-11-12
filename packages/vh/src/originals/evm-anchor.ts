@@ -97,6 +97,17 @@ export interface EvmEvidence {
    * publication on any supplied token.
    */
   resolving?: string;
+  /**
+   * EXPERIMENTAL (P9.18 read through P9.20): the supplied log is the caller's
+   * own committed log, which it extends before publishing. With no token read
+   * at all (`tokens` empty), it is verified whole, as the Bitcoin assembly
+   * verifies a log with no Bitcoin evidence: unverified on the chain
+   * (`evm-evidence-missing`), with claimed ordering, never current and with
+   * no owner. Any token read decides as without it: a copy is never preferred
+   * to the anchor (P7.14). A carried log or a package is never a local copy.
+   * PROVISIONAL.
+   */
+  localCopy?: boolean;
 }
 
 /** A publication accepted on a token (P9.20): its record index and the timestamp the record holds. */
@@ -661,6 +672,9 @@ export async function assembleFromEvm(
 
     if (token.kind === "missing") {
       stretch.missing = { code: token.code, message: token.message };
+      // The caller's own committed log with no token read at all: verified whole, unverified on the
+      // chain and never current (P9.18 through P9.20), as Bitcoin's assembly treats a log with no reads.
+      if (evidence.localCopy === true && evidence.tokens.length === 0 && bitcoin.length === 0 && copy) return finish("unverified", copy);
       // P9.29: a chain the Original left that cannot be read leaves the move unconfirmed, and the
       // log the arrival carries is still verified, its proofs and hash links checked from genesis.
       // Which move left it is known only from the copy.

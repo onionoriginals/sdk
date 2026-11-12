@@ -373,7 +373,9 @@
       "status": "covered",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts",
-        "packages/vh/tests/bitcoin.test.ts"
+        "packages/sdk/tests/unit/originals/evm-sdk.test.ts",
+        "packages/vh/tests/bitcoin.test.ts",
+        "packages/vh/tests/evm-anchor.test.ts"
       ]
     },
     {
@@ -400,6 +402,7 @@
       "status": "covered",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts",
+        "packages/sdk/tests/unit/originals/evm-sdk.test.ts",
         "packages/vh/tests/bitcoin.test.ts"
       ]
     },
@@ -3174,6 +3177,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/evm-sdk.test.ts",
         "packages/vh/tests/evm-anchor.test.ts",
         "packages/vh/tests/evm-state.test.ts"
       ]
@@ -3605,6 +3609,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/evm-sdk.test.ts",
         "packages/vh/tests/evm-anchor.test.ts"
       ]
     },
@@ -3723,6 +3728,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/evm-sdk.test.ts",
         "packages/vh/tests/evm-anchor.test.ts"
       ]
     },
@@ -3736,6 +3742,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/evm-sdk.test.ts",
         "packages/sdk/tests/unit/originals/evm.test.ts"
       ]
     },
@@ -3749,6 +3756,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/evm-sdk.test.ts",
         "packages/sdk/tests/unit/originals/evm.test.ts"
       ],
       "note": "Reworded at a3ffdc1 (originals-spec PR 59); was: \"Writer creating an Original with an EVM `anchor`\" / \"Author told the first chain is permanent and the Original can move only upward, that it stays dependent on every chain it was anchored on, the chain’s trust class and what it means, that publications last only while the chain’s state is kept, and the minter fixed (P9.27)\"."
@@ -3940,9 +3948,11 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/evm-sdk.test.ts",
         "packages/vh/tests/carried.test.ts",
         "packages/vh/tests/evm-anchor.test.ts"
-      ]
+      ],
+      "note": "Exercised with a Bitcoin inscription's metadata and body (packages/vh/tests/carried.test.ts), with an EVM publication's entries and body (packages/vh/tests/evm-anchor.test.ts) and, through the SDK, with an Original's publication record on an EVM token at its finalized block (packages/sdk/tests/unit/originals/evm-sdk.test.ts, EXPERIMENTAL)."
     },
     {
       "id": "C12-292",
@@ -4176,6 +4186,7 @@
       "status": "covered",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/carried.test.ts",
+        "packages/sdk/tests/unit/originals/evm-sdk.test.ts",
         "packages/vh/tests/carried.test.ts",
         "packages/vh/tests/evm-anchor.test.ts"
       ]
@@ -4320,11 +4331,12 @@
         5
       ],
       "status": "covered",
-      "note": "Also exercised against a contract on anvil: packages/sdk/tests/integration/evm-anvil.test.ts (gated on a local chain).",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/evm-sdk.test.ts",
         "packages/sdk/tests/unit/originals/evm.test.ts",
         "packages/vh/tests/evm-anchor.test.ts"
-      ]
+      ],
+      "note": "Also exercised against a contract on anvil: packages/sdk/tests/integration/evm-anvil.test.ts (gated on a local chain)."
     },
     {
       "id": "C12-329",
@@ -4334,8 +4346,11 @@
       "phases": [
         5
       ],
-      "status": "todo",
-      "note": "Contract behavior, tested in Solidity: contracts/test/OriginalsAnchor.t.sol test_uploadBegunEvent (forge test; outside the Bun roots this registry scans, and not run in CI), citing C12-329; the writer's use of the event is exercised only by the staged upload in packages/sdk/tests/integration/evm-anvil.test.ts (gated on a local chain). packages/sdk/tests/unit/originals/evm.test.ts checks the event's topic without citing the row."
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/evm-sdk.test.ts"
+      ],
+      "note": "The writer's use of the event: packages/sdk/tests/unit/originals/evm-sdk.test.ts stages an upload through the SDK against a fake anchor contract, learns the upload ID from `UploadBegun` and reads the record back from state; the end-to-end staged upload is in packages/sdk/tests/integration/evm-anvil.test.ts (gated on a local chain). Contract behavior is tested in Solidity: contracts/test/OriginalsAnchor.t.sol test_uploadBegunEvent (forge test; outside the Bun roots this registry scans, and not run in CI), citing C12-329."
     },
     {
       "id": "C12-330",
@@ -4360,6 +4375,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/evm-sdk.test.ts",
         "packages/vh/tests/evm-anchor.test.ts"
       ]
     },

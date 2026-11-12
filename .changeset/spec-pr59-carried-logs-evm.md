@@ -18,6 +18,25 @@ no anchor contract (P14.21).
   adds a JSON-RPC reader and a writer that uses a wallet you supply, from
   `@originals/sdk/originals/evm`.
   - A writer refuses an `anchor` member unless it is given an `EvmAnchorPin`.
+  - `OriginalsSDK` takes an `evm` option (`pin`, `providers`, `fetch`).
+    `create` takes `anchor` with the acknowledged P9.27 notice
+    (`acknowledged`). `anchor()` lists the token alias. `mintEvm`,
+    `prepareEvmPublication`, `submitEvmPublication` and
+    `evmPublicationStatus` publish on the token, one publication at a time,
+    after verifying the log through the entry published (P9.18).
+    `prepareMove` and `move` write a move entry up a layer (P9.28, P9.29).
+    `verifyCommitted` verifies the committed log through a checkpoint as the
+    local log. `get`, `load` and `carry` read the configured providers or
+    take `evm` reads. A commit is refused when a token accepted an entry
+    the local log does not hold (P9.12).
+  - Stores may keep retained EVM blocks and checkpoints (`getRetainedEvm`,
+    `putRetainedEvm`; `MemoryStore` and `FileStore` do).
+  - The Bitcoin writer inscribes an Original that moved from an EVM chain
+    only once its departure is final, and verifies it as the local log.
+  - `verifyOriginal`'s `evm` evidence takes `localCopy`: with no token read,
+    the caller's own committed log verifies whole, unverified on the chain
+    and never current, as the Bitcoin assembly treats a log with no Bitcoin
+    evidence.
   - A verifier given no pin reports the Original unsupported, where it used
     to report it valid as of its checkpoint.
 - Breaking: the 65,536-byte entry limit is measured over the entry's JCS form

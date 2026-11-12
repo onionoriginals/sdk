@@ -22,7 +22,7 @@
 import { OriginalsError } from "@originals/vh";
 import { parseJson } from "@originals/vh/json";
 import { resourceDigestAsync } from "@originals/vh/originals";
-import type { AuthorDidEvidence, RetainedAnchor } from "@originals/vh/originals";
+import type { AuthorDidEvidence, EvmCheckpoint, RetainedAnchor, RetainedEvmBlock } from "@originals/vh/originals";
 
 export interface StoredOriginal {
   /** The committed asset log, `did.jsonl` text. Asset logs have no witness file (P9.8). */
@@ -59,6 +59,12 @@ export interface StoredPending {
   parent: string | null;
   /** The signed entry, exactly as submitted: one JSON line without a newline. */
   entry: string;
+}
+
+/** What an Original's EVM verification retains (P9.22, P9.25; EXPERIMENTAL, PROVISIONAL shape). */
+export interface RetainedEvm {
+  blocks: RetainedEvmBlock[];
+  checkpoints: EvmCheckpoint[];
 }
 
 export interface OriginalsStore {
@@ -101,6 +107,17 @@ export interface OriginalsStore {
    */
   getRetainedAnchor?(did: string): Promise<RetainedAnchor | undefined>;
   putRetainedAnchor?(did: string, anchor: RetainedAnchor): Promise<void>;
+  /**
+   * Optional, EXPERIMENTAL (originals-spec PR 59): for an Original anchored on
+   * an EVM chain, the finalized blocks the last verification relied on and
+   * its verified checkpoints per token (`report.retain.evm`,
+   * `report.retain.evmCheckpoints`). The SDK passes them back to the next
+   * verification, so a replaced finalized block is reported (P9.22) and a read
+   * can resume from a checkpoint (P9.25). A store without them reads every
+   * record each time and finds a replaced block only within one verification.
+   */
+  getRetainedEvm?(did: string): Promise<RetainedEvm | undefined>;
+  putRetainedEvm?(did: string, retained: RetainedEvm): Promise<void>;
   /**
    * Optional. Mark an Original first stored by importing a carried file, and
    * ask whether one is marked. Reads of a marked Original make no resolver
@@ -160,6 +177,7 @@ export class MemoryStore implements OriginalsStore {
   private readonly authors = new Map<string, AuthorDidEvidence>();
   private readonly retained = new Map<string, string>();
   private readonly anchors = new Map<string, RetainedAnchor>();
+  private readonly evm = new Map<string, RetainedEvm>();
   private readonly branches = new Map<string, string[]>();
   private readonly refused = new Map<string, StoredRefused[]>();
   private readonly pending = new Map<string, StoredPending>();
@@ -235,6 +253,16 @@ export class MemoryStore implements OriginalsStore {
 
   putRetainedAnchor(did: string, anchor: RetainedAnchor): Promise<void> {
     this.anchors.set(did, { ...anchor });
+    return Promise.resolve();
+  }
+
+  getRetainedEvm(did: string): Promise<RetainedEvm | undefined> {
+    const kept = this.evm.get(did);
+    return Promise.resolve(kept ? structuredClone(kept) : undefined);
+  }
+
+  putRetainedEvm(did: string, retained: RetainedEvm): Promise<void> {
+    this.evm.set(did, structuredClone({ blocks: retained.blocks, checkpoints: retained.checkpoints }));
     return Promise.resolve();
   }
 

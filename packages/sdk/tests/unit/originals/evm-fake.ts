@@ -5,6 +5,7 @@
  */
 import { decodeArgs, encodeArgs, keccakHex, selector, toHex, fromHex, type AbiType } from "../../../src/originals/evm-abi.js";
 import type { EvmFetch } from "../../../src/originals/evm-rpc.js";
+import type { EvmTransactionRequest, EvmWallet } from "../../../src/originals/evm-writer.js";
 
 export interface FakeRecord {
   block: number;
@@ -38,7 +39,7 @@ export interface FakeChain {
   stateFrom?: number;
   /** Pool and receipts for status tests. */
   pool?: Set<string>;
-  receipts?: Map<string, { block: number; status: 1 | 0 }>;
+  receipts?: Map<string, { block: number; status: 1 | 0; logs?: Array<{ address: string; topics: string[]; data: string }> }>;
 }
 
 export const blockHash = (chain: Pick<FakeChain, "fork">, n: number) => keccakHex(new TextEncoder().encode(`${chain.fork ?? "main"}:${n}`));
@@ -131,7 +132,7 @@ export function fakeProvider(chain: FakeChain, calls: Call[] = []): EvmFetch {
       case "eth_getTransactionReceipt": {
         const r = chain.receipts?.get(params[0] as string);
         if (!r) return null;
-        return { transactionHash: params[0], status: `0x${r.status}`, blockNumber: `0x${r.block.toString(16)}`, blockHash: blockHash(chain, r.block), gasUsed: "0x5208", logs: [] };
+        return { transactionHash: params[0], status: `0x${r.status}`, blockNumber: `0x${r.block.toString(16)}`, blockHash: blockHash(chain, r.block), gasUsed: "0x5208", logs: r.logs ?? [] };
       }
       case "eth_getTransactionByHash": {
         const hash = params[0] as string;
@@ -165,4 +166,120 @@ export function fakeNetwork(byUrl: Record<string, EvmFetch>): EvmFetch {
     if (!f) return Promise.reject(new Error(`no provider at ${url}`));
     return f(url, init);
   };
+}
+
+const WRITES: Record<string, { name: string; args: AbiType[] }> = {
+  [SIG("mint(bytes32)")]: { name: "mint", args: ["bytes32"] },
+  [SIG("publish(uint256,string,bytes,bytes)")]: { name: "publish", args: ["uint256", "string", "bytes", "bytes"] },
+  [SIG("publishSameBody(uint256,bytes,uint32)")]: { name: "publishSameBody", args: ["uint256", "bytes", "uint32"] },
+  [SIG("begin(uint256)")]: { name: "begin", args: ["uint256"] },
+  [SIG("append(bytes32,bytes)")]: { name: "append", args: ["bytes32", "bytes"] },
+  [SIG("commit(bytes32,string,uint32)")]: { name: "commit", args: ["bytes32", "string", "uint32"] },
+  [SIG("commitSameBody(bytes32,uint32)")]: { name: "commitSameBody", args: ["bytes32", "uint32"] },
+};
+const topic = (s: string) => keccakHex(new TextEncoder().encode(s));
+const word = (n: bigint) => `0x${n.toString(16).padStart(64, "0")}`;
+
+/**
+ * A wallet that executes its transactions on a fake anchor contract (P14.19,
+ * P14.20): each is mined in a block of its own, above the finalized block,
+ * with the contract's events in its receipt. Only the holder may publish; a
+ * transaction that breaks a rule is mined as reverted. `sent` lists what it
+ * sent, by function name.
+ */
+export function fakeWallet(chain: FakeChain, address: string, sent: string[] = []): EvmWallet & { sent: string[] } {
+  chain.receipts ??= new Map();
+  const uploads = new Map<string, { tokenId: bigint; by: string; data: Uint8Array }>();
+  let n = 0;
+  const holderOk = (tokenId: bigint, from: string) => chain.owners.get(tokenId)?.toLowerCase() === from.toLowerCase();
+  const record = (tokenId: bigint, r: Omit<FakeRecord, "block" | "timestamp">) => {
+    const list = chain.records.get(tokenId) ?? [];
+    const block = chain.latest;
+    list.push({ ...r, block, timestamp: 1_800_000_000 + block });
+    chain.records.set(tokenId, list);
+    return list.length - 1;
+  };
+  const sameBodyOk = (tokenId: bigint, of: number) => {
+    const r = (chain.records.get(tokenId) ?? [])[of];
+    return r !== undefined && (r.bodyOf ?? of) === of;
+  };
+  const execute = (tx: EvmTransactionRequest): { ok: boolean; logs: Array<{ address: string; topics: string[]; data: string }> } => {
+    if (tx.to !== chain.address || BigInt(tx.chainId) !== chain.chainId) return { ok: false, logs: [] };
+    const fn = WRITES[tx.data.slice(0, 10)];
+    if (!fn) return { ok: false, logs: [] };
+    const args = decodeArgs(fn.args, fromHex(`0x${tx.data.slice(10)}`));
+    const from = tx.from.toLowerCase();
+    const published = (tokenId: bigint, index: number) => ({ ok: true, logs: [{ address: chain.address, topics: [topic("Published(uint256,uint32)"), word(tokenId)], data: word(BigInt(index)) }] });
+    switch (fn.name) {
+      case "mint": {
+        const tokenId = BigInt(keccakHex(encodeArgs(["bytes32", "address"], [args[0] as Uint8Array, from])));
+        if (chain.owners.has(tokenId)) return { ok: false, logs: [] };
+        chain.owners.set(tokenId, from);
+        return { ok: true, logs: [{ address: chain.address, topics: [topic("Transfer(address,address,uint256)"), word(0n), `0x${from.slice(2).padStart(64, "0")}`, word(tokenId)], data: "0x" }] };
+      }
+      case "publish": {
+        const [tokenId, mediaType, metadata, body] = args as [bigint, string, Uint8Array, Uint8Array];
+        if (!holderOk(tokenId, from) || metadata.length + body.length > 350_000) return { ok: false, logs: [] };
+        return published(tokenId, record(tokenId, { mediaType, metadata, body }));
+      }
+      case "publishSameBody": {
+        const [tokenId, metadata, of] = args as [bigint, Uint8Array, number];
+        if (!holderOk(tokenId, from) || !sameBodyOk(tokenId, Number(of))) return { ok: false, logs: [] };
+        const ref = chain.records.get(tokenId)![Number(of)];
+        return published(tokenId, record(tokenId, { mediaType: ref.mediaType, metadata, body: ref.body, bodyOf: Number(of) }));
+      }
+      case "begin": {
+        const tokenId = args[0] as bigint;
+        if (!holderOk(tokenId, from)) return { ok: false, logs: [] };
+        const id = keccakHex(new TextEncoder().encode(`upload ${uploads.size} ${from}`));
+        uploads.set(id, { tokenId, by: from, data: new Uint8Array(0) });
+        return { ok: true, logs: [{ address: chain.address, topics: [topic("UploadBegun(uint256,bytes32,address)"), word(tokenId)], data: `${id}${from.slice(2).padStart(64, "0")}` }] };
+      }
+      case "append": {
+        const u = uploads.get(toHex(args[0] as Uint8Array));
+        const part = args[1] as Uint8Array;
+        if (!u || u.by !== from || u.data.length + part.length > 350_000) return { ok: false, logs: [] };
+        const next = new Uint8Array(u.data.length + part.length);
+        next.set(u.data);
+        next.set(part, u.data.length);
+        u.data = next;
+        return { ok: true, logs: [] };
+      }
+      case "commit":
+      case "commitSameBody": {
+        const id = toHex(args[0] as Uint8Array);
+        const u = uploads.get(id);
+        if (!u || u.by !== from || !holderOk(u.tokenId, from)) return { ok: false, logs: [] };
+        uploads.delete(id);
+        if (fn.name === "commit") {
+          const [, mediaType, metadataLength] = args as [Uint8Array, string, number];
+          if (Number(metadataLength) > u.data.length) return { ok: false, logs: [] };
+          return published(u.tokenId, record(u.tokenId, { mediaType, metadata: u.data.slice(0, Number(metadataLength)), body: u.data.slice(Number(metadataLength)) }));
+        }
+        const of = Number(args[1]);
+        if (!sameBodyOk(u.tokenId, of)) return { ok: false, logs: [] };
+        const ref = chain.records.get(u.tokenId)![of];
+        return published(u.tokenId, record(u.tokenId, { mediaType: ref.mediaType, metadata: u.data, body: ref.body, bodyOf: of }));
+      }
+    }
+    return { ok: false, logs: [] };
+  };
+  return {
+    address,
+    sent,
+    sendTransaction(tx) {
+      const name = WRITES[tx.data.slice(0, 10)]?.name ?? "unknown";
+      sent.push(name);
+      chain.latest += 1;
+      const { ok, logs } = execute(tx);
+      const hash = keccakHex(new TextEncoder().encode(`${address} ${chain.chainId} ${n++} ${tx.data.slice(0, 74)}`));
+      chain.receipts!.set(hash, { block: chain.latest, status: ok ? 1 : 0, logs });
+      return Promise.resolve(hash);
+    },
+  };
+}
+
+/** Make everything mined so far final (P9.22). */
+export function finalize(chain: FakeChain): void {
+  chain.finalized = chain.latest;
 }
