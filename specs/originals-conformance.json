@@ -4080,7 +4080,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/signer.test.ts"
+      ],
+      "note": "keySigner refuses non-entries and malformed entries, and requests whose summary misstates or omits the signer, the Original, the operation or the resource changes; it shows the recomputed text through `confirm`. Without `confirm` (tests and local custody) it shows nothing, so a signer for people must pass one."
     },
     {
       "id": "C12-303",
