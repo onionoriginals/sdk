@@ -2222,13 +2222,17 @@ export class OriginalsSDK {
     const view = await this.read(did, options.checkpoint !== undefined ? { checkpoint: options.checkpoint } : {}, LOCAL);
     const ids = versionIds(log);
     const prefix = `${lines(log).slice(0, ids.indexOf(view.checkpoint) + 1).join("\n")}\n`;
-    // A did:btco signer's history is read from Bitcoin, not packaged; it is listed as missing (P5.13).
+    // A did:btco signer's history is read from Bitcoin and never packaged, complete or not, so it is
+    // not a missing item either (P7.1, P5.13, P14.10; C12-298).
     const authors = (await this.packagedIdentities(prefix, view.report))
       .filter((a) => a.log !== undefined)
       .map(({ did, log, witness }) => ({ did, log, ...(witness !== undefined ? { witness } : {}) }));
     const missing: MissingItem[] = [];
     const editorDids = new Set(signerDidsOf(prefix).filter((d) => d !== (view.report.identityEvidence.author ?? undefined)));
-    for (const did of signerDidsOf(prefix)) if (!authors.some((a) => a.did === did)) missing.push({ kind: "identity", did, role: editorDids.has(did) ? "editor" : "author" });
+    for (const did of signerDidsOf(prefix)) {
+      if (did.startsWith("did:btco:") || authors.some((a) => a.did === did)) continue;
+      missing.push({ kind: "identity", did, role: editorDids.has(did) ? "editor" : "author" });
+    }
     const bytes: Record<string, Uint8Array> = {};
     const versions = view.report.resources.versions;
     // Bytes are packaged by digest: a version is left out only when no packaged version names the same bytes.
@@ -2251,7 +2255,8 @@ export class OriginalsSDK {
       original: did,
       checkpoint: view.checkpoint,
       head: ids[ids.length - 1],
-      completeness: missing.length === 0 && view.report.identityEvidence.status === "complete" ? "complete" : "partial",
+      // Complete: every item a package can hold is in it (P7.1). A did:btco signer's history is never one.
+      completeness: missing.length === 0 ? "complete" : "partial",
       missing,
     };
     return { bytes: writeEvidence({ manifest, log: prefix, authors, bytes }), manifest };
@@ -2299,7 +2304,10 @@ export class OriginalsSDK {
     const m = contents.manifest;
     if (m.original !== report.original) reasons.push("manifest-original-mismatch");
     if (m.checkpoint !== m.head) reasons.push("package-checkpoint-is-not-its-head");
-    const actuallyComplete = report.resources.missing.length === 0 && report.identityEvidence.status === "complete";
+    // P7.1: complete means the package holds every item a package can hold: the bytes, and each signer's
+    // history except a did:btco signer's, which is read from Bitcoin and never packaged (C12-298).
+    const packaged = new Set(contents.authors.map((a) => a.did));
+    const actuallyComplete = report.resources.missing.length === 0 && signerDidsOf(contents.log).every((d) => d.startsWith("did:btco:") || packaged.has(d));
     if ((m.completeness === "complete") !== actuallyComplete) reasons.push("manifest-completeness-mismatch");
     return { manifest: m, report: { ...report, current: report.current && reasons.length === report.reasons.length }, reasons };
   }
