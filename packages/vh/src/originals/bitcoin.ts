@@ -499,6 +499,16 @@ export interface AssembleOptions {
    * sat, and the move is reported unconfirmed by the caller.
    */
   arrival?: LogEntry[] | "unconfirmed";
+  /**
+   * P9.25 (originals-spec PR 59 a3ffdc1, MAY; EVM only, EXPERIMENTAL): resume
+   * from a retained verified checkpoint. `entries` is the accepted head there,
+   * of which the first `anchorEntries` are the anchoring (or arrival)
+   * publication's; `anchor` is that publication, already verified, whose
+   * bytes are not read again; `accepted` and `conflicting` are what was
+   * placed before; `departed` whether a move entry was accepted. The reads
+   * then hold only later publications, which extend the head as usual.
+   */
+  resume?: { entries: LogEntry[]; anchorEntries: number; anchor: SatInscription; accepted: Placed[]; conflicting: Placed[]; departed: boolean };
 }
 
 /**
@@ -698,6 +708,12 @@ export async function assembleAnchored(
     }
   }
   anchorings.sort((a, b) => chainOrder(a.inscription, b.inscription));
+  const resume = options.resume;
+  if (resume && reads[0]) {
+    // P9.25: the checkpoint's anchor comes before every record read after it.
+    target ??= originalOf(resume.entries);
+    anchorings.unshift({ read: reads[0], inscription: resume.anchor, entries: resume.entries.slice(0, resume.anchorEntries), original: originalOf(resume.entries) as string });
+  }
   target ??= anchorings[0]?.original;
   const mine = anchorings.filter((a) => a.original === target);
   for (const a of anchorings) if (a.original !== target) ignore(a.read.alias.did, a.inscription, "another-original", a.entries[a.entries.length - 1]);
@@ -748,8 +764,9 @@ export async function assembleAnchored(
   const read = chosen.read;
   const sat = read.alias.did;
   const anchor = place(sat, chosen.inscription, lastOf(chosen));
-  keepBody(chosen.inscription, lastOf(chosen));
-  const conflicting = mine.slice(1).map((a) => place(a.read.alias.did, a.inscription, lastOf(a)));
+  // A resumed anchor's bytes were checked when the checkpoint was made, and are not read again (P9.25).
+  if (!resume) keepBody(chosen.inscription, lastOf(chosen));
+  const conflicting = [...(resume?.conflicting ?? []), ...mine.slice(1).map((a) => place(a.read.alias.did, a.inscription, lastOf(a)))];
   // Inscriptions that are neither anchors nor, on the anchoring sat after the anchor, single entries.
   /**
    * An inscription after the anchor whose signer could not be verified: never incomplete identity
@@ -779,9 +796,9 @@ export async function assembleAnchored(
   // After the anchor: one entry per inscription, extending the head at a greater height (P9.13).
   // Chain order decides: while an inscription extending the head is unverifiable, a later one
   // extending the same head waits on it (P9.15; originals-spec #51, merged).
-  const head: LogEntry[] = [...chosen.entries];
-  const accepted: Placed[] = [];
-  let lastHeight = chosen.inscription.height;
+  const head: LogEntry[] = resume ? [...resume.entries] : [...chosen.entries];
+  const accepted: Placed[] = resume ? [...resume.accepted] : [];
+  let lastHeight = accepted.length > 0 ? accepted[accepted.length - 1].height : chosen.inscription.height;
   // `blocking` is the first unverifiable inscription extending the head; `chain` is the head with
   // it and the publications waiting on top of it, which are followed once it is accepted (P9.15;
   // originals-spec #51, merged). Each candidate is judged in full first: one that would be
@@ -820,7 +837,7 @@ export async function assembleAnchored(
   // waiting ones, waits too, at a greater height than the one it extends (P9.13, P9.15).
   let blocking: { id: string } | null = null;
   let branches: Array<{ chain: LogEntry[]; height: number }> = [];
-  let departure: Placed | undefined;
+  let departure: Placed | undefined = resume?.departed ? accepted[accepted.length - 1] : undefined;
   for (const { inscription: i, entry } of singles.get(read)!) {
     if (chainOrder(i, chosen.inscription) <= 0) continue;
     // P9.29: once a move entry is accepted, the Original has left; nothing later is accepted here.

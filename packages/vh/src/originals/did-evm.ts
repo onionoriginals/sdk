@@ -4,15 +4,18 @@
  *
  * A did:evm DID is an alias of an Original only if it names the token P14.19
  * derives for that Original and the log accepted on that token lists it; this
- * resolver accepts neither alone. It reads the Original's log from its tokens,
+ * resolver accepts neither alone. Given no copy of the log, it takes the
+ * candidate Original from an anchoring or arrival publication on the token
+ * (`evmCandidate`), never from the token's first record as such. It reads the
+ * Original's log from its tokens,
  * verifies it under this profile (`verifyOriginal`), and returns the did:vh,
  * its state and the report. The DID document is derived from the state
  * accepted on the token, never stored: nothing here reads `tokenURI` or any
  * served document (P3.8, P3.9).
  */
 import type { JsonObject } from "../json/index.js";
-import type { EvmEvidence, EvmStretch } from "./evm-anchor.js";
-import { parseEvmAlias, type TrustClass, describeClass } from "./evm.js";
+import { evmCandidate, type EvmEvidence, type EvmStretch } from "./evm-anchor.js";
+import { anchorAddress, parseEvmAlias, type TrustClass, describeClass } from "./evm.js";
 import type { AssetState } from "./state.js";
 import { verifyOriginal, type OriginalsReport, type VerifyOriginalOptions } from "./verify.js";
 
@@ -53,9 +56,18 @@ export async function resolveDidEvm(did: string, options: Omit<VerifyOriginalOpt
   const alias = parseEvmAlias(did);
   const pin = options.evm.pin;
   if (!pin) return nothing(did, "unsupported");
-  // P14.18, P14.21: a token of other code, or at another address, is not an Originals anchor.
-  if (alias.contract !== pin.address) return nothing(did, "not-found");
-  const report = await verifyOriginal(options);
+  // P14.18, P14.21: a token of other code, or at an address other than the one fixed for its chain, is not an Originals anchor.
+  if (alias.contract !== anchorAddress(pin, alias.chain)) return nothing(did, "not-found");
+  // P3.9 (PR 59 a3ffdc1): with no copy of the log, the candidate comes from an anchoring or arrival
+  // publication on this token, never from a record that is no such publication, the token's first
+  // included, nor from what `tokenURI` returns. It is then verified, and the token checked to be the
+  // one P14.19 derives from it (the stretch below is the derived token's).
+  const evidence: EvmEvidence = options.log === undefined ? { ...options.evm, resolving: did } : options.evm;
+  if (options.log === undefined && evmCandidate(evidence) === undefined) {
+    const unread = options.evm.tokens.filter((t) => t.alias === did).every((t) => t.reads.every((r) => r.records === null || r.stateUnavailable === true));
+    return nothing(did, unread && options.evm.tokens.some((t) => t.alias === did) ? "unverified" : "not-found");
+  }
+  const report = await verifyOriginal({ ...options, evm: evidence });
   const evm = report.evm;
   if (!evm) return nothing(did, "not-found", report, report.original);
   if (evm.status === "unsupported" && evm.stretches.every((s) => s.token !== did)) return nothing(did, "unsupported", report);

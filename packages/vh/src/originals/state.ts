@@ -9,7 +9,7 @@ import { OriginalsError, fail } from "../errors.js";
 import { canonicalize, isJsonObject, type JsonObject, type JsonValue } from "../json/index.js";
 import { parseDidWebvh } from "../webvh/index.js";
 import { parseBtcoAlias } from "./btco.js";
-import { LAYER_RANK, checkAnchor, evmAliasOf, layerOfAnchor, parseEvmAlias, tokenIdOf, type EvmAnchor, type EvmAnchorPin } from "./evm.js";
+import { LAYER_RANK, anchorAddress, checkAnchor, evmAliasOf, layerOfAnchor, parseEvmAlias, tokenIdOf, type EvmAnchor, type EvmAnchorPin } from "./evm.js";
 
 /** PROVISIONAL (D1): the extension's method value; it implies vh-log:1.0. */
 export const ORIGINALS_METHOD = "originals:1.0";
@@ -434,7 +434,7 @@ function checkAnchorChange(s: JsonObject, asset: AssetState, ctx: EntryStateCont
   if (token !== undefined && asset.anchor) {
     const t = parseEvmAlias(token);
     if (t.tokenId !== tokenIdOf(id, asset.anchor.minter)) invalid("STATE_ANCHOR_TOKEN", `${token} is not the token P14.19 derives from this Original and its minter (P9.19)`);
-    if (ctx.evm && t.contract !== ctx.evm.address) invalid("STATE_ANCHOR_TOKEN", `${token} names a contract other than the pinned anchor contract (P14.18, P14.21)`);
+    if (ctx.evm && t.contract !== anchorAddress(ctx.evm, t.chain)) invalid("STATE_ANCHOR_TOKEN", `${token} names a contract other than the anchor contract pinned for ${t.chain} (P14.18, P14.21)`);
   }
   if (!previous) return;
   if (sameAnchor(previous.anchor, asset.anchor)) {
@@ -461,9 +461,9 @@ function checkAnchorChange(s: JsonObject, asset: AssetState, ctx: EntryStateCont
   }
 }
 
-/** The did:evm alias of the token P14.19 derives, under a pin (P14.18). */
+/** The did:evm alias of the token P14.19 derives, under a pin, at the address P14.21 fixes for its chain (P14.18). */
 export function derivedTokenAlias(didVh: string, anchor: EvmAnchor, pin: EvmAnchorPin): string {
-  return evmAliasOf(anchor.chain, pin.address, tokenIdOf(didVh, anchor.minter));
+  return evmAliasOf(anchor.chain, anchorAddress(pin, anchor.chain), tokenIdOf(didVh, anchor.minter));
 }
 
 /** Validate an entry's state against the Originals rules and its predecessor. */

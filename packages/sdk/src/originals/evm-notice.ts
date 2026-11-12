@@ -81,8 +81,8 @@ export interface EvmGenesisNotice {
   /** Layers the Original can later move up to (P9.28). */
   layersAbove: AnchorLayer[];
   permanent: true;
-  /** The five statements P9.27 requires, in its order. */
-  points: [permanentAndLayer: string, staysDependent: string, trustClass: string, chainLifetime: string, minter: string];
+  /** The six statements P9.27 requires, in its order (PR 59 a3ffdc1 added `publicationCost`). */
+  points: [permanentAndLayer: string, staysDependent: string, trustClass: string, chainLifetime: string, publicationCost: string, minter: string];
   /** The plain statement to show the author. */
   text: string;
 }
@@ -95,6 +95,7 @@ export function evmGenesisNotice(anchor: EvmAnchor, pin: EvmAnchorPin): EvmGenes
     "A move does not free the Original from a chain: it stays dependent on every chain it was ever anchored on.",
     `${chain.name} is of trust class ${chain.trustClass}. ${CLASS_MEANING[chain.trustClass]} Once the Original is anchored, its ordering, its owner and whether changes can be published rest on that chain, and on whoever its class says can upgrade, pause, censor or reorder it.`,
     `Its publications last only as long as ${chain.name}'s nodes keep its state; nothing can be done for an Original whose chain stops.`,
+    `A large publication can need several staged transactions (begin, append, commit), because ${chain.name} caps what one transaction can store. Every entry carries the Original's full asset state, so large metadata makes each later edit, even a rename, cost more to publish.`,
     `The minter ${a.minter} is fixed now. Only that address can mint the Original's token on ${chain.name}: if its key is lost before minting, the Original can never be anchored there; if it is stolen first, the thief can mint and hold the token.`,
   ];
   return { kind: "evm-genesis", chain, minter: a.minter, layersAbove: layersAbove(chain.layer), permanent: true, points, text: points.join(" ") };

@@ -13,7 +13,16 @@
  * metadata and body of each record in ranges. It never reads the bytes of a
  * record whose own fields exceed the limits (P9.25). It uses no event logs
  * (P9.25). Records above the common block, read at `latest`, are returned
- * as `observed` (P9.22), fields only, when `observe` is set.
+ * as `observed` (P9.22), fields only, when `observe` is set. With `from`, it
+ * reads only the records from that index, resuming from a checkpoint the
+ * verifier retained (P9.25).
+ *
+ * P9.22 (PR 59 a3ffdc1): a provider must serve the contract's state at the
+ * finalized block, however far finality trails its head. One that cannot
+ * (no such block, or a state read at it failing for any reason other than a
+ * revert) is reported with `stateUnavailable`, which the verifier treats as
+ * missing evidence; it is not dropped, so the read is not decided on the
+ * other provider alone.
  *
  * The reader judges nothing: a provider serving another chain is still
  * reported, with what it reported and no state, and the verifier discards it
@@ -26,6 +35,7 @@
 import { OriginalsError } from "@originals/vh";
 import {
   ORIGINALS_INSCRIPTION_MAX_BYTES,
+  anchorAddress,
   derivedTokenAlias,
   parseEvmAlias,
   requireSupported,
@@ -69,12 +79,20 @@ export interface ReadEvmTokenOptions {
   /** Also read records above the common block, at `latest`, as `observed` (P9.22). Default false. */
   observe?: boolean;
   /**
-   * The finalized blocks the verifier relied on before (P9.22). Each provider
-   * reports its current hash at each such number on this chain, as
-   * `blockHashes`, so a replaced block is detected even after finality has
-   * moved past it (spec finding: P9.22 does not require this).
+   * OPTIONAL, off by default. The finalized blocks the verifier relied on
+   * before (P9.22). Each provider reports its current hash at each such
+   * number on this chain, as `blockHashes`, so a replaced block is found
+   * after finality has moved past it. P9.22 assumes finality holds and does
+   * not require these reads; a hash that differs is the evidence on which the
+   * verifier warns and discards what rested on that block.
    */
   retained?: ReadonlyArray<RetainedEvmBlock>;
+  /**
+   * P9.25 (MAY): read only the records from this index, resuming from a
+   * retained checkpoint whose `records` it is (`EvmCheckpoint`). The verifier
+   * accepts the read only with that checkpoint. Default 0, every record.
+   */
+  from?: number;
 }
 
 /** What to read: the token alias, or the Original and its anchor member, from which it derives (P14.19). */
@@ -125,13 +143,16 @@ async function readBytes(rpc: EvmRpc, address: string, which: "metadata" | "body
   return out;
 }
 
-/** Every record of the token at `at`, with the bytes of each record within the limits (P9.25). */
-async function readRecords(rpc: EvmRpc, address: string, tokenId: bigint, at: BlockRef, range: number): Promise<EvmRecord[]> {
+/** Every record of the token at `at` from index `from`, with the bytes of each record within the limits (P9.25). */
+async function readRecords(rpc: EvmRpc, address: string, tokenId: bigint, at: BlockRef, range: number, from: number): Promise<EvmRecord[]> {
   const [count] = await rpc.call(address, ANCHOR_READS.publicationCount, ["uint256"], [tokenId], ["uint32"], at);
+  if (Number(count) < from) inconsistent(rpc.url, `the token has ${count} records, fewer than the checkpoint's ${from}`);
   const records: EvmRecord[] = [];
-  for (let index = 0; index < Number(count); index++) {
+  const byIndex = new Map<number, EvmRecord>();
+  for (let index = from; index < Number(count); index++) {
     const r = await recordFields(rpc, address, tokenId, index, at);
     records.push(r);
+    byIndex.set(index, r);
     // P9.25: decided from the record's own fields; such a record never makes evidence missing.
     if (recordExceedsLimits(r)) continue;
     r.metadata = await readBytes(rpc, address, "metadata", tokenId, index, r.metadataLength, at, range);
@@ -139,14 +160,16 @@ async function readRecords(rpc: EvmRpc, address: string, tokenId: bigint, at: Bl
       r.body = await readBytes(rpc, address, "body", tokenId, index, r.bodyLength, at, range);
       continue;
     }
-    // A record that refers to a body names an earlier record that stored its own (P14.20). The
-    // pinned contract cannot record anything else, so another answer is the provider's.
-    const ref = records[r.bodyOf];
-    if (r.bodyOf > index || !ref || ref.bodyOf !== ref.index || ref.bodyLength !== r.bodyLength || ref.mediaType !== r.mediaType) {
+    // A record that refers to a body names an earlier record of this token that stored its own, and
+    // holds that body's length as its `bodyLength` (P14.20). The pinned contract cannot record
+    // anything else, so another answer is the provider's. A referred record before `from` was
+    // checked when the checkpoint was made; its bytes are `body(index)`'s.
+    const ref = byIndex.get(r.bodyOf);
+    if (r.bodyOf > index || (r.bodyOf >= from && (!ref || ref.bodyOf !== ref.index || ref.bodyLength !== r.bodyLength || ref.mediaType !== r.mediaType))) {
       inconsistent(rpc.url, `record ${index} refers to record ${r.bodyOf}, which is not an earlier record with that stored body`);
     }
     // The same block's state: the referred record's bytes are the bytes `body(index)` returns.
-    r.body = ref.body ?? (await readBytes(rpc, address, "body", tokenId, index, r.bodyLength, at, range));
+    r.body = ref?.body ?? (await readBytes(rpc, address, "body", tokenId, index, r.bodyLength, at, range));
   }
   return records;
 }
@@ -168,10 +191,14 @@ export async function readEvmToken(ref: EvmTokenRef, options: ReadEvmTokenOption
   const { pin } = options;
   const alias = "alias" in ref ? ref.alias : derivedTokenAlias(ref.original, ref.anchor, pin);
   const parsed = parseEvmAlias(alias);
-  if (parsed.contract !== pin.address) throw new OriginalsError("invalid-evidence", "EVM_ALIAS_CONTRACT", `${alias} names a contract other than the pinned anchor contract (P14.18, P14.21)`);
+  // P14.21: the address fixed for this chain, which may differ from the common one.
+  const address = anchorAddress(pin, parsed.chain);
+  if (parsed.contract !== address) throw new OriginalsError("invalid-evidence", "EVM_ALIAS_CONTRACT", `${alias} names a contract other than the anchor contract pinned for ${parsed.chain} (P14.18, P14.21)`);
   const { listed } = requireSupported(parsed.chain, pin);
   const range = options.rangeBytes ?? 65_536;
   if (!Number.isSafeInteger(range) || range < 1) throw new OriginalsError("invalid-evidence", "INPUT_INVALID", "rangeBytes is a positive integer");
+  const from = options.from ?? 0;
+  if (!Number.isSafeInteger(from) || from < 0) throw new OriginalsError("invalid-evidence", "INPUT_INVALID", "from is a non-negative integer");
   const failures: EvmProviderFailure[] = [];
   const fail = (provider: string, error: unknown) =>
     failures.push({ provider, code: error instanceof OriginalsError ? error.code : error instanceof EvmRevert ? "EVM_CALL_REVERTED" : "EVM_READ_FAILED", message: (error as Error)?.message ?? String(error) });
@@ -211,27 +238,50 @@ export async function readEvmToken(ref: EvmTokenRef, options: ReadEvmTokenOption
         reads.push({ ...base, block: h.finalized, codeHash: null, owner: null, records: null });
         return;
       }
+      // P9.22: a provider that cannot serve state at the common block is not usable for this read.
+      const unusable = (block: { number: number; hash: string }, error: unknown) => {
+        fail(h.provider, error);
+        reads.push({ ...base, block, codeHash: null, owner: null, records: null, stateUnavailable: true });
+      };
+      let block: { number: number; hash: string } | null;
       try {
-        const block = h.finalized.number === common ? h.finalized : await h.rpc.block(common);
-        if (!block) throw new OriginalsError("incomplete-evidence", "EVM_NO_BLOCK", `${h.provider} has no block ${common}`);
-        const at: BlockRef = { blockHash: block.hash };
-        const code = await h.rpc.code(pin.address, at);
+        block = h.finalized.number === common ? h.finalized : await h.rpc.block(common);
+      } catch (error) {
+        unusable({ number: common, hash: "0x" }, error);
+        return;
+      }
+      if (!block) {
+        unusable({ number: common, hash: "0x" }, new OriginalsError("incomplete-evidence", "EVM_NO_BLOCK", `${h.provider} has no block ${common}`));
+        return;
+      }
+      const at: BlockRef = { blockHash: block.hash };
+      let code: Uint8Array;
+      try {
+        code = await h.rpc.code(address, at);
+      } catch (error) {
+        unusable({ number: common, hash: block.hash }, error);
+        return;
+      }
+      try {
         const codeHash = code.length === 0 ? null : keccakHex(code);
-        const read: EvmProviderRead = { ...base, block: { number: common, hash: block.hash }, codeHash, owner: null, records: null };
+        const read: EvmProviderRead = { ...base, block: { number: common, hash: block.hash }, codeHash, owner: null, records: null, ...(from > 0 ? { from } : {}) };
         // P9.21: no read is relied on unless the code at the address is the pinned code.
         if (codeHash !== pin.codeHash.toLowerCase()) {
           reads.push(read);
           return;
         }
         try {
-          const [owner] = await h.rpc.call(pin.address, ANCHOR_READS.ownerOf, ["uint256"], [parsed.tokenId], ["address"], at);
+          const [owner] = await h.rpc.call(address, ANCHOR_READS.ownerOf, ["uint256"], [parsed.tokenId], ["address"], at);
           read.owner = owner as string;
         } catch (error) {
-          if (!(error instanceof EvmRevert)) throw error;
+          if (!(error instanceof EvmRevert)) {
+            unusable(read.block, error);
+            return;
+          }
           read.owner = null; // ownerOf reverts for a token that does not exist (ERC-721).
         }
         try {
-          read.records = await readRecords(h.rpc, pin.address, parsed.tokenId, at, range);
+          read.records = await readRecords(h.rpc, address, parsed.tokenId, at, range, from);
         } catch (error) {
           // P9.25: records that cannot be read from state are missing evidence, never a partial log.
           read.records = null;
@@ -240,7 +290,7 @@ export async function readEvmToken(ref: EvmTokenRef, options: ReadEvmTokenOption
         if (options.observe && read.records) {
           // Observed records only label publications (P9.27); failing to read them costs no evidence.
           try {
-            read.observed = await observed(h.rpc, pin.address, parsed.tokenId, read.records.length);
+            read.observed = await observed(h.rpc, address, parsed.tokenId, from + read.records.length);
           } catch (error) {
             fail(h.provider, error);
           }

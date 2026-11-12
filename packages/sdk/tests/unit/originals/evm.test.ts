@@ -22,6 +22,7 @@ import {
 import { OriginalsError } from "@originals/vh";
 import { decodeArgs, encodeArgs, encodeCall, eventTopic, keccakHex, toHex } from "../../../src/originals/evm-abi.js";
 import {
+  ANCHOR_EVENTS,
   evmGenesisNotice,
   evmMoveNotice,
   evmPublicationStatus,
@@ -75,7 +76,9 @@ describe("ABI layer (hand-rolled; vectors from Foundry's cast)", () => {
       "0x5d4168ffabababababababababababababababababababababababababababababababab00000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000007000000000000000000000000000000000000000000000000000000000000000a746578742f706c61696e00000000000000000000000000000000000000000000",
     );
     expect(eventTopic("Published(uint256,uint32)")).toBe("0x84aa9a99807ead41342ca4e48223d1822eefbffacb56b587ea2759e96dba3083");
-    expect(eventTopic("UploadBegun(bytes32,uint256,address)")).toBe("0x8375c199f66db5da537ea5b6851eea4db0b8ed7968b558fc405440a5491e4a12");
+    // P14.20 (PR 59 a3ffdc1): `event UploadBegun(uint256 indexed tokenId, bytes32 upload, address by)`.
+    expect(eventTopic("UploadBegun(uint256,bytes32,address)")).toBe(ANCHOR_EVENTS.UploadBegun);
+    expect(ANCHOR_EVENTS.UploadBegun).toBe("0xa709c981aa063e1aacf1ac52fcfd2da2da541db3928f09d9814721e060348671");
   });
 
   test("decodes cast abi-encode of publication()'s return, and rejects malformed answers", () => {
@@ -184,6 +187,37 @@ describe("readEvmToken (P9.21, P9.22, P9.25)", () => {
     expect(failures).toEqual([expect.objectContaining({ provider: "down", code: "EVM_PROVIDER_UNAVAILABLE" })]);
   });
 
+  test("PR59b: \"Provider that cannot serve state at the finalized block because finality trails its retained state\": reported unusable for the read, not dropped (P9.22)", async () => {
+    const fetch = fakeNetwork({ archive: fakeProvider(chain({ finalized: 10 }, records())), pruned: fakeProvider(chain({ finalized: 10, stateFrom: 11 }, records())) });
+    const { evidence, failures } = await readEvmToken({ alias: ALIAS }, { pin: PIN, providers: ["archive", "pruned"], fetch });
+    expect(evidence.reads.map((r) => r.provider)).toEqual(["archive", "pruned"]);
+    expect(evidence.reads[1]).toMatchObject({ stateUnavailable: true, records: null, codeHash: null, block: { number: 10 } });
+    expect(evidence.reads[0].stateUnavailable).toBeUndefined();
+    expect(failures).toEqual([expect.objectContaining({ provider: "pruned" })]);
+  });
+
+  test("PR59b: \"Token with many records, verifier holding a checkpoint\": `from` reads only the later records, with a referring record's body (P9.25)", async () => {
+    const calls: Call[] = [];
+    const { evidence } = await readEvmToken({ alias: ALIAS }, { pin: PIN, providers: ["p"], from: 1, fetch: fakeNetwork({ p: fakeProvider(chain({ finalized: 12 }, records()), calls) }) });
+    const r = evidence.reads[0];
+    expect(r.from).toBe(1);
+    expect(r.records!.map((x) => x.index)).toEqual([1, 2]);
+    // Record 1 refers to record 0, which was not read: its body is read through body(1) (P14.20).
+    expect(r.records![0]).toMatchObject({ bodyOf: 0, bodyLength: b0.length, body: b0, metadata: m1 });
+    expect(calls.some((c) => c.name === "publication" && Number(c.args![1]) === 0)).toBe(false);
+    const past = await readEvmToken({ alias: ALIAS }, { pin: PIN, providers: ["p"], from: 9, fetch: fakeNetwork({ p: fakeProvider(chain({ finalized: 12 }, records())) }) });
+    expect(past.evidence.reads[0].records).toBeNull();
+  });
+
+  test("P14.21 (a3ffdc1): a chain with its own pinned address is read there, and its aliases name it", async () => {
+    const own = "0x" + "be".repeat(20);
+    const perChain: EvmAnchorPin = { ...PIN, addresses: { "eip155:31337": own } };
+    const { evidence } = await readEvmToken({ alias: evmAliasOf("eip155:31337", own, TOKEN) }, { pin: perChain, providers: ["p"], fetch: fakeNetwork({ p: fakeProvider(chain({ address: own }, records())) }) });
+    expect(evidence.reads[0]).toMatchObject({ codeHash: PIN.codeHash, owner: HOLDER });
+    expect(evidence.reads[0].records!.length).toBe(2);
+    await rejects(readEvmToken({ alias: ALIAS }, { pin: perChain, providers: ["p"] }), "EVM_ALIAS_CONTRACT");
+  });
+
   test("the token derives from the Original and its anchor member (P14.19); an alias of another contract, or an unlisted chain, is refused", async () => {
     const did = "did:vh:QmTokenIdVectorTokenIdVectorTokenIdVectorAb";
     const anchor = { chain: "eip155:31337", minter: "0x70997970c51812dc3a010c7d01b50e0d17dc79c8" };
@@ -221,7 +255,11 @@ describe("P9.27 / P9.29 disclosures", () => {
     expect(n.points[1]).toMatch(/stays dependent on every chain/);
     expect(n.points[2]).toMatch(/trust class operator.*attested by its operator, never as proven/);
     expect(n.points[3]).toMatch(/last only as long as Robinhood Chain's nodes keep its state/);
-    expect(n.points[4]).toContain(minter);
+    // PR59b: "Writer creating an Original with an EVM `anchor`" (C12-278 as changed at a3ffdc1): large
+    // publications can need staged transactions and large metadata makes later edits cost more.
+    expect(n.points).toHaveLength(6);
+    expect(n.points[4]).toMatch(/several staged transactions.*full asset state.*large metadata makes each later edit.*cost more/);
+    expect(n.points[5]).toContain(minter);
     expect(n.text).toBe(n.points.join(" "));
     const eth = evmGenesisNotice({ chain: "eip155:1", minter }, PIN);
     expect(eth.chain.layer).toBe("proven");

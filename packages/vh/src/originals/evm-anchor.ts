@@ -47,12 +47,16 @@ import {
   type AnchoringReport,
   type Assembly,
   type IgnoredReason,
+  type Placed,
   type RetainedAnchor,
 } from "./bitcoin.js";
 import type { SatEvidence, SatInscription } from "./btco.js";
 import {
+  anchorAddress,
   caip19Of,
   checkAnchor,
+  parseEvmAlias,
+  tokenIdOf,
   classAt,
   currentClass,
   describeClass,
@@ -60,6 +64,8 @@ import {
   layerOfClass,
   type EvmAnchor,
   type EvmAnchorPin,
+  type EvmCheckpoint,
+  type EvmCheckpointPlacement,
   type EvmProviderRead,
   type EvmRecord,
   type EvmTokenEvidence,
@@ -77,6 +83,20 @@ export interface EvmEvidence {
   tokens: EvmTokenEvidence[];
   /** The finalized blocks this verifier relied on before, per chain (P9.22). */
   retained?: RetainedEvmBlock[];
+  /**
+   * P9.25 (PR 59 a3ffdc1, MAY): verified checkpoints this verifier retained
+   * (`OriginalsReport.retain.evmCheckpoints`). A read whose `from` is a
+   * checkpoint's `records` resumes from it; one resting on a block the chain
+   * replaced is discarded (P9.22).
+   */
+  checkpoints?: EvmCheckpoint[];
+  /**
+   * P3.9: the did:evm alias being resolved with no copy of the log. The
+   * candidate Original is then taken only from an anchoring or arrival
+   * publication on that token. Without it and without a copy, from such a
+   * publication on any supplied token.
+   */
+  resolving?: string;
 }
 
 /** A publication accepted on a token (P9.20): its record index and the timestamp the record holds. */
@@ -102,6 +122,12 @@ export interface EvmStretch {
   name: string;
   /** The class of the revision this verifier implements (P9.27). */
   class: TrustClass;
+  /**
+   * How the ordering of this stretch's `entries` is described (P9.27, P9.29):
+   * as its class requires once the token is read; `claimed` when the token
+   * could not be read, as for a chain the Original left that is unreadable.
+   */
+  ordering: ReturnType<typeof describeClass> | "claimed";
   /** For a stretch the Original left, the class at the departure record's timestamp, by which the move was judged (P9.28). */
   classAtDeparture?: TrustClass;
   layer: "attested" | "proven";
@@ -146,11 +172,16 @@ export interface EvmStretch {
   /** P9.22: failed when a retained finalized block of this chain was replaced. */
   finality: "held" | "failed" | "unchecked";
   /**
-   * P9.24 (MAY): uniqueness established under this chain's finality, its
-   * class and the providers used, never more; on an attested chain it is
-   * described as attested, never as proven (P9.27).
+   * P9.24 (MAY; PR 59 a3ffdc1): the anchor's uniqueness in the terms of the
+   * chain's class (P9.27): established on a `consensus` or `exit-protected`
+   * chain, attested by the operator on an `operator` chain, attested by the
+   * validators on a `consortium` chain. Each holds only under the chain's
+   * finality and the providers used (`block`, `providers`). Not established
+   * after a finality failure.
    */
-  uniqueness: { status: "established-under-chain"; describes: ReturnType<typeof describeClass>; block: { number: number; hash: string }; providers: string[] } | { status: "not-established" };
+  uniqueness: EvmUniqueness;
+  /** P9.25: the retained checkpoint this read resumed from, reading only later records. */
+  resumedFrom?: { records: number; block: { number: number; hash: string } };
   /** Why the evidence is missing (P9.22, P9.25). */
   missing?: { code: string; message: string };
   /** P9.16: a different anchor than the retained one. */
@@ -185,8 +216,26 @@ export interface EvmAnchoringReport {
   stretches: EvmStretch[];
   /** Only for an anchored Original whose every move is confirmed (P9.23, P9.29). */
   owner: EvmOwnership | null;
-  /** For departed-not-arrived: where the move entry goes (P9.29). */
+  /**
+   * For departed-not-arrived, or a final departure whose destination could not
+   * be read: where the move entry goes (P9.29).
+   */
   destination: string | null;
+  /**
+   * P9.29, for the last move: `arrived` once the arrival is accepted;
+   * `not-arrived` when the destination was read and holds none; `unknown`
+   * when the departure is final but the destination could not be read, which
+   * is missing evidence and claims neither an arrival nor its lack. Null with
+   * no move.
+   */
+  arrival: "arrived" | "not-arrived" | "unknown" | null;
+  /**
+   * P9.29 (PR 59 a3ffdc1): the entries before the first anchoring entry,
+   * described as carried with claimed ordering after any number of moves.
+   * Their proofs and hash links are checked; carrying them does not order
+   * them.
+   */
+  carried: { entries: string[]; ordering: "claimed" };
   unsupported: { code: string; message: string; chain: string } | null;
   /** VH-Log's warning when a finalized block was replaced (P9.22, [S20]). */
   warnings: Array<"authoritative-source-changed">;
@@ -205,6 +254,32 @@ export interface EvmAssembly {
   retainedAnchor?: RetainedAnchor;
   /** The finalized blocks relied on, per chain, to retain (P9.22). */
   retainedBlocks: RetainedEvmBlock[];
+  /** P9.25: a verified checkpoint per token read, to retain. */
+  checkpoints: EvmCheckpoint[];
+  /**
+   * P9.22: per chain, the lowest retained block number evidence showed
+   * replaced. Every retained result and checkpoint resting on it or a later
+   * block is discarded.
+   */
+  replaced: Array<{ chain: string; from: number }>;
+}
+
+/** P9.24 (PR 59 a3ffdc1): uniqueness in the terms of the chain's class. */
+export type EvmUniqueness =
+  | {
+    status: "established" | "attested-by-operator" | "attested-by-validators";
+    chain: string;
+    class: TrustClass;
+    /** It holds only under the chain's finality and these providers' reads at this block. */
+    block: { number: number; hash: string };
+    providers: string[];
+  }
+  | { status: "not-established" };
+
+/** P9.24: how a chain's class lets a report state an anchor's uniqueness. */
+export function uniquenessStatus(cls: TrustClass): "established" | "attested-by-operator" | "attested-by-validators" {
+  const d = describeClass(cls);
+  return d === "proven" ? "established" : d;
 }
 
 type Verify = (entries: unknown[], options?: { unauthorized?: ReadonlySet<number> }) => Promise<LogVerification>;
@@ -245,8 +320,17 @@ const EVM_KIND: AnchorKind = Object.freeze({
 });
 
 type TokenRead =
-  | { kind: "read"; read: AnchorRead; inscriptions: SatInscription[]; preIgnored: EvmStretch["ignored"]; block: { number: number; hash: string }; providers: string[]; holder: string | null; observed: EvmStretch["observed"]; times: Map<number, { timestamp: number; time: number }>; finality: EvmStretch["finality"]; records: EvmRecord[] }
-  | { kind: "missing"; code: string; message: string; block: { number: number; hash: string } | null; providers: string[] }
+  | {
+    kind: "read"; read: AnchorRead; inscriptions: SatInscription[]; preIgnored: EvmStretch["ignored"]; block: { number: number; hash: string }; providers: string[]; holder: string | null;
+    observed: EvmStretch["observed"]; times: Map<number, { timestamp: number; time: number }>; finality: EvmStretch["finality"]; records: EvmRecord[];
+    /** The first record index read, and the checkpoint it resumes from (P9.25). */
+    from: number; checkpoint: EvmCheckpoint | undefined;
+    /** The greatest record timestamp read, s (P9.20). */
+    latest: number;
+    /** The lowest retained block number shown replaced (P9.22). */
+    replacedFrom: number | undefined;
+  }
+  | { kind: "missing"; code: string; message: string; block: { number: number; hash: string } | null; providers: string[]; finality?: EvmStretch["finality"]; replacedFrom?: number | undefined }
   | { kind: "unsupported"; code: string; message: string };
 
 function sameRecord(a: EvmRecord, b: EvmRecord): boolean {
@@ -264,9 +348,11 @@ function readToken(
   pin: EvmAnchorPin,
   supplied: EvmTokenEvidence[],
   retained: RetainedEvmBlock[],
+  checkpoints: EvmCheckpoint[],
   excluded: EvmStretch["excludedProviders"],
 ): TokenRead {
-  const missing = (code: string, message: string, block: { number: number; hash: string } | null = null, providers: string[] = []): TokenRead => ({ kind: "missing", code, message, block, providers });
+  const missing = (code: string, message: string, block: { number: number; hash: string } | null = null, providers: string[] = [], extra: { finality?: EvmStretch["finality"]; replacedFrom?: number | undefined } = {}): TokenRead =>
+    ({ kind: "missing", code, message, block, providers, ...extra });
   const reads: EvmProviderRead[] = [];
   for (const t of supplied) {
     // P9.20: never read an Original's publications from a chain other than the one its anchor names.
@@ -283,45 +369,74 @@ function readToken(
   }
   if (reads.length === 0) return missing("EVM_NO_PROVIDER", `no provider serving ${listed.chain} (by chain ID and block 0) read ${alias} (P9.21)`);
   const providers = [...new Set(reads.map((r) => r.provider))];
-  // P9.22: the lower of the providers' finalized blocks, read from every provider.
+  // P9.22 (PR 59 a3ffdc1): a provider that cannot serve the contract's state at the finalized block,
+  // however far finality trails the head, is not usable for that read, and its failure is missing evidence.
+  const unavailable = reads.find((r) => r.stateUnavailable === true);
+  if (unavailable) {
+    return missing("EVM_STATE_UNAVAILABLE", `${unavailable.provider} cannot serve the anchor contract's state at the finalized block of ${listed.chain}: not usable for this read (P9.22)`, null, providers);
+  }
+  // P9.22: the lower of the providers' finalized blocks, read from every provider. A read at any other
+  // block, including the ahead provider's own finalized block, is not evidence for the comparison.
   const common = Math.min(...reads.map((r) => r.finalized));
   if (reads.some((r) => r.block.number !== common)) {
-    return missing("EVM_READ_NOT_AT_FINALIZED", `every provider must be read at block ${common}, the lower of their finalized blocks (P9.22)`, null, providers);
+    return missing("EVM_READ_NOT_AT_FINALIZED", `every provider must be read at block ${common}, the lower of their finalized blocks; a read at another block is not evidence (P9.22)`, null, providers);
   }
   const block = { number: common, hash: reads[0].block.hash.toLowerCase() };
   if (reads.some((r) => r.block.hash.toLowerCase() !== block.hash)) {
     return missing("EVM_PROVIDERS_DISAGREE", `providers report different hashes for block ${common} (P9.22)`, null, providers);
   }
-  const codes = new Set(reads.map((r) => lower(r.codeHash)));
-  if (codes.size > 1) return missing("EVM_PROVIDERS_DISAGREE", `providers report different code at the anchor contract address at block ${common} (P9.22)`, block, providers);
-  const code = reads[0].codeHash?.toLowerCase() ?? null;
-  // P9.21: other code, or none, at the pinned address is not an Originals anchor: unsupported.
-  if (code !== pin.codeHash.toLowerCase()) {
-    return { kind: "unsupported", code: "EVM_ANCHOR_CODE_MISMATCH", message: `the code at ${pin.address} on ${listed.chain} at block ${common} ${code === null ? "is absent" : `has hash ${code}`}, not the pinned ${pin.codeHash}: unsupported, never not anchored (P9.21)` };
-  }
-  if (new Set(reads.map((r) => lower(r.owner))).size > 1) return missing("EVM_PROVIDERS_DISAGREE", `providers report different ownerOf for ${alias} at block ${common} (P9.22)`, block, providers);
-  const lists = reads.map((r) => r.records);
-  if (lists.some((l) => l === null)) return missing("EVM_RECORDS_UNREADABLE", `the records of ${alias} could not be read from state at block ${common} (P9.25)`, block, providers);
-  const records = lists[0]!;
-  if (lists.some((l) => l!.length !== records.length || l!.some((r, k) => !sameRecord(r, records[k])))) {
-    return missing("EVM_PROVIDERS_DISAGREE", `providers report different records or bytes for ${alias} at block ${common} (P9.22)`, block, providers);
-  }
-  if (records.some((r, k) => r.index !== k)) return missing("EVM_RECORDS_UNREADABLE", `the records of ${alias} are not every index from 0 in order (P14.20)`, block, providers);
 
-  // P9.22: a retained finalized block that the chain has replaced is a finality failure.
+  // P9.22: finality is assumed; a retained finalized block, or a checkpoint's, that a provider now
+  // reports with another hash is evidence that it was replaced: a finality failure, and every retained
+  // result and checkpoint resting on it or a later block is discarded.
   let finality: EvmStretch["finality"] = "unchecked";
-  for (const r of retained.filter((x) => x.chain === listed.chain)) {
+  const replaced: number[] = [];
+  const relied = [...retained.filter((x) => x.chain === listed.chain), ...checkpoints.filter((c) => c.chain === listed.chain).map((c) => ({ chain: c.chain, ...c.block }))];
+  for (const r of relied) {
     const seen = r.number === block.number ? block.hash : reads.flatMap((x) => x.blockHashes ?? []).find((h) => h.number === r.number)?.hash.toLowerCase();
     if (seen === undefined) continue;
-    if (seen !== r.hash.toLowerCase()) finality = "failed";
-    else if (finality !== "failed") finality = "held";
+    if (seen !== r.hash.toLowerCase()) {
+      finality = "failed";
+      replaced.push(r.number);
+    } else if (finality !== "failed") finality = "held";
+  }
+  const replacedFrom = replaced.length > 0 ? Math.min(...replaced) : undefined;
+  const at = { finality, replacedFrom };
+
+  const codes = new Set(reads.map((r) => lower(r.codeHash)));
+  if (codes.size > 1) return missing("EVM_PROVIDERS_DISAGREE", `providers report different code at the anchor contract address at block ${common} (P9.22)`, block, providers, at);
+  const code = reads[0].codeHash?.toLowerCase() ?? null;
+  // P9.21: other code, or none, at the address fixed for this chain is not an Originals anchor: unsupported.
+  if (code !== pin.codeHash.toLowerCase()) {
+    return { kind: "unsupported", code: "EVM_ANCHOR_CODE_MISMATCH", message: `the code at ${anchorAddress(pin, listed.chain)} on ${listed.chain} at block ${common} ${code === null ? "is absent" : `has hash ${code}`}, not the pinned ${pin.codeHash}: unsupported, never not anchored (P9.21)` };
+  }
+  if (new Set(reads.map((r) => lower(r.owner))).size > 1) return missing("EVM_PROVIDERS_DISAGREE", `providers report different ownerOf for ${alias} at block ${common} (P9.22)`, block, providers, at);
+  const lists = reads.map((r) => r.records);
+  if (lists.some((l) => l === null)) return missing("EVM_RECORDS_UNREADABLE", `the records of ${alias} could not be read from state at block ${common} (P9.25)`, block, providers, at);
+  const records = lists[0]!;
+  const froms = new Set(reads.map((r) => r.from ?? 0));
+  if (froms.size > 1) return missing("EVM_PROVIDERS_DISAGREE", `providers read the records of ${alias} from different indexes (P9.25)`, block, providers, at);
+  const from = [...froms][0];
+  if (lists.some((l) => l!.length !== records.length || l!.some((r, k) => !sameRecord(r, records[k])))) {
+    return missing("EVM_PROVIDERS_DISAGREE", `providers report different records or bytes for ${alias} at block ${common} (P9.22)`, block, providers, at);
+  }
+  if (records.some((r, k) => r.index !== from + k)) return missing("EVM_RECORDS_UNREADABLE", `the records of ${alias} are not every index from ${from} in order (P14.20)`, block, providers, at);
+  // P9.25 (MAY): a read that starts after record 0 resumes from a retained checkpoint at that index,
+  // at or below this block and not resting on a replaced block (P9.22). Without one, the earlier
+  // records are unread: missing evidence, never decided on the part read.
+  let checkpoint: EvmCheckpoint | undefined;
+  if (from > 0) {
+    checkpoint = checkpoints.find((c) => c.token === alias && c.chain === listed.chain && c.records === from && c.block.number <= common && (replacedFrom === undefined || c.block.number < replacedFrom));
+    if (!checkpoint) return missing("EVM_RECORDS_UNREADABLE", `the records of ${alias} before index ${from} were not read, and no retained checkpoint covers them (P9.25)`, block, providers, at);
   }
 
   // P9.20, P9.25, P14.20: records as inscriptions, height = index; inscription time the greatest timestamp so far.
   const inscriptions: SatInscription[] = [];
   const preIgnored: EvmStretch["ignored"] = [];
   const times = new Map<number, { timestamp: number; time: number }>();
-  let latest = 0;
+  for (const p of checkpoint ? [checkpoint.anchor, ...checkpoint.accepted, ...checkpoint.conflicting] : []) times.set(p.index, { timestamp: p.timestamp, time: p.time });
+  const byIndex = new Map(records.map((r) => [r.index, r]));
+  let latest = checkpoint?.latest ?? 0;
   for (const rec of records) {
     latest = Math.max(latest, rec.timestamp);
     times.set(rec.index, { timestamp: rec.timestamp, time: latest * 1000 });
@@ -331,41 +446,43 @@ function readToken(
       continue;
     }
     const stored = rec.bodyOf === rec.index;
+    // P14.20 (PR 59 a3ffdc1): a publication counts the bytes it newly stores, so a record that refers
+    // to an earlier body counts its metadata only.
     if ((stored ? rec.metadataLength + rec.bodyLength : rec.metadataLength) > ORIGINALS_INSCRIPTION_MAX_BYTES) {
       preIgnored.push({ index: rec.index, reason: "too-large" });
       continue;
     }
-    const referred = stored ? rec : records[rec.bodyOf];
-    // The contract allows only an earlier record of the token that stored its own body (P14.20).
-    if (!referred || rec.bodyOf > rec.index || referred.bodyOf !== referred.index) {
+    // P14.20: `bodyOf` is an earlier record of this token that stored its own body, and a referring
+    // record holds that body's actual length as its `bodyLength`. The pinned contract records nothing
+    // else. A referred record before a resumed read was checked when the checkpoint was made.
+    const referred = stored ? rec : byIndex.get(rec.bodyOf);
+    if (!stored && (rec.bodyOf > rec.index || (referred === undefined && rec.bodyOf >= from) ||
+      (referred !== undefined && (referred.bodyOf !== referred.index || referred.bodyLength !== rec.bodyLength)))) {
       preIgnored.push({ index: rec.index, reason: "invalid-body-reference" });
       continue;
     }
-    const body = rec.body ?? (stored ? undefined : referred.body);
+    const body = rec.body ?? (stored ? undefined : referred?.body);
     if (rec.metadata === undefined || body === undefined) {
-      return missing("EVM_RECORD_BYTES_UNREAD", `the bytes of record ${rec.index} of ${alias} were not read from state (P9.25)`, block, providers);
+      return missing("EVM_RECORD_BYTES_UNREAD", `the bytes of record ${rec.index} of ${alias} were not read from state (P9.25)`, block, providers, at);
     }
-    // PROVISIONAL: a referring record's `bodyLength` is read as the referred body's length.
-    if (rec.metadata.length !== rec.metadataLength || body.length !== referred.bodyLength) {
-      return missing("EVM_RECORD_BYTES_UNREAD", `the bytes read for record ${rec.index} of ${alias} are not the lengths it records (P14.20)`, block, providers);
+    if (rec.metadata.length !== rec.metadataLength || body.length !== rec.bodyLength) {
+      return missing("EVM_RECORD_BYTES_UNREAD", `the bytes read for record ${rec.index} of ${alias} are not the lengths it records (P14.20)`, block, providers, at);
     }
     inscriptions.push({
       id: `${alias}#${rec.index}`, sat: alias, network: "mainnet", height: rec.index, transactionIndex: 0, inscriptionIndex: 0,
       confirmations: 1, inscriptionTime: latest * 1000, mediaType: rec.mediaType, content: body, metadata: rec.metadata,
     });
   }
-  const observed = [...new Map(reads.flatMap((r) => r.observed ?? []).filter((o) => o.index >= records.length).map((o) => [o.index, { index: o.index, timestamp: o.timestamp }])).values()]
+  const count = from + records.length;
+  const observed = [...new Map(reads.flatMap((r) => r.observed ?? []).filter((o) => o.index >= count).map((o) => [o.index, { index: o.index, timestamp: o.timestamp }])).values()]
     .sort((a, b) => a.index - b.index);
   const holder = lower(reads[0].owner);
   const read: AnchorRead = { alias: { did: alias }, indexes: providers, tip: { height: block.number, hash: block.hash }, inscriptions, excluded: [], disputed: [], owner: null, ownerDisputed: false };
-  return { kind: "read", read, inscriptions, preIgnored, block, providers, holder, observed, times, finality, records };
+  return { kind: "read", read, inscriptions, preIgnored, block, providers, holder, observed, times, finality, records, from, checkpoint, latest, replacedFrom };
 }
 
 const indexOf = (id: string) => Number(id.slice(id.lastIndexOf("#") + 1));
 
-function unsupportedReport(code: string, message: string, chain: string, stretches: EvmStretch[] = []): EvmAnchoringReport {
-  return { status: "unsupported", move: "none", stretches, owner: null, destination: null, unsupported: { code, message, chain }, warnings: [] };
-}
 
 /** The entries before the first anchoring entry of `copy`, or all of it when it has none (P7.14). */
 function beforeFirstAnchoring(copy: unknown[] | null): unknown[] {
@@ -374,18 +491,57 @@ function beforeFirstAnchoring(copy: unknown[] | null): unknown[] {
   return k < 0 ? copy : copy.slice(0, k);
 }
 
-/** The genesis entry: the copy's, or the first entry any supplied token's records carry. PROVISIONAL. */
-function genesisOf(copy: unknown[] | null, tokens: EvmTokenEvidence[]): unknown {
-  if (copy && copy.length > 0) return copy[0];
-  for (const t of tokens) {
+/** Whether P14.19 derives the token `alias` names from the Original `did` and its `anchor` member, at the address P14.21 fixes (P3.9). */
+function derivesToken(alias: string, did: string, anchor: EvmAnchor, pin: EvmAnchorPin | null): boolean {
+  let t;
+  try {
+    t = parseEvmAlias(alias);
+  } catch (error) {
+    if (error instanceof OriginalsError) return false;
+    throw error;
+  }
+  return t.chain === anchor.chain && t.tokenId === tokenIdOf(did, anchor.minter) && (pin === null || t.contract === anchorAddress(pin, anchor.chain));
+}
+
+/**
+ * P3.9 (PR 59 a3ffdc1): with no copy of the log, the candidate Original comes
+ * from an anchoring or arrival publication on a token: one whose last entry
+ * lists that token's alias and whose genesis entry, with that last entry's
+ * `anchor` member, derives the token (P14.19). Any other record, including
+ * the token's first, decides nothing. The candidate is then verified like
+ * any log; this only chooses which Original to verify. With `resolving`, only
+ * that token's records are searched.
+ */
+export function evmCandidate(evidence: Pick<EvmEvidence, "tokens" | "pin" | "resolving">): LogEntry | undefined {
+  for (const t of evidence.tokens) {
+    if (evidence.resolving !== undefined && t.alias !== evidence.resolving) continue;
     for (const r of t.reads) {
       for (const rec of r.records ?? []) {
         const carried = readInscribedEntries(rec.metadata);
-        if (carried.kind === "entries") return carried.entries[0];
+        if (carried.kind !== "entries") continue;
+        const first = carried.entries[0];
+        const last = carried.entries[carried.entries.length - 1];
+        if (tokenNamedBy(last) !== t.alias) continue;
+        const did = (first?.state as { id?: unknown } | undefined)?.id;
+        const anchor = anchorOf(last);
+        if (typeof did !== "string" || !anchor || !derivesToken(t.alias, did, anchor, evidence.pin)) continue;
+        return first;
       }
     }
   }
   return undefined;
+}
+
+/** The genesis entry: the copy's, or the candidate's (P3.9). */
+function genesisOf(copy: unknown[] | null, evidence: EvmEvidence): unknown {
+  if (copy && copy.length > 0) return copy[0];
+  return evmCandidate(evidence);
+}
+
+/** The versionIds of the entries before the first anchoring entry, when there is one (P9.29). */
+function carriedOf(entries: unknown[]): string[] {
+  const k = beforeFirstAnchoring(entries).length;
+  return k < entries.length ? entries.slice(0, k).map((e) => (e as LogEntry).versionId) : [];
 }
 
 /**
@@ -406,15 +562,21 @@ export async function assembleFromEvm(
   histories: AuthorHistory[],
   options: { previousAnchor?: RetainedAnchor; previousHead?: string; moveTimes: Map<string, number> },
 ): Promise<EvmAssembly | null> {
-  const genesis = genesisOf(copy, evidence.tokens);
+  const genesis = genesisOf(copy, evidence);
+  const empty = (report: EvmAnchoringReport, entries: unknown[] = []): EvmAssembly =>
+    ({ entries, report, bitcoin: null, bytes: new Map(), rejectedByAuthorState: new Set(), retainedBlocks: [], checkpoints: [], replaced: [] });
+  const bare = (status: EvmAnchoringReport["status"]): EvmAnchoringReport =>
+    ({ status, move: "none", stretches: [], owner: null, destination: null, arrival: null, carried: { entries: [], ordering: "claimed" }, unsupported: null, warnings: [] });
+  // P3.9, P9.23: tokens with no anchoring or arrival publication of any Original, whatever was minted
+  // or whatever `tokenURI` says, show no Original.
+  if (genesis === undefined && (!copy || copy.length === 0) && evidence.tokens.length > 0) return empty(bare("not-anchored"));
   const genesisAnchor = assetOf(genesis)?.anchor;
   if (genesisAnchor === undefined) return null;
   const did = (genesis as { state?: { id?: unknown } }).state?.id;
-  const empty = (report: EvmAnchoringReport, entries: unknown[] = []): EvmAssembly => ({ entries, report, bitcoin: null, bytes: new Map(), rejectedByAuthorState: new Set(), retainedBlocks: [] });
   let anchor = anchorOf(genesis);
   if (!anchor || typeof did !== "string") {
     // A malformed anchor member is the log's failure (P14.18); verify the copy and let it report it.
-    return empty({ status: "unverified", move: "none", stretches: [], owner: null, destination: null, unsupported: null, warnings: [] }, copy ?? []);
+    return empty(bare("unverified"), copy ?? []);
   }
   const pin = evidence.pin;
 
@@ -422,6 +584,8 @@ export async function assembleFromEvm(
   const bytes = new Map<string, { bytes: Uint8Array; chain: string }>();
   const rejectedByAuthorState = new Set<string>();
   const retainedBlocks: RetainedEvmBlock[] = [];
+  const checkpoints: EvmCheckpoint[] = [];
+  const replaced: EvmAssembly["replaced"] = [];
   const warnings: EvmAnchoringReport["warnings"] = [];
   let move: EvmAnchoringReport["move"] = "none";
   let arrival: LogEntry[] | "unconfirmed" | undefined;
@@ -434,16 +598,27 @@ export async function assembleFromEvm(
     const owner: EvmOwnership | null = ownerOk && last ? {
       describes: last.describes, chain: last.chain, class: last.class, token: last.token, address: last.holder!, block: last.block!, providers: last.providers,
     } : null;
+    const moved = move !== "none" || arrival !== undefined;
+    const arrivalStatus: EvmAnchoringReport["arrival"] = !moved ? null : status === "anchored" || status === "moved-to-bitcoin" ? "arrived" : status === "departed-not-arrived" ? "not-arrived" : "unknown";
     return {
       entries,
-      report: { status, move, stretches, owner, destination: null, unsupported: null, warnings, ...extra },
+      report: {
+        status, move, stretches, owner, destination: null, arrival: arrivalStatus,
+        // P9.29: the entries before the first anchoring entry are carried, with claimed ordering, after any number of moves.
+        carried: { entries: carriedOf(entries), ordering: "claimed" },
+        unsupported: null, warnings, ...extra,
+      },
       bitcoin: btc,
       bytes,
       rejectedByAuthorState,
       ...(retainedAnchor ? { retainedAnchor } : {}),
       retainedBlocks,
+      checkpoints,
+      replaced,
     };
   };
+  const unsupported = (code: string, message: string, chain: string, entries: unknown[] = []): EvmAssembly =>
+    ({ ...empty({ ...bare("unsupported"), stretches, unsupported: { code, message, chain } }, entries), replaced });
 
   for (;;) {
     // P9.19, P9.21, section 14: no pin, or an unlisted chain, is unsupported, never invalid.
@@ -453,32 +628,52 @@ export async function assembleFromEvm(
       const message = support.reason === "chain-not-listed"
         ? `${anchor.chain} is not in this verifier's revision of P14.22: unsupported, not invalid (P9.19)`
         : "P14.21 pins no anchor contract: an Original with an anchor member is unsupported, not invalid (section 14)";
-      return { ...empty(unsupportedReport(code, message, anchor.chain, stretches)) };
+      return unsupported(code, message, anchor.chain);
     }
     const { listed } = support;
     const alias = derivedTokenAlias(did, anchor, support.pin);
     const cls = currentClass(listed);
     const excluded: EvmStretch["excludedProviders"] = [];
     const supplied = evidence.tokens.filter((t) => t.alias === alias);
-    const token = readToken(alias, listed, support.pin, supplied, evidence.retained ?? [], excluded);
-    if (token.kind === "unsupported") return empty(unsupportedReport(token.code, token.message, anchor.chain, stretches));
+    let token = readToken(alias, listed, support.pin, supplied, evidence.retained ?? [], evidence.checkpoints ?? [], excluded);
+    if (token.kind === "unsupported") return unsupported(token.code, token.message, anchor.chain);
+    // P9.22: evidence of a replaced block is a warning, whatever else the read shows.
+    const replacedFrom = token.kind === "read" ? token.replacedFrom : token.replacedFrom;
+    if (replacedFrom !== undefined) {
+      replaced.push({ chain: listed.chain, from: replacedFrom });
+      if (!warnings.includes("authoritative-source-changed")) warnings.push("authoritative-source-changed");
+    }
+    // P9.25: resuming needs the checkpoint's head in a copy of the log; without it the earlier records are unread.
+    let resume: ReturnType<typeof resumeFrom> = null;
+    if (token.kind === "read" && token.checkpoint) {
+      resume = resumeFrom(alias, token.checkpoint, copy ?? (Array.isArray(arrival) ? arrival : null));
+      if (!resume) {
+        token = { kind: "missing", code: "EVM_CHECKPOINT_UNUSABLE", message: `the read of ${alias} resumes from record ${token.from}, but no copy of the log holds the checkpoint's head ${token.checkpoint.head} (P9.25)`, block: token.block, providers: token.providers, finality: token.finality };
+      }
+    }
     const stretch: EvmStretch = {
-      chain: listed.chain, name: listed.name, class: cls, layer: layerOfClass(cls), describes: describeClass(cls), token: alias, caip19: caip19Of(alias),
+      chain: listed.chain, name: listed.name, class: cls, ordering: "claimed", layer: layerOfClass(cls), describes: describeClass(cls), token: alias, caip19: caip19Of(alias),
       status: "unverified", arrival: arrival !== undefined, anchor: null, conflicting: [], accepted: [], entries: [], carried: [], departure: null,
       ignored: [], unverifiable: [], observed: [], block: token.block, providers: token.providers, excludedProviders: excluded, holder: null,
-      finality: "unchecked", uniqueness: { status: "not-established" }, change: null, headChange: null,
+      finality: token.kind === "read" ? token.finality : token.finality ?? "unchecked", uniqueness: { status: "not-established" }, change: null, headChange: null,
     };
     stretches.push(stretch);
 
     if (token.kind === "missing") {
       stretch.missing = { code: token.code, message: token.message };
       // P9.29: a chain the Original left that cannot be read leaves the move unconfirmed, and the
-      // log the arrival carries is still verified. Which move left it is known only from the copy.
+      // log the arrival carries is still verified, its proofs and hash links checked from genesis.
+      // Which move left it is known only from the copy.
       const k = copy ? copy.findIndex((e, j) => j > 0 && tokenNamedBy(copy[j - 1]) === alias && departsFrom(e as LogEntry, copy[j - 1] as LogEntry)) : -1;
       const next = k >= 0 ? anchorOf(copy![k]) : undefined;
       const btcoNext = k >= 0 && next === undefined;
       const destinationSupplied = next ? evidence.tokens.some((t) => t.chain === next.chain) : btcoNext && bitcoin.length > 0;
       if (k >= 0 && destinationSupplied) {
+        // P9.29 (PR 59 a3ffdc1): the entries accepted on the unread chain, by the copy, have claimed
+        // ordering only: neither attested nor proven without that chain's evidence.
+        const named = copy!.flatMap((e, j) => (tokenNamedBy(e) === alias && j < k ? [j] : []));
+        stretch.entries = [...(arrival !== undefined ? named.slice(1) : named), k].map((j) => (copy![j] as LogEntry).versionId);
+        stretch.ordering = "claimed";
         move = "unconfirmed";
         arrival = "unconfirmed";
         if (next) {
@@ -487,22 +682,29 @@ export async function assembleFromEvm(
         }
         return toBitcoin(copy!.slice(0, k + 1) as LogEntry[]);
       }
-      // P7.14: without every chain in the path, at most the entries before the first anchoring entry.
+      // P9.29 (PR 59 a3ffdc1): a final departure whose destination cannot be read is reported as
+      // finalized, the destination as unreachable, with missing evidence, claiming no arrival and no
+      // lack of one. P7.14: without the chain it is anchored on now, at most the entries before the
+      // first anchoring entry.
+      if (arrival !== undefined) return finish("unverified", beforeFirstAnchoring(copy ?? throughDeparture), { destination: alias });
       return finish("unverified", beforeFirstAnchoring(copy ?? throughDeparture));
     }
 
     // P9.28: a move's layers are judged at its departure record's timestamp; record it before verifying.
+    // Every entry a record carries gets the record's timestamp; the first record carrying it wins.
     for (const i of token.inscriptions) {
       const carried = readInscribedEntries(i.metadata);
-      if (carried.kind === "entries" && carried.entries.length === 1 && typeof carried.entries[0].versionId === "string" && !options.moveTimes.has(carried.entries[0].versionId)) {
-        options.moveTimes.set(carried.entries[0].versionId, token.times.get(i.height)!.timestamp * 1000);
-      }
+      if (carried.kind !== "entries") continue;
+      const versionId = carried.entries[carried.entries.length - 1]?.versionId;
+      if (typeof versionId === "string" && !options.moveTimes.has(versionId)) options.moveTimes.set(versionId, token.times.get(i.height)!.timestamp * 1000);
     }
+    for (const p of token.checkpoint ? token.checkpoint.accepted : []) if (!options.moveTimes.has(p.versionId)) options.moveTimes.set(p.versionId, p.timestamp * 1000);
     const previousAnchor = options.previousAnchor?.sat === alias ? options.previousAnchor : undefined;
     const core = await assembleAnchored(copy ?? (Array.isArray(arrival) ? arrival : null), [token.read], token.inscriptions, verify, histories, {
       ...(previousAnchor ? { previousAnchor } : {}),
       ...(previousAnchor && options.previousHead !== undefined ? { previousHead: options.previousHead } : {}),
       ...(arrival ? { arrival } : {}),
+      ...(resume ? { resume } : {}),
     }, EVM_KIND);
     for (const v of core.rejectedByAuthorState) rejectedByAuthorState.add(v);
     const placedOf = (p: { inscription: string; versionId: string }): EvmPlaced => {
@@ -514,6 +716,7 @@ export async function assembleFromEvm(
     stretch.holder = token.holder;
     stretch.finality = token.finality;
     stretch.observed = token.observed;
+    if (token.checkpoint) stretch.resumedFrom = { records: token.checkpoint.records, block: token.checkpoint.block };
     stretch.ignored = [
       ...token.preIgnored,
       ...core.report.ignored.map((x) => ({
@@ -526,15 +729,12 @@ export async function assembleFromEvm(
     stretch.change = core.report.change;
     stretch.headChange = core.report.headChange;
     retainedBlocks.push({ chain: listed.chain, number: token.block.number, hash: token.block.hash });
-    if (token.finality === "failed") {
-      if (!warnings.includes("authoritative-source-changed")) warnings.push("authoritative-source-changed");
-    }
 
     // P9.28: a move entry to an unlisted chain is unsupported, not invalid; it is not a departure.
     const unlisted = stretch.ignored.find((x) => x.code === "EVM_CHAIN_NOT_LISTED");
     if (unlisted) {
       stretch.status = core.report.status === "anchored" ? "anchored" : "not-anchored";
-      return empty(unsupportedReport("EVM_CHAIN_NOT_LISTED", `the move entry ${unlisted.versionId ?? ""} names a destination this verifier's revision of P14.22 does not list: unsupported, not invalid (P9.19, P9.28)`, anchor.chain, stretches), core.entries);
+      return unsupported("EVM_CHAIN_NOT_LISTED", `the move entry ${unlisted.versionId ?? ""} names a destination this verifier's revision of P14.22 does not list: unsupported, not invalid (P9.19, P9.28)`, anchor.chain, core.entries);
     }
 
     if (core.report.status !== "anchored") {
@@ -545,11 +745,13 @@ export async function assembleFromEvm(
         if (arrival === "unconfirmed") return finish("unverified", beforeFirstAnchoring(copy));
         return finish("departed-not-arrived", throughDeparture!, { destination: alias });
       }
-      // P9.23: minted or not, no valid anchoring publication: not anchored, no owner.
+      // P9.19, P9.23: a signed anchoring entry not published, a genesis anchor member alone, or a
+      // token minted with no valid anchoring publication: not anchored, no owner.
       return finish("not-anchored", core.entries);
     }
 
     stretch.status = "anchored";
+    stretch.ordering = stretch.describes;
     const anchorPlaced = placedOf(core.report.anchor!);
     stretch.anchor = anchorPlaced;
     stretch.conflicting = core.report.conflicting.map(placedOf);
@@ -558,10 +760,23 @@ export async function assembleFromEvm(
     const anchorAt = head.findIndex((e) => e.versionId === anchorPlaced.versionId);
     stretch.carried = head.slice(0, arrival !== undefined ? anchorAt + 1 : anchorAt).map((e) => e.versionId);
     stretch.entries = [...(arrival !== undefined ? [] : [anchorPlaced.versionId]), ...stretch.accepted.map((a) => a.versionId)];
-    // P9.24 (MAY): uniqueness established only under this chain's finality, class and providers.
-    stretch.uniqueness = { status: "established-under-chain", describes: stretch.describes, block: token.block, providers: token.providers };
+    // P9.24 (MAY; PR 59 a3ffdc1): uniqueness in the terms of the class, only under this chain's
+    // finality and the providers used; none after a finality failure.
+    stretch.uniqueness = token.finality === "failed"
+      ? { status: "not-established" }
+      : { status: uniquenessStatus(cls), chain: listed.chain, class: cls, block: token.block, providers: token.providers };
     for (const [digest, b] of core.bytes) bytes.set(digest, { bytes: b, chain: listed.chain });
     retainedAnchor = { inscription: core.report.anchor!.inscription, sat: alias, owner: token.holder };
+    // P9.25: a verified checkpoint at this read, unless something is waiting on an unverifiable
+    // publication (P9.15), which a resumed read could not take up again, or finality failed (P9.22).
+    if (token.finality !== "failed" && core.report.unverifiable.length === 0) {
+      const at = (p: EvmPlaced): EvmCheckpointPlacement => ({ index: p.index, versionId: p.versionId, timestamp: p.timestamp, time: p.inscriptionTime });
+      checkpoints.push({
+        chain: listed.chain, token: alias, records: token.from + token.records.length, block: token.block, head: head[head.length - 1].versionId,
+        arrival: arrival !== undefined, anchor: at(anchorPlaced), accepted: stretch.accepted.map(at), conflicting: stretch.conflicting.map(at),
+        latest: token.latest, departed: core.departure !== undefined,
+      });
+    }
     if (token.finality === "failed" && throughDeparture) move = "unconfirmed";
 
     if (!core.departure) return finish("anchored", head);
@@ -595,8 +810,37 @@ export async function assembleFromEvm(
     for (const v of btc.rejectedByAuthorState) rejectedByAuthorState.add(v);
     if (btc.report.status === "anchored") return finish("moved-to-bitcoin", btc.entries, {}, btc);
     const destination = (assetOf(through[through.length - 1])?.aliases ?? []).find((a) => a.startsWith("did:btco:")) ?? null;
-    if (btc.report.status === "unverified") return finish("unverified", beforeFirstAnchoring(copy ?? through), {}, btc);
+    // P9.29: a final departure whose destination sat cannot be read: unreachable, no arrival claimed or denied.
+    if (btc.report.status === "unverified") return finish("unverified", beforeFirstAnchoring(copy ?? through), { destination }, btc);
     if (arrival === "unconfirmed") return finish("unverified", beforeFirstAnchoring(copy ?? through), {}, btc);
     return finish("departed-not-arrived", through, { destination }, btc);
   }
+}
+
+/**
+ * P9.25: what `assembleAnchored` needs to resume from a checkpoint: the copy
+ * through the checkpoint's head, which must hold its anchor and every entry
+ * accepted after it, in order. Null when the copy cannot supply that.
+ */
+function resumeFrom(alias: string, cp: EvmCheckpoint, source: unknown[] | null): NonNullable<Parameters<typeof assembleAnchored>[5]["resume"]> | null {
+  if (!source) return null;
+  const at = source.findIndex((e) => (e as LogEntry | null)?.versionId === cp.head);
+  if (at < 0) return null;
+  const entries = source.slice(0, at + 1) as LogEntry[];
+  const anchorEntries = entries.findIndex((e) => e.versionId === cp.anchor.versionId) + 1;
+  if (anchorEntries === 0) return null;
+  const after = entries.slice(anchorEntries).map((e) => e.versionId);
+  if (after.length !== cp.accepted.length || after.some((v, k) => v !== cp.accepted[k].versionId)) return null;
+  const placed = (p: EvmCheckpointPlacement): Placed => ({ sat: alias, inscription: `${alias}#${p.index}`, versionId: p.versionId, height: p.index, confirmations: 1, inscriptionTime: p.time });
+  return {
+    entries,
+    anchorEntries,
+    anchor: {
+      id: `${alias}#${cp.anchor.index}`, sat: alias, network: "mainnet", height: cp.anchor.index, transactionIndex: 0, inscriptionIndex: 0,
+      confirmations: 1, inscriptionTime: cp.anchor.time, mediaType: "", content: new Uint8Array(0),
+    },
+    accepted: cp.accepted.map(placed),
+    conflicting: cp.conflicting.map(placed),
+    departed: cp.departed,
+  };
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.38;
 
-import {Base} from "./Base.sol";
+import {Base, Vm} from "./Base.sol";
 import {OriginalsAnchor, IERC721Receiver} from "../src/OriginalsAnchor.sol";
 
 /// A contract account that holds a token and publishes on it (P9.23).
@@ -101,8 +101,9 @@ contract OriginalsAnchorTest is Base {
 
     // ----------------------------------------------------------------- who may publish (P14.20, P9.23)
 
-    /// C12-252: "Publication by an address that is neither the holder nor an approved operator":
-    /// reverted by the contract; no record.
+    /// C12-252, as reworded at PR 59 a3ffdc1: PR59b: "Publication by an address that is not the
+    /// holder, the address approved for the token through `approve`, or an operator approved
+    /// through `setApprovalForAll`": reverted by the contract; no record. Both approvals publish.
     function test_publicationByNonHolderReverts() public {
         uint256 id = minted();
         bytes memory m = hex"80";
@@ -359,8 +360,9 @@ contract OriginalsAnchorTest is Base {
         eq(a.body(id, index, 0, type(uint32).max), b, "record 0's body");
     }
 
-    /// C12-260: "`publishSameBody` or `commitSameBody` naming a later record, a record of another
-    /// token, or a record that itself refers to another": reverted by the contract; no record.
+    /// C12-260, as reworded at PR 59 a3ffdc1: PR59b: "`publishSameBody` or `commitSameBody` naming
+    /// an index that is not an earlier record of the selected token, or a record that itself refers
+    /// to another": reverted by the contract; no record.
     function test_sameBodyMisuseReverts() public {
         uint256 id = minted();
         uint256 other = minted(BOB, ORIGINAL);
@@ -390,6 +392,74 @@ contract OriginalsAnchorTest is Base {
         vm.stopPrank();
         eq(a.publicationCount(id), 2, "no record from any misuse");
         eq(a.body(id, 1, 0, 10), hex"09", "record 1 has record 0's body, not the other token's");
+    }
+
+    /// PR59b: "The same record index on two tokens, used in `publishSameBody` on one of them": the
+    /// body is that of the selected token's own record; another token's body cannot be selected
+    /// (P14.20: `bodyOf` is token-local).
+    function test_bodyOfIsTokenLocal() public {
+        uint256 id = minted();
+        uint256 other = minted(BOB, ORIGINAL);
+        vm.prank(BOB);
+        a.publish(other, "text/plain", hex"80", hex"0b0b");
+        vm.startPrank(ALICE);
+        a.publish(id, "image/png", hex"80", hex"0a");
+        uint32 index = a.publishSameBody(id, hex"81", 0);
+        vm.stopPrank();
+        (,, uint32 bl, uint32 bodyOf, string memory mt) = a.publication(id, index);
+        eq(bodyOf, 0, "bodyOf names record 0 of the selected token");
+        eq(bl, 1, "its body's length, not the other token's");
+        eq(mt, "image/png", "its media type, not the other token's");
+        eq(a.body(id, index, 0, 10), hex"0a", "its body, not the other token's");
+    }
+
+    /// PR59b: "Record that refers to an earlier body": its `bodyLength` is the referred body's
+    /// length; only its metadata counts toward the 350,000-byte limit (P14.20).
+    function test_referringRecordBodyLengthAndLimit() public {
+        uint256 id = minted();
+        vm.startPrank(ALICE);
+        a.publish(id, "image/png", hex"80", blob(300_000, 21));
+        // 350,000 bytes of metadata plus a 300,000-byte body it does not store again.
+        uint32 index = a.publishSameBody(id, blob(LIMIT, 22), 0);
+        (, uint32 ml, uint32 bl, uint32 bodyOf,) = a.publication(id, index);
+        eq(ml, LIMIT, "metadataLength");
+        eq(bl, 300_000, "bodyLength is the referred body's length, not zero");
+        eq(bodyOf, 0, "bodyOf");
+        bytes32 up = a.begin(id);
+        a.append(up, blob(LIMIT, 23));
+        index = a.commitSameBody(up, 0);
+        (, ml, bl,,) = a.publication(id, index);
+        eq(ml, LIMIT, "staged metadataLength");
+        eq(bl, 300_000, "staged bodyLength is the referred body's length");
+        vm.expectRevert(abi.encodeWithSelector(OriginalsAnchor.TooLarge.selector, LIMIT + 1));
+        a.publishSameBody(id, blob(LIMIT + 1, 24), 0);
+        vm.stopPrank();
+    }
+
+    /// PR59b: "Writer staging an upload": learns the upload ID from `UploadBegun`; the event is
+    /// never evidence. P14.20: `event UploadBegun(uint256 indexed tokenId, bytes32 upload, address by)`.
+    function test_uploadBegunEvent() public {
+        uint256 id = minted();
+        vm.prank(ALICE);
+        a.approve(CAROL, id);
+        vm.recordLogs();
+        vm.prank(CAROL);
+        bytes32 up = a.begin(id);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        eq(logs.length, 1, "one event");
+        eq(logs[0].emitter, address(a), "emitted by the anchor");
+        eq(logs[0].topics.length, 2, "only tokenId is indexed");
+        truth(logs[0].topics[0] == keccak256("UploadBegun(uint256,bytes32,address)"), "P14.20 signature");
+        eq(uint256(logs[0].topics[1]), id, "tokenId topic");
+        (bytes32 upload, address by) = abi.decode(logs[0].data, (bytes32, address));
+        truth(upload == up, "the ID begin returned");
+        eq(by, CAROL, "by is the caller of begin");
+        // The upload so learned is usable by its opener; nothing is recorded until commit.
+        eq(a.publicationCount(id), 0, "no record from begin");
+        vm.startPrank(CAROL);
+        a.append(upload, hex"8001");
+        eq(a.commit(upload, "image/png", 1), 0, "committed through the learned ID");
+        vm.stopPrank();
     }
 
     // ----------------------------------------------------------------- tokenURI, ERC-165 (P14.21)
