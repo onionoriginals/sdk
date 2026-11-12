@@ -93,6 +93,38 @@ describe("C12-01: create, edit and verify in a fresh reader", () => {
     expect(missing.checkpoint).toBeNull();
     expect(missing.reasons).toContain("checkpoint-not-found");
   });
+
+  test("C12-303: exact-checkpoint resolution of a checkpoint the resolver cannot supply: reports why; the latest is not substituted (P3.2)", async () => {
+    const { alice, log, sign, ref, at } = await harbor();
+    const other = await createOriginal({ versionTime: at(), name: "Another Original", resource: photo(B1), author: ref, sign });
+    const later = await updateOriginal(log[2], { versionTime: at(), name: "Harbor, renamed", author: ref, sign });
+    const cases = [
+      "9-QmMissing", // in no log
+      other.versionId, // another Original's checkpoint
+      later.versionId, // this Original's, but not in the log supplied
+      `${log[1].versionId.split("-")[0]}-${log[2].versionId.split("-")[1]}`, // a number and hash that belong to different entries
+    ];
+    for (const checkpoint of cases) {
+      const r = await report(log, [alice], { checkpoint });
+      expect(r.checkpoint, checkpoint).toBeNull();
+      expect(r.reasons).toContain("checkpoint-not-found");
+      expect(r.state ?? null).toBeNull();
+      expect(r.validAsOf).toBeNull();
+      expect(r.document ?? null).toBeNull();
+      expect(r.current).toBe(false);
+      // The head is reported as the head, never as the checkpoint asked for.
+      expect(r.head).toBe(log[2].versionId);
+      expect(r.original).toBe(`did:vh:${log[0].parameters.scid as string}`);
+    }
+    // A checkpoint past an entry the verifier rejects is not supplied either: the log is valid only before it.
+    const broken = await resign(log[2], { ...log[2].state, operation: "create" } as JsonObject, sign);
+    const tail = await resign(broken, { ...log[2].state, transitions: [] } as JsonObject, sign, {}, "2026-10-18T12:40:00.000Z");
+    const r = await report([...log, broken, tail], [alice], { checkpoint: tail.versionId });
+    expect(r.history.status).toBe("invalid");
+    expect(r.checkpoint).toBeNull();
+    expect(r.reasons).toContain("checkpoint-not-found");
+    expect(r.state ?? null).toBeNull();
+  });
 });
 
 describe("resources", () => {
@@ -508,7 +540,7 @@ describe("the derived DID document and generic resolvers (P3.5, P3.8)", () => {
 });
 
 describe("section 14: exact members (P14.1, P14.4, P14.8)", () => {
-  test("P14.1: genesis parameters are exactly method and scid", async () => {
+  test("C12-305: P14.1: genesis parameters are exactly method and scid; a null parameter value is rejected", async () => {
     const { alice, key, sign, ref } = await harbor();
     const genesisWith = async (extra: JsonObject) => {
       const base = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", resource: photo(B1), author: ref, sign });
@@ -524,7 +556,7 @@ describe("section 14: exact members (P14.1, P14.4, P14.8)", () => {
     failedWith(await report([await genesisWith({ ttl: null })], [alice]), 0, "PARAMETER_NULL", "invalid-evidence");
   });
 
-  test("P14.1: every later author entry has {} parameters; a deactivation exactly {\"deactivated\": true}", async () => {
+  test("C12-305: P14.1: every later author entry has {} parameters; a deactivation exactly {\"deactivated\": true}; no null value", async () => {
     const { alice, log, sign } = await harbor();
     const same = { ...log[2].state, transitions: [] };
     for (const parameters of [{ ttl: 60 }, { method: ORIGINALS_METHOD }, { deactivated: false }, { watchers: [] }]) {
@@ -534,6 +566,13 @@ describe("section 14: exact members (P14.1, P14.4, P14.8)", () => {
     const deactivated = await report([...log, await resign(log[2], off, sign, { deactivated: true })], [alice]);
     expect(deactivated.history.status, JSON.stringify(deactivated.history.failure)).toBe("valid");
     failedWith(await report([...log, await resign(log[2], off, sign, { deactivated: true, ttl: 60 })], [alice]), 3, "PARAMETER_MEMBERS", "invalid-evidence");
+    // A null value in a later entry, and a null `deactivated`, are rejected too.
+    for (const [parameters, state] of [[{ ttl: null }, same], [{ deactivated: null }, off]] as const) {
+      const r = await report([...log, await resign(log[2], state, sign, parameters as JsonObject)], [alice]);
+      expect(r.history.failure?.index).toBe(3);
+      expect(r.history.failure?.code).toMatch(/^PARAMETER_(NULL|MEMBERS)$/);
+      expect(r.history.status).toBe("invalid");
+    }
   });
 
   test("C12-174: P14.4, P14.8: a proof has exactly type, cryptosuite, verificationMethod, proofPurpose and proofValue", async () => {
@@ -566,6 +605,26 @@ describe("section 14: the asset log's form (P14.2)", () => {
     for (const versionTime of ["2026-10-18T12:30:00Z", "2026-10-18T12:30:00.5Z", "2026-10-18T12:30:00.123Z"]) {
       expect((await report([...log, await resign(log[2], same, sign, {}, versionTime)], [alice])).history.status).toBe("valid");
     }
+  });
+
+  test("C12-307: two entries less than one millisecond apart, or a versionTime with more than three fractional digits: rejected (P14.2, D5 PROVISIONAL)", async () => {
+    const { alice, log, sign } = await harbor();
+    const same = { ...log[2].state, transitions: [] };
+    const last = log[2].versionTime as string;
+    // More than three fractional digits, even when the extra digits are zeros or the instant is later.
+    for (const versionTime of ["2026-10-18T12:30:00.0001Z", "2026-10-18T12:30:00.1230Z", "2026-10-18T12:30:00.123456789Z"]) {
+      failedWith(await report([...log, await resign(log[2], same, sign, {}, versionTime)], [alice]), 3, "VERSION_TIME_FORMAT", "invalid-evidence");
+    }
+    // At three digits, entries less than 1 ms apart have the same versionTime: the same instant is rejected,
+    // in either spelling, and 1 ms later is accepted.
+    const ms = Date.parse(last);
+    const at = (t: number) => new Date(t).toISOString();
+    for (const versionTime of [at(ms), at(ms).replace(".000Z", "Z"), at(ms - 1)]) {
+      const r = await report([...log, await resign(log[2], same, sign, {}, versionTime)], [alice]);
+      expect(r.history.failure?.index, versionTime).toBe(3);
+      expect(r.history.status).toBe("invalid");
+    }
+    expect((await report([...log, await resign(log[2], same, sign, {}, at(ms + 1))], [alice])).history.status).toBe("valid");
   });
 
   test("C12-173, C12-179: each line of an asset log is compact JSON ending in one LF: a missing final LF, CRLF or whitespace between tokens is rejected", async () => {

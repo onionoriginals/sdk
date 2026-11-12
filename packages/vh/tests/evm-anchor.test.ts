@@ -17,6 +17,7 @@ import {
   derivedTokenAlias,
   parseBtcoAlias,
   parseEvmAlias,
+  readInscribedEntries,
   resolveDidEvm,
   updateOriginal,
   verifyOriginal,
@@ -346,6 +347,28 @@ describe("P9.23, P9.24 ownership and the anchor", () => {
     expect(r.head).toBe(b.versionId);
     expect(r.evm!.stretches[0].accepted.map((p) => p.index)).toEqual([1, 2]);
     expect(r.current).toBe(true);
+  });
+
+  test("C12-251: '…or in two blocks of a rollup that share one parent-chain block number': both accepted, in index order (P9.13, P9.20, P14.20)", async () => {
+    // Arbitrum One: its blocks can share a timestamp and a contract sees its parent chain's approximate
+    // block number [S42]. A record holds no block number, only its index and timestamp (P14.20), so two
+    // rollup blocks behind one parent-chain block are, to the verifier, the index order and nothing else.
+    const ARBITRUM = "eip155:42161";
+    expect(listed(ARBITRUM)).toBeDefined();
+    const o = await original(ARBITRUM, 47);
+    const a = await o.next(o.anchoring, { name: "A" });
+    const b = await o.next(a, { name: "B" });
+    const records = [rec(0, o.log, TS0), rec(1, a, TS0 + 1), rec(2, b, TS0 + 1)];
+    for (const r of records) expect(Object.keys(r).some((k) => /block/i.test(k))).toBe(false);
+    const r = await verify(o.alice, [token(o.alias, two(ARBITRUM, records))]);
+    expect(r.head).toBe(b.versionId);
+    expect(r.evm!.stretches[0].accepted.map((p) => [p.index, p.versionId])).toEqual([[1, a.versionId], [2, b.versionId]]);
+    expect(r.evm!.stretches[0].ignored).toEqual([]);
+    // The second publication extends the first, so index order decides; a later record that does not extend the head is not accepted.
+    const stale = await o.next(o.anchoring, { name: "C" });
+    const forked = await verify(o.alice, [token(o.alias, two(ARBITRUM, [...records, rec(3, stale, TS0 + 1)]))]);
+    expect(forked.head).toBe(b.versionId);
+    expect(forked.evm!.stretches[0].accepted.map((p) => p.index)).toEqual([1, 2]);
   });
 });
 
@@ -1054,5 +1077,55 @@ describe("originals-spec PR 59 a3ffdc1: P3.9 did:evm candidate", () => {
     ];
     const here = await resolveDidEvm(m.dest, { authors: [m.alice.evidence(), other.alice.evidence()], now: NOW, evm: { pin: PIN, tokens } });
     expect(here).toMatchObject({ status: "resolved", original: m.id });
+  });
+});
+
+describe("originals-spec PR 59: tokenURI and carried files from publications", () => {
+  test("C12-286: 'Document returned by the token's tokenURI, offered as the did:evm DID document': not used (P3.9, P3.8)", async () => {
+    const o = await original(ROBINHOOD, 91);
+    const forged = {
+      "@context": ["https://www.w3.org/ns/did/v1"], id: o.alias, alsoKnownAs: ["did:vh:QmForgedForgedForgedForgedForgedForgedForged1"],
+      service: [{ id: `${o.alias}#files`, type: "OriginalsFiles", serviceEndpoint: "https://evil.example/files/" }],
+      verificationMethod: [{ id: `${o.alias}#k`, type: "Multikey", controller: o.alias, publicKeyMultibase: "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK" }],
+    };
+    const tokenURI = `data:application/json,${encodeURIComponent(JSON.stringify(forged))}`;
+    const withUri = (reads: EvmProviderRead[]) => reads.map((r) => ({ ...r, tokenURI, document: forged }) as EvmProviderRead);
+    const base = { authors: [o.alice.evidence()], now: NOW };
+    // Offered beside an accepted log: the derived document, never the offered one.
+    const plain = await resolveDidEvm(o.alias, { ...base, evm: { pin: PIN, tokens: [token(o.alias, two(ROBINHOOD, [rec(0, o.log)]))] } });
+    const offered = await resolveDidEvm(o.alias, { ...base, document: forged, tokenURI, evm: { pin: PIN, tokens: [token(o.alias, withUri(two(ROBINHOOD, [rec(0, o.log)])))] } } as never);
+    expect(offered.status).toBe("resolved");
+    expect(canonicalize(offered.document as JsonValue)).toBe(canonicalize(plain.document as JsonValue));
+    expect(offered.document).toMatchObject({ id: o.alias, alsoKnownAs: [o.id] });
+    expect(JSON.stringify(offered.document)).not.toContain("evil.example");
+    expect(offered.original).toBe(o.id);
+    // Offered for a token with no accepted anchoring publication: it resolves to nothing, whatever tokenURI says.
+    const minted = await resolveDidEvm(o.alias, { ...base, document: forged, tokenURI, evm: { pin: PIN, tokens: [token(o.alias, withUri(two(ROBINHOOD, [])))] } } as never);
+    expect(minted).toMatchObject({ status: "not-found", document: null, state: null, original: null });
+  });
+
+  test("C12-291: 'Writer making a carried file from an accepted publication's body and entries': allowed for an EVM publication, as for any accepted checkpoint (P7.16, P7.15)", async () => {
+    const o = await original(ROBINHOOD, 92);
+    const v3 = await o.next(o.anchoring, { resource: photo("dusk v3 92") });
+    const records = [rec(0, o.log), rec(1, v3)];
+    const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, records))]);
+    expect(r.evm!.stretches[0].accepted.map((p) => p.index)).toEqual([1]);
+    expect(r.head).toBe(v3.versionId);
+    // The two parts of a carried file: the entries of the accepted publications, in index order, and the last one's body.
+    const entries = records.flatMap((x) => {
+      const read = readInscribedEntries(x.metadata);
+      if (read.kind !== "entries") throw new Error(`record ${x.index} carries no entries`);
+      return read.entries;
+    });
+    expect(entries.map((e) => e.versionId)).toEqual([...o.log, v3].map((e) => e.versionId));
+    const body = records[1].body!;
+    const file = await writeCarriedFile(body, entries, { disclosed: carriedDisclosure(entries) });
+    const read = await readCarriedFile(file, { authors: [o.alice.evidence()], now: NOW, evm: { pin: PIN, tokens: [token(o.alias, two(ROBINHOOD, records))] } });
+    expect(read.verified, JSON.stringify(read.reasons)).toEqual({ log: true, version: true });
+    expect(read.anchoring.status).toBe("evm");
+    expect(read.current).toBe(true);
+    // The carrier is never part of what is published: removing it gives the body back (P7.16).
+    expect(file.length).toBeGreaterThan(body.length);
+    expect(file.slice(0, body.length)).toEqual(body);
   });
 });

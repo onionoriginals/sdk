@@ -962,6 +962,28 @@ describe("placement rests on the index (P9.10, P9.11)", () => {
     expect(r.reasons).toContain("ownership-indexes-disagree");
   });
 
+  test("C12-304: a report for an anchored Original states the confirmation depth relied on and whether more than one independent index agreed (P9.5, P9.11)", async () => {
+    const { alice, copy, anchor, ref, sign, anchoring } = await anchored();
+    const next = await updateOriginal(anchor, { versionTime: time(20), name: "Later", author: ref, sign });
+    const a = anchoring(10);
+    const n = inscribe(next, 20);
+    // One index: the depth of each inscription relied on and of the holder's output, and that index alone.
+    const one = await verify(copy, alice, [sat([a, n])]);
+    expect(one.anchoring?.anchor).toMatchObject({ versionId: anchor.versionId, confirmations: a.confirmations });
+    expect(one.anchoring?.accepted.map((p) => [p.versionId, p.confirmations])).toEqual([[next.versionId, n.confirmations]]);
+    expect(one.ownership).toMatchObject({ confirmations: 3, indexes: ["ord-a"] });
+    expect(one.anchoring?.indexes).toEqual(["ord-a"]);
+    // Two indexes that agree, one a block behind: the lower depth is the one relied on, and both are named.
+    const behind = (i: Inscribed) => ({ ...i, confirmations: i.confirmations - 1 });
+    const two = await verify(copy, alice, [sat([a, n]), sat([behind(a), behind(n)], SAT, { output: "aa".repeat(32) + ":0", confirmations: 2 }, "ord-b")]);
+    expect(two.anchoring?.disputed).toEqual([]);
+    expect(two.anchoring?.anchor?.confirmations).toBe(a.confirmations - 1);
+    expect(two.anchoring?.accepted.map((p) => p.confirmations)).toEqual([n.confirmations - 1]);
+    expect(two.ownership).toMatchObject({ confirmations: 2, indexes: ["ord-a", "ord-b"] });
+    expect(two.anchoring?.indexes).toEqual(["ord-a", "ord-b"]);
+    expect(two.current, JSON.stringify(two.reasons)).toBe(true);
+  });
+
   test("C12-108: did:btco aliases follow the strict grammar", () => {
     for (const ok of ["did:btco:0", "did:btco:1", "did:btco:sig:1", "did:btco:test:1", "did:btco:reg:5000000000", "did:btco:2099999997689999"]) {
       expect(parseBtcoAlias(ok).did).toBe(ok);

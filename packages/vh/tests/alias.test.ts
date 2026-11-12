@@ -162,3 +162,46 @@ describe("alias rules in the asset log (PROVISIONAL, plan 011 PR 7b)", () => {
     }
   });
 });
+
+describe("originals-spec PR 59: what aliases and grants may name (P14.5, P3.9, P5.15)", () => {
+  /** An author-signed entry after `previous` with this asset state, bypassing the writer's checks. */
+  async function forged(previous: LogEntry, asset: JsonObject, sign: Parameters<typeof appendEntry>[1]["sign"]) {
+    const state = { ...(previous.state as JsonObject), operation: "update", asset: { ...(previous.state.asset as JsonObject), ...asset }, transitions: [] };
+    return appendEntry(previous, { versionTime: "2026-10-18T13:00:00.000Z", parameters: {}, state, sign });
+  }
+
+  test("C12-299: 'aliases holding a DID of any other method, or the same DID twice': rejected by writer and verifier (P14.5)", async () => {
+    const { alice, at, sign, ref, publish, alias, log } = await published();
+    const id = publish.state.id as string;
+    const others = [
+      [alias.did, "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"],
+      [alias.did, "did:web:example.com"],
+      [alias.did, id], // its own did:vh is the Original, never an alias of it
+      [alias.did, "did:ion:EiClkZMDxPKqC9c-umQfTkR8vvZ9JPhl_xLDI9Nfk38w5w"],
+      [alias.did, "https://example.com/harbor"], // not a DID at all (P3.9: every alias is a DID)
+      [alias.did, alias.did],
+    ];
+    for (const aliases of others) {
+      await expect(updateOriginal(publish, { versionTime: at(), aliases, author: ref, sign })).rejects.toMatchObject({ code: "STATE_ALIASES" });
+      const r = await verify([...log, await forged(publish, { aliases }, sign)], alice);
+      expect(r.history.failure, JSON.stringify(aliases)).toMatchObject({ index: 2, code: "STATE_ALIASES" });
+      expect(r.history.status).toBe("invalid");
+    }
+    // The same did:btco twice, before anchoring.
+    await expect(updateOriginal(publish, { versionTime: at(), aliases: [alias.did, "did:btco:reg:5", "did:btco:reg:5"], author: ref, sign })).rejects.toMatchObject({ code: "STATE_ALIASES" });
+  });
+
+  test("C12-300: 'Grant naming the Original's did:webvh alias': rejected, whether the grant or the alias comes first (P5.15)", async () => {
+    const { alice, at, sign, ref, genesis, publish, alias, log } = await published();
+    const grant = { did: alias.did, name: true, metadata: false, resource: false };
+    // The grant after the alias is listed.
+    await expect(updateOriginal(publish, { versionTime: at(), editors: [grant], author: ref, sign })).rejects.toMatchObject({ code: "STATE_EDITORS" });
+    const r = await verify([...log, await forged(publish, { editors: [grant] }, sign)], alice);
+    expect(r.history.failure).toMatchObject({ index: 2, code: "STATE_EDITORS", category: "invalid-evidence" });
+    // The alias listed after the grant: the state that lists both is rejected.
+    const granted = await updateOriginal(genesis, { versionTime: at(), editors: [grant], author: ref, sign });
+    await expect(updateOriginal(granted, { versionTime: at(), aliases: [alias.did], author: ref, sign })).rejects.toMatchObject({ code: "STATE_EDITORS" });
+    expect(() => checkEntryState({ ...(publish.state as JsonObject), asset: { ...(publish.state.asset as JsonObject), editors: [grant] } }, { scid: (genesis.parameters.scid as string), index: 1, previous: genesis.state as never, deactivatedParameter: false }))
+      .toThrow(/names this Original itself/);
+  });
+});

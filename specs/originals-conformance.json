@@ -3332,11 +3332,11 @@
       "phases": [
         5
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
         "packages/vh/tests/evm-anchor.test.ts"
       ],
-      "note": "The rollup case, two blocks sharing one parent-chain block number, is not exercised."
+      "note": "A record holds no block number (P14.20), so the rollup case reaches the verifier as records in index order with shared timestamps, tested on Arbitrum One. The contract sets no per-block limit; no Forge test publishes twice in one block."
     },
     {
       "id": "C12-252",
@@ -3850,7 +3850,10 @@
       "phases": [
         5
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/evm-anchor.test.ts"
+      ]
     },
     {
       "id": "C12-287",
@@ -3935,11 +3938,11 @@
         4,
         5
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/carried.test.ts"
-      ],
-      "note": "Exercised with a Bitcoin inscription's metadata and body; a carried file made from an EVM publication record is not."
+        "packages/vh/tests/carried.test.ts",
+        "packages/vh/tests/evm-anchor.test.ts"
+      ]
     },
     {
       "id": "C12-292",
@@ -4041,7 +4044,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/alias.test.ts"
+      ]
     },
     {
       "id": "C12-300",
@@ -4054,6 +4060,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/vh/tests/alias.test.ts",
         "packages/vh/tests/evm-state.test.ts"
       ]
     },
@@ -4094,7 +4101,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-304",
@@ -4104,7 +4114,10 @@
       "phases": [
         4
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts"
+      ]
     },
     {
       "id": "C12-305",
@@ -4114,7 +4127,10 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ]
     },
     {
       "id": "C12-306",
@@ -4348,7 +4364,11 @@
       "phases": [
         1
       ],
-      "status": "todo"
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/originals.test.ts"
+      ],
+      "note": "PROVISIONAL: P14.2's value (three fractional digits, at least 1 ms apart) is open under D5; the test checks the current value."
     }
   ],
   "retired": [
