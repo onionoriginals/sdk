@@ -20,6 +20,7 @@ import {
   type EntryState,
   type ResourceDescriptor,
 } from "./state.js";
+import { checkAnchor, requireSupported, type EvmAnchor, type EvmAnchorPin } from "./evm.js";
 
 export interface PrepareCreateInput {
   versionTime: string;
@@ -30,6 +31,15 @@ export interface PrepareCreateInput {
   author: AuthorRef;
   /** Editor grants from genesis (P5.15). Genesis is always an author entry (P5.16). */
   editors?: EditorGrant[];
+  /**
+   * EXPERIMENTAL (originals-spec PR 59, P9.19, P14.18): the EVM anchor chain and
+   * minter, fixed at genesis. Requires `evm`, the anchor contract pin: the spec
+   * pins none (P14.21), and a writer MUST NOT write an anchor member until it
+   * does, nor one naming a chain P14.22 does not list. The SDK tells the author
+   * what the choice means before writing it (P9.27).
+   */
+  anchor?: EvmAnchor;
+  evm?: EvmAnchorPin;
 }
 
 export interface CreateOriginalInput extends PrepareCreateInput {
@@ -62,6 +72,13 @@ export interface PrepareUpdateInput {
   aliases?: string[];
   /** Replaces the editor grants (P5.15); null or [] removes them all. Author entries only (P5.16). */
   editors?: EditorGrant[] | null;
+  /**
+   * EXPERIMENTAL: a move entry (P9.28) replaces the anchor member with the
+   * destination chain's, or removes it (null) for a move to Bitcoin; list the
+   * destination's alias in `aliases` too. Requires `evm`. Author entries only.
+   */
+  anchor?: EvmAnchor | null;
+  evm?: EvmAnchorPin;
 }
 
 export interface UpdateOriginalInput extends PrepareUpdateInput {
@@ -70,6 +87,14 @@ export interface UpdateOriginalInput extends PrepareUpdateInput {
 
 function invalidInput(code: string, message: string): never {
   return fail("invalid-evidence", code, message);
+}
+
+/** A writer writes an anchor member only under a pin, naming a listed chain (section 14, P9.19, P14.21). */
+function writableAnchor(anchor: EvmAnchor, evm: EvmAnchorPin | undefined): EvmAnchor {
+  const checked = checkAnchor(anchor, "anchor");
+  if (!evm) fail("unsupported-profile", "EVM_NO_ANCHOR_CONTRACT", "P14.21 pins no anchor contract, so a writer MUST NOT write an anchor member; pass an experimental `evm` pin to do so anyway");
+  requireSupported(checked.chain, evm);
+  return { chain: checked.chain, minter: checked.minter };
 }
 
 function stateOf(entry: UnsignedEntry): EntryState {
@@ -88,6 +113,7 @@ export function prepareCreateOriginal(input: PrepareCreateInput): UnsignedEntry 
     resource,
     aliases: [],
     ...(input.editors !== undefined && input.editors.length > 0 ? { editors: input.editors } : {}),
+    ...(input.anchor !== undefined ? { anchor: writableAnchor(input.anchor, input.evm) } : {}),
   };
   const state = {
     id: `did:vh:${SCID_PLACEHOLDER}`,
@@ -113,7 +139,8 @@ function nextAsset(previous: AssetState, input: Omit<PrepareUpdateInput, "versio
     invalidInput("STATE_RESOURCE", "an Original has exactly one resource, never added or removed: give its next version as `resource` (P4.1)");
   }
   const resource = input.resource === undefined ? previous.resource : checkDescriptor(input.resource, "resource");
-  const { metadata: _old, editors: _editors, ...rest } = previous;
+  const { metadata: _old, editors: _editors, anchor: _anchor, ...rest } = previous;
+  const anchor = input.anchor === undefined ? previous.anchor : input.anchor === null ? undefined : writableAnchor(input.anchor, input.evm);
   const metadata = input.metadata === undefined ? previous.metadata : input.metadata;
   const editors = input.editors === undefined ? previous.editors : input.editors;
   return {
@@ -123,6 +150,7 @@ function nextAsset(previous: AssetState, input: Omit<PrepareUpdateInput, "versio
     resource,
     aliases: input.aliases ?? previous.aliases,
     ...(editors !== null && editors !== undefined && editors.length > 0 ? { editors } : {}),
+    ...(anchor !== undefined ? { anchor } : {}),
   };
 }
 
@@ -132,6 +160,7 @@ interface NextInput {
   editor?: EditorRef;
   aliases?: string[];
   editors?: EditorGrant[] | null;
+  evm?: EvmAnchorPin;
 }
 
 function next(previous: UnsignedEntry, operation: "update" | "deactivate", asset: AssetState, input: NextInput): UnsignedEntry {
@@ -154,7 +183,7 @@ function next(previous: UnsignedEntry, operation: "update" | "deactivate", asset
     transitions: expectedTransitions(before.asset, asset),
   } as unknown as JsonObject;
   const scid = before.id.slice("did:vh:".length);
-  checkEntryState(state, { scid, index: 1, previous: before, deactivatedParameter: operation === "deactivate" });
+  checkEntryState(state, { scid, index: 1, previous: before, deactivatedParameter: operation === "deactivate", evm: input.evm });
   const parameters: JsonObject = operation === "deactivate" ? { deactivated: true } : {};
   return prepareNext(previous, { versionTime: input.versionTime, parameters, state });
 }

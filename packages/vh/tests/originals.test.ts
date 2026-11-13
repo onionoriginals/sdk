@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { base58btcEncode, createProof, multibaseEncode, sha256 } from "../src/crypto/index.js";
 import { OriginalsError } from "../src/errors.js";
-import { parseJson, type JsonObject } from "../src/json/index.js";
+import { canonicalize, parseJson, type JsonObject } from "../src/json/index.js";
 import { appendEntry, createLog, parseLog, serializeLog, signWith, verifyLog, type LogEntry, type Specialisation } from "../src/log/index.js";
 import { resolveDidVh } from "../src/didvh/index.js";
 import {
@@ -92,6 +92,38 @@ describe("C12-01: create, edit and verify in a fresh reader", () => {
     const missing = await report(log, [alice], { checkpoint: "9-QmMissing" });
     expect(missing.checkpoint).toBeNull();
     expect(missing.reasons).toContain("checkpoint-not-found");
+  });
+
+  test("C12-303: exact-checkpoint resolution of a checkpoint the resolver cannot supply: reports why; the latest is not substituted (P3.2)", async () => {
+    const { alice, log, sign, ref, at } = await harbor();
+    const other = await createOriginal({ versionTime: at(), name: "Another Original", resource: photo(B1), author: ref, sign });
+    const later = await updateOriginal(log[2], { versionTime: at(), name: "Harbor, renamed", author: ref, sign });
+    const cases = [
+      "9-QmMissing", // in no log
+      other.versionId, // another Original's checkpoint
+      later.versionId, // this Original's, but not in the log supplied
+      `${log[1].versionId.split("-")[0]}-${log[2].versionId.split("-")[1]}`, // a number and hash that belong to different entries
+    ];
+    for (const checkpoint of cases) {
+      const r = await report(log, [alice], { checkpoint });
+      expect(r.checkpoint, checkpoint).toBeNull();
+      expect(r.reasons).toContain("checkpoint-not-found");
+      expect(r.state ?? null).toBeNull();
+      expect(r.validAsOf).toBeNull();
+      expect(r.document ?? null).toBeNull();
+      expect(r.current).toBe(false);
+      // The head is reported as the head, never as the checkpoint asked for.
+      expect(r.head).toBe(log[2].versionId);
+      expect(r.original).toBe(`did:vh:${log[0].parameters.scid as string}`);
+    }
+    // A checkpoint past an entry the verifier rejects is not supplied either: the log is valid only before it.
+    const broken = await resign(log[2], { ...log[2].state, operation: "create" } as JsonObject, sign);
+    const tail = await resign(broken, { ...log[2].state, transitions: [] } as JsonObject, sign, {}, "2026-10-18T12:40:00.000Z");
+    const r = await report([...log, broken, tail], [alice], { checkpoint: tail.versionId });
+    expect(r.history.status).toBe("invalid");
+    expect(r.checkpoint).toBeNull();
+    expect(r.reasons).toContain("checkpoint-not-found");
+    expect(r.state ?? null).toBeNull();
   });
 });
 
@@ -508,7 +540,7 @@ describe("the derived DID document and generic resolvers (P3.5, P3.8)", () => {
 });
 
 describe("section 14: exact members (P14.1, P14.4, P14.8)", () => {
-  test("P14.1: genesis parameters are exactly method and scid", async () => {
+  test("C12-305: P14.1: genesis parameters are exactly method and scid; a null parameter value is rejected", async () => {
     const { alice, key, sign, ref } = await harbor();
     const genesisWith = async (extra: JsonObject) => {
       const base = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", resource: photo(B1), author: ref, sign });
@@ -524,7 +556,7 @@ describe("section 14: exact members (P14.1, P14.4, P14.8)", () => {
     failedWith(await report([await genesisWith({ ttl: null })], [alice]), 0, "PARAMETER_NULL", "invalid-evidence");
   });
 
-  test("P14.1: every later author entry has {} parameters; a deactivation exactly {\"deactivated\": true}", async () => {
+  test("C12-305: P14.1: every later author entry has {} parameters; a deactivation exactly {\"deactivated\": true}; no null value", async () => {
     const { alice, log, sign } = await harbor();
     const same = { ...log[2].state, transitions: [] };
     for (const parameters of [{ ttl: 60 }, { method: ORIGINALS_METHOD }, { deactivated: false }, { watchers: [] }]) {
@@ -534,6 +566,13 @@ describe("section 14: exact members (P14.1, P14.4, P14.8)", () => {
     const deactivated = await report([...log, await resign(log[2], off, sign, { deactivated: true })], [alice]);
     expect(deactivated.history.status, JSON.stringify(deactivated.history.failure)).toBe("valid");
     failedWith(await report([...log, await resign(log[2], off, sign, { deactivated: true, ttl: 60 })], [alice]), 3, "PARAMETER_MEMBERS", "invalid-evidence");
+    // A null value in a later entry, and a null `deactivated`, are rejected too.
+    for (const [parameters, state] of [[{ ttl: null }, same], [{ deactivated: null }, off]] as const) {
+      const r = await report([...log, await resign(log[2], state, sign, parameters as JsonObject)], [alice]);
+      expect(r.history.failure?.index).toBe(3);
+      expect(r.history.failure?.code).toMatch(/^PARAMETER_(NULL|MEMBERS)$/);
+      expect(r.history.status).toBe("invalid");
+    }
   });
 
   test("C12-174: P14.4, P14.8: a proof has exactly type, cryptosuite, verificationMethod, proofPurpose and proofValue", async () => {
@@ -566,6 +605,26 @@ describe("section 14: the asset log's form (P14.2)", () => {
     for (const versionTime of ["2026-10-18T12:30:00Z", "2026-10-18T12:30:00.5Z", "2026-10-18T12:30:00.123Z"]) {
       expect((await report([...log, await resign(log[2], same, sign, {}, versionTime)], [alice])).history.status).toBe("valid");
     }
+  });
+
+  test("C12-307: two entries less than one millisecond apart, or a versionTime with more than three fractional digits: rejected (P14.2, D5 PROVISIONAL)", async () => {
+    const { alice, log, sign } = await harbor();
+    const same = { ...log[2].state, transitions: [] };
+    const last = log[2].versionTime as string;
+    // More than three fractional digits, even when the extra digits are zeros or the instant is later.
+    for (const versionTime of ["2026-10-18T12:30:00.0001Z", "2026-10-18T12:30:00.1230Z", "2026-10-18T12:30:00.123456789Z"]) {
+      failedWith(await report([...log, await resign(log[2], same, sign, {}, versionTime)], [alice]), 3, "VERSION_TIME_FORMAT", "invalid-evidence");
+    }
+    // At three digits, entries less than 1 ms apart have the same versionTime: the same instant is rejected,
+    // in either spelling, and 1 ms later is accepted.
+    const ms = Date.parse(last);
+    const at = (t: number) => new Date(t).toISOString();
+    for (const versionTime of [at(ms), at(ms).replace(".000Z", "Z"), at(ms - 1)]) {
+      const r = await report([...log, await resign(log[2], same, sign, {}, versionTime)], [alice]);
+      expect(r.history.failure?.index, versionTime).toBe(3);
+      expect(r.history.status).toBe("invalid");
+    }
+    expect((await report([...log, await resign(log[2], same, sign, {}, at(ms + 1))], [alice])).history.status).toBe("valid");
   });
 
   test("C12-173, C12-179: each line of an asset log is compact JSON ending in one LF: a missing final LF, CRLF or whitespace between tokens is rejected", async () => {
@@ -650,8 +709,8 @@ describe("creating needs a well-formed entry", () => {
   });
 });
 
-describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7; P14.13)", () => {
-  /** A genesis entry whose stored line, without its line feed, is exactly `target` UTF-8 bytes, mostly two-byte characters. */
+describe("C12-150: \"Entry whose JCS form is 65,536 / 65,537 UTF-8 bytes, in `did.jsonl`, an inscription, a publication or any carrier\": accepted / rejected (P7.7; P14.13)", () => {
+  /** A genesis entry whose JCS form (here also its stored line, without its line feed) is exactly `target` UTF-8 bytes, mostly two-byte characters. */
   async function genesisOf(target: number) {
     const key = seeded(21);
     const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
@@ -668,7 +727,7 @@ describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7;
     throw new Error(`no entry of ${target} bytes`);
   }
 
-  test("a line of 65,536 bytes is accepted and one of 65,537 bytes is rejected, however few UTF-16 code units it has", async () => {
+  test("an entry of 65,536 bytes is accepted and one of 65,537 bytes is rejected, however few UTF-16 code units it has", async () => {
     const atLimit = await genesisOf(65_536);
     expect(atLimit.codeUnits).toBeLessThan(40_000);
     const ok = await verifyOriginal({ log: `${atLimit.line}\n`, authors: [atLimit.alice.evidence()], now: NOW, bytes: allBytes(B1) });
@@ -677,12 +736,12 @@ describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7;
     const r = await verifyOriginal({ log: `${over.line}\n`, authors: [over.alice.evidence()], now: NOW, bytes: allBytes(B1) });
     failedWith(r, 0, "ENTRY_TOO_LARGE", "limit-exceeded");
     expect(r.history.status).toBe("limit-exceeded");
-    // Parsed entries are measured as the line they serialize to.
+    // Parsed entries are measured the same way: as their JCS form.
     const parsed = await verifyOriginal({ log: [JSON.parse(over.line)], authors: [over.alice.evidence()], now: NOW, bytes: allBytes(B1) });
     failedWith(parsed, 0, "ENTRY_TOO_LARGE", "limit-exceeded");
   });
 
-  test("the stored line is measured, never its parsed form re-serialized: a 65,536-byte line that re-serializes longer is accepted", async () => {
+  test("the JCS form is measured, never the stored line: a 65,536-byte line whose JCS form is longer is rejected, a longer line whose JCS form is 65,536 bytes accepted (P14.13 at a3ffdc1)", async () => {
     const key = seeded(21);
     const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
     // `1.5e-6` re-serializes as `0.0000015`: the same entry, and the same versionId and proof, three bytes longer each time.
@@ -696,13 +755,17 @@ describe("C12-150: entry size is the UTF-8 byte length of its stored line (P7.7;
         pad += 65_536 - size;
         continue;
       }
-      expect(new TextEncoder().encode(JSON.stringify(JSON.parse(line))).length).toBe(66_136);
-      const r = await verifyOriginal({ log: `${line}\n`, authors: [alice.evidence()], now: NOW, bytes: allBytes(B1) });
-      expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
-      // Entries parsed with parseLog carry their stored line's size; one parsed elsewhere is measured as its JCS line.
-      const parsed = await verifyOriginal({ log: parseLog(`${line}\n`), authors: [alice.evidence()], now: NOW, bytes: allBytes(B1) });
-      expect(parsed.history.status, JSON.stringify(parsed.history.failure)).toBe("valid");
-      failedWith(await verifyOriginal({ log: [JSON.parse(line)], authors: [alice.evidence()], now: NOW, bytes: allBytes(B1) }), 0, "ENTRY_TOO_LARGE", "limit-exceeded");
+      expect(new TextEncoder().encode(canonicalize(JSON.parse(line))).length).toBe(66_136);
+      // As text, parsed with parseLog, or parsed elsewhere: the JCS form is over the limit.
+      for (const log of [`${line}\n`, parseLog(`${line}\n`), [JSON.parse(line)]]) {
+        failedWith(await verifyOriginal({ log, authors: [alice.evidence()], now: NOW, bytes: allBytes(B1) }), 0, "ENTRY_TOO_LARGE", "limit-exceeded");
+      }
+      // A line longer than the limit whose JCS form is within it: `\u` escapes that JCS writes as one byte each.
+      const atLimit = await genesisOf(65_536);
+      const escaped = atLimit.line.replace("aaaaaaaaaa", "\\u0061".repeat(10));
+      expect(new TextEncoder().encode(escaped).length).toBe(65_586);
+      const ok = await verifyOriginal({ log: `${escaped}\n`, authors: [atLimit.alice.evidence()], now: NOW, bytes: allBytes(B1) });
+      expect(ok.history.status, JSON.stringify(ok.history.failure)).toBe("valid");
       return;
     }
     throw new Error("no entry of 65,536 bytes");

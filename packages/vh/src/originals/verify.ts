@@ -45,6 +45,8 @@ import { authorKey, stillAuthorized, verifyAuthorHistory, versionNumberOf, type 
 import { didWebvhLogUrl } from "../webvh/index.js";
 import { NATIVE_SHA256_MIN_BYTES, bytesView } from "../crypto/index.js";
 import { deriveDocument, exactNumberError, originalsSpecialisation } from "./profile.js";
+import { assembleFromEvm, type EvmAnchoringReport, type EvmAssembly, type EvmEvidence } from "./evm-anchor.js";
+import type { EvmCheckpoint, RetainedEvmBlock } from "./evm.js";
 import { ORIGINALS_LIMITS, ORIGINALS_METHOD, resourceDigest, resourceDigestAsync, signerOf, type AssetState, type EntryState } from "./state.js";
 
 export interface VerifyOriginalOptions {
@@ -90,6 +92,15 @@ export interface VerifyOriginalOptions {
    * compared and otherwise ignored.
    */
   bitcoin?: SatEvidence[];
+  /**
+   * EXPERIMENTAL (originals-spec PR 59, P9.19-P9.29): for an Original whose
+   * genesis entry has an `anchor` member, the P14.21 pin and what providers
+   * read from its tokens. The tokens then decide the log as the sat does for
+   * Bitcoin (P9.20); a supplied log is one more source, never preferred to
+   * the anchor (P7.14). Without a pin, or for an unlisted chain, the Original
+   * is unsupported, never invalid (P9.19, section 14).
+   */
+  evm?: EvmEvidence;
   now?: number | Date;
   limits?: LogLimits & { maxAuthorVersions?: number };
 }
@@ -200,6 +211,8 @@ export interface ResourceVersion {
   bytes: "verified" | "missing" | "mismatch";
   /** Whether these bytes were read from an inscription's body on the anchoring sat (P9.17, P9.18). */
   onBitcoin: boolean;
+  /** The EVM chain whose accepted publication's body these bytes were read from (P9.25); never Bitcoin. EXPERIMENTAL. */
+  onEvm?: string;
 }
 
 /** Identity evidence for one editor DID the report relied on (P7.8, P5.18). */
@@ -232,7 +245,8 @@ export interface OriginalsReport {
   checkpoint: string | null;
   /** The last verified entry. */
   head: string | null;
-  history: { status: "valid" | "invalid" | "incomplete" | "limit-exceeded"; entries: number; failure?: ReportFailure };
+  /** `unsupported`: an `anchor` member this verifier cannot support (P9.19, P9.21, section 14): never invalid. */
+  history: { status: "valid" | "invalid" | "incomplete" | "limit-exceeded" | "unsupported"; entries: number; failure?: ReportFailure };
   authorBinding: { status: "valid" | "failed" | "incomplete" };
   identityEvidence: {
     status: "complete" | "incomplete";
@@ -273,8 +287,21 @@ export interface OriginalsReport {
   anchoring: AnchoringReport | null;
   /** The anchoring sat's holder: never authority, always provisional (P9.11, P9.12). */
   ownership: OwnershipReport | null;
-  /** Anchored from the anchoring entry on (P9.13); claimed before it and for unanchored Originals (P7.6). */
-  ordering: "claimed" | "anchored";
+  /**
+   * EXPERIMENTAL (originals-spec PR 59): present for an Original whose genesis
+   * entry has an `anchor` member. Every chain it was anchored on, with its
+   * trust class, the entries accepted there, the finalized block and the
+   * providers, and the token's holder as owner (P9.23, P9.27, P9.29). Never
+   * Bitcoin anchoring: `anchoring` and `ownership` are Bitcoin's alone.
+   */
+  evm: EvmAnchoringReport | null;
+  /**
+   * Anchored on Bitcoin from the anchoring entry on (P9.13); claimed before it and for unanchored
+   * Originals (P7.6). For a checkpoint accepted on an EVM chain, `evm-` and what that chain's trust
+   * class lets a report say: proven on that chain, or attested by its validators or operator
+   * (P9.27); never `anchored`, which is Bitcoin's.
+   */
+  ordering: "claimed" | "anchored" | "evm-proven" | "evm-attested-by-validators" | "evm-attested-by-operator";
   deactivated: boolean;
   state: AssetState | null;
   /** The derived DID document at the checkpoint (P3.8). */
@@ -308,7 +335,11 @@ export interface OriginalsReport {
    * rather than silent (P9.16), with the inscriptions reported unverifiable,
    * so accepting one later is a reported change of head (P9.15).
    */
-  retain: { original: string | null; authors: Record<string, string>; anchor?: RetainedAnchor };
+  retain: {
+    original: string | null; authors: Record<string, string>; anchor?: RetainedAnchor; evm?: RetainedEvmBlock[];
+    /** P9.25 (PR 59 a3ffdc1): verified checkpoints per token, to resume from (`EvmEvidence.checkpoints`). EXPERIMENTAL. */
+    evmCheckpoints?: EvmCheckpoint[];
+  };
 }
 
 function toFailure(index: number, versionId: string | undefined, error: OriginalsError): ReportFailure {
@@ -319,6 +350,7 @@ function historyStatus(failure?: ReportFailure): OriginalsReport["history"]["sta
   if (!failure) return "valid";
   if (failure.category === "limit-exceeded") return "limit-exceeded";
   if (failure.category === "incomplete-evidence") return "incomplete";
+  if (failure.category === "unsupported-profile") return "unsupported";
   return "invalid";
 }
 
@@ -421,7 +453,13 @@ function lookup(bytes: VerifyOriginalOptions["bytes"], digest: string): Uint8Arr
  * inscribed on the anchoring sat is read from there, already checked against its descriptor;
  * earlier ones need `bytes` (P9.17, P9.18; originals-spec #53).
  */
-function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOptions["bytes"], onSat: ReadonlyMap<string, Uint8Array>, checked?: VerifyOriginalOptions["checked"]): Promise<ResourceVersion[]> {
+function resourceVersions(
+  prefix: VerifiedEntry[],
+  bytes: VerifyOriginalOptions["bytes"],
+  onSat: ReadonlyMap<string, Uint8Array>,
+  checked?: VerifyOriginalOptions["checked"],
+  onEvm: ReadonlyMap<string, { bytes: Uint8Array; chain: string }> = new Map(),
+): Promise<ResourceVersion[]> {
   // Every version's bytes are looked up and read in one synchronous pass, in version order, as
   // when each was hashed in turn: nothing is awaited until all of them are read, and
   // `resourceDigestAsync` reads (or copies) its input when called. A `bytes` callback, or a view
@@ -437,7 +475,8 @@ function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOptions[
     if (state.transitions.length === 0) continue;
     const d = state.asset.resource;
     const inscribed = onSat.get(d.digest);
-    const supplied = inscribed ?? lookup(bytes, d.digest);
+    const published = inscribed === undefined ? onEvm.get(d.digest) : undefined;
+    const supplied = inscribed ?? published?.bytes ?? lookup(bytes, d.digest);
     // Held bytes checked when stored: matching their digest, so they match the descriptor exactly when the size does (P4.3).
     const held = supplied === undefined ? checked?.(d.digest) : undefined;
     // Read now through the array's internal slots (`bytesView`, no copy): the size is checked before
@@ -455,7 +494,7 @@ function resourceVersions(prefix: VerifiedEntry[], bytes: VerifyOriginalOptions[
       : native ? resourceDigestAsync(view)
       // Small or over the budget: hashed now with noble, from the view, without a copy.
       : Promise.resolve(resourceDigest(view));
-    pending.push({ version: { version: pending.length + 1, digest: d.digest, mediaType: d.mediaType, size: d.size, versionId: v.entry.versionId, onBitcoin: inscribed !== undefined }, check });
+    pending.push({ version: { version: pending.length + 1, digest: d.digest, mediaType: d.mediaType, size: d.size, versionId: v.entry.versionId, onBitcoin: inscribed !== undefined, ...(published ? { onEvm: published.chain } : {}) }, check });
   }
   return settleVersions(pending);
 }
@@ -464,7 +503,7 @@ async function settleVersions(pending: Array<{ version: Omit<ResourceVersion, "b
   const out: ResourceVersion[] = [];
   for (const { version: v, check } of pending) {
     const result = typeof check === "string" ? check : (await check) === v.digest ? "verified" : "mismatch";
-    out.push({ version: v.version, digest: v.digest, mediaType: v.mediaType, size: v.size, versionId: v.versionId, bytes: result, onBitcoin: v.onBitcoin });
+    out.push({ version: v.version, digest: v.digest, mediaType: v.mediaType, size: v.size, versionId: v.versionId, bytes: result, onBitcoin: v.onBitcoin, ...(v.onEvm ? { onEvm: v.onEvm } : {}) });
   }
   return out;
 }
@@ -528,14 +567,18 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     }
   }
 
+  // P9.28: a move entry's layers are judged at its departure record's timestamp, filled in as the
+  // tokens are read (originals-spec PR 59, EXPERIMENTAL).
+  const moveTimes = new Map<string, number>();
   const verifyOptions = {
-    specialisation: originalsSpecialisation(histories),
+    specialisation: originalsSpecialisation(histories, { pin: options.evm?.pin ?? null, moveTimes }),
     now: options.now,
     limits: { maxEntries: ORIGINALS_LIMITS.entries, maxEntryBytes: ORIGINALS_LIMITS.entryBytes, ...options.limits },
   };
   // An anchored Original: Bitcoin decides the log (plan 012 §3.4; P9.17).
   const onSats = (options.bitcoin?.length ?? 0) > 0;
-  if (options.log === undefined && !onSats) throw new OriginalsError("incomplete-evidence", "LOG_MISSING", "neither an asset log nor Bitcoin evidence was supplied");
+  const onTokens = (options.evm?.tokens.length ?? 0) > 0;
+  if (options.log === undefined && !onSats && !onTokens) throw new OriginalsError("incomplete-evidence", "LOG_MISSING", "neither an asset log nor Bitcoin evidence was supplied");
   let input: string | unknown[] = options.log ?? [];
   let assembly: Awaited<ReturnType<typeof assembleFromBitcoin>> | null = null;
   let raw: unknown[] | null = null;
@@ -544,9 +587,18 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     raw = options.log === undefined ? null : typeof options.log === "string" ? parseLog(options.log) : options.log;
   } catch (error) {
     if (!(error instanceof OriginalsError)) throw error;
-    raw = onSats ? [] : null; // a copy that does not parse is ignored when the sat carries the log
+    raw = onSats || onTokens ? [] : null; // a copy that does not parse is ignored when the anchor carries the log
   }
-  if (onSats || (raw && anchoringIndex(raw) >= 0)) {
+  // An Original whose genesis entry has an `anchor` member: its tokens decide (P9.19, P9.20).
+  let evmAssembly: EvmAssembly | null = null;
+  const fromEvm = (entries: unknown[] | null) =>
+    assembleFromEvm(entries, options.evm ?? { pin: null, tokens: [] }, options.bitcoin ?? [], (e, o) => verifyLog(e, { ...verifyOptions, ...o }), histories, {
+      moveTimes,
+      ...(options.retained?.anchor ? { previousAnchor: options.retained.anchor } : {}),
+      ...(options.retained?.original !== undefined ? { previousHead: options.retained.original } : {}),
+    });
+  if (onTokens || (raw && raw.length > 0 && hasAnchorMember(raw[0]))) evmAssembly = await fromEvm(raw);
+  if (!evmAssembly && (onSats || (raw && anchoringIndex(raw) >= 0))) {
     const previousAnchor = options.retained?.anchor;
     const previousHead = options.retained?.original;
     assembly = await assembleFromBitcoin(raw, options.bitcoin ?? [], (entries, o) => verifyLog(entries, { ...verifyOptions, ...o }), histories, {
@@ -554,8 +606,27 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       ...(previousHead !== undefined ? { previousHead } : {}),
     });
     input = assembly.entries;
+    // EXPERIMENTAL (PR 59; P9.19, P9.29): with no copy of the log and no token read, a sat can carry an
+    // arrival: a log whose genesis entry has an `anchor` member. The chains it left still decide, so it is
+    // assembled as an Original anchored on an EVM chain first, from the log the sat carries; without
+    // their evidence the move is unconfirmed, with no owner and not current (C12-273, found on regtest).
+    if ((!raw || raw.length === 0) && assembly.entries.length > 0 && hasAnchorMember(assembly.entries[0])) {
+      const copy = assembly.report.copy;
+      evmAssembly = await fromEvm(assembly.entries);
+      // That log came from the sat, not from the caller: the report names no supplied copy.
+      if (evmAssembly?.bitcoin) evmAssembly.bitcoin.report = { ...evmAssembly.bitcoin.report, copy, superseded: 0 };
+    }
+  }
+  if (evmAssembly) {
+    // Section 14, P9.19, P9.21, P7.14: an anchor this verifier cannot support is unsupported, and nothing is verified.
+    if (evmAssembly.report.status === "unsupported" && evmAssembly.report.stretches.length === 0) return unsupportedReport(evmAssembly.report, options, raw && raw.length > 0 ? raw : assembly?.entries ?? raw);
+    input = evmAssembly.entries;
+    assembly = evmAssembly.bitcoin;
   }
   const onBitcoin = assembly?.report.status === "anchored" ? assembly.report : null;
+  const evmReport = evmAssembly?.report ?? null;
+  // On an EVM chain the token decides from the anchor on, as the sat does (P9.20).
+  const onEvm = evmReport !== null && evmReport.stretches.some((s) => s.status === "anchored");
   // The entries in the anchoring inscription depend on their signer's history up to it; without an
   // anchor every entry may. A DID that signed none of them leaves no accepted entry depending on the
   // history past its gap; inscriptions after the anchor are unverifiable instead (P5.13, P9.15).
@@ -576,7 +647,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   let stale = false;
   // Once anchored, Bitcoin decides from the anchor on: a copy can neither fork the log nor
   // make it stale (P9.13, P9.16). A retained version Bitcoin dropped is reported below.
-  if (!onBitcoin && ((options.copies?.length ?? 0) > 0 || options.retained?.original !== undefined)) {
+  if (!onBitcoin && !onEvm && ((options.copies?.length ?? 0) > 0 || options.retained?.original !== undefined)) {
     const text = typeof input === "string" ? input : input.map((e) => `${JSON.stringify(e)}\n`).join("");
     const resolution = await resolveCopies({ source: "supplied", log: text }, options.copies ?? [], {
       ...verifyOptions,
@@ -598,7 +669,18 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const head = log.entries[log.entries.length - 1];
   // Anchored ordering only for what Bitcoin accepted: the anchor and the inscriptions after it.
   const inscribed = new Set(onBitcoin ? [onBitcoin.anchor!.versionId, ...onBitcoin.accepted.map((a) => a.versionId)] : []);
-  const anchored = (v: VerifiedEntry | undefined) => v !== undefined && inscribed.has(v.entry.versionId);
+  // P9.27, P9.29: an entry accepted on an EVM stretch keeps that chain's ordering, described by its class.
+  const evmStretchOf = (versionId: string) => evmReport?.stretches.find((s) => s.status === "anchored" && s.entries.includes(versionId));
+  const anchored = (v: VerifiedEntry | undefined) => v !== undefined && (inscribed.has(v.entry.versionId) || evmStretchOf(v.entry.versionId) !== undefined);
+  const orderingOf = (v: VerifiedEntry | undefined): OriginalsReport["ordering"] => {
+    if (!v) return "claimed";
+    const stretch = evmStretchOf(v.entry.versionId);
+    if (stretch) return `evm-${stretch.describes}`;
+    // P9.29: an entry an arrival carries keeps the ordering of the stretch that accepted it; on a chain left
+    // that was not read, claimed, even when Bitcoin holds the arrival.
+    if (evmReport?.stretches.some((s) => s.entries.includes(v.entry.versionId))) return "claimed";
+    return inscribed.has(v.entry.versionId) ? "anchored" : "claimed";
+  };
   const authorDid = head ? (head.entry.state as unknown as EntryState).author.did : null;
   const history = authorDid ? histories.find((h) => h.did === authorDid) : undefined;
   const latest = history?.versions[history.versions.length - 1];
@@ -664,24 +746,32 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   // the aliases, where the report was already awaited. What was read between the two (the retained
   // anchor and version, the identity evidence, the aliases and `now`) is still read before anything
   // is awaited: a `bytes` callback cannot change it, as before.
-  const checking = resourceVersions(prefix, options.bytes, onBitcoin ? assembly!.bytes : new Map(), options.checked);
+  const checking = resourceVersions(prefix, options.bytes, onBitcoin ? assembly!.bytes : new Map(), options.checked, evmAssembly?.bytes);
   const state = selected ? (selected.entry.state as unknown as EntryState) : undefined;
 
   const bindingFailed = failure && (failure.category === "author-binding" || failure.category === "unauthorized-key" || failure.category === "outside-grant");
   // P9.15 (originals-spec #47): an inscribed entry naming a signer DID version
   // the verifier has no verified copy of, or none at or after, is incomplete identity evidence (P5.6).
-  const versionUnavailable = assembly?.report.ignored.some((i) => i.reason === "author-version-unavailable" || i.code === "AUTHOR_VERSION_UNAVAILABLE") ?? false;
+  const versionUnavailable = (assembly?.report.ignored.some((i) => i.reason === "author-version-unavailable" || i.code === "AUTHOR_VERSION_UNAVAILABLE") ?? false) ||
+    (evmReport?.stretches.some((s) => s.ignored.some((i) => i.reason === "author-version-unavailable" || i.code === "AUTHOR_VERSION_UNAVAILABLE")) ?? false);
   const identityIncomplete =
     failure?.category === "incomplete-evidence" || identityFailures.length > 0 || !history || editors.some((e) => e.status === "incomplete") || versionUnavailable;
   // With the anchor, the inscriptions reported unverifiable: one accepted later is a reported change of head (P9.15).
   const unverifiableNow = onBitcoin?.unverifiable.map((u) => u.inscription) ?? [];
   const acceptedNow = onBitcoin?.accepted.map((a) => a.inscription) ?? [];
+  // P9.22 (PR 59 a3ffdc1): evidence that a finalized block was replaced discards every retained result
+  // and checkpoint that rested on it or a later block of that chain. A retained token anchor rested on
+  // the chain's retained block, so it goes with it; what this read found is kept.
+  const replaced = evmAssembly?.replaced ?? [];
+  const onReplaced = (chain: string, number: number) => replaced.some((r) => r.chain === chain && number >= r.from);
+  const retainedTokenChain = options.retained?.anchor?.sat.startsWith("did:evm:") ? `eip155:${options.retained.anchor.sat.split(":")[2]}` : undefined;
+  const keptAnchor = retainedTokenChain !== undefined && replaced.some((r) => r.chain === retainedTokenChain) ? undefined : options.retained?.anchor;
   const retainedAnchor: RetainedAnchor | undefined = onBitcoin
     ? {
       inscription: onBitcoin.anchor!.inscription, sat: onBitcoin.sat, owner: assembly!.owner?.output ?? null,
       ...(unverifiableNow.length > 0 ? { unverifiable: unverifiableNow } : {}), ...(acceptedNow.length > 0 ? { accepted: acceptedNow } : {}),
     }
-    : options.retained?.anchor;
+    : evmAssembly?.retainedAnchor ?? keptAnchor;
   const identityEvidence: OriginalsReport["identityEvidence"] = {
     status: identityIncomplete ? "incomplete" : "complete",
     author: authorDid ?? history?.did ?? null,
@@ -714,33 +804,42 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     },
     assetFreshness: {
       // An anchored log is the sat's, as of the read's tip (P9.13, P9.17).
-      status: stale ? "stale" : onBitcoin ? "anchored" : "not-established",
+      status: stale ? "stale" : onBitcoin || onEvm ? "anchored" : "not-established",
       retainedVersionId,
       copies,
     },
     fork,
     aliases,
     anchoring: assembly?.report ?? null,
-    ownership: assembly?.owner ?? null,
-    ordering: anchored(selected) ? "anchored" : "claimed",
+    // P9.29: a verifier that cannot confirm a move reports no owner, on the destination sat either.
+    ownership: evmReport?.move === "unconfirmed" ? null : assembly?.owner ?? null,
+    evm: evmReport,
+    ordering: orderingOf(selected),
     deactivated: log.deactivated,
     state: state?.asset ?? null,
     document: selected ? deriveDocument(prefix) : null,
     validAsOf: null,
     // P7.9 is for entries not inscribed on an anchoring sat; those are checked at their inscription
     // time instead, and entries the anchoring inscription carries against the version they name (P9.15).
-    historicallyAuthorizedOnly: onBitcoin === null ? historicallyAuthorizedOnly(prefix, histories, authorDid) : [],
+    historicallyAuthorizedOnly: onBitcoin === null && !onEvm ? historicallyAuthorizedOnly(prefix, histories, authorDid) : [],
     current: false,
     notices: [],
     reasons,
     // An anchored log whose anchor Bitcoin has not shown is not retained past what was (P9.12).
     // After a change of anchor, the new anchor's branch is the history (P9.16).
     retain: {
-      original: assembly && !onBitcoin
+      // P9.22: after a replaced block the retained head is discarded; only what this read verified is kept.
+      original: replaced.length > 0
+        ? (onEvm || onBitcoin ? (head?.entry.versionId ?? null) : null)
+        : (assembly || evmAssembly) && !onBitcoin && !onEvm
         ? (options.retained?.original ?? null)
-        : onBitcoin?.change ? (head?.entry.versionId ?? null) : retainOriginal(head?.entry.versionId, options.retained?.original, fork !== null),
+        : onBitcoin?.change || evmReport?.stretches.some((s) => s.change) ? (head?.entry.versionId ?? null) : retainOriginal(head?.entry.versionId, options.retained?.original, fork !== null),
       authors: retainedAuthors,
       ...(retainedAnchor ? { anchor: retainedAnchor } : {}),
+      ...(evmAssembly && evmAssembly.retainedBlocks.length > 0 ? { evm: retainedEvm(evmAssembly.retainedBlocks, options.evm?.retained, onReplaced) } : {}),
+      ...(evmAssembly && (evmAssembly.checkpoints.length > 0 || (options.evm?.checkpoints?.length ?? 0) > 0)
+        ? { evmCheckpoints: retainedCheckpoints(evmAssembly.checkpoints, options.evm?.checkpoints, onReplaced) }
+        : {}),
     },
   };
   for (const h of histories) {
@@ -766,6 +865,23 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   if (assembly && assembly.report.disputed.length > 0) reasons.push("bitcoin-placement-disputed");
   if (assembly?.ownerDisputed) reasons.push("ownership-indexes-disagree");
   if (assembly?.report.change) reasons.push("anchor-changed");
+  // EXPERIMENTAL (originals-spec PR 59): what keeps an EVM-anchored Original from being current.
+  if (evmReport) {
+    const why: Record<EvmAnchoringReport["status"], string | null> = {
+      anchored: null, "moved-to-bitcoin": null, "departed-not-arrived": "departed-not-arrived", "not-anchored": "anchor-not-found-on-evm",
+      unverified: "evm-evidence-missing", unsupported: "unsupported-profile",
+    };
+    const reason = why[evmReport.status];
+    if (reason) reasons.push(reason);
+    if (evmReport.move === "unconfirmed") reasons.push("move-unconfirmed");
+    // P9.29: a final departure whose destination could not be read; no arrival claimed or denied.
+    if (evmReport.arrival === "unknown" && evmReport.destination !== null) reasons.push("evm-destination-unreachable");
+    if (evmReport.stretches.some((s) => s.finality === "failed")) reasons.push("evm-finality-failed");
+    if (evmReport.warnings.includes("authoritative-source-changed") && !reasons.includes("authoritative-source-changed")) reasons.push("authoritative-source-changed");
+    if (evmReport.stretches.some((s) => s.change)) reasons.push("anchor-changed");
+    const last = evmReport.stretches[evmReport.stretches.length - 1];
+    if (evmReport.status === "anchored" && last && !last.holder) reasons.push("evm-owner-not-observed");
+  }
   // A head change from an inscription's verifiability is a notice, not a reason: the state reached
   // is current, and the change is shown with it (P9.15; owner decision on #993's review). One that a
   // reorganization caused is also VH-Log's authoritative-source-changed warning (P9.5).
@@ -792,7 +908,75 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   if (headChange) report.notices.push("head-changed");
   if (onBitcoin && onBitcoin.unverifiable.length > 0) report.notices.push("unverifiable-inscriptions");
   if (onBitcoin && onBitcoin.ignored.some((i) => i.reason === "waiting-for-earlier-unverifiable")) report.notices.push("publications-waiting");
+  if (evmReport?.stretches.some((s) => s.headChange) && !report.notices.includes("head-changed")) report.notices.push("head-changed");
+  if (evmReport?.stretches.some((s) => s.unverifiable.length > 0) && !report.notices.includes("unverifiable-inscriptions")) report.notices.push("unverifiable-inscriptions");
+  if (evmReport?.stretches.some((s) => s.ignored.some((i) => i.reason === "waiting-for-earlier-unverifiable")) && !report.notices.includes("publications-waiting")) report.notices.push("publications-waiting");
   return report;
+}
+
+/** The finalized blocks relied on now, and the retained ones of chains not read this time (P9.22). */
+function retainedEvm(now: RetainedEvmBlock[], before: RetainedEvmBlock[] | undefined, replaced: (chain: string, number: number) => boolean): RetainedEvmBlock[] {
+  const chains = new Set(now.map((b) => b.chain));
+  return [...(before ?? []).filter((b) => !chains.has(b.chain) && !replaced(b.chain, b.number)), ...now];
+}
+
+/** P9.25: this read's checkpoints, and earlier ones for tokens it did not read, unless they rest on a replaced block (P9.22). */
+function retainedCheckpoints(now: EvmCheckpoint[], before: EvmCheckpoint[] | undefined, replaced: (chain: string, number: number) => boolean): EvmCheckpoint[] {
+  const tokens = new Set(now.map((c) => c.token));
+  return [...(before ?? []).filter((c) => !tokens.has(c.token) && !replaced(c.chain, c.block.number)), ...now];
+}
+
+/** Whether an entry's asset state has an `anchor` member: its Original starts on an EVM chain (P9.19). */
+function hasAnchorMember(entry: unknown): boolean {
+  return isJsonObject(entry) && (entry as { state?: { asset?: { anchor?: unknown } } }).state?.asset?.anchor !== undefined;
+}
+
+/**
+ * Section 14, P9.19, P9.21, P7.14 (originals-spec PR 59): an Original whose
+ * genesis `anchor` member this verifier cannot support (no pinned contract, an
+ * unlisted chain, other code at the pinned address) is unsupported, not
+ * invalid, and nothing about it is reported as verified.
+ */
+function unsupportedReport(evm: EvmAnchoringReport, options: VerifyOriginalOptions, raw: unknown[] | null): OriginalsReport {
+  const u = evm.unsupported!;
+  const genesis = raw?.[0];
+  const author = (genesis as { state?: { author?: { did?: unknown } } } | undefined)?.state?.author?.did;
+  const authorDid = typeof author === "string" ? author : null;
+  const none: IdentityObtained = { location: null, obtainedAt: null, source: null, latestVersionId: null, witnessed: false };
+  return {
+    profile: ORIGINALS_METHOD,
+    original: null,
+    checkpoint: null,
+    head: null,
+    history: { status: "unsupported", entries: 0, failure: { index: 0, category: "unsupported-profile", code: u.code, message: u.message } },
+    authorBinding: { status: "incomplete" },
+    identityEvidence: {
+      status: "incomplete", author: authorDid, latestVersionId: null, freshness: "not-established", obtained: none,
+      retainedVersionId: (authorDid && options.retained?.authors?.[authorDid]) || null, deactivated: false, editors: [],
+    },
+    resources: { status: "available", versions: [], missing: [], failures: [] },
+    assetFreshness: { status: "not-established", retainedVersionId: options.retained?.original ?? null, copies: [] },
+    fork: null,
+    aliases: [],
+    anchoring: null,
+    ownership: null,
+    evm,
+    ordering: "claimed",
+    deactivated: false,
+    state: null,
+    document: null,
+    validAsOf: null,
+    historicallyAuthorizedOnly: [],
+    current: false,
+    notices: [],
+    reasons: ["unsupported-profile"],
+    retain: {
+      original: options.retained?.original ?? null,
+      authors: { ...options.retained?.authors },
+      ...(options.retained?.anchor ? { anchor: options.retained.anchor } : {}),
+      ...(options.evm?.retained ? { evm: options.evm.retained } : {}),
+    },
+  };
 }
 
 /** The latest verified version of `did`, if any. */

@@ -9,6 +9,7 @@ import { OriginalsError, fail } from "../errors.js";
 import { canonicalize, isJsonObject, type JsonObject, type JsonValue } from "../json/index.js";
 import { parseDidWebvh } from "../webvh/index.js";
 import { parseBtcoAlias } from "./btco.js";
+import { LAYER_RANK, anchorAddress, checkAnchor, evmAliasOf, layerOfAnchor, parseEvmAlias, tokenIdOf, type EvmAnchor, type EvmAnchorPin } from "./evm.js";
 
 /** PROVISIONAL (D1): the extension's method value; it implies vh-log:1.0. */
 export const ORIGINALS_METHOD = "originals:1.0";
@@ -68,6 +69,11 @@ export interface AssetState {
   aliases: string[];
   /** The editor grants (P5.15). Absent means no editors; PROVISIONAL: an empty list is not used. */
   editors?: EditorGrant[];
+  /**
+   * The anchor chain and minter (P14.18, P9.19; originals-spec PR 59,
+   * proposed, EXPERIMENTAL). Absent means the anchor chain is Bitcoin.
+   */
+  anchor?: EvmAnchor;
 }
 
 /** The author DID, its verification method and its exact versionId (P5.1). */
@@ -263,7 +269,8 @@ function checkEditors(value: unknown, authorDid: string | undefined): EditorGran
 
 /** Check an asset state. `authorDid` enables the grant rules that depend on it (P5.15). */
 export function checkAsset(value: unknown, authorDid?: string): AssetState {
-  const a = members(value, ["name", "status", "resource", "aliases"], ["metadata", "editors"], "state.asset");
+  const a = members(value, ["name", "status", "resource", "aliases"], ["metadata", "editors", "anchor"], "state.asset");
+  const anchor = a.anchor === undefined ? undefined : checkAnchor(a.anchor);
   if (typeof a.name !== "string" || a.name.length === 0 || a.name.length > ORIGINALS_LIMITS.nameLength) {
     invalid("STATE_NAME", `the name must be a string of 1 to ${ORIGINALS_LIMITS.nameLength} UTF-16 code units (P14.5)`);
   }
@@ -273,16 +280,28 @@ export function checkAsset(value: unknown, authorDid?: string): AssetState {
   if (!isJsonObject(a.resource)) invalid("STATE_RESOURCE", "state.asset.resource is the descriptor of the Original's one resource: an Original has exactly one (P4.1)");
   checkDescriptor(a.resource, "state.asset.resource");
   if (!Array.isArray(a.aliases) || !a.aliases.every((x) => typeof x === "string")) invalid("STATE_ALIASES", "aliases must be an array of DIDs");
-  // PROVISIONAL (plan 011 PR 7b, plan 012 §3.1): at most one did:webvh alias and one did:btco alias.
+  // PROVISIONAL (plan 011 PR 7b, plan 012 §3.1): at most one did:webvh alias and one did:btco alias;
+  // with an `anchor` member, one did:webvh and one did:evm token alias instead, no DID of another
+  // method and no DID twice (P14.5, P9.19, P3.9; originals-spec PR 59, proposed).
   let webvh = 0;
   let btco = 0;
+  let evm = 0;
+  if (new Set(a.aliases).size !== a.aliases.length) invalid("STATE_ALIASES", "aliases lists no DID twice (P14.5)");
   for (const alias of a.aliases) {
     if (alias.startsWith("did:btco:")) {
+      if (anchor) invalid("STATE_ALIASES", "an entry with an anchor member lists no did:btco alias (P9.19)");
       parseBtcoAlias(alias);
       btco++;
       continue;
     }
-    if (!alias.startsWith("did:webvh:")) invalid("STATE_ALIASES", `${alias} is not a did:webvh or did:btco alias`);
+    if (alias.startsWith("did:evm:")) {
+      if (!anchor) invalid("STATE_ALIASES", "an Original without an anchor member lists no token alias (P9.19)");
+      const t = parseEvmAlias(alias);
+      if (t.chain !== anchor.chain) invalid("STATE_ALIASES", `the token alias ${alias} is not on the anchor chain ${anchor.chain} (P9.19)`);
+      evm++;
+      continue;
+    }
+    if (!alias.startsWith("did:webvh:")) invalid("STATE_ALIASES", `${alias} is not a did:webvh, did:btco or did:evm alias (P14.5)`);
     try {
       parseDidWebvh(alias);
     } catch {
@@ -290,7 +309,14 @@ export function checkAsset(value: unknown, authorDid?: string): AssetState {
     }
     webvh++;
   }
-  if (webvh > 1 || btco > 1) invalid("STATE_ALIASES", "an Original lists at most one did:webvh and one did:btco alias");
+  if (webvh > 1 || btco > 1 || evm > 1) invalid("STATE_ALIASES", "an Original lists at most one did:webvh alias and one did:btco or token alias (P14.5)");
+  // P9.26: with an anchor member, no did:btco author or editor: nothing orders did:btco versions against an EVM chain.
+  if (anchor) {
+    if (authorDid?.startsWith("did:btco:")) invalid("STATE_ANCHOR_BTCO_SIGNER", "an entry with an anchor member names no did:btco author (P9.26)");
+    if (Array.isArray(a.editors) && a.editors.some((g) => isJsonObject(g) && typeof g.did === "string" && g.did.startsWith("did:btco:"))) {
+      invalid("STATE_ANCHOR_BTCO_SIGNER", "an entry with an anchor member grants no did:btco editor (P9.26)");
+    }
+  }
   if (a.editors !== undefined) checkEditors(a.editors, authorDid);
   return a as unknown as AssetState;
 }
@@ -301,7 +327,8 @@ const same = (a: JsonValue | undefined, b: JsonValue | undefined) => canonicaliz
  * P5.16, P5.17: an editor entry, checked against its parent. The grant is
  * the parent's; the author reference is the parent's; the operation is
  * update; and only the name, metadata and resource descriptor the grant
- * allows change. Grants, aliases and lifecycle are the author's.
+ * allows change. Grants, aliases, the anchor member (P9.28) and lifecycle are
+ * the author's.
  */
 export function checkEditorEntry(editor: EditorRef, operation: string, author: AuthorRef, asset: AssetState, previous: EntryState | undefined): void {
   const authorOnly: (message: string) => never = (message) => fail("outside-grant", "EDITOR_AUTHOR_ONLY", `${message}; only an author entry may (P5.16)`);
@@ -315,6 +342,8 @@ export function checkEditorEntry(editor: EditorRef, operation: string, author: A
   const before = previous.asset;
   if (!same(asset.editors as unknown as JsonValue, before.editors as unknown as JsonValue)) authorOnly("an editor entry cannot change the editor grants");
   if (!same(asset.aliases, before.aliases)) authorOnly("an editor entry cannot change aliases");
+  // P9.28: a move entry is signed by the author, not by an editor; changing `anchor` is a move.
+  if (!same(asset.anchor as unknown as JsonValue, before.anchor as unknown as JsonValue)) authorOnly("an editor entry cannot change the anchor member: a move entry is the author's (P9.28)");
   if (asset.status !== before.status) authorOnly("an editor entry cannot change the lifecycle status");
   const outside: (what: string) => never = (what) => fail("outside-grant", "EDITOR_OUTSIDE_GRANT", `${editor.did} is not granted ${what} (P5.16)`);
   if (asset.name !== before.name && !grant.name) outside("the name");
@@ -344,6 +373,20 @@ export interface EntryStateContext {
    * (`checkEditorChange`; VH-Log PR 11, "Editors from a Controller" [S25]).
    */
   editorRules?: boolean;
+  /**
+   * The P14.21 anchor contract pin, when the caller has one (EXPERIMENTAL; the
+   * spec pins none). With it, a token alias's contract address is checked and
+   * its chain list is used for move layers; without it, the address is not
+   * checked here, and a verifier reports the Original unsupported (section 14).
+   */
+  evm?: EvmAnchorPin | null;
+  /**
+   * For a move entry, the timestamp (ms) of the departure record that carries
+   * it, when the verifier has read it: layers are judged by the classes that
+   * applied then (P9.28, P14.22; originals-spec PR 59, proposed). Without it,
+   * by the classes of the revision this verifier implements. PROVISIONAL.
+   */
+  moveTime?: number;
 }
 
 /** The members, id, operation, author reference and asset of an entry's state: what every later rule reads. */
@@ -369,6 +412,61 @@ function entryHead(state: JsonObject, ctx: EntryStateContext): { s: JsonObject; 
 export function checkEditorChange(state: JsonObject, ctx: EntryStateContext): void {
   const { s, operation, author, asset } = entryHead(state, ctx);
   if (s.editor !== undefined) checkEditorEntry(checkEditorRef(s.editor), operation, author, asset, ctx.previous);
+}
+
+const sameAnchor = (a: EvmAnchor | undefined, b: EvmAnchor | undefined) => a?.chain === b?.chain && a?.minter === b?.minter;
+
+/** Whether an entry is a move entry: it changes or removes its parent's `anchor` member (P9.28). */
+export function isMoveEntry(asset: AssetState, previous: AssetState | undefined): boolean {
+  return previous?.anchor !== undefined && !sameAnchor(previous.anchor, asset.anchor);
+}
+
+/**
+ * P9.19, P9.28 (originals-spec PR 59, proposed, EXPERIMENTAL): the `anchor`
+ * member is fixed at genesis and changed only by a move entry; a token alias
+ * names the one token P14.19 derives; a move goes up a layer, is signed by
+ * the author, comes after the anchoring entry, and lists the destination's
+ * alias in place of the token left. Layers are judged here by the current
+ * classes; a verifier that has the departure record's timestamp judges them
+ * by the class that applied then (P9.28, `classAt`).
+ */
+function checkAnchorChange(s: JsonObject, asset: AssetState, ctx: EntryStateContext): void {
+  const previous = ctx.previous?.asset;
+  const id = s.id as string;
+  const token = asset.aliases.find((x) => x.startsWith("did:evm:"));
+  if (token !== undefined && asset.anchor) {
+    const t = parseEvmAlias(token);
+    if (t.tokenId !== tokenIdOf(id, asset.anchor.minter)) invalid("STATE_ANCHOR_TOKEN", `${token} is not the token P14.19 derives from this Original and its minter (P9.19)`);
+    if (ctx.evm && t.contract !== anchorAddress(ctx.evm, t.chain)) invalid("STATE_ANCHOR_TOKEN", `${token} names a contract other than the anchor contract pinned for ${t.chain} (P14.18, P14.21)`);
+  }
+  if (!previous) return;
+  if (sameAnchor(previous.anchor, asset.anchor)) {
+    const was = previous.aliases.find((x) => x.startsWith("did:evm:"));
+    if (was !== undefined && token !== was) invalid("STATE_ANCHOR", "an anchored Original keeps its token alias until a move entry (P9.20, P9.28)");
+    return;
+  }
+  if (!previous.anchor) invalid("STATE_ANCHOR", "no entry adds an anchor member to an Original whose genesis entry had none (P9.19)");
+  // A move entry (P9.28).
+  const fromToken = previous.aliases.find((x) => x.startsWith("did:evm:"));
+  if (fromToken === undefined) invalid("STATE_MOVE_BEFORE_ANCHOR", "a move entry comes after the Original's anchoring entry: it moves only from a chain it is anchored on (P9.28)");
+  if (s.editor !== undefined) fail("outside-grant", "STATE_MOVE_BY_EDITOR", "a move entry is signed by the author, not by an editor (P9.28)");
+  if (s.operation !== "update") invalid("STATE_MOVE", "a move entry is an update (P9.28)");
+  const fromLayer = layerOfAnchor(previous.anchor, ctx.evm ?? null, ctx.moveTime);
+  const toLayer = layerOfAnchor(asset.anchor, ctx.evm ?? null, ctx.moveTime);
+  if (toLayer === undefined) fail("unsupported-profile", "EVM_CHAIN_NOT_LISTED", `the move entry's destination ${asset.anchor!.chain} is not in this verifier's revision of P14.22: unsupported, not invalid (P9.19, P9.28)`);
+  if (fromLayer !== undefined && LAYER_RANK[toLayer] <= LAYER_RANK[fromLayer]) invalid("STATE_MOVE_LAYER", `a move goes only up a layer: ${fromLayer} to ${toLayer} is not (P9.28)`);
+  if (asset.aliases.includes(fromToken)) invalid("STATE_MOVE_ALIAS", "a move entry replaces the token alias with the destination's (P9.28)");
+  if (asset.anchor) {
+    const want = asset.aliases.find((x) => x.startsWith("did:evm:"));
+    if (want === undefined) invalid("STATE_MOVE_ALIAS", "a move entry lists the destination token's alias (P9.28)");
+  } else if (!asset.aliases.some((x) => x.startsWith("did:btco:"))) {
+    invalid("STATE_MOVE_ALIAS", "a move to Bitcoin lists the destination sat's did:btco alias (P9.28)");
+  }
+}
+
+/** The did:evm alias of the token P14.19 derives, under a pin, at the address P14.21 fixes for its chain (P14.18). */
+export function derivedTokenAlias(didVh: string, anchor: EvmAnchor, pin: EvmAnchorPin): string {
+  return evmAliasOf(anchor.chain, anchorAddress(pin, anchor.chain), tokenIdOf(didVh, anchor.minter));
 }
 
 /** Validate an entry's state against the Originals rules and its predecessor. */
@@ -403,10 +501,13 @@ export function checkEntryState(state: JsonObject, ctx: EntryStateContext): Entr
       if (error instanceof OriginalsError && error.code === "STATE_ANCHOR") throw error;
     }
   }
-  const anchoredTo = ctx.previous ? satOf(ctx.previous.asset.aliases) : undefined;
+  checkAnchorChange(s, asset, ctx);
+  const tokenOf = (aliases: string[]) => aliases.find((x) => x.startsWith("did:evm:"));
+  const anchoredTo = ctx.previous ? satOf(ctx.previous.asset.aliases) ?? tokenOf(ctx.previous.asset.aliases) : undefined;
   if (anchoredTo !== undefined) {
-    // Anchoring is terminal (P9.10): once the did:btco alias is listed it never changes or goes.
-    if (satOf(asset.aliases) !== anchoredTo) invalid("STATE_ANCHOR", "an anchored Original names its sat for good (P9.10)");
+    // Anchoring is terminal on Bitcoin (P9.10): once the did:btco alias is listed it never changes or goes.
+    // On an EVM chain the token alias changes only in a move entry (P9.20, P9.28), checked above.
+    if (anchoredTo.startsWith("did:btco:") && satOf(asset.aliases) !== anchoredTo) invalid("STATE_ANCHOR", "an anchored Original names its sat for good (P9.10)");
     // After anchoring no entry adds or replaces a did:webvh alias, even within its SCID (P9.10, D7).
     // The one the anchoring state lists may stay or go; with at most one listed and none added
     // since, an alias absent from the previous state was never listed or has been removed, and

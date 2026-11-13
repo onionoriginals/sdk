@@ -1,0 +1,25 @@
+# EXPERIMENTAL anchor contract for originals-spec PR 59 (P14.20, P14.21).
+# Not reviewed, not audited and not the P14.21 pin. See README.md.
+[profile.default]
+src = "src"
+test = "test"
+out = "out"
+cache_path = "cache"
+libs = []
+# P14.21 pins the compiler, its settings and the EVM version. These are this
+# experiment's choices (PROVISIONAL), recorded in README.md with the resulting
+# CREATE2 address and runtime code hash.
+solc_version = "0.8.38"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 200
+via_ir = false
+# No CBOR metadata, so the bytecode (and so the CREATE2 address and the
+# runtime code hash) depends only on the source and these settings.
+bytecode_hash = "none"
+cbor_metadata = false
+gas_reports = ["OriginalsAnchor"]
+fs_permissions = [{ access = "read", path = "./out" }]
+
+[fmt]
+line_length = 120

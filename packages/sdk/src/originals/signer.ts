@@ -18,8 +18,8 @@
 import { OriginalsError } from "@originals/vh";
 import { localSigner, proofHashData, type CryptosuiteName, type DataIntegrityProof, type KeyType } from "@originals/vh/crypto";
 import { canonicalize, isJsonObject, type JsonObject, type JsonValue } from "@originals/vh/json";
-import { vhHash, type UnsignedEntry } from "@originals/vh/log";
-import { ORIGINALS_METHOD, type AuthorRef, type EditorGrant, type EntryState, type Operation, type Transition } from "@originals/vh/originals";
+import { parseVersionTime, vhHash, type UnsignedEntry } from "@originals/vh/log";
+import { ORIGINALS_METHOD, checkAsset, checkAuthorRef, checkDigest, checkEditorRef, type AuthorRef, type EditorGrant, type EntryState, type Operation, type Transition } from "@originals/vh/originals";
 
 /** Who signs an entry: the author, or a granted editor (P5.16). */
 export interface SignerIdentity extends AuthorRef {
@@ -156,6 +156,63 @@ function parentState(request: SigningRequest, number: number): EntryState | unde
   return p.state as unknown as EntryState;
 }
 
+const exactly = (value: JsonObject, keys: string[]) => {
+  const own = Object.keys(value).sort();
+  return own.length === keys.length && [...keys].sort().every((k, i) => own[i] === k);
+};
+
+/**
+ * P5.11: the entry on its own is a well-formed Originals entry: exactly the
+ * unsigned VH-Log members, with no proof yet; a versionTime as P14.2 writes
+ * it; parameters exactly as P14.1 allows, with no null value; and a state
+ * with exactly the defined members, whose author and editor references,
+ * asset (P14.5, P14.6) and transitions (P14.4) are well formed. Rules that
+ * need the parent, such as what an editor may change or how layers move, are
+ * the verifier's; the writer already applied them (`prepareUpdateOriginal`).
+ */
+function checkWellFormed(entry: UnsignedEntry, number: number): void {
+  if (!isJsonObject(entry) || !exactly(entry, ["versionId", "versionTime", "parameters", "state"])) {
+    refuse("not an unsigned VH log entry: exactly versionId, versionTime, parameters and state");
+  }
+  if (typeof entry.versionTime !== "string" || !entry.versionTime.endsWith("Z")) refuse("the versionTime is not P14.2's");
+  try {
+    parseVersionTime(entry.versionTime, 3);
+  } catch {
+    refuse("the versionTime is not P14.2's");
+  }
+  const parameters = entry.parameters as unknown as JsonValue;
+  if (!isJsonObject(parameters)) refuse("not a VH log entry: parameters is not an object");
+  if (Object.values(parameters).some((v) => v === null)) refuse("a parameter value is null (P14.1)");
+  const genesis = number === 1;
+  const parametersOk = genesis
+    ? exactly(parameters, ["method", "scid"]) && parameters.method === ORIGINALS_METHOD && typeof parameters.scid === "string"
+    : exactly(parameters, []) || (exactly(parameters, ["deactivated"]) && parameters.deactivated === true);
+  if (!parametersOk) refuse(genesis ? "not an Originals genesis entry: its parameters are exactly method and scid (P14.1)" : "an entry's parameters are {} or, for a deactivation, {\"deactivated\": true} (P14.1)");
+  const state = entry.state as unknown as JsonValue;
+  if (!isJsonObject(state)) refuse("not an Originals asset state");
+  if (!exactly(state, ["id", "operation", "author", "asset", "transitions"]) && !exactly(state, ["id", "operation", "author", "editor", "asset", "transitions"])) {
+    refuse("not an Originals asset state: exactly id, operation, author, asset and transitions, and editor in an editor entry");
+  }
+  if (genesis ? state.operation !== "create" || state.id !== `did:vh:${parameters.scid as string}` : state.operation === "create") refuse("the operation does not fit the entry's place in the log");
+  if ((state.operation === "deactivate") !== (parameters.deactivated === true)) refuse("operation deactivate and deactivated: true go together (P6.5)");
+  try {
+    const author = checkAuthorRef(state.author);
+    if (state.editor !== undefined) checkEditorRef(state.editor);
+    const asset = checkAsset(state.asset, author.did);
+    if (genesis && asset.aliases.length > 0) refuse("a genesis entry lists no alias");
+    if (!Array.isArray(state.transitions) || state.transitions.length > 1) refuse("an entry lists at most one resource transition (P14.4)");
+    for (const t of state.transitions) {
+      if (!isJsonObject(t) || !exactly(t, ["from", "to"])) refuse("a transition is exactly {from, to} (P14.4)");
+      if (t.from !== null) checkDigest(t.from);
+      if ((t.from === null) !== genesis || t.to !== asset.resource.digest) refuse("the transition does not name the resource's version (P14.4)");
+    }
+    if (genesis && state.transitions.length !== 1) refuse("a genesis entry lists its resource's first version (P14.4)");
+  } catch (error) {
+    if (error instanceof OriginalsError && error.code === "SIGNER_REFUSED") throw error;
+    refuse(`not a well-formed Originals entry: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 /**
  * Refuse input that is not a well-formed Originals entry for `verificationMethod`,
  * or whose summary does not state the entry truly (P5.11). Returns the
@@ -167,11 +224,8 @@ function checkRequest(request: SigningRequest, verificationMethod: string, crypt
     refuse("the proof options are not this key's");
   }
   const number = Number(/^(\d+)-/.exec(String(entry?.versionId))?.[1] ?? NaN);
-  const parameters = (entry?.parameters ?? {});
-  if (!Number.isInteger(number) || typeof entry.versionTime !== "string") refuse("not a VH log entry");
-  if (number === 1 ? parameters.method !== ORIGINALS_METHOD : parameters.method !== undefined && parameters.method !== ORIGINALS_METHOD) {
-    refuse("not an Originals entry");
-  }
+  if (!Number.isInteger(number) || number < 1 || typeof entry.versionTime !== "string") refuse("not a VH log entry");
+  checkWellFormed(entry, number);
   const state = entry.state;
   const author = state?.author as JsonObject | undefined;
   const editor = state?.editor as JsonObject | undefined;

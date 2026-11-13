@@ -12,6 +12,9 @@ workspace packages, typechecks the harness, and runs disposable chains in turn:
   PR 10, plan 012);
 - `scripts/regtest/originals-restart.ts`: the Bitcoin writer across a real
   process kill, with durable stores and a fresh reader (#975).
+- `scripts/regtest/originals-evm-move.ts`: EXPERIMENTAL (originals-spec PR 59,
+  plan 011 phase 12), an Original anchored on a local anvil devnet moves up to
+  Bitcoin. Skipped, with a message, when Foundry's `anvil` is not installed.
 
 The Originals journey asserts each step on real transactions:
 
@@ -124,6 +127,41 @@ directory; under the runner, `REGTEST_RECEIPT` gives
 journey writes `<receipt>-originals.json`), and `REGTEST_LOGS_DIR` keeps the Core
 and ord logs. Set both `BITCOIND_BIN` and `ORD_BIN` to use installed binaries.
 The runner uses no public Bitcoin network and spends nothing outside regtest.
+
+`originals-evm-move.ts` (EXPERIMENTAL, originals-spec PR 59) adds a local
+anvil devnet (Foundry; `--slots-in-an-epoch 1`, so `finalized` trails `latest`
+by two blocks) to the same Core and ord. It deploys `contracts/OriginalsAnchor.sol`
+through the deterministic deployment proxy with a zero salt (P14.21) and pins
+the devnet as an `operator` chain. Each step is asserted on real transactions:
+
+1. Created with an `anchor` member after the genesis notice (P9.27), anchored,
+   minted and published on the token: `pending-evm-finality`, then final,
+   anchored and current, attested by the operator (P9.22, P9.23).
+2. An edit is published on the token and verifies as current (P9.20).
+3. A move entry to a sat the wallet holds (P9.28), after the P9.29 notice
+   (Bitcoin, irreversible, no layer above). The Bitcoin writer refuses the
+   arrival before the departure is published (`EVM_DEPARTURE_NOT_FINAL`).
+4. The departure on the token: while above the finalized block the arrival is
+   still refused (`EVM_DEPARTURE_NOT_FINAL`) and the token writer waits
+   (`EVM_PUBLICATION_PENDING`); final, the token writer refers the arrival to
+   the Bitcoin writer (`EVM_ARRIVAL_ON_BITCOIN`). Read from the token alone the
+   arrival is unknown; with the sat read, departed and not arrived.
+5. The arrival inscription carries the whole log through the move entry, with
+   the current version as its body; ord returns exactly those entries. Unmined
+   it is `pending-bitcoin-acceptance`; mined, anchored on Bitcoin,
+   `moved-to-bitcoin` with the move confirmed, no EVM owner, ownership of the
+   reveal output, and the move entry keeps the operator stretch's ordering.
+6. Bitcoin is terminal: no token publication and no further move
+   (`MOVE_NOT_FROM_EVM`); a later edit is reinscribed on the sat.
+7. A fresh reader with no copy of the log, given the sat read, the token read at
+   its finalized block and the author's DID history, verifies the five entries:
+   anchored on Bitcoin, the token's stretch accepting the anchoring entry, the
+   edit and the move entry in order, genesis carried with claimed ordering,
+   ownership of the sat holder's output. Without the token read the move is
+   unconfirmed, with no owner and not current (P9.29, C12-273).
+
+Its receipt is `$ORIGINALS_REGTEST_EVM_EVIDENCE`, or
+`<receipt>-originals-evm-move.json` under the runner.
 
 `landing-anchor.ts` runs the landing's path (plan 011 PR 10b) on the same
 nodes. The server is `apps/landing/serve.ts`, a child process with

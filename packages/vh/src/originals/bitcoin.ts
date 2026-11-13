@@ -49,12 +49,12 @@
  *   #50, merged). There is no per-network confirmation policy.
  */
 import { OriginalsError } from "../errors.js";
-import { isJsonObject } from "../json/index.js";
+import { canonicalize, isJsonObject, type JsonValue } from "../json/index.js";
 import type { LogEntry, LogVerification } from "../log/index.js";
 import { authorKey, stillAuthorized, versionNumberOf, type AuthorHistory, type AuthorVersion } from "./author.js";
 import { btcoAliasOf, chainOrder, parseBtcoAlias, readSat, type ChainPosition, type PlacementReason, type SatEvidence, type SatInscription, type SatRead } from "./btco.js";
 import { decodeCbor } from "./cbor.js";
-import { ORIGINALS_LIMITS, checkDescriptor, resourceDigest, signerOf, type AuthorRef, type EntryState, type ResourceDescriptor } from "./state.js";
+import { ORIGINALS_LIMITS, checkDescriptor, isMoveEntry, resourceDigest, signerOf, type AssetState, type AuthorRef, type EntryState, type ResourceDescriptor } from "./state.js";
 
 /**
  * The largest inscription, its metadata and body together, in bytes (P9.17,
@@ -153,7 +153,19 @@ export type IgnoredReason =
   | "waiting-for-earlier-unverifiable"
   | "author-version-not-yet-in-effect"
   | "author-key-not-valid-at-inscription-time"
-  | "author-deactivated-at-inscription-time";
+  | "author-deactivated-at-inscription-time"
+  /**
+   * P9.29 (originals-spec PR 59, proposed): on a move's destination, a
+   * publication whose log is not exactly the entries accepted through the
+   * departure, ending in the move entry naming this destination.
+   */
+  | "not-an-arrival"
+  /** P9.29: a publication on a token after a move entry was accepted on it: the Original has departed. */
+  | "after-departure"
+  /** P9.25, P14.20: a record whose media type is longer than 255 bytes, rejected from its fields. */
+  | "media-type-too-long"
+  /** P14.20: a record whose `bodyOf` is not an earlier record of the token that stored its own body. */
+  | "invalid-body-reference";
 
 export interface Placed {
   sat: string;
@@ -449,6 +461,8 @@ export interface Assembly {
    * descriptor (P9.17, P9.18; originals-spec #53).
    */
   bytes: Map<string, Uint8Array>;
+  /** P9.29: the accepted move entry on this anchor, when the Original has departed it. */
+  departure?: Placed;
 }
 
 type Verify = (entries: unknown[], options?: { unauthorized?: ReadonlySet<number> }) => Promise<LogVerification>;
@@ -460,7 +474,7 @@ const passes = (v: LogVerification, length: number) => !v.failure && v.entries.l
 const CHAIN_CODES = new Set(["ENTRY_HASH_MISMATCH", "VERSION_NUMBER", "SCID_MISMATCH"]);
 
 interface Anchoring {
-  read: SatRead;
+  read: AnchorRead;
   inscription: SatInscription;
   entries: LogEntry[];
   original: string;
@@ -475,6 +489,57 @@ export interface AssembleOptions {
   previousAnchor?: RetainedAnchor;
   /** The head reported before, for `headChange` (P9.15). */
   previousHead?: string;
+  /**
+   * P9.29 (originals-spec PR 59, proposed, EXPERIMENTAL): read the sat as a
+   * move's destination. The anchoring inscription must then carry exactly
+   * these entries, those accepted through the departure, ending in the move
+   * entry; it is checked only for that and its body, never against its
+   * signer's DID state at its inscription time. "unconfirmed" when the chain
+   * left could not be read: any valid log ending in a move entry naming the
+   * sat, and the move is reported unconfirmed by the caller.
+   */
+  arrival?: LogEntry[] | "unconfirmed";
+  /**
+   * P9.25 (originals-spec PR 59 a3ffdc1, MAY; EVM only, EXPERIMENTAL): resume
+   * from a retained verified checkpoint. `entries` is the accepted head there,
+   * of which the first `anchorEntries` are the anchoring (or arrival)
+   * publication's; `anchor` is that publication, already verified, whose
+   * bytes are not read again; `accepted` and `conflicting` are what was
+   * placed before; `departed` whether a move entry was accepted. The reads
+   * then hold only later publications, which extend the head as usual.
+   */
+  resume?: { entries: LogEntry[]; anchorEntries: number; anchor: SatInscription; accepted: Placed[]; conflicting: Placed[]; departed: boolean };
+}
+
+/**
+ * How a layer's publications name their anchor and are sized (P9.17, P9.20,
+ * P9.25): Bitcoin's sats, or an EVM token under the readings of P9.20.
+ */
+export interface AnchorKind {
+  /** The anchoring entry: the first entry that names an anchor of this layer, or -1. */
+  anchoringIndex(entries: unknown[]): number;
+  /** The anchor of this layer an entry names. */
+  namedBy(entry: unknown): string | undefined;
+  /** Whether a publication is over the limit (P9.17, P9.25). */
+  tooLarge(i: SatInscription): boolean;
+  /** P9.29: whether an accepted entry departs the anchor, after which nothing more is accepted there. */
+  departs?: (entry: LogEntry, previous: LogEntry) => boolean;
+}
+
+/** One anchor's merged reads: a sat's (`SatRead`), or an EVM token's in the same shape (P9.20). */
+export type AnchorRead = Omit<SatRead, "alias"> & { alias: { did: string } };
+
+export const BITCOIN_KIND: AnchorKind = Object.freeze({
+  anchoringIndex: (entries: unknown[]) => anchoringIndex(entries),
+  namedBy: (entry: unknown) => satNamedBy(entry),
+  tooLarge: (i: SatInscription) => (i.metadata?.length ?? 0) + i.content.length > ORIGINALS_INSCRIPTION_MAX_BYTES,
+});
+
+/** P9.28: whether `entry` is a move entry after `previous`. */
+export function departsFrom(entry: LogEntry, previous: LogEntry): boolean {
+  const asset = (e: LogEntry) => (e.state as { asset?: AssetState } | undefined)?.asset;
+  const a = asset(entry);
+  return a !== undefined && isMoveEntry(a, asset(previous));
 }
 
 /**
@@ -491,14 +556,6 @@ export async function assembleFromBitcoin(
   histories: AuthorHistory[],
   options: AssembleOptions = {},
 ): Promise<Assembly> {
-  const ignored: AnchoringReport["ignored"] = [];
-  const unverifiable: AnchoringReport["unverifiable"] = [];
-  const rejectedByAuthorState = new Set<string>();
-  const ignore = (sat: string, i: SatInscription | string, reason: IgnoredReason, entry?: LogEntry, code?: string, waitingOn?: string) => {
-    ignored.push({ sat, inscription: typeof i === "string" ? i : i.id, ...(entry?.versionId ? { versionId: entry.versionId } : {}), reason, ...(code ? { code } : {}), ...(waitingOn ? { waitingOn } : {}) });
-    if (entry && (reason === "author-key-not-valid-at-inscription-time" || reason === "author-deactivated-at-inscription-time")) rejectedByAuthorState.add(entry.versionId);
-  };
-
   // One merged read per alias, from every index read supplied for it (P9.10).
   const byAlias = new Map<string, SatEvidence[]>();
   for (const e of evidence) {
@@ -513,14 +570,40 @@ export async function assembleFromBitcoin(
     r.metadata instanceof Uint8Array ? readInscribedEntries(r.metadata).kind !== "not-originals"
       : r.unsupported === "not-read" ? r.metadataPresent !== false : r.metadata === undefined);
   const reads = [...byAlias].map(([did, list]) => readSat(did, list, { couldCount }));
+  return assembleAnchored(copy, reads, evidence.flatMap((e) => e.inscriptions), verify, histories, options, BITCOIN_KIND);
+}
+
+/**
+ * The assembly of P9.12-P9.17 over merged reads of one layer's anchors: a
+ * Bitcoin sat's, or, under the readings of P9.20, an EVM token's records as
+ * inscriptions (height = record index). `all` is every inscription supplied,
+ * for chain order in the report.
+ */
+export async function assembleAnchored(
+  copy: unknown[] | null,
+  reads: AnchorRead[],
+  all: SatInscription[],
+  verify: Verify,
+  histories: AuthorHistory[],
+  options: AssembleOptions,
+  kind: AnchorKind,
+): Promise<Assembly> {
+  const ignored: AnchoringReport["ignored"] = [];
+  const unverifiable: AnchoringReport["unverifiable"] = [];
+  const rejectedByAuthorState = new Set<string>();
+  const ignore = (sat: string, i: SatInscription | string, reason: IgnoredReason, entry?: LogEntry, code?: string, waitingOn?: string) => {
+    ignored.push({ sat, inscription: typeof i === "string" ? i : i.id, ...(entry?.versionId ? { versionId: entry.versionId } : {}), reason, ...(code ? { code } : {}), ...(waitingOn ? { waitingOn } : {}) });
+    if (entry && (reason === "author-key-not-valid-at-inscription-time" || reason === "author-deactivated-at-inscription-time")) rejectedByAuthorState.add(entry.versionId);
+  };
+
   // The report lists what was ignored in chain order.
   const position = new Map<string, SatInscription>();
-  for (const e of evidence) for (const i of e.inscriptions) if (!position.has(i.id)) position.set(i.id, i);
+  for (const i of all) if (!position.has(i.id)) position.set(i.id, i);
   const inChainOrder = () => ignored.sort((a, b) => chainOrder(position.get(a.inscription)!, position.get(b.inscription)!));
   for (const read of reads) for (const x of read.excluded) ignore(read.alias.did, x.inscription, x.reason);
 
   /** The inscription's entries when it is a usable Originals inscription, else why not. */
-  const usable = (read: SatRead, i: SatInscription): LogEntry[] | undefined => {
+  const usable = (read: AnchorRead, i: SatInscription): LogEntry[] | undefined => {
     const sat = read.alias.did;
     if (i.confirmations < 1) return void ignore(sat, i, "unconfirmed");
     if (i.unsupported === "not-read") {
@@ -544,7 +627,7 @@ export async function assembleFromBitcoin(
       return void ignore(sat, i, carried?.kind === "not-originals" ? "not-an-originals-inscription" : "unsupported-encoding");
     }
     if (!carried || carried.kind === "not-originals") return void ignore(sat, i, "not-an-originals-inscription");
-    if ((i.metadata?.length ?? 0) + i.content.length > ORIGINALS_INSCRIPTION_MAX_BYTES) return void ignore(sat, i, "too-large");
+    if (kind.tooLarge(i)) return void ignore(sat, i, "too-large");
     if (carried.kind === "invalid") return void ignore(sat, i, "undecodable");
     const mismatch = bodyMismatch(i, carried.entries[carried.entries.length - 1]);
     if (mismatch) return void ignore(sat, i, mismatch, carried.entries[carried.entries.length - 1]);
@@ -552,11 +635,13 @@ export async function assembleFromBitcoin(
   };
 
   /** The anchoring inscription's verified log, or why it is not an anchor (P9.17). */
-  const asAnchor = async (read: SatRead, i: SatInscription, entries: LogEntry[]): Promise<LogEntry[] | [IgnoredReason, string?]> => {
+  const arrival = options.arrival;
+  const asAnchor = async (read: AnchorRead, i: SatInscription, entries: LogEntry[]): Promise<LogEntry[] | [IgnoredReason, string?]> => {
     if (versionNumberOf(entries[0]?.versionId) !== 1) return ["does-not-start-at-genesis"];
-    if (anchoringIndex(entries) !== entries.length - 1) return ["last-entry-not-anchoring"];
+    if (arrival) return asArrival(read, entries);
+    if (kind.anchoringIndex(entries) !== entries.length - 1) return ["last-entry-not-anchoring"];
     const last = entries[entries.length - 1];
-    if (satNamedBy(last) !== read.alias.did) return ["names-another-sat"];
+    if (kind.namedBy(last) !== read.alias.did) return ["names-another-sat"];
     // An entry naming a version its signer's history shows is not that DID's is rejected, here
     // as after the anchor, not incomplete identity evidence (P9.15; originals-spec #51, merged).
     if (entries.some((e) => impossibleVersion(e, histories))) return ["invalid-entry", "AUTHOR_VERSION_IMPOSSIBLE"];
@@ -575,14 +660,36 @@ export async function assembleFromBitcoin(
     return author ? [author] : entries;
   };
 
+  /**
+   * P9.29: an arrival carries exactly the entries accepted through the departure, the move entry
+   * last, naming this anchor; it is checked only for that and its body, never against its signer's
+   * DID state at its inscription time (owner decision, 11 November 2026). The log is still verified
+   * as one log, which the entries accepted through the departure already are.
+   */
+  const asArrival = async (read: AnchorRead, entries: LogEntry[]): Promise<LogEntry[] | [IgnoredReason, string?]> => {
+    const last = entries[entries.length - 1];
+    if (kind.namedBy(last) !== read.alias.did) return ["not-an-arrival"];
+    if (Array.isArray(arrival)) {
+      if (entries.length !== arrival.length || entries.some((e, k) => e.versionId !== arrival[k].versionId || canonicalize(e as unknown as JsonValue) !== canonicalize(arrival[k] as unknown as JsonValue))) return ["not-an-arrival"];
+    } else if (entries.length < 2 || !departsFrom(last, entries[entries.length - 2])) {
+      return ["not-an-arrival"];
+    }
+    const v = await verify(entries);
+    if (!passes(v, entries.length)) {
+      const code = v.failure?.error.code;
+      return [code && CHAIN_CODES.has(code) ? "not-one-log" : "invalid-entry", code];
+    }
+    return entries;
+  };
+
   const originalOf = (entries: unknown[]) => stateOf(entries[0]).id;
   let target = copy && copy.length > 0 ? originalOf(copy) : undefined;
 
   // Classify every usable inscription on every sat. Multi-entry inscriptions are
   // anchoring candidates; single entries only matter after an anchor.
   const anchorings: Anchoring[] = [];
-  const singles = new Map<SatRead, Array<{ inscription: SatInscription; entry: LogEntry }>>();
-  const rejected: Array<{ read: SatRead; inscription: SatInscription; entries: LogEntry[]; reason: IgnoredReason; code?: string }> = [];
+  const singles = new Map<AnchorRead, Array<{ inscription: SatInscription; entry: LogEntry }>>();
+  const rejected: Array<{ read: AnchorRead; inscription: SatInscription; entries: LogEntry[]; reason: IgnoredReason; code?: string }> = [];
   for (const read of reads) {
     const list: Array<{ inscription: SatInscription; entry: LogEntry }> = [];
     singles.set(read, list);
@@ -601,6 +708,12 @@ export async function assembleFromBitcoin(
     }
   }
   anchorings.sort((a, b) => chainOrder(a.inscription, b.inscription));
+  const resume = options.resume;
+  if (resume && reads[0]) {
+    // P9.25: the checkpoint's anchor comes before every record read after it.
+    target ??= originalOf(resume.entries);
+    anchorings.unshift({ read: reads[0], inscription: resume.anchor, entries: resume.entries.slice(0, resume.anchorEntries), original: originalOf(resume.entries) as string });
+  }
   target ??= anchorings[0]?.original;
   const mine = anchorings.filter((a) => a.original === target);
   for (const a of anchorings) if (a.original !== target) ignore(a.read.alias.did, a.inscription, "another-original", a.entries[a.entries.length - 1]);
@@ -612,8 +725,8 @@ export async function assembleFromBitcoin(
   const lastOf = (a: Anchoring) => a.entries[a.entries.length - 1];
   const disputed = reads.flatMap((r) => r.disputed);
   const named = copy ? (() => {
-    const k = anchoringIndex(copy);
-    return k >= 0 ? satNamedBy(copy[k]) : undefined;
+    const k = kind.anchoringIndex(copy);
+    return k >= 0 ? kind.namedBy(copy[k]) : undefined;
   })() : undefined;
 
   /** The inscriptions' bodies, by the digest each was checked against (P9.17, P9.18). */
@@ -625,13 +738,13 @@ export async function assembleFromBitcoin(
 
   if (!chosen) {
     for (const r of rejected) ignore(r.read.alias.did, r.inscription, r.reason, r.entries[r.entries.length - 1], r.code);
-    const status = evidence.length === 0 || disputed.length > 0 ? "unverified" : "not-anchored";
-    const copyAnchor = copy ? anchoringIndex(copy) : -1;
+    const status = reads.length === 0 || disputed.length > 0 ? "unverified" : "not-anchored";
+    const copyAnchor = copy ? kind.anchoringIndex(copy) : -1;
     // Without an anchor on Bitcoin the copy's anchoring entry and what follows are not established,
     // so the head is the last entry before it (claimed ordering, P7.6), as for not-anchored. With no
     // Bitcoin evidence at all the copy is the local committed log, reported whole and not current
     // (bitcoin-evidence-missing): the SDK extends it locally before inscribing (P9.18).
-    const local = status === "unverified" && evidence.length === 0;
+    const local = status === "unverified" && reads.length === 0;
     const entries = !copy ? [] : local || copyAnchor < 0 ? copy : copy.slice(0, copyAnchor);
     const change = status === "not-anchored" && options.previousAnchor ? { previous: options.previousAnchor, current: null } : null;
     inChainOrder();
@@ -651,8 +764,9 @@ export async function assembleFromBitcoin(
   const read = chosen.read;
   const sat = read.alias.did;
   const anchor = place(sat, chosen.inscription, lastOf(chosen));
-  keepBody(chosen.inscription, lastOf(chosen));
-  const conflicting = mine.slice(1).map((a) => place(a.read.alias.did, a.inscription, lastOf(a)));
+  // A resumed anchor's bytes were checked when the checkpoint was made, and are not read again (P9.25).
+  if (!resume) keepBody(chosen.inscription, lastOf(chosen));
+  const conflicting = [...(resume?.conflicting ?? []), ...mine.slice(1).map((a) => place(a.read.alias.did, a.inscription, lastOf(a)))];
   // Inscriptions that are neither anchors nor, on the anchoring sat after the anchor, single entries.
   /**
    * An inscription after the anchor whose signer could not be verified: never incomplete identity
@@ -682,9 +796,9 @@ export async function assembleFromBitcoin(
   // After the anchor: one entry per inscription, extending the head at a greater height (P9.13).
   // Chain order decides: while an inscription extending the head is unverifiable, a later one
   // extending the same head waits on it (P9.15; originals-spec #51, merged).
-  const head: LogEntry[] = [...chosen.entries];
-  const accepted: Placed[] = [];
-  let lastHeight = chosen.inscription.height;
+  const head: LogEntry[] = resume ? [...resume.entries] : [...chosen.entries];
+  const accepted: Placed[] = resume ? [...resume.accepted] : [];
+  let lastHeight = accepted.length > 0 ? accepted[accepted.length - 1].height : chosen.inscription.height;
   // `blocking` is the first unverifiable inscription extending the head; `chain` is the head with
   // it and the publications waiting on top of it, which are followed once it is accepted (P9.15;
   // originals-spec #51, merged). Each candidate is judged in full first: one that would be
@@ -723,8 +837,14 @@ export async function assembleFromBitcoin(
   // waiting ones, waits too, at a greater height than the one it extends (P9.13, P9.15).
   let blocking: { id: string } | null = null;
   let branches: Array<{ chain: LogEntry[]; height: number }> = [];
+  let departure: Placed | undefined = resume?.departed ? accepted[accepted.length - 1] : undefined;
   for (const { inscription: i, entry } of singles.get(read)!) {
     if (chainOrder(i, chosen.inscription) <= 0) continue;
+    // P9.29: once a move entry is accepted, the Original has left; nothing later is accepted here.
+    if (departure) {
+      ignore(sat, i, "after-departure", entry);
+      continue;
+    }
     if (i.height <= lastHeight) {
       ignore(sat, i, "not-above-previous-height", entry);
       continue;
@@ -775,10 +895,12 @@ export async function assembleFromBitcoin(
       branches = [{ chain: [...head, entry], height: i.height }];
       continue;
     }
+    const parent = head[head.length - 1];
     head.push(entry);
     accepted.push(place(sat, i, entry));
     keepBody(i, entry);
     lastHeight = i.height;
+    if (kind.departs?.(entry, parent)) departure = accepted[accepted.length - 1];
   }
 
   // A copy is compared, never used (P9.17).
@@ -828,5 +950,6 @@ export async function assembleFromBitcoin(
     ownerDisputed: read.ownerDisputed,
     rejectedByAuthorState,
     bytes,
+    ...(departure ? { departure } : {}),
   };
 }
