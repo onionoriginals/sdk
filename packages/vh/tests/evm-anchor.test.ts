@@ -604,6 +604,13 @@ describe("P9.28, P9.29 moves", () => {
     // The move entry keeps the ordering of the stretch it was accepted on (P9.29).
     expect(btc.ordering).toBe("evm-attested-by-operator");
     expect(btc.current, JSON.stringify(btc.reasons)).toBe(true);
+    // Reports stay separate: with no copy of the log supplied, the Bitcoin report names none, as from a sat alone
+    // (found on regtest, scripts/regtest/originals-evm-move.ts); a supplied copy is compared.
+    expect(btc.anchoring).toMatchObject({ copy: "absent", superseded: 0 });
+    const withCopy = await verify(b.alice, [token(b.alias, two(ROBINHOOD, [rec(0, b.log), rec(1, b.move)]))], b.through, {
+      bitcoin: [satRead([{ id: "ab".repeat(32) + "i0", height: 100, transactionIndex: 1, inscriptionIndex: 0, confirmations: 6, inscriptionTime: (TS0 + 7200) * 1000, ...carrying(b.through) } as Omit<SatInscription, "sat" | "network">])],
+    });
+    expect(withCopy.anchoring).toMatchObject({ status: "anchored", copy: "agrees" });
   });
 
   test("C12-276: 'Report for an Original that moved from an attested chain to a proven chain': both chains, their classes and entries; the earlier stretch attested", async () => {
@@ -682,6 +689,28 @@ describe("P9.28, P9.29 moves", () => {
     expect(r.ordering).toBe("claimed");
     expect(r.reasons).toContain("move-unconfirmed");
     expect(r.current).toBe(false);
+  });
+
+  test("C12-273: 'Moved Original, a chain it left cannot be read', arrived on Bitcoin and read from the sat alone: move unconfirmed; that stretch's ordering claimed; no owner and not current (found on regtest)", async () => {
+    const b = await moving(null, 75);
+    const sat = [satRead([{ id: "ab".repeat(32) + "i0", height: 100, transactionIndex: 1, inscriptionIndex: 0, confirmations: 6, inscriptionTime: (TS0 + 7200) * 1000, ...carrying(b.through) } as Omit<SatInscription, "sat" | "network">])];
+    // With a copy of the log, and with none: the sat carries the log, whose genesis entry has an `anchor` member (P9.17, P9.19).
+    for (const log of [b.through, undefined]) {
+      const r = await verify(b.alice, [], log, { bitcoin: sat });
+      expect(r.history).toMatchObject({ status: "valid", entries: b.through.length });
+      expect(r.head).toBe(b.move.versionId);
+      expect(r.evm).toMatchObject({ move: "unconfirmed", owner: null });
+      expect(r.evm!.stretches[0]).toMatchObject({ chain: ROBINHOOD, status: "unverified", ordering: "claimed", entries: [b.anchoring.versionId, b.move.versionId] });
+      expect(r.anchoring).toMatchObject({ status: "anchored", sat: SAT, copy: log ? "agrees" : "absent" });
+      expect(r.ownership).toBeNull();
+      expect(r.ordering).toBe("claimed");
+      expect(r.reasons).toContain("move-unconfirmed");
+      expect(r.current).toBe(false);
+    }
+    // P9.19, section 14: a verifier with no pin reports it unsupported, never as an Original anchored on Bitcoin alone.
+    const unpinned = await verify(b.alice, [], undefined, { bitcoin: sat, pin: null });
+    expect(unpinned.evm).toMatchObject({ status: "unsupported" });
+    expect(unpinned.current).toBe(false);
   });
 
   test("C12-274: 'A chain the Original left later replaces the block that held the departure': finality failure there; move unconfirmed", async () => {

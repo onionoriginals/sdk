@@ -591,19 +591,14 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   }
   // An Original whose genesis entry has an `anchor` member: its tokens decide (P9.19, P9.20).
   let evmAssembly: EvmAssembly | null = null;
-  if (onTokens || (raw && raw.length > 0 && isJsonObject(raw[0]) && (raw[0] as { state?: { asset?: { anchor?: unknown } } }).state?.asset?.anchor !== undefined)) {
-    evmAssembly = await assembleFromEvm(raw, options.evm ?? { pin: null, tokens: [] }, options.bitcoin ?? [], (entries, o) => verifyLog(entries, { ...verifyOptions, ...o }), histories, {
+  const fromEvm = (entries: unknown[] | null) =>
+    assembleFromEvm(entries, options.evm ?? { pin: null, tokens: [] }, options.bitcoin ?? [], (e, o) => verifyLog(e, { ...verifyOptions, ...o }), histories, {
       moveTimes,
       ...(options.retained?.anchor ? { previousAnchor: options.retained.anchor } : {}),
       ...(options.retained?.original !== undefined ? { previousHead: options.retained.original } : {}),
     });
-  }
-  if (evmAssembly) {
-    // Section 14, P9.19, P9.21, P7.14: an anchor this verifier cannot support is unsupported, and nothing is verified.
-    if (evmAssembly.report.status === "unsupported" && evmAssembly.report.stretches.length === 0) return unsupportedReport(evmAssembly.report, options, raw);
-    input = evmAssembly.entries;
-    assembly = evmAssembly.bitcoin;
-  } else if (onSats || (raw && anchoringIndex(raw) >= 0)) {
+  if (onTokens || (raw && raw.length > 0 && hasAnchorMember(raw[0]))) evmAssembly = await fromEvm(raw);
+  if (!evmAssembly && (onSats || (raw && anchoringIndex(raw) >= 0))) {
     const previousAnchor = options.retained?.anchor;
     const previousHead = options.retained?.original;
     assembly = await assembleFromBitcoin(raw, options.bitcoin ?? [], (entries, o) => verifyLog(entries, { ...verifyOptions, ...o }), histories, {
@@ -611,6 +606,22 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       ...(previousHead !== undefined ? { previousHead } : {}),
     });
     input = assembly.entries;
+    // EXPERIMENTAL (PR 59; P9.19, P9.29): with no copy of the log and no token read, a sat can carry an
+    // arrival: a log whose genesis entry has an `anchor` member. The chains it left still decide, so it is
+    // assembled as an Original anchored on an EVM chain first, from the log the sat carries; without
+    // their evidence the move is unconfirmed, with no owner and not current (C12-273, found on regtest).
+    if ((!raw || raw.length === 0) && assembly.entries.length > 0 && hasAnchorMember(assembly.entries[0])) {
+      const copy = assembly.report.copy;
+      evmAssembly = await fromEvm(assembly.entries);
+      // That log came from the sat, not from the caller: the report names no supplied copy.
+      if (evmAssembly?.bitcoin) evmAssembly.bitcoin.report = { ...evmAssembly.bitcoin.report, copy, superseded: 0 };
+    }
+  }
+  if (evmAssembly) {
+    // Section 14, P9.19, P9.21, P7.14: an anchor this verifier cannot support is unsupported, and nothing is verified.
+    if (evmAssembly.report.status === "unsupported" && evmAssembly.report.stretches.length === 0) return unsupportedReport(evmAssembly.report, options, raw && raw.length > 0 ? raw : assembly?.entries ?? raw);
+    input = evmAssembly.entries;
+    assembly = evmAssembly.bitcoin;
   }
   const onBitcoin = assembly?.report.status === "anchored" ? assembly.report : null;
   const evmReport = evmAssembly?.report ?? null;
@@ -665,6 +676,9 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     if (!v) return "claimed";
     const stretch = evmStretchOf(v.entry.versionId);
     if (stretch) return `evm-${stretch.describes}`;
+    // P9.29: an entry an arrival carries keeps the ordering of the stretch that accepted it; on a chain left
+    // that was not read, claimed, even when Bitcoin holds the arrival.
+    if (evmReport?.stretches.some((s) => s.entries.includes(v.entry.versionId))) return "claimed";
     return inscribed.has(v.entry.versionId) ? "anchored" : "claimed";
   };
   const authorDid = head ? (head.entry.state as unknown as EntryState).author.did : null;
@@ -797,7 +811,8 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     fork,
     aliases,
     anchoring: assembly?.report ?? null,
-    ownership: assembly?.owner ?? null,
+    // P9.29: a verifier that cannot confirm a move reports no owner, on the destination sat either.
+    ownership: evmReport?.move === "unconfirmed" ? null : assembly?.owner ?? null,
     evm: evmReport,
     ordering: orderingOf(selected),
     deactivated: log.deactivated,
@@ -909,6 +924,11 @@ function retainedEvm(now: RetainedEvmBlock[], before: RetainedEvmBlock[] | undef
 function retainedCheckpoints(now: EvmCheckpoint[], before: EvmCheckpoint[] | undefined, replaced: (chain: string, number: number) => boolean): EvmCheckpoint[] {
   const tokens = new Set(now.map((c) => c.token));
   return [...(before ?? []).filter((c) => !tokens.has(c.token) && !replaced(c.chain, c.block.number)), ...now];
+}
+
+/** Whether an entry's asset state has an `anchor` member: its Original starts on an EVM chain (P9.19). */
+function hasAnchorMember(entry: unknown): boolean {
+  return isJsonObject(entry) && (entry as { state?: { asset?: { anchor?: unknown } } }).state?.asset?.anchor !== undefined;
 }
 
 /**

@@ -822,6 +822,9 @@ export async function assembleFromEvm(
       ...(options.previousAnchor && !options.previousAnchor.sat.startsWith("did:evm:") && options.previousHead !== undefined ? { previousHead: options.previousHead } : {}),
     });
     for (const v of btc.rejectedByAuthorState) rejectedByAuthorState.add(v);
+    // `through` only selects the Original and names the sat when no copy was supplied: the report
+    // compares a supplied copy, so without one it names none (section 7, reports stay separate).
+    if (!copy) btc.report = { ...btc.report, copy: "absent", superseded: 0 };
     if (btc.report.status === "anchored") return finish("moved-to-bitcoin", btc.entries, {}, btc);
     const destination = (assetOf(through[through.length - 1])?.aliases ?? []).find((a) => a.startsWith("did:btco:")) ?? null;
     // P9.29: a final departure whose destination sat cannot be read: unreachable, no arrival claimed or denied.
