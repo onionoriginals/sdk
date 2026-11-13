@@ -83,6 +83,20 @@ const originalsRestart = Bun.spawn([process.execPath, 'scripts/regtest/originals
 });
 if (await originalsRestart.exited) process.exit(originalsRestart.exitCode ?? 1);
 
+// EXPERIMENTAL (originals-spec PR 59, plan 011 phase 12): an Original anchored on a local anvil
+// devnet moves up to Bitcoin; the arrival is inscribed only once the departure is final, and a
+// fresh reader checks both chains. Skips (exit 0) without Foundry's anvil.
+const evmMove = Bun.spawn([process.execPath, 'scripts/regtest/originals-evm-move.ts'], {
+  cwd: root,
+  env: {
+    ...process.env, ...binaries,
+    ...(restartReceipt && !process.env.ORIGINALS_REGTEST_EVM_EVIDENCE ? { ORIGINALS_REGTEST_EVM_EVIDENCE: `${restartReceipt}-originals-evm-move.json` } : {}),
+    ...(process.env.REGTEST_LOGS_DIR ? { ORIGINALS_REGTEST_LOGS: `${process.env.REGTEST_LOGS_DIR}/originals-evm-move` } : {}),
+  },
+  stdout: 'inherit', stderr: 'inherit',
+});
+if (await evmMove.exited) process.exit(evmMove.exitCode ?? 1);
+
 // The landing's anchoring path (plan 011 PR 10b, #975): apps/landing/serve.ts with
 // ORIGINALS_BITCOIN_ANCHORING=1 and the landing's own engine over HTTP; anchor,
 // reinscribe the Original's own sat, the server killed between commit and reveal
