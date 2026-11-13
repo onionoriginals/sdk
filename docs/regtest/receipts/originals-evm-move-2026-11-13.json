@@ -1,0 +1,183 @@
+{
+  "revision": "ad51876f3d08fa826f98d90f0b69bbb95037987c",
+  "versions": {
+    "core": "Bitcoin Core daemon version v31.1.0 bitcoind",
+    "ord": "ord 0.29.0",
+    "anvil": "anvil Version: 1.9.0\nCommit SHA: 6056c5845d34205a83cf7108042adb137325c9df\nBuild Timestamp: 2026-11-02T20:16:54.701302000Z (1793650614)\nBuild Profile: dist"
+  },
+  "contract": {
+    "address": "0x48f382c1d6c079bde4971c89e316841d2c9e79c2",
+    "codeHash": "0x0a97a92302c38e4084f1d15ea5ff08fa8892f3161a54aa63e650f62a8f3f05f0",
+    "deployTx": "0x1a34b276f633d9c3010837355717b16702322f3ad0aa6549dfdd63a5cfffe8f8",
+    "chain": "eip155:31337",
+    "genesisHash": "0xa8964e26a9912afaed3b620299eb87a4ed6f548b3d5c142304549ab49b521ea7",
+    "class": "operator"
+  },
+  "evmAnchor": {
+    "did": "did:vh:QmUYuj5xzDi7YjrLHGniM8nKUmJ7SHme5Y92XFTMnvzREX",
+    "token": "did:evm:31337:0x48f382c1d6c079bde4971c89e316841d2c9e79c2:52763143856236560016985800735667982458946758320017437280980967397790014128077",
+    "mintTx": "0xf862e3ac6c54245fe2b844f2c66868374abb50ab0f8fba39fb6fc3a3773a31e5",
+    "publication": {
+      "kind": "anchoring",
+      "carries": [
+        "1-QmSAQE2uPmvf2nvJxfmHPxwZZd5LhUa4k5W7DoVwkUU2bQ",
+        "2-QmX4kmNdRXaMsJKV9oDwpu2tCA4NNNjH5Njd2QruPno2s8"
+      ],
+      "txHashes": [
+        "0x57bcd6543fad1b939390c434f6140e34ee0638510b5f479d70aaf777f357ee6b"
+      ],
+      "index": 0
+    },
+    "status": [
+      "pending-evm-finality",
+      "finalized"
+    ],
+    "ordering": "evm-attested-by-operator",
+    "owner": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8"
+  },
+  "evmEdit": {
+    "versionId": "3-QmV16dDv9FaShrnq4VWjwRWvp3tD8CUVj4veuNCfT7jW25",
+    "txHashes": [
+      "0xa299462152e9fdb6b1fe8a8188d45a34a973747d45500deab26e65f17c394927"
+    ],
+    "index": 1
+  },
+  "departure": {
+    "versionId": "4-QmZjjA6Dz8AudKYciyCLjRKCH69ox6nvUuAxBuLck9Coid",
+    "sat": "did:btco:reg:9999899718",
+    "txHashes": [
+      "0x83b0fa17dd7d30747dff49b55fdc10e3a9c73abbf2f4758559f054038a965484"
+    ],
+    "index": 2,
+    "status": [
+      "pending-evm-finality",
+      "finalized"
+    ],
+    "fromTokenAlone": {
+      "evm": "unverified",
+      "arrival": "unknown"
+    },
+    "withSatRead": {
+      "evm": "departed-not-arrived",
+      "arrival": "not-arrived",
+      "publication": "not-anchored"
+    },
+    "refusedBeforePublished": "EVM_DEPARTURE_NOT_FINAL",
+    "refusedBeforeFinal": "EVM_DEPARTURE_NOT_FINAL",
+    "tokenWriter": "EVM_ARRIVAL_ON_BITCOIN"
+  },
+  "arrival": {
+    "sat": "did:btco:reg:9999899718",
+    "commitTxId": "bd4a99ebdaa1a7f4f3799a78ed907647d80205b960d2b55cf4935e23a5793aeb",
+    "revealTxId": "a2921875ba8614266d02158952d062959b36891b9d7beda9e7b8b1a009cf8fd1",
+    "inscription": "a2921875ba8614266d02158952d062959b36891b9d7beda9e7b8b1a009cf8fd1i0",
+    "carries": [
+      "1-QmSAQE2uPmvf2nvJxfmHPxwZZd5LhUa4k5W7DoVwkUU2bQ",
+      "2-QmX4kmNdRXaMsJKV9oDwpu2tCA4NNNjH5Njd2QruPno2s8",
+      "3-QmV16dDv9FaShrnq4VWjwRWvp3tD8CUVj4veuNCfT7jW25",
+      "4-QmZjjA6Dz8AudKYciyCLjRKCH69ox6nvUuAxBuLck9Coid"
+    ],
+    "metadataBytes": 3963,
+    "bodyBytes": 4000,
+    "publication": [
+      "pending-bitcoin-acceptance",
+      "anchored"
+    ],
+    "height": 106,
+    "evm": {
+      "status": "moved-to-bitcoin",
+      "move": "confirmed",
+      "arrival": "arrived"
+    },
+    "ordering": "evm-attested-by-operator",
+    "ownership": {
+      "status": "provisional",
+      "sat": "did:btco:reg:9999899718",
+      "output": "a2921875ba8614266d02158952d062959b36891b9d7beda9e7b8b1a009cf8fd1:0",
+      "address": "bcrt1q0227ert25tmu02g59vgrjsmlj73sljjkkv28kq",
+      "confirmations": 1,
+      "indexes": [
+        "ord-0.29.0-regtest"
+      ]
+    }
+  },
+  "bitcoinEdit": {
+    "versionId": "5-QmaB7MwqSJrz9VrDHqxd8y7aF2vE7y8hzRrLAdqQktr4GL",
+    "inscription": "6f60f1defd021623d72d30c4740e5f96471bc3c7da419a1912922d88857107bdi0",
+    "revealTxId": "6f60f1defd021623d72d30c4740e5f96471bc3c7da419a1912922d88857107bd",
+    "ownership": {
+      "status": "provisional",
+      "sat": "did:btco:reg:9999899718",
+      "output": "6f60f1defd021623d72d30c4740e5f96471bc3c7da419a1912922d88857107bd:0",
+      "address": "bcrt1q0227ert25tmu02g59vgrjsmlj73sljjkkv28kq",
+      "confirmations": 1,
+      "indexes": [
+        "ord-0.29.0-regtest"
+      ]
+    }
+  },
+  "freshReader": {
+    "head": "5-QmaB7MwqSJrz9VrDHqxd8y7aF2vE7y8hzRrLAdqQktr4GL",
+    "history": {
+      "status": "valid",
+      "entries": 5
+    },
+    "anchoring": "anchored",
+    "copy": "absent",
+    "evm": {
+      "status": "moved-to-bitcoin",
+      "move": "confirmed",
+      "chain": "eip155:31337",
+      "class": "operator",
+      "entries": [
+        "2-QmX4kmNdRXaMsJKV9oDwpu2tCA4NNNjH5Njd2QruPno2s8",
+        "3-QmV16dDv9FaShrnq4VWjwRWvp3tD8CUVj4veuNCfT7jW25",
+        "4-QmZjjA6Dz8AudKYciyCLjRKCH69ox6nvUuAxBuLck9Coid"
+      ],
+      "departure": {
+        "token": "did:evm:31337:0x48f382c1d6c079bde4971c89e316841d2c9e79c2:52763143856236560016985800735667982458946758320017437280980967397790014128077",
+        "index": 2,
+        "versionId": "4-QmZjjA6Dz8AudKYciyCLjRKCH69ox6nvUuAxBuLck9Coid",
+        "timestamp": 1794562637,
+        "inscriptionTime": 1794562637000,
+        "destination": "did:btco:reg:9999899718"
+      },
+      "carried": {
+        "entries": [
+          "1-QmSAQE2uPmvf2nvJxfmHPxwZZd5LhUa4k5W7DoVwkUU2bQ"
+        ],
+        "ordering": "claimed"
+      },
+      "block": {
+        "number": 15,
+        "hash": "0x293ff6d0b2a5edadb950c7e36d9daea0deb934201690d6a0581e19380f588a90"
+      }
+    },
+    "ordering": "anchored",
+    "ownership": {
+      "status": "provisional",
+      "sat": "did:btco:reg:9999899718",
+      "output": "6f60f1defd021623d72d30c4740e5f96471bc3c7da419a1912922d88857107bd:0",
+      "address": "bcrt1q0227ert25tmu02g59vgrjsmlj73sljjkkv28kq",
+      "confirmations": 1,
+      "indexes": [
+        "ord-0.29.0-regtest"
+      ]
+    },
+    "holderAddress": "bcrt1q0227ert25tmu02g59vgrjsmlj73sljjkkv28kq",
+    "identity": "complete",
+    "current": true,
+    "withoutToken": {
+      "anchoring": "anchored",
+      "evm": "moved-to-bitcoin",
+      "move": "unconfirmed",
+      "stretchOrdering": "claimed",
+      "ownership": null,
+      "current": false,
+      "reasons": [
+        "move-unconfirmed"
+      ]
+    }
+  },
+  "result": "passed"
+}
