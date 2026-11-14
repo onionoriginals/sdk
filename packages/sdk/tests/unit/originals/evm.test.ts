@@ -177,6 +177,8 @@ describe("readEvmToken (P9.21, P9.22, P9.25)", () => {
     expect(calls.filter((c) => c.name === "body").map((c) => [Number(c.args![2]), Number(c.args![3])])).toEqual([[0, 300], [300, 300], [600, 300], [900, 100]]);
     const short = await readEvmToken({ alias: ALIAS }, { pin: PIN, providers: ["p"], rangeBytes: 300, fetch: fakeNetwork({ p: fakeProvider(chain({ shortRanges: true }, [rec(1, m0, big)])) }) });
     expect(short.evidence.reads[0].records).toBeNull();
+    // P9.22 (1b5c484): records it cannot read from state make the provider unusable; the verifier drops it.
+    expect(short.evidence.reads[0].stateUnavailable).toBe(true);
     expect(short.failures[0].code).toBe("EVM_PROVIDER_INCONSISTENT");
   });
 
@@ -187,13 +189,27 @@ describe("readEvmToken (P9.21, P9.22, P9.25)", () => {
     expect(failures).toEqual([expect.objectContaining({ provider: "down", code: "EVM_PROVIDER_UNAVAILABLE" })]);
   });
 
-  test("C12-325: \"Provider that cannot serve state at the finalized block because finality trails its retained state\": reported unusable for the read, not dropped (P9.22)", async () => {
+  test("C12-325 (changed at 1b5c484): \"Provider that cannot serve state at the finalized block because finality trails its retained state\": reported unusable, for the verifier to drop; the other usable provider's read stands (P9.22)", async () => {
     const fetch = fakeNetwork({ archive: fakeProvider(chain({ finalized: 10 }, records())), pruned: fakeProvider(chain({ finalized: 10, stateFrom: 11 }, records())) });
     const { evidence, failures } = await readEvmToken({ alias: ALIAS }, { pin: PIN, providers: ["archive", "pruned"], fetch });
     expect(evidence.reads.map((r) => r.provider)).toEqual(["archive", "pruned"]);
     expect(evidence.reads[1]).toMatchObject({ stateUnavailable: true, records: null, codeHash: null, block: { number: 10 } });
     expect(evidence.reads[0].stateUnavailable).toBeUndefined();
     expect(failures).toEqual([expect.objectContaining({ provider: "pruned" })]);
+  });
+
+  test("C12-335: P9.22: a provider unusable at the lower finalized block no longer sets it: the other is read again at its own finalized block", async () => {
+    const calls: Call[] = [];
+    // `behind` reports the lower finalized block, but cannot serve state there; `ahead` is finalized at 12.
+    const fetch = fakeNetwork({ behind: fakeProvider(chain({ finalized: 8, stateFrom: 9 }, records())), ahead: fakeProvider(chain({ finalized: 12 }, records()), calls) });
+    const { evidence, commonBlock } = await readEvmToken({ alias: ALIAS }, { pin: PIN, providers: ["behind", "ahead"], fetch });
+    expect(commonBlock).toBe(12);
+    expect(evidence.reads.map((r) => [r.provider, r.stateUnavailable === true, r.block.number])).toEqual([["behind", true, 8], ["ahead", false, 12]]);
+    expect(evidence.reads[1].records!.map((x) => x.index)).toEqual([0, 1, 2]);
+    // Both providers usable and agreeing: the lower block, as before.
+    const both = await readEvmToken({ alias: ALIAS }, { pin: PIN, providers: ["a", "b"], fetch: fakeNetwork({ a: fakeProvider(chain({ finalized: 8 }, records())), b: fakeProvider(chain({ finalized: 12 }, records())) }) });
+    expect(both.commonBlock).toBe(8);
+    expect(calls.length).toBeGreaterThan(0);
   });
 
   test("C12-328: \"Token with many records, verifier holding a checkpoint\": `from` reads only the later records, with a referring record's body (P9.25)", async () => {

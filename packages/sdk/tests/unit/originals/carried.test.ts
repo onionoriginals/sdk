@@ -135,6 +135,39 @@ describe("P7.13: resolution only on the caller's opt-in", () => {
     expect(online.asked.length).toBe(during);
   });
 
+  test("C12-344: \"Carried file read with the caller's opt-in to resolve, then read again without one\": the first read resolves; the second makes no resolver request (P7.13)", async () => {
+    const env = await harbor();
+    const file = await carried(env);
+    const online = reader(env.alice);
+    const first = await online.sdk.readCarried(file.bytes, { resolveSigners: true });
+    expect(online.asked).toEqual([env.alice.did]);
+    expect(first.verified).toEqual({ log: true, version: true });
+    // An opt-in applies to a single read (owner decision, 13 November 2026).
+    const second = await online.sdk.readCarried(file.bytes);
+    expect(online.asked).toEqual([env.alice.did]);
+    expect(second.signers.requested).toBe(false);
+    expect(second.proofs).toBe("unchecked");
+  });
+
+  test("C12-345: \"Caller's opt-in recorded as a standing or default setting for carried files\": not an opt-in; each read needs its own (P7.13)", async () => {
+    const env = await harbor();
+    const file = await carried(env);
+    const asked: string[] = [];
+    // A standing setting, as an SDK option: there is none, and one passed anyway is no opt-in.
+    const standing = { store: new MemoryStore(), resolveSigners: true, authors: async (did: string) => (asked.push(did), did === env.alice.did ? env.alice.evidence() : undefined), clock: clock(Date.parse("2026-10-18T13:00:00Z")) };
+    const sdk = OriginalsSDK.create(standing as Parameters<typeof OriginalsSDK.create>[0]);
+    const r = await sdk.readCarried(file.bytes);
+    expect(asked).toEqual([]);
+    expect(r.signers.requested).toBe(false);
+    // An options object reused across reads is read anew each time; only a read that carries the opt-in resolves.
+    const options: { resolveSigners?: boolean } = { resolveSigners: true };
+    await sdk.readCarried(file.bytes, options);
+    expect(asked).toEqual([env.alice.did]);
+    delete options.resolveSigners;
+    await sdk.readCarried(file.bytes, options);
+    expect(asked).toEqual([env.alice.did]);
+  });
+
   test("a store's retained signer history is used without a request", async () => {
     const env = await harbor();
     const file = await carried(env);

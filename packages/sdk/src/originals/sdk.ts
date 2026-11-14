@@ -91,6 +91,7 @@ import {
   type VerifyOriginalOptions,
   derivedTokenAlias,
   parseEvmAlias,
+  resumableCheckpoint,
   type EvmAnchor,
   type EvmAnchorPin,
   type EvmEvidence,
@@ -858,13 +859,17 @@ function logResourceVersions(log: string): Array<{ version: number; digest: stri
 
 /**
  * How a verification gets EVM evidence: read with the configured providers
- * (`fallback` says what an unreadable chain leaves: the local log for this
- * store's own committed log, nothing for evidence from elsewhere, P7.14), the
- * local log only (a commit, P9.18 through P9.20), or the caller's reads.
+ * (an unreadable chain then leaves at most the entries before the first
+ * anchoring entry, P7.14), the committed log as a local copy, or the caller's
+ * reads. A local copy is only the writer's own check before it publishes
+ * (P9.18; owner decision, 13 November 2026): a commit, a publication's
+ * pre-check, `verifyCommitted`. Its report is marked (`evm.localCopy`, reason
+ * `local-copy`) and is never one to give anyone else, so a read (`get`) never
+ * falls back to it.
  */
-type EvmMode = { kind: "read"; fallback: "local" | "none" } | { kind: "local" } | { kind: "supplied"; tokens: EvmTokenEvidence[] };
+type EvmMode = { kind: "read" } | { kind: "local" } | { kind: "supplied"; tokens: EvmTokenEvidence[] };
 
-const OWN_LOG: EvmMode = { kind: "read", fallback: "local" };
+const OWN_LOG: EvmMode = { kind: "read" };
 const LOCAL: EvmMode = { kind: "local" };
 
 /** The genesis entry's `anchor` member, before verification (P9.19); undefined without one. */
@@ -1332,8 +1337,10 @@ export class OriginalsSDK {
    * genesis entry has no `anchor` member. Without the SDK's `evm` option the
    * pin is null, so the Original is unsupported, never invalid (section 14).
    * A read uses every configured provider of each token's chain, the
-   * finalized blocks this store retained (P9.22), and resumes from a retained
-   * checkpoint whose head `log` holds (P9.25).
+   * finalized blocks this store retained (P9.22), and resumes after a
+   * retained checkpoint's record index when `log`'s entry N is the
+   * checkpoint's head; otherwise it reads the token from its first record
+   * (P9.25).
    */
   private async evmEvidence(log: string, mode: EvmMode): Promise<EvmEvidence | undefined> {
     if (genesisAnchorOf(log) === undefined && mode.kind !== "supplied") return undefined;
@@ -1349,8 +1356,8 @@ export class OriginalsSDK {
     const blocks = kept?.blocks ?? [];
     const base = { pin, ...(blocks.length > 0 ? { retained: blocks } : {}) };
     if (mode.kind === "supplied") return { ...base, tokens: mode.tokens, ...(kept && kept.checkpoints.length > 0 ? { checkpoints: kept.checkpoints } : {}) };
-    if (mode.kind === "local" || !pin || !evm?.providers) return { ...base, tokens: [], ...(mode.kind === "local" || mode.fallback === "local" ? { localCopy: true } : {}) };
-    const ids = new Set(versionIds(log));
+    if (mode.kind === "local" || !pin || !evm?.providers) return { ...base, tokens: [], ...(mode.kind === "local" ? { localCopy: true } : {}) };
+    const entries = versionIds(log).map((versionId) => ({ versionId }));
     const tokens: EvmTokenEvidence[] = [];
     const used: NonNullable<EvmEvidence["checkpoints"]> = [];
     for (const alias of tokenAliasesOf(log, pin)) {
@@ -1363,15 +1370,15 @@ export class OriginalsSDK {
       }
       const providers = evm.providers[chain];
       if (!providers || providers.length === 0) continue;
-      // P9.25 (MAY): resume only from a checkpoint whose head this log holds, as the verifier requires.
-      const checkpoint = kept?.checkpoints.find((c) => c.token === alias && ids.has(c.head));
+      // P9.25 (MAY): resume only from a checkpoint whose head is this log's entry N, as the verifier requires.
+      const checkpoint = resumableCheckpoint(kept?.checkpoints ?? [], alias, entries);
       try {
         const read = await readEvmToken({ alias }, {
           pin, providers, observe: true,
           ...(evm.fetch ? { fetch: evm.fetch } : {}),
           ...(evm.rangeBytes !== undefined ? { rangeBytes: evm.rangeBytes } : {}),
           ...(blocks.length > 0 ? { retained: blocks } : {}),
-          ...(checkpoint ? { from: checkpoint.records } : {}),
+          ...(checkpoint ? { from: checkpoint.record + 1 } : {}),
         });
         tokens.push(read.evidence);
         if (checkpoint) used.push(checkpoint);
@@ -1380,7 +1387,7 @@ export class OriginalsSDK {
         if (!(error instanceof OriginalsError)) throw error;
       }
     }
-    if (tokens.length === 0) return { ...base, tokens: [], ...(mode.fallback === "local" ? { localCopy: true } : {}) };
+    if (tokens.length === 0) return { ...base, tokens: [] };
     const others = (kept?.checkpoints ?? []).filter((c) => !used.includes(c));
     return { ...base, tokens, ...(used.length + others.length > 0 ? { checkpoints: [...used, ...others] } : {}) };
   }
@@ -1465,8 +1472,11 @@ export class OriginalsSDK {
    * from the anchoring entry on (P9.20): pass `evm`, what providers read
    * (`readEvmToken`), or configure `evm.providers` and the SDK reads every
    * token the log names at the finalized block, with the blocks and
-   * checkpoints this store retained (P9.22, P9.25). With neither, the result
-   * is the committed log, unverified on the chain and never current.
+   * checkpoints this store retained (P9.22, P9.25). With neither, or when no
+   * token can be read, evidence is missing and the result holds at most the
+   * entries before the first anchoring entry, the rest not checked against
+   * the anchor (P7.14). It is never a local copy: that is only the writer's
+   * own check before publishing (P9.18; `verifyCommitted`).
    */
   async get(did: string, options: { checkpoint?: string; bitcoin?: SatEvidence[]; resolveSigners?: boolean; evm?: EvmTokenEvidence[] } = {}): Promise<OriginalView> {
     return this.read(did, options, options.evm ? { kind: "supplied", tokens: options.evm } : OWN_LOG);
@@ -1475,7 +1485,8 @@ export class OriginalsSDK {
   /**
    * `get` with the EVM evidence `mode` gives (EXPERIMENTAL). With the
    * configured providers by default; `local` verifies the committed log
-   * itself, as a commit does, never as accepted on a token (P9.12).
+   * itself as a local copy, as a commit does, never as accepted on a token
+   * (P9.12, P9.18).
    */
   private async read(did: string, options: { checkpoint?: string; bitcoin?: SatEvidence[]; resolveSigners?: boolean }, mode: EvmMode): Promise<OriginalView> {
     const log = await this.stored(did);
@@ -1727,7 +1738,7 @@ export class OriginalsSDK {
     if (genesisAnchorOf(log) === undefined) sdkError("invalid-evidence", "NOT_EVM_ANCHORED", `${did} has no anchor member: its anchor chain is Bitcoin (P9.19); publish it with the Bitcoin writer`);
     const all = lines(log);
     const ids = versionIds(log);
-    const report = await this.verify(log, undefined, undefined, undefined, undefined, { kind: "read", fallback: "none" });
+    const report = await this.verify(log, undefined, undefined, undefined, undefined, OWN_LOG);
     const e = report.evm!;
     if (e.status === "unsupported") sdkError("unsupported-profile", e.unsupported?.code ?? "EVM_UNSUPPORTED", e.unsupported?.message ?? `${did} is anchored where this SDK's pin cannot follow (P9.19, P9.21)`, { report });
     if (e.status === "moved-to-bitcoin") sdkError("invalid-evidence", "MOVED_TO_BITCOIN", `${did} has moved to Bitcoin: publish its entries with the Bitcoin writer (P9.28)`, { report });
@@ -1769,10 +1780,14 @@ export class OriginalsSDK {
   /**
    * The committed log through `checkpoint`, verified as this store's own log
    * with no anchor evidence: what a writer checks before publishing the
-   * entry (P9.18, read through P9.20 for a token). It is never a statement
-   * that the entry is accepted on an anchor (P9.12). EXPERIMENTAL: the Bitcoin
-   * writer uses it for an Original whose genesis entry has an `anchor`
-   * member, whose fresh reader needs the chain it is anchored on now (P7.14).
+   * entry. It is never a statement that the entry is accepted on an anchor
+   * (P9.12). EXPERIMENTAL: for an Original whose genesis entry has an
+   * `anchor` member it is a local copy (P9.18; owner decision, 13 November
+   * 2026), verified whole from genesis, unverified on the chain, never
+   * current, and marked `evm.localCopy` with the reason `local-copy`: valid
+   * only for the writer's own check before publishing, and never a report to
+   * give anyone else. The Bitcoin writer uses it before inscribing an arrival
+   * after a move off an EVM chain, once the departure is final (P9.29).
    */
   async verifyCommitted(did: string, checkpoint: string): Promise<OriginalsReport> {
     const all = lines(await this.stored(did));
@@ -2051,7 +2066,7 @@ export class OriginalsSDK {
    */
   private async tokenHeadHeld(did: string, log: string): Promise<void> {
     if (!this.options.evm?.providers || genesisAnchorOf(log) === undefined) return;
-    const report = await this.verify(log, undefined, undefined, undefined, undefined, { kind: "read", fallback: "none" });
+    const report = await this.verify(log, undefined, undefined, undefined, undefined, OWN_LOG);
     const e = report.evm;
     if (!e || (e.status !== "anchored" && e.status !== "departed-not-arrived" && e.status !== "moved-to-bitcoin")) return;
     const ids = versionIds(log);
@@ -2282,7 +2297,7 @@ export class OriginalsSDK {
     const aliasEvidence = await this.aliasEvidence(contents.log, aliases);
     const comparisons = await this.comparisons(contents.log);
     // P7.14: evidence from elsewhere is never the local log; without token reads, at most the entries before anchoring.
-    const evm = await this.evmEvidence(contents.log, tokens ? { kind: "supplied", tokens } : { kind: "read", fallback: "none" });
+    const evm = await this.evmEvidence(contents.log, tokens ? { kind: "supplied", tokens } : OWN_LOG);
     const run = (authors: AuthorDidEvidence[]) =>
       verifyOriginal({
         ...(bitcoin ? { bitcoin } : {}),

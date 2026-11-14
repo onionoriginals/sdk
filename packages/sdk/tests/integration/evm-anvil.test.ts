@@ -33,6 +33,7 @@ import { localSigner } from "@originals/vh/crypto";
 import { serializeLog, signWith, type LogEntry } from "@originals/vh/log";
 import {
   EVM_CHAINS,
+  checkpointAlias,
   createOriginal,
   derivedTokenAlias,
   resourceDigest,
@@ -287,19 +288,21 @@ describe.skipIf(!enabled)("EVM anchoring on anvil (PR 59, experimental)", () => 
     // P9.24 (a3ffdc1): on an operator chain, uniqueness is attested by the operator, under its finality and these providers.
     expect(report.evm?.stretches[0]?.uniqueness).toMatchObject({ status: "attested-by-operator", class: "operator", block: { number: finalized.number } });
 
-    // C12-328: "Token with many records, verifier holding a checkpoint": once record 4 is final, the
-    // reader resumes at the retained checkpoint's index and the verifier reads only that record (P9.25).
+    // C12-328 (changed at 1b5c484): "Token with many records, verifier holding a checkpoint and a supplied log
+    // whose entry N has the checkpoint's versionId": once record 4 is final, the reader resumes after the
+    // checkpoint's record index and the verifier reads only that record (P9.25).
     const [checkpoint] = report.retain.evmCheckpoints ?? [];
-    expect(checkpoint).toMatchObject({ token: alias, records: 4, head: rename.versionId });
+    expect(checkpoint).toMatchObject({ head: rename.versionId, chain: "eip155:31337", contract: pin.address, record: 3, class: "operator", block: { number: finalized.number } });
+    expect(checkpointAlias(checkpoint!)).toBe(alias);
     await rpc.request("anvil_mine", ["0x3"]);
-    const resumed = await readEvmToken({ original: did, anchor }, { pin, providers: [{ url, name: "anvil-a" }, { url, name: "anvil-b" }], from: checkpoint!.records, fetch: realFetch });
+    const resumed = await readEvmToken({ original: did, anchor }, { pin, providers: [{ url, name: "anvil-a" }, { url, name: "anvil-b" }], from: checkpoint!.record + 1, fetch: realFetch });
     expect(resumed.failures).toEqual([]);
     expect(resumed.evidence.reads.map((r) => r.records!.map((x) => x.index))).toEqual([[4], [4]]);
     const log = [genesis, anchoring, edit, bigMeta, rename];
     const next = await verifyOriginal({ log, authors, evm: { pin, tokens: [resumed.evidence], checkpoints: [checkpoint!] } });
     expect(next.history.status, JSON.stringify(next.history.failure)).toBe("valid");
     expect(next.head).toBe(later.versionId);
-    expect(next.evm?.stretches[0]?.resumedFrom).toEqual({ records: 4, block: checkpoint!.block });
+    expect(next.evm?.stretches[0]?.resumedFrom).toEqual({ head: rename.versionId, record: 3, block: checkpoint!.block });
     expect(next.current, JSON.stringify(next.reasons)).toBe(true);
   }, 180_000);
   test("the SDK workflow: create with anchor, anchor, mint, publish, edit, verify, then move from an operator chain to a consensus chain (P9.18-P9.29)", async () => {
@@ -347,7 +350,7 @@ describe.skipIf(!enabled)("EVM anchoring on anvil (PR 59, experimental)", () => 
     expect(read.head).toBe(edit.original.checkpoint);
     expect(read.current, JSON.stringify(read.report.reasons)).toBe(true);
     expect(read.report.evm?.stretches[0]?.providers).toEqual([url, "anvil-a2"]);
-    expect((await store.getRetainedEvm(did))?.checkpoints[0]).toMatchObject({ records: 2, head: edit.original.checkpoint });
+    expect((await store.getRetainedEvm(did))?.checkpoints[0]).toMatchObject({ record: 1, head: edit.original.checkpoint });
 
     // P9.28, P9.29: up from the attested chain to the proven one.
     const to = { chain: B, minter: CAROL };

@@ -69,7 +69,7 @@
  */
 import { OriginalsError } from "@originals/vh";
 import { sha256 } from "@originals/vh/crypto";
-import type { AuthorDidEvidence, RetainedAnchor } from "@originals/vh/originals";
+import { isEvmCheckpoint, type AuthorDidEvidence, type RetainedAnchor } from "@originals/vh/originals";
 import { hex } from "@scure/base";
 import type { InscriptionRecoveryRecord, InscriptionRecoveryStore } from "../bitcoin/inscription-recovery.js";
 import type { ClockStore } from "./bitcoin.js";
@@ -685,10 +685,8 @@ export class FileStore implements OriginalsStore {
     if (record.did !== did || !Array.isArray(record.blocks) || !Array.isArray(record.checkpoints)) return undefined;
     const block = (b: unknown) => typeof b === "object" && b !== null && typeof (b as { number?: unknown }).number === "number" && typeof (b as { hash?: unknown }).hash === "string";
     const blocks = record.blocks.filter((b) => block(b) && typeof (b as { chain?: unknown }).chain === "string") as RetainedEvm["blocks"];
-    const checkpoints = record.checkpoints.filter((c) => {
-      const k = c as Record<string, unknown> | null;
-      return typeof k === "object" && k !== null && typeof k.chain === "string" && typeof k.token === "string" && typeof k.head === "string" && typeof k.records === "number" && block(k.block);
-    }) as RetainedEvm["checkpoints"];
+    // P9.25: a retained result lacking any of a checkpoint's members is not one.
+    const checkpoints = record.checkpoints.filter(isEvmCheckpoint);
     return { blocks, checkpoints };
   }
 

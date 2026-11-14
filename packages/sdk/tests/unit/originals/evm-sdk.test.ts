@@ -18,7 +18,7 @@ import { localSigner } from "@originals/vh/crypto";
 import { parseJson } from "@originals/vh/json";
 import { signWith, type LogEntry } from "@originals/vh/log";
 import { OriginalsError } from "@originals/vh";
-import { EVM_CHAINS, derivedTokenAlias, updateOriginal, type EvmAnchor, type EvmAnchorPin, type ListedChain } from "@originals/vh/originals";
+import { EVM_CHAINS, derivedTokenAlias, parseEvmAlias, updateOriginal, type EvmAnchor, type EvmAnchorPin, type ListedChain } from "@originals/vh/originals";
 import { keccakHex } from "../../../src/originals/evm-abi.js";
 import { evmGenesisNotice, prepareEvmPublication as preparePublication, readEvmToken, submitEvmPublication as submitPublication } from "../../../src/originals/evm.js";
 import { FileStore } from "../../../src/originals/fs-store.js";
@@ -236,7 +236,7 @@ describe("anchoring on the token (P9.19, P9.18 through P9.20, P9.27)", () => {
 });
 
 describe("verifying from the tokens (P9.20-P9.25)", () => {
-  test("C12-328: 'Token with many records, verifier holding a checkpoint': the store keeps the finalized blocks and checkpoints, and the next read resumes from the checkpoint", async () => {
+  test("C12-328 (changed at 1b5c484): 'Token with many records, verifier holding a checkpoint and a supplied log whose entry N has the checkpoint's versionId': the store keeps the finalized blocks and checkpoints, and the next read resumes after the checkpoint's record index", async () => {
     const env = await setup();
     const o = await published(env);
     const v = await env.sdk.edit(o.did, { parent: o.anchoring, name: "Harbor, later", author: env.author, signer: env.signer });
@@ -244,25 +244,57 @@ describe("verifying from the tokens (P9.20-P9.25)", () => {
     await env.sdk.get(o.did);
     const kept = await env.store.getRetainedEvm!(o.did);
     expect(kept?.blocks).toEqual([{ chain: OPERATOR.chain, number: env.A.finalized, hash: expect.any(String) as string }]);
-    expect(kept?.checkpoints[0]).toMatchObject({ token: o.alias, records: 2, head: v.original.checkpoint });
+    // P9.25: the head entry's versionId and the chain read that verified it.
+    expect(kept?.checkpoints[0]).toMatchObject({ head: v.original.checkpoint, chain: OPERATOR.chain, contract: ADDRESS, tokenId: String(parseEvmAlias(o.alias).tokenId), record: 1, class: "operator", block: { number: env.A.finalized } });
     env.calls.length = 0;
     const again = await env.sdk.get(o.did);
     expect(again.head).toBe(v.original.checkpoint);
     expect(again.current, JSON.stringify(again.report.reasons)).toBe(true);
-    expect(again.report.evm?.stretches[0]?.resumedFrom?.records).toBe(2);
-    // Only records from the checkpoint on are read (P9.25).
+    expect(again.report.evm?.stretches[0]?.resumedFrom).toMatchObject({ head: v.original.checkpoint, record: 1 });
+    // Only the records after the checkpoint's record index are read (P9.25).
     const read = env.calls.filter((c) => c.name === "publication" || c.name === "metadata").map((c) => Number(c.args![1]));
     expect(read.every((i) => i >= 2)).toBe(true);
   });
 
-  test("the caller's own reads are used as given; without them or providers, the committed log is unverified on the chain and never current", async () => {
+  test("C12-349, C12-350: a retained checkpoint the committed log's entry N does not match, or that lacks a member, is not resumed from: the token is read from its first record", async () => {
+    const env = await setup();
+    const o = await published(env);
+    const v = await env.sdk.edit(o.did, { parent: o.anchoring, name: "Harbor, later", author: env.author, signer: env.signer });
+    await publish(env, o.did, o.wallet, env.A);
+    await env.sdk.get(o.did);
+    const kept = (await env.store.getRetainedEvm!(o.did))!;
+    const [cp] = kept.checkpoints;
+    const other = `${cp!.head.split("-")[0]}-${"z".repeat(46)}`;
+    const { record: _record, ...lacking } = cp!;
+    for (const checkpoints of [[{ ...cp!, head: other, accepted: cp!.accepted.map((p) => (p.versionId === cp!.head ? { ...p, versionId: other } : p)) }], [lacking]]) {
+      await env.store.putRetainedEvm!(o.did, { blocks: kept.blocks, checkpoints: checkpoints as typeof kept.checkpoints });
+      env.calls.length = 0;
+      const again = await env.sdk.get(o.did);
+      expect(again.head).toBe(v.original.checkpoint);
+      expect(again.current, JSON.stringify(again.report.reasons)).toBe(true);
+      expect(again.report.evm?.stretches[0]?.resumedFrom).toBeUndefined();
+      const read = env.calls.filter((c) => c.name === "publication").map((c) => Number(c.args![1]));
+      expect(read).toContain(0);
+    }
+  });
+
+  test("C12-332, C12-333: the caller's own reads are used as given; without them or providers, a read is missing evidence with at most the entries before the anchoring entry, never the local copy, which only the writer's own check before publishing uses", async () => {
     const env = await setup();
     const o = await published(env);
     const offline = await setup({ providers: false, store: env.store, alice: env.alice });
     const local = await offline.sdk.get(o.did);
-    expect(local.head).toBe(o.anchoring);
-    expect(local.report.evm?.status).toBe("unverified");
+    // P9.18 (1b5c484): a read, whose report the caller may give anyone, is never a local copy (P7.14).
+    expect(local.head).toBe(o.genesis);
+    expect(local.report.evm).toMatchObject({ status: "unverified", localCopy: false, notCheckedAgainstAnchor: [o.anchoring] });
+    expect(local.report.reasons).not.toContain("local-copy");
     expect(local.current).toBe(false);
+    // The writer's own check before publishing verifies the committed log whole, as a local copy, marked as one.
+    const own = await offline.sdk.verifyCommitted(o.did, o.anchoring);
+    expect(own.head).toBe(o.anchoring);
+    expect(own.history.status).toBe("valid");
+    expect(own.evm).toMatchObject({ status: "unverified", localCopy: true });
+    expect(own.reasons).toContain("local-copy");
+    expect(own.current).toBe(false);
     const { evidence } = await readEvmToken({ alias: o.alias }, { pin: PIN, providers: ["http://a-1"], fetch: env.fetch });
     const supplied = await offline.sdk.get(o.did, { evm: [evidence] });
     expect(supplied.report.evm?.status).toBe("anchored");
@@ -277,7 +309,7 @@ describe("verifying from the tokens (P9.20-P9.25)", () => {
       const o = await published(env);
       await env.sdk.get(o.did);
       const kept = await store.getRetainedEvm(o.did);
-      expect(kept?.checkpoints[0]).toMatchObject({ token: o.alias, records: 1 });
+      expect(kept?.checkpoints[0]).toMatchObject({ head: o.anchoring, record: 0, chain: OPERATOR.chain, contract: ADDRESS });
       await store.close();
       const reopened = await FileStore.open(root);
       expect(await reopened.getRetainedEvm(o.did)).toEqual(kept!);
@@ -367,7 +399,7 @@ describe("moves (P9.28, P9.29)", () => {
     await rejects(env.sdk.prepareMove(c.original.did, { parent: e.original.checkpoint, author: env.author, to }), "MOVE_ARRIVAL_TOO_LARGE", "limit-exceeded");
   });
 
-  test("a move to Bitcoin: departure on the token, then the arrival is the Bitcoin writer's anchoring inscription through the move entry (P9.28, P9.29)", async () => {
+  test("C12-340, C12-341: a move to Bitcoin: departure on the token, then the arrival is the Bitcoin writer's anchoring inscription through the move entry, refused until the departure is accepted and final, then verified through the move entry as a local copy (P9.28, P9.29, P9.18)", async () => {
     const env = await setup();
     const o = await published(env);
     const SAT = "5000000000";
@@ -393,7 +425,10 @@ describe("moves (P9.28, P9.29)", () => {
     expect(plan.kind).toBe("departure");
     const err = await rejects(env.sdk.prepareEvmPublication(o.did, { wallet: o.wallet }), "EVM_ARRIVAL_ON_BITCOIN");
     expect(err.details).toMatchObject({ versionId: moved.original.checkpoint, sat });
-    // Then verified through the move entry (P9.18), and on to signing.
+    // Then verified through the move entry as a local copy (P9.18), and on to signing.
+    const own = await env.sdk.verifyCommitted(o.did, moved.original.checkpoint);
+    expect(own.evm).toMatchObject({ localCopy: true });
+    expect(own.history.status).toBe("valid");
     await expect(inscribe()).rejects.toThrow("not reached");
   });
 });

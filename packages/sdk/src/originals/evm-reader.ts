@@ -17,12 +17,15 @@
  * reads only the records from that index, resuming from a checkpoint the
  * verifier retained (P9.25).
  *
- * P9.22 (PR 59 a3ffdc1): a provider must serve the contract's state at the
- * finalized block, however far finality trails its head. One that cannot
- * (no such block, or a state read at it failing for any reason other than a
- * revert) is reported with `stateUnavailable`, which the verifier treats as
- * missing evidence; it is not dropped, so the read is not decided on the
- * other provider alone.
+ * P9.22 (PR 59 1b5c484; owner decision, 13 November 2026): a provider is
+ * usable only if it serves the contract's state at the finalized block,
+ * however far finality trails its head. One that cannot (no such block, or a
+ * state read at it, records included, failing for any reason other than a
+ * revert) is reported with `stateUnavailable`, and the verifier drops it: the
+ * reads of the providers that remain usable stand, and one is enough. When
+ * the dropped provider's finalized block was the lower one, the others are
+ * read again at the lower of their own finalized blocks, so the read is at
+ * the finalized block of the usable providers.
  *
  * The reader judges nothing: a provider serving another chain is still
  * reported, with what it reported and no state, and the verifier discards it
@@ -89,8 +92,10 @@ export interface ReadEvmTokenOptions {
   retained?: ReadonlyArray<RetainedEvmBlock>;
   /**
    * P9.25 (MAY): read only the records from this index, resuming from a
-   * retained checkpoint whose `records` it is (`EvmCheckpoint`). The verifier
-   * accepts the read only with that checkpoint. Default 0, every record.
+   * retained checkpoint whose record index is the one before it
+   * (`EvmCheckpoint.record` + 1; choose it with `resumableCheckpoint`). The
+   * verifier accepts the read only with that checkpoint and a log whose entry
+   * N is its head. Default 0, every record.
    */
   from?: number;
 }
@@ -108,7 +113,7 @@ export interface EvmReadResult {
   evidence: EvmTokenEvidence;
   /** Providers that could not be read, or whose records could not be (then also `records: null`). */
   failures: EvmProviderFailure[];
-  /** The common block, the lower of the matching providers' finalized blocks (P9.22); null when none matched. */
+  /** The common block, the lower of the usable providers' finalized blocks (P9.22); null when none matched. */
   commonBlock: number | null;
 }
 
@@ -225,90 +230,103 @@ export async function readEvmToken(ref: EvmTokenRef, options: ReadEvmTokenOption
   );
   const serving = (h: Head) => h.chainId === listed.chainId && h.genesisHash === listed.genesisHash.toLowerCase();
   const matching = heads.filter((h): h is Head => h !== null && serving(h));
-  // P9.22: the lower of the finalized block numbers; a provider ahead is not in disagreement.
-  const common = matching.length ? Math.min(...matching.map((h) => h.finalized.number)) : null;
 
   const reads: EvmProviderRead[] = [];
-  await Promise.all(
-    heads.map(async (h) => {
-      if (!h) return;
-      const base = { provider: h.provider, chainId: h.chainId, genesisHash: h.genesisHash, finalized: h.finalized.number };
-      if (!serving(h) || common === null) {
-        // P9.21: not serving the listed chain; its answers are not evidence, so none are read.
-        reads.push({ ...base, block: h.finalized, codeHash: null, owner: null, records: null });
-        return;
-      }
-      // P9.22: a provider that cannot serve state at the common block is not usable for this read.
-      const unusable = (block: { number: number; hash: string }, error: unknown) => {
-        fail(h.provider, error);
-        reads.push({ ...base, block, codeHash: null, owner: null, records: null, stateUnavailable: true });
-      };
-      let block: { number: number; hash: string } | null;
+  for (const h of heads) {
+    // P9.21: not serving the listed chain; its answers are not evidence, so no state is read.
+    if (h && !serving(h)) reads.push({ provider: h.provider, chainId: h.chainId, genesisHash: h.genesisHash, finalized: h.finalized.number, block: h.finalized, codeHash: null, owner: null, records: null });
+  }
+
+  /** One provider's read of the token at block `common` (P9.22, P9.25), with what failed. */
+  const readAt = async (h: Head, common: number): Promise<{ read: EvmProviderRead; failures: EvmProviderFailure[] }> => {
+    const failed: EvmProviderFailure[] = [];
+    const note = (error: unknown) =>
+      failed.push({ provider: h.provider, code: error instanceof OriginalsError ? error.code : error instanceof EvmRevert ? "EVM_CALL_REVERTED" : "EVM_READ_FAILED", message: (error as Error)?.message ?? String(error) });
+    const base = { provider: h.provider, chainId: h.chainId, genesisHash: h.genesisHash, finalized: h.finalized.number };
+    // P9.22: a provider that cannot serve state at the common block is not usable; the verifier drops it.
+    const unusable = (block: { number: number; hash: string }, error: unknown) => {
+      note(error);
+      return { read: { ...base, block, codeHash: null, owner: null, records: null, stateUnavailable: true } as EvmProviderRead, failures: failed };
+    };
+    let block: { number: number; hash: string } | null;
+    try {
+      block = h.finalized.number === common ? h.finalized : await h.rpc.block(common);
+    } catch (error) {
+      return unusable({ number: common, hash: "0x" }, error);
+    }
+    if (!block) return unusable({ number: common, hash: "0x" }, new OriginalsError("incomplete-evidence", "EVM_NO_BLOCK", `${h.provider} has no block ${common}`));
+    const at: BlockRef = { blockHash: block.hash };
+    let code: Uint8Array;
+    try {
+      code = await h.rpc.code(address, at);
+    } catch (error) {
+      return unusable({ number: common, hash: block.hash }, error);
+    }
+    const codeHash = code.length === 0 ? null : keccakHex(code);
+    const read: EvmProviderRead = { ...base, block: { number: common, hash: block.hash }, codeHash, owner: null, records: null, ...(from > 0 ? { from } : {}) };
+    // P9.21: no read is relied on unless the code at the address is the pinned code.
+    if (codeHash !== pin.codeHash.toLowerCase()) return { read, failures: failed };
+    try {
+      const [owner] = await h.rpc.call(address, ANCHOR_READS.ownerOf, ["uint256"], [parsed.tokenId], ["address"], at);
+      read.owner = owner as string;
+    } catch (error) {
+      if (!(error instanceof EvmRevert)) return unusable(read.block, error);
+      read.owner = null; // ownerOf reverts for a token that does not exist (ERC-721).
+    }
+    try {
+      read.records = await readRecords(h.rpc, address, parsed.tokenId, at, range, from);
+    } catch (error) {
+      // P9.22, P9.25: records it cannot read from state at the block make it unusable, never a partial log.
+      return unusable(read.block, error);
+    }
+    if (options.observe) {
+      // Observed records only label publications (P9.27); failing to read them costs no evidence.
       try {
-        block = h.finalized.number === common ? h.finalized : await h.rpc.block(common);
+        read.observed = await observed(h.rpc, address, parsed.tokenId, from + read.records.length);
       } catch (error) {
-        unusable({ number: common, hash: "0x" }, error);
-        return;
+        note(error);
       }
-      if (!block) {
-        unusable({ number: common, hash: "0x" }, new OriginalsError("incomplete-evidence", "EVM_NO_BLOCK", `${h.provider} has no block ${common}`));
-        return;
-      }
-      const at: BlockRef = { blockHash: block.hash };
-      let code: Uint8Array;
-      try {
-        code = await h.rpc.code(address, at);
-      } catch (error) {
-        unusable({ number: common, hash: block.hash }, error);
-        return;
-      }
-      try {
-        const codeHash = code.length === 0 ? null : keccakHex(code);
-        const read: EvmProviderRead = { ...base, block: { number: common, hash: block.hash }, codeHash, owner: null, records: null, ...(from > 0 ? { from } : {}) };
-        // P9.21: no read is relied on unless the code at the address is the pinned code.
-        if (codeHash !== pin.codeHash.toLowerCase()) {
-          reads.push(read);
-          return;
-        }
+    }
+    const earlier = (options.retained ?? []).filter((b) => b.chain === parsed.chain && b.number <= common);
+    if (earlier.length > 0) {
+      read.blockHashes = [];
+      for (const b of earlier) {
         try {
-          const [owner] = await h.rpc.call(address, ANCHOR_READS.ownerOf, ["uint256"], [parsed.tokenId], ["address"], at);
-          read.owner = owner as string;
+          const got = b.number === common ? block : await h.rpc.block(b.number);
+          if (got) read.blockHashes.push({ number: b.number, hash: got.hash });
         } catch (error) {
-          if (!(error instanceof EvmRevert)) {
-            unusable(read.block, error);
-            return;
-          }
-          read.owner = null; // ownerOf reverts for a token that does not exist (ERC-721).
+          note(error); // P9.22 does not require these reads; one that fails only checks less.
         }
-        try {
-          read.records = await readRecords(h.rpc, address, parsed.tokenId, at, range, from);
-        } catch (error) {
-          // P9.25: records that cannot be read from state are missing evidence, never a partial log.
-          read.records = null;
-          fail(h.provider, error);
-        }
-        if (options.observe && read.records) {
-          // Observed records only label publications (P9.27); failing to read them costs no evidence.
-          try {
-            read.observed = await observed(h.rpc, address, parsed.tokenId, from + read.records.length);
-          } catch (error) {
-            fail(h.provider, error);
-          }
-        }
-        const earlier = (options.retained ?? []).filter((b) => b.chain === parsed.chain && b.number <= common);
-        if (earlier.length > 0) {
-          read.blockHashes = [];
-          for (const b of earlier) {
-            const got = b.number === common ? block : await h.rpc.block(b.number);
-            if (got) read.blockHashes.push({ number: b.number, hash: got.hash });
-          }
-        }
-        reads.push(read);
-      } catch (error) {
-        fail(h.provider, error);
       }
-    }),
-  );
+    }
+    return { read, failures: failed };
+  };
+
+  // P9.22: the lower of the usable providers' finalized block numbers; a provider ahead is not in
+  // disagreement. A provider dropped as unusable no longer sets it: the rest are read again at theirs.
+  let candidates = matching;
+  let common: number | null = null;
+  for (;;) {
+    if (candidates.length === 0) break;
+    const at = Math.min(...candidates.map((h) => h.finalized.number));
+    common = at;
+    const round = await Promise.all(candidates.map((h) => readAt(h, at)));
+    const dropped = round.filter((r) => r.read.stateUnavailable === true);
+    for (const r of dropped) {
+      reads.push(r.read);
+      failures.push(...r.failures);
+    }
+    const left = candidates.filter((h) => !dropped.some((r) => r.read.provider === h.provider));
+    if (dropped.length === 0 || left.length === 0 || Math.min(...left.map((h) => h.finalized.number)) === at) {
+      for (const r of round) {
+        if (r.read.stateUnavailable === true) continue;
+        reads.push(r.read);
+        failures.push(...r.failures);
+      }
+      break;
+    }
+    candidates = left;
+  }
   // Report reads in the order the providers were given.
   const order = new Map(providers.map((p, i) => [p.name ?? p.url, i]));
   reads.sort((a, b) => (order.get(a.provider) ?? 0) - (order.get(b.provider) ?? 0));
