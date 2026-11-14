@@ -41,24 +41,25 @@ for (const root of roots) {
 }
 
 describe("section 12 conformance registry", () => {
-  // The pinned table has 344 rows. It is originals-spec 1b5c484, the head of open PR 59 (carried logs
+  // The pinned table has 347 rows. It is originals-spec ce19572, the head of open PR 59 (carried logs
   // and EVM anchoring, experimental) on master 915b726, which merged #58; not master itself. #58 and
   // PR 59 at 3ed0f89 added C12-200 to C12-307; PR 59 at a3ffdc1 rewords twelve rows, splits C12-222,
   // and adds 24 rows, C12-308 to C12-331; at 1b5c484 it rewords six rows and adds 20, C12-332 to
-  // C12-351. Ids are stable
+  // C12-351; at ce19572 (P14.22 lists Base alone) it rewords three rows and adds 3, C12-352 to
+  // C12-354. Ids are stable
   // across re-pins, so they need not equal table positions; each row records its position in the
   // pinned table. A row from an open spec pull request would carry `proposal`.
-  test("registers all 344 pinned rows with unique ids, in table order", () => {
-    expect(registry.rows.length).toBe(344);
+  test("registers all 347 pinned rows with unique ids, in table order", () => {
+    expect(registry.rows.length).toBe(347);
     const pinned = registry.rows.filter((r) => r.proposal === undefined);
-    expect(pinned.length).toBe(344);
+    expect(pinned.length).toBe(347);
     expect(registry.rows.map((r) => r.position)).toEqual(registry.rows.map((_, i) => i + 1));
-    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(344);
+    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(347);
     for (const r of registry.rows) expect(r.id).toMatch(/^C12-\d{2,3}$/);
   });
 
   // #53 removed the rows about adding, removing and reusing resources and the 256-resource limit.
-  // #58 and PR 59 (at 3ed0f89, a3ffdc1 and 1b5c484) removed none.
+  // #58 and PR 59 (at 3ed0f89, a3ffdc1, 1b5c484 and ce19572) removed none.
   test("a retired id names its commit and reason, is never reused, and no test cites it", () => {
     const live = new Set(registry.rows.map((r) => r.id));
     expect(registry.retired.map((r) => r.id).sort()).toEqual(["C12-154", "C12-155", "C12-156", "C12-157", "C12-158", "C12-160", "C12-171"]);
