@@ -342,7 +342,7 @@ describe("P9.12, P9.13: commits after anchoring", () => {
 });
 
 describe("moves (P9.28, P9.29)", () => {
-  test("C12-276, C12-270: 'Report for an Original that moved from an attested chain to a proven chain': departure on the token left, arrival on the destination minted by its minter", async () => {
+  test("C12-276 (changed at ce19572), C12-270: 'Under a revision of P14.22 that lists an attested chain, report for an Original that moved from it to a proven chain' (a devnet pin lists one): departure on the token left, arrival on the destination minted by its minter", async () => {
     const env = await setup();
     const o = await published(env);
     // P9.28: never sideways or down.

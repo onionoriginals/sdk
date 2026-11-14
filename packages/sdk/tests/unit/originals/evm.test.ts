@@ -40,7 +40,12 @@ const CODE = bytes("pinned anchor runtime code");
 const ADDRESS = "0x92aa49faf844dee74ab85de1a42a0705e8ea8b08";
 const GENESIS = "0x" + "0d".repeat(32);
 const DEVNET: ListedChain = { name: "Devnet", chain: "eip155:31337", chainId: 31337n, genesisHash: GENESIS, classes: [{ from: 0, class: "operator" }] };
-const PIN: EvmAnchorPin = { address: ADDRESS, codeHash: keccakHex(CODE), chains: [...EVM_CHAINS, DEVNET] };
+// P14.22 lists only Base (originals-spec PR 59 ce19572); the made-up chains exercise the class and layer rules it keeps (P9.27, P9.28).
+const CONSENSUS_DEVNET: ListedChain = { name: "Consensus devnet", chain: "eip155:31338", chainId: 31338n, genesisHash: "0x" + "0e".repeat(32), classes: [{ from: 0, class: "consensus" }] };
+const CONSORTIUM_DEVNET: ListedChain = { name: "Consortium devnet", chain: "eip155:31339", chainId: 31339n, genesisHash: "0x" + "0f".repeat(32), classes: [{ from: 0, class: "consortium" }] };
+const PIN: EvmAnchorPin = { address: ADDRESS, codeHash: keccakHex(CODE), chains: [...EVM_CHAINS, DEVNET, CONSENSUS_DEVNET, CONSORTIUM_DEVNET] };
+/** The spec's own list, Base alone. */
+const SPEC_CHAINS_PIN: EvmAnchorPin = { address: ADDRESS, codeHash: keccakHex(CODE) };
 const TOKEN = 77n;
 const ALIAS = evmAliasOf("eip155:31337", ADDRESS, TOKEN);
 const HOLDER = "0x" + "a1".repeat(20);
@@ -264,50 +269,57 @@ async function anchoredLog(chainId = "eip155:31337", minter = "0x" + "a1".repeat
 describe("P9.27 / P9.29 disclosures", () => {
   test("C12-278: \"Writer creating an Original with an EVM `anchor`\": told the first chain is permanent, upward only, stays dependent, its trust class, chain lifetime, the minter", () => {
     const minter = "0x" + "a1".repeat(20);
-    const n = evmGenesisNotice({ chain: "eip155:4663", minter }, PIN);
-    expect(n.chain).toEqual({ chain: "eip155:4663", name: "Robinhood Chain", trustClass: "operator", layer: "attested" });
+    const n = evmGenesisNotice({ chain: "eip155:31337", minter }, PIN);
+    expect(n.chain).toEqual({ chain: "eip155:31337", name: "Devnet", trustClass: "operator", layer: "attested" });
     expect(n.layersAbove).toEqual(["proven", "bitcoin"]);
     expect(n.points[0]).toMatch(/permanent.*attested chain.*only upward.*never sideways, down or back/);
     expect(n.points[1]).toMatch(/stays dependent on every chain/);
     expect(n.points[2]).toMatch(/trust class operator.*attested by its operator, never as proven/);
-    expect(n.points[3]).toMatch(/last only as long as Robinhood Chain's nodes keep its state/);
+    expect(n.points[3]).toMatch(/last only as long as Devnet's nodes keep its state/);
     // C12-278 (reworded at a3ffdc1): "Writer creating an Original with an EVM `anchor`": large
     // publications can need staged transactions and large metadata makes later edits cost more.
     expect(n.points).toHaveLength(6);
     expect(n.points[4]).toMatch(/several staged transactions.*full asset state.*large metadata makes each later edit.*cost more/);
     expect(n.points[5]).toContain(minter);
     expect(n.text).toBe(n.points.join(" "));
-    const eth = evmGenesisNotice({ chain: "eip155:1", minter }, PIN);
-    expect(eth.chain.layer).toBe("proven");
-    expect(eth.layersAbove).toEqual(["bitcoin"]);
-    expect(eth.points[2]).toMatch(/proven on that chain/);
+    const base = evmGenesisNotice({ chain: "eip155:8453", minter }, SPEC_CHAINS_PIN);
+    expect(base.chain).toEqual({ chain: "eip155:8453", name: "Base", trustClass: "exit-protected", layer: "proven" });
+    expect(base.layersAbove).toEqual(["bitcoin"]);
+    expect(base.points[2]).toMatch(/proven on that chain/);
     // An unlisted chain, or no pin at all, is unsupported: nothing to disclose because nothing may be written.
     expect(() => evmGenesisNotice({ chain: "eip155:999", minter }, PIN)).toThrow(/not in this verifier's revision/);
+    // C12-352: the chains P14.22 removed on 14 November 2026 (ce19572), such as eip155:1 and eip155:4663, are refused.
+    for (const chain of ["eip155:1", "eip155:4663"]) expect(() => evmGenesisNotice({ chain, minter }, SPEC_CHAINS_PIN)).toThrow(/not in this verifier's revision/);
   });
 
   test("C12-277: P9.29: a move notice says irreversible, the layers above, dependence on the chain left, and what becomes public; a sideways or downward move is refused", async () => {
     const { lines, resource } = await anchoredLog();
     const minter = "0x" + "c1".repeat(20);
-    const n = evmMoveNotice({ from: { chain: "eip155:4663", minter }, to: { chain: "eip155:1", minter }, lines, version: resource, pin: PIN });
+    const n = evmMoveNotice({ from: { chain: "eip155:31337", minter }, to: { chain: "eip155:31338", minter }, lines, version: resource, pin: PIN });
     expect(n.layersAbove).toEqual(["bitcoin"]);
     expect(n.points[0]).toMatch(/cannot be reversed.*Bitcoin/);
-    expect(n.points[1]).toMatch(/stays dependent on Robinhood Chain/);
+    expect(n.points[1]).toMatch(/stays dependent on Devnet/);
     expect(n.points[2]).toMatch(/public and permanent/);
     expect(n.arrivalBytes).toBe(inscriptionMetadata(lines).length + resource.size);
-    const toBitcoin = evmMoveNotice({ from: { chain: "eip155:1", minter }, to: null, lines, version: resource, pin: PIN });
+    // Base, the one chain P14.22 lists, moves only to Bitcoin (P14.22).
+    const toBitcoin = evmMoveNotice({ from: { chain: "eip155:8453", minter }, to: null, lines, version: resource, pin: SPEC_CHAINS_PIN });
     expect(toBitcoin.layersAbove).toEqual([]);
     expect(toBitcoin.points[2]).toMatch(/on Bitcoin/);
-    // Robinhood (operator) to Tempo (consortium): both attested, sideways. Ethereum to Robinhood: down.
-    await rejects(() => evmMoveNotice({ from: { chain: "eip155:4663", minter }, to: { chain: "eip155:4217", minter }, lines, version: resource, pin: PIN }), "MOVE_NOT_UPWARD");
-    await rejects(() => evmMoveNotice({ from: { chain: "eip155:1", minter }, to: { chain: "eip155:4663", minter }, lines, version: resource, pin: PIN }), "MOVE_NOT_UPWARD");
+    // Operator to consortium: both attested, sideways. Consensus to operator: down.
+    await rejects(() => evmMoveNotice({ from: { chain: "eip155:31337", minter }, to: { chain: "eip155:31339", minter }, lines, version: resource, pin: PIN }), "MOVE_NOT_UPWARD");
+    await rejects(() => evmMoveNotice({ from: { chain: "eip155:31338", minter }, to: { chain: "eip155:31337", minter }, lines, version: resource, pin: PIN }), "MOVE_NOT_UPWARD");
+    // C12-353: Base to Base again, with another minter, is a move within the same layer (P9.28).
+    await rejects(() => evmMoveNotice({ from: { chain: "eip155:8453", minter: "0x" + "a1".repeat(20) }, to: { chain: "eip155:8453", minter }, lines, version: resource, pin: SPEC_CHAINS_PIN }), "MOVE_NOT_UPWARD");
+    // C12-354: Base to a chain this revision does not list is unsupported, not a disclosure (P9.19, P14.22).
+    expect(() => evmMoveNotice({ from: { chain: "eip155:8453", minter }, to: { chain: "eip155:1", minter }, lines, version: resource, pin: SPEC_CHAINS_PIN })).toThrow(/not in this verifier's revision/);
   });
 
   test("C12-277: P9.29: the SDK refuses a move whose arrival would exceed 350,000 bytes", async () => {
     const { lines, resource } = await anchoredLog();
     const minter = "0x" + "c1".repeat(20);
     const room = 350_000 - inscriptionMetadata(lines).length;
-    expect(evmMoveNotice({ from: { chain: "eip155:4663", minter }, to: null, lines, version: { ...resource, size: room }, pin: PIN }).arrivalBytes).toBe(350_000);
-    const e = await rejects(() => evmMoveNotice({ from: { chain: "eip155:4663", minter }, to: null, lines, version: { ...resource, size: room + 1 }, pin: PIN }), "MOVE_ARRIVAL_TOO_LARGE", "limit-exceeded");
+    expect(evmMoveNotice({ from: { chain: "eip155:31337", minter }, to: null, lines, version: { ...resource, size: room }, pin: PIN }).arrivalBytes).toBe(350_000);
+    const e = await rejects(() => evmMoveNotice({ from: { chain: "eip155:31337", minter }, to: null, lines, version: { ...resource, size: room + 1 }, pin: PIN }), "MOVE_ARRIVAL_TOO_LARGE", "limit-exceeded");
     expect(e.details).toEqual({ size: 350_001, limit: 350_000 });
   });
 });
