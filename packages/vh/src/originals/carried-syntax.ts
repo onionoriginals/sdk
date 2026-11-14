@@ -1,28 +1,33 @@
 /**
- * P14.16 (originals-spec PR 59 at a3ffdc1): a writer refuses a text block
- * unless the appended block, parsed under the version's own syntax, is a
- * separate comment and nothing else. The test is the parse of the resulting
- * file; P14.16 lists the checks known for each type:
+ * P14.16 (originals-spec PR 59 at 1b5c484; owner decision, 13 November
+ * 2026): a writer places a text block only where the host format's parser
+ * reads it as a comment. Parsed under the version's own syntax, the appended
+ * block must be a separate comment and nothing else; the writer refuses
+ * otherwise, or when it has no parser for that syntax (`no-parser`).
+ * `text/plain` has no comment and no such check. The test is the parse of the
+ * resulting file, not a search for particular text, and no list of refusals
+ * stands in for it.
  *
- * - `text/html`, `application/xhtml+xml`: an ending inside a comment, or
- *   inside `script`, `style`, `textarea`, `title`, `xmp`, `plaintext` or
- *   `noscript`, whose content is not parsed as markup. An unclosed `pre` is
- *   no reason to refuse.
- * - `text/markdown`: an unclosed code fence, or one of those HTML contexts.
- * - `image/svg+xml`, `application/xml`, `text/xml`: a comment or CDATA section.
- * - `text/css`: an unterminated comment or string.
- * - `application/yaml`: a last node that is a block scalar.
+ * The parser here is one lexer per comment family, which reads exactly what
+ * decides the test: where the version ends, relative to comments, strings,
+ * tags and raw-text contexts. It errs towards refusing: a refusal costs the
+ * user a separate log file, a wrong carrier costs them visible content. The
+ * spec's non-normative examples it refuses, among others:
+ *
+ * - HTML (and the HTML inside Markdown): an ending inside a comment, an open
+ *   tag, a processing instruction, or an element whose content is not parsed
+ *   as markup (`script`, `style`, `iframe`, `noembed`, `noframes`,
+ *   `textarea`, `title`, `xmp`, `plaintext`, `noscript`). An unclosed `pre`
+ *   is no reason to refuse: its content is markup.
+ * - Markdown: an unclosed code fence.
+ * - XML, XHTML and SVG: a comment, a CDATA section, a processing instruction
+ *   or an open tag.
+ * - CSS: an unterminated comment or string.
+ * - YAML: a last node that is a block scalar.
  * - the line-comment types: an unterminated string, heredoc or block comment,
  *   or a last line ending in a line continuation.
  *
- * PROVISIONAL: P14.16 says the list is not yet complete and testable for
- * every type (D4). This is a lexer per comment family, not a parser of each
- * language, and it errs towards refusing: a refusal costs the user a separate
- * log file, a wrong carrier costs them visible content. Beyond the listed
- * checks it also refuses an ending inside a tag or processing instruction,
- * and, for HTML, inside `iframe`, `noembed` or `noframes`, which an HTML
- * parser also reads as raw text, since the parse test fails there too.
- *
+ * Which media types take a text block is P14.14's provisional list (D4).
  * Everything here is pure and browser-safe.
  */
 
@@ -36,15 +41,17 @@ export type TextBlockRefusal =
   | "unclosed-tag"
   | "unterminated-string"
   | "unterminated-heredoc"
-  | "line-continuation";
+  | "line-continuation"
+  /** P14.16: the writer has no parser for the version's syntax, so it cannot show the block is a comment. */
+  | "no-parser";
 
 const lower = (s: string) => s.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
 
 /**
  * P14.16: elements whose content an HTML parser does not parse as markup, so
- * a `<!--` inside them is text. The first seven are P14.16's; `iframe`,
- * `noembed` and `noframes` are raw text to an HTML parser too (PROVISIONAL).
- * `pre` is not among them: its content is markup.
+ * a `<!--` inside them is text (P14.16's examples, from 1b5c484 including
+ * `iframe`, `noembed` and `noframes`). `pre` is not among them: its content is
+ * markup.
  */
 const RAW_ELEMENTS = ["script", "style", "textarea", "title", "xmp", "noscript", "iframe", "noembed", "noframes"];
 
@@ -200,10 +207,11 @@ interface Lexer {
 
 const C_LIKE: Lexer = { line: ["//"], block: { open: "/*", close: "*/" }, singleLine: ['"', "'"] };
 
-/** PROVISIONAL: the lexer each text media type is checked with. */
+/** P14.16: the parser each line- or block-comment media type of P14.14 is checked with. */
 const LEXERS: Record<string, Lexer> = {
   "text/css": { block: { open: "/*", close: "*/" }, singleLine: ['"', "'"] },
-  // Template literals span lines; regular expression literals are not recognised (PROVISIONAL).
+  // Template literals span lines. Regular expression literals are not recognised: a quote inside one
+  // can only make the lexer see an open string and refuse, never accept a block that is not a comment.
   "text/javascript": { ...C_LIKE, multiLine: [{ open: "`", close: "`", escapes: true }] },
   "application/typescript": { ...C_LIKE, multiLine: [{ open: "`", close: "`", escapes: true }] },
   "text/x-c": C_LIKE,
@@ -378,7 +386,8 @@ function endsInContinuation(text: string): boolean {
 
 /**
  * Why `text` (the version, decoded, without its BOM) cannot take a text block
- * under `mediaType` (lower case), or undefined. PROVISIONAL (P14.16).
+ * under `mediaType` (lower case), or undefined (P14.16). A media type this
+ * writer has no parser for is refused (`no-parser`), never accepted unchecked.
  */
 export function textBlockRefusal(text: string, mediaType: string): TextBlockRefusal | undefined {
   switch (mediaType) {
@@ -396,8 +405,9 @@ export function textBlockRefusal(text: string, mediaType: string): TextBlockRefu
     case "application/yaml":
       return yamlRefusal(text) ?? (endsInContinuation(text) ? "line-continuation" : undefined);
     default: {
-      const lexer = LEXERS[mediaType];
-      const lexed = lexer ? lexRefusal(text, lexer) : undefined;
+      const lexer = Object.prototype.hasOwnProperty.call(LEXERS, mediaType) ? LEXERS[mediaType] : undefined;
+      if (!lexer) return "no-parser";
+      const lexed = lexRefusal(text, lexer);
       if (lexed) return lexed;
       return LINE_COMMENT_TYPES.includes(mediaType) && endsInContinuation(text) ? "line-continuation" : undefined;
     }

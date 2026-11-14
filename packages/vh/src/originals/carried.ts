@@ -1,5 +1,5 @@
 /**
- * Carried logs (proposed; aviarytech/originals-spec PR 59 at a3ffdc1):
+ * Carried logs (proposed; aviarytech/originals-spec PR 59 at 1b5c484):
  * P7.11-P7.16 and P14.14-P14.17. Everything here is PROVISIONAL, as the
  * subsection itself is.
  *
@@ -81,6 +81,9 @@ const TEXT_TYPES: Record<string, CommentSyntax> = {
   "application/toml": "#",
   "application/sql": "--",
 };
+
+/** P14.14: the media types whose carrier is a text block, each with a parser for P14.16's test. */
+export const TEXT_BLOCK_MEDIA_TYPES: ReadonlyArray<string> = Object.freeze(Object.keys(TEXT_TYPES));
 
 const CLOSERS: Partial<Record<CommentSyntax, string>> = { "<!--": "-->", "/*": "*/" };
 

@@ -26,6 +26,8 @@ import {
   type SatEvidence,
   type SatInscription,
 } from "../src/originals/index.js";
+import { textBlockRefusal } from "../src/originals/carried-syntax.js";
+import { TEXT_BLOCK_MEDIA_TYPES } from "../src/originals/carried.js";
 import { NOW, VhAuthor, bytes, carrying, clock, photo, seeded } from "./helpers/originals.js";
 
 const KA = seeded(41);
@@ -138,7 +140,7 @@ describe("P14.14: the carrier for a media type", () => {
 });
 
 describe("P7.12, P7.13: reading a carried file", () => {
-  test("C12-200: \"Carried file whose bytes, with the carrier removed, are the version its log's last entry names, signer DIDs resolved\": log and version verified, valid as of that checkpoint, never current", async () => {
+  test("C12-200, C12-343: \"Carried file whose bytes, with the carrier removed, are the version its log's last entry names, signer DIDs resolved\" and \"Carried log with no `anchor` member that holds no anchoring entry\": log and version verified, a historical checkpoint valid as of its last entry, never current", async () => {
     // Harbor notes, carried (section 7 example): version 3, then a metadata correction as the checkpoint.
     const md2 = enc("# Harbor\n\nSecond notes.\n");
     const { alice, entries } = await original([{ data: MD1, mediaType: "text/markdown" }, { data: md2, mediaType: "text/markdown" }, { data: MD3, mediaType: "text/markdown" }], { trailingEdit: true });
@@ -571,6 +573,66 @@ describe("P14.16, P7.15: text block writer refusals", () => {
     expect(await refusal(enc("<p>a <!--> b</p>\n"), "text/html")).toBeUndefined();
   });
 
+  test("C12-346: \"HTML version ending inside an open tag, a processing instruction, or an open `iframe`, `noembed` or `noframes` element\": writer refuses; the appended block would not parse as a separate comment (P14.16)", async () => {
+    for (const mediaType of ["text/html", "application/xhtml+xml", "text/markdown"]) {
+      expect(await refusal(enc('<p>hi</p>\n<img src="a.png"\n'), mediaType)).toEqual({ code: "CARRIER_CANNOT_ADD", reason: "unclosed-tag" });
+      expect(await refusal(enc("<p>hi</p>\n<?php echo 1;\n"), mediaType)).toEqual({ code: "CARRIER_CANNOT_ADD", reason: "unclosed-tag" });
+      for (const element of ["iframe", "noembed", "noframes"]) {
+        expect(await refusal(enc(`<p>hi</p>\n<${element}>\nfallback\n`), mediaType)).toEqual({ code: "CARRIER_CANNOT_ADD", reason: "unclosed-element" });
+        expect(await refusal(enc(`<p>hi</p>\n<${element}>fallback</${element}>\n`), mediaType)).toBeUndefined();
+      }
+    }
+    // XML: an open tag or processing instruction too.
+    for (const mediaType of ["image/svg+xml", "application/xml", "text/xml"]) {
+      expect((await refusal(enc('<svg><rect width="1"\n'), mediaType))?.reason).toBe("unclosed-tag");
+      expect((await refusal(enc("<svg><?pi data\n"), mediaType))?.reason).toBe("unclosed-tag");
+    }
+  });
+
+  test("C12-347: \"Version of a listed type whose ending its format's parser leaves outside any comment, string, tag or raw-text context\": writer adds the block; it parses as a separate comment (P14.16)", async () => {
+    const benign: Record<string, string> = {
+      "text/plain": "plain words\n",
+      "text/markdown": "# Notes\n\nSome text.\n",
+      "text/html": "<p>hi</p>\n",
+      "application/xhtml+xml": "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body/></html>\n",
+      "image/svg+xml": "<svg xmlns=\"http://www.w3.org/2000/svg\"/>\n",
+      "application/xml": "<a/>\n",
+      "text/xml": "<a/>\n",
+      "text/css": "a { color: red }\n",
+      "text/javascript": "const a = 1;\n",
+      "application/typescript": "const a: number = 1;\n",
+      "text/x-c": "int a = 1;\n",
+      "text/x-c++": "int a = 1;\n",
+      "text/x-java-source": "class A {}\n",
+      "text/x-go": "package main\n",
+      "text/x-rust": "fn main() {}\n",
+      "text/x-swift": "let a = 1\n",
+      "text/x-kotlin": "val a = 1\n",
+      "text/x-python": "a = 1\n",
+      "text/x-shellscript": "echo hi\n",
+      "application/yaml": "a: 1\n",
+      "application/toml": "a = 1\n",
+      "application/sql": "select 1;\n",
+    };
+    for (const [mediaType, text] of Object.entries(benign)) {
+      expect(carrierFor(mediaType)?.kind, mediaType).toBe("text-block");
+      const data = enc(text);
+      const { alice, entries } = await original([{ data, mediaType }]);
+      const file = await carry(data, entries);
+      const r = await readCarriedFile(file, { authors: [alice.evidence()], now: NOW });
+      expect(r.carrierStatus, mediaType).toBe("found");
+      expect(r.bytes, mediaType).toBe("match");
+    }
+  });
+
+  test("C12-348: \"Writer with no parser for the version's syntax asked for a text block\": refused (P14.16)", () => {
+    // Every type P14.14 gives a text block has a parser here; a syntax with none is refused, never accepted unchecked.
+    expect(textBlockRefusal("anything\n", "text/x-unknown")).toBe("no-parser");
+    expect(textBlockRefusal("anything\n", "text/x-haskell")).toBe("no-parser");
+    expect(textBlockRefusal("plain words\n", "text/plain")).toBeUndefined();
+    for (const mediaType of TEXT_BLOCK_MEDIA_TYPES) expect(textBlockRefusal("", mediaType), mediaType).not.toBe("no-parser");
+  });
+
   test("P14.16: XML types refuse an ending inside a comment or CDATA section; CSS inside a comment or string", async () => {
     for (const mediaType of ["image/svg+xml", "application/xml", "text/xml"]) {
       expect((await refusal(enc("<svg><!-- open"), mediaType))?.reason).toBe("unclosed-comment");
@@ -919,7 +981,7 @@ describe("P7.14: anchored Originals", () => {
     }
   });
 
-  test("C12-288: \"Carried log with an `anchor` member naming a chain the reader's revision does not list, or read while P14.21 pins no contract\": unsupported, not invalid; nothing verified", async () => {
+  test("C12-288 (changed at 1b5c484), C12-342: \"Carried log with an `anchor` member naming a chain the reader's revision does not list, or read while P14.21 pins no contract, with or without an anchoring entry\" and \"…whose genesis entry has an `anchor` member and that holds no anchoring entry\": unsupported, not invalid, not a historical checkpoint; nothing verified", async () => {
     const { alice, entries } = await original([{ data: PNG, mediaType: "image/png" }]);
     const withAnchor = structuredClone(entries) as LogEntry[];
     (withAnchor[0].state.asset as JsonObject).anchor = { chain: "eip155:1", minter: "0x" + "cd".repeat(20) };
@@ -933,5 +995,8 @@ describe("P7.14: anchored Originals", () => {
     expect(r.reasons).toContain("anchor-chain-unsupported");
     expect(r.history).toBe("unchecked"); // not "invalid"
     expect(r.verified).toEqual({ log: false, version: false });
+    // The log holds no anchoring entry, yet it is not read as a historical checkpoint: section 14 takes precedence (P7.14).
+    expect(r.reasons).not.toContain("historical-checkpoint");
+    expect(r.overall.status).toBe("unsupported");
   });
 });
