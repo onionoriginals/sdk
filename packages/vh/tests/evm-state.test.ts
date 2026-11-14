@@ -19,13 +19,18 @@ import {
   updateOriginal,
   type EvmAnchorPin,
 } from "../src/originals/index.js";
+import { OPERATOR_CHAIN, CONSENSUS_CHAIN, CONSORTIUM_CHAIN, TEST_CHAINS } from "./helpers/evm-chains.js";
 import { VhAuthor, clock, photo, seeded } from "./helpers/originals.js";
 
-const PIN: EvmAnchorPin = { address: "0x" + "ab".repeat(20), codeHash: "0x" + "00".repeat(32) };
-const ROBINHOOD = "eip155:4663"; // operator: attested
-const TEMPO = "eip155:4217"; // consortium: attested
-const ETHEREUM = "eip155:1"; // consensus: proven
-const BASE = "eip155:8453"; // exit-protected: proven
+// P14.22 lists only Base (originals-spec PR 59 ce19572); the pin adds made-up chains of the other classes
+// so the class and layer rules the spec keeps for a later revision stay exercised (P9.27, P9.28).
+const PIN: EvmAnchorPin = { address: "0x" + "ab".repeat(20), codeHash: "0x" + "00".repeat(32), chains: [...EVM_CHAINS, ...TEST_CHAINS] };
+/** The spec's own list: Base alone (P14.22). */
+const SPEC_CHAINS_PIN: EvmAnchorPin = { address: PIN.address, codeHash: PIN.codeHash };
+const OPERATOR = OPERATOR_CHAIN.chain; // operator: attested
+const CONSORTIUM = CONSORTIUM_CHAIN.chain; // consortium: attested
+const CONSENSUS = CONSENSUS_CHAIN.chain; // consensus: proven
+const BASE = "eip155:8453"; // exit-protected: proven; the one chain P14.22 lists
 const A = "0x" + "11".repeat(20);
 const C = "0x" + "22".repeat(20);
 
@@ -85,11 +90,11 @@ describe("P14.18 the anchor member and token alias", () => {
     const key = seeded(32);
     const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
     await rejects(
-      createOriginal({ versionTime: clock()(), name: "x", resource: photo("x"), author: alice.ref("orig"), sign: alice.signer(key, "orig"), anchor: { chain: ETHEREUM, minter: A } }),
+      createOriginal({ versionTime: clock()(), name: "x", resource: photo("x"), author: alice.ref("orig"), sign: alice.signer(key, "orig"), anchor: { chain: CONSENSUS, minter: A } }),
       "EVM_NO_ANCHOR_CONTRACT",
       "unsupported-profile",
     );
-    expect(evmSupport(ETHEREUM)).toEqual({ supported: false, reason: "no-anchor-contract-pinned" });
+    expect(evmSupport(CONSENSUS)).toEqual({ supported: false, reason: "no-anchor-contract-pinned" });
   });
 
   test("C12-238: anchor.chain well formed but not listed: unsupported; a writer refuses", async () => {
@@ -101,7 +106,24 @@ describe("P14.18 the anchor member and token alias", () => {
       "unsupported-profile",
     );
     expect(evmSupport("eip155:10", PIN)).toEqual({ supported: false, reason: "chain-not-listed" });
-    expect(EVM_CHAINS.map((c) => c.chain)).toEqual(["eip155:1", "eip155:143", "eip155:8453", "eip155:42161", "eip155:5042", "eip155:4217", "eip155:4663", "eip155:99901"]);
+  });
+
+  test("C12-352: 'Genesis anchor member naming a chain other than Base, such as eip155:1 or eip155:4663': unsupported, not invalid; a writer refuses to write it (P9.19, P14.22)", async () => {
+    // P14.22 at ce19572 (owner decision, 14 November 2026) lists Base alone, with its row unchanged.
+    expect(EVM_CHAINS).toEqual([
+      { name: "Base", chain: "eip155:8453", chainId: 8453n, genesisHash: "0xf712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd", classes: [{ from: Date.UTC(2026, 10, 11), class: "exit-protected" }] },
+    ]);
+    const key = seeded(36);
+    const alice = await VhAuthor.create([{ fragment: "orig", signer: key }]);
+    const create = (chain: string, evm: EvmAnchorPin) =>
+      createOriginal({ versionTime: clock()(), name: "x", resource: photo("x"), author: alice.ref("orig"), sign: alice.signer(key, "orig"), anchor: { chain, minter: A }, evm });
+    // The chains the first list (D6) named, removed on 14 November 2026, are refused before signing.
+    for (const chain of ["eip155:1", "eip155:143", "eip155:42161", "eip155:5042", "eip155:4217", "eip155:4663", "eip155:99901"]) {
+      expect(evmSupport(chain, SPEC_CHAINS_PIN)).toEqual({ supported: false, reason: "chain-not-listed" });
+      await rejects(create(chain, SPEC_CHAINS_PIN), "EVM_CHAIN_NOT_LISTED", "unsupported-profile");
+    }
+    expect(evmSupport(BASE, SPEC_CHAINS_PIN)).toMatchObject({ supported: true, listed: { name: "Base", classes: [{ class: "exit-protected" }] } });
+    await create(BASE, SPEC_CHAINS_PIN);
   });
 });
 
@@ -113,19 +135,19 @@ describe("P9.19 the anchor member is fixed at genesis", () => {
     const sign = alice.signer(key, "orig");
     const author = alice.ref("orig");
     const plain = await createOriginal({ versionTime: at(), name: "x", resource: photo("x"), author, sign });
-    await rejects(updateOriginal(plain, { versionTime: at(), author, sign, anchor: { chain: ETHEREUM, minter: A }, evm: PIN }), "STATE_ANCHOR");
-    const { genesis, author: au, sign: s2, at: at2 } = await anchoredOn(ROBINHOOD);
+    await rejects(updateOriginal(plain, { versionTime: at(), author, sign, anchor: { chain: CONSENSUS, minter: A }, evm: PIN }), "STATE_ANCHOR");
+    const { genesis, author: au, sign: s2, at: at2 } = await anchoredOn(OPERATOR);
     // Not anchored yet: a change is a move before the anchoring entry.
-    await rejects(updateOriginal(genesis, { versionTime: at2(), author: au, sign: s2, anchor: { chain: ROBINHOOD, minter: C }, evm: PIN }), "STATE_MOVE_BEFORE_ANCHOR");
+    await rejects(updateOriginal(genesis, { versionTime: at2(), author: au, sign: s2, anchor: { chain: OPERATOR, minter: C }, evm: PIN }), "STATE_MOVE_BEFORE_ANCHOR");
     await rejects(updateOriginal(genesis, { versionTime: at2(), author: au, sign: s2, anchor: null, evm: PIN }), "STATE_MOVE_BEFORE_ANCHOR");
   });
 
   test("C12-236: EVM anchor listing a did:btco alias, or another token's alias; no anchor listing a token alias: rejected", async () => {
-    const { genesis, author, sign, at, id } = await anchoredOn(ROBINHOOD);
+    const { genesis, author, sign, at, id } = await anchoredOn(OPERATOR);
     await rejects(updateOriginal(genesis, { versionTime: at(), author, sign, aliases: ["did:btco:reg:1234"], evm: PIN }), "STATE_ALIASES");
-    const other = derivedTokenAlias(id, { chain: ROBINHOOD, minter: C }, PIN);
+    const other = derivedTokenAlias(id, { chain: OPERATOR, minter: C }, PIN);
     await rejects(updateOriginal(genesis, { versionTime: at(), author, sign, aliases: [other], evm: PIN }), "STATE_ANCHOR_TOKEN");
-    const wrongContract = `did:evm:4663:0x${"cd".repeat(20)}:${tokenIdOf(id, A)}`;
+    const wrongContract = `did:evm:${OPERATOR_CHAIN.chainId}:0x${"cd".repeat(20)}:${tokenIdOf(id, A)}`;
     await rejects(updateOriginal(genesis, { versionTime: at(), author, sign, aliases: [wrongContract], evm: PIN }), "STATE_ANCHOR_TOKEN");
     const key = seeded(35);
     const bob = await VhAuthor.create([{ fragment: "orig", signer: key }]);
@@ -134,46 +156,46 @@ describe("P9.19 the anchor member is fixed at genesis", () => {
   });
 
   test("anchored on a token: the token alias stays until a move entry; no did:webvh added (P9.10 via P9.20)", async () => {
-    const { anchoring, author, sign, at } = await anchoredOn(ROBINHOOD);
+    const { anchoring, author, sign, at } = await anchoredOn(OPERATOR);
     await rejects(updateOriginal(anchoring, { versionTime: at(), author, sign, aliases: [], evm: PIN }), "STATE_ANCHOR");
     const renamed = await updateOriginal(anchoring, { versionTime: at(), author, sign, name: "Renamed", evm: PIN });
-    expect((renamed.state as { asset: { anchor: unknown } }).asset.anchor).toEqual({ chain: ROBINHOOD, minter: A });
+    expect((renamed.state as { asset: { anchor: unknown } }).asset.anchor).toEqual({ chain: OPERATOR, minter: A });
   });
 });
 
 describe("P9.28 move entries", () => {
-  test("C12-265: move from an attested chain to a proven chain, or to Bitcoin; from a proven chain to Bitcoin: accepted by the state rules", async () => {
-    const { anchoring, author, sign, at, id } = await anchoredOn(ROBINHOOD);
-    const dest = derivedTokenAlias(id, { chain: ETHEREUM, minter: C }, PIN);
-    const moved = await updateOriginal(anchoring, { versionTime: at(), author, sign, anchor: { chain: ETHEREUM, minter: C }, aliases: [dest], evm: PIN });
+  test("C12-265 (changed at ce19572): move from Base to Bitcoin; under a revision listing an attested chain (the test pin), from it to a proven chain or to Bitcoin: accepted by the state rules", async () => {
+    const { anchoring, author, sign, at, id } = await anchoredOn(OPERATOR);
+    const dest = derivedTokenAlias(id, { chain: CONSENSUS, minter: C }, PIN);
+    const moved = await updateOriginal(anchoring, { versionTime: at(), author, sign, anchor: { chain: CONSENSUS, minter: C }, aliases: [dest], evm: PIN });
     expect((moved.state as { asset: { aliases: string[] } }).asset.aliases).toEqual([dest]);
     const toBitcoin = await updateOriginal(anchoring, { versionTime: at(), author, sign, anchor: null, aliases: ["did:btco:reg:1234"], evm: PIN });
     expect((toBitcoin.state as { asset: { anchor?: unknown } }).asset.anchor).toBeUndefined();
     const proven = await anchoredOn(BASE);
-    await updateOriginal(proven.anchoring, { versionTime: proven.at(), author: proven.author, sign: proven.sign, anchor: null, aliases: ["did:btco:reg:99"], evm: PIN });
+    await updateOriginal(proven.anchoring, { versionTime: proven.at(), author: proven.author, sign: proven.sign, anchor: null, aliases: ["did:btco:reg:99"], evm: SPEC_CHAINS_PIN });
   });
 
   test("C12-266: move to a chain in the same layer or a lower one: rejected", async () => {
-    const attested = await anchoredOn(ROBINHOOD);
-    const toTempo = derivedTokenAlias(attested.id, { chain: TEMPO, minter: C }, PIN);
-    await rejects(updateOriginal(attested.anchoring, { versionTime: attested.at(), author: attested.author, sign: attested.sign, anchor: { chain: TEMPO, minter: C }, aliases: [toTempo], evm: PIN }), "STATE_MOVE_LAYER");
-    const proven = await anchoredOn(ETHEREUM);
-    const down = derivedTokenAlias(proven.id, { chain: ROBINHOOD, minter: C }, PIN);
-    await rejects(updateOriginal(proven.anchoring, { versionTime: proven.at(), author: proven.author, sign: proven.sign, anchor: { chain: ROBINHOOD, minter: C }, aliases: [down], evm: PIN }), "STATE_MOVE_LAYER");
+    const attested = await anchoredOn(OPERATOR);
+    const toConsortium = derivedTokenAlias(attested.id, { chain: CONSORTIUM, minter: C }, PIN);
+    await rejects(updateOriginal(attested.anchoring, { versionTime: attested.at(), author: attested.author, sign: attested.sign, anchor: { chain: CONSORTIUM, minter: C }, aliases: [toConsortium], evm: PIN }), "STATE_MOVE_LAYER");
+    const proven = await anchoredOn(CONSENSUS);
+    const down = derivedTokenAlias(proven.id, { chain: OPERATOR, minter: C }, PIN);
+    await rejects(updateOriginal(proven.anchoring, { versionTime: proven.at(), author: proven.author, sign: proven.sign, anchor: { chain: OPERATOR, minter: C }, aliases: [down], evm: PIN }), "STATE_MOVE_LAYER");
     const side = derivedTokenAlias(proven.id, { chain: BASE, minter: C }, PIN);
     await rejects(updateOriginal(proven.anchoring, { versionTime: proven.at(), author: proven.author, sign: proven.sign, anchor: { chain: BASE, minter: C }, aliases: [side], evm: PIN }), "STATE_MOVE_LAYER");
   });
 
   test("C12-267: entry that changes anchor without listing the destination's alias: rejected", async () => {
-    const { anchoring, author, sign, at, token } = await anchoredOn(ROBINHOOD);
-    await rejects(updateOriginal(anchoring, { versionTime: at(), author, sign, anchor: { chain: ETHEREUM, minter: C }, aliases: [], evm: PIN }), "STATE_MOVE_ALIAS");
+    const { anchoring, author, sign, at, token } = await anchoredOn(OPERATOR);
+    await rejects(updateOriginal(anchoring, { versionTime: at(), author, sign, anchor: { chain: CONSENSUS, minter: C }, aliases: [], evm: PIN }), "STATE_MOVE_ALIAS");
     await rejects(updateOriginal(anchoring, { versionTime: at(), author, sign, anchor: null, aliases: [], evm: PIN }), "STATE_MOVE_ALIAS");
     // Keeping the old token alias is not listing the destination's: it is on another chain.
-    await rejects(updateOriginal(anchoring, { versionTime: at(), author, sign, anchor: { chain: ETHEREUM, minter: C }, aliases: [token], evm: PIN }), "STATE_ALIASES");
+    await rejects(updateOriginal(anchoring, { versionTime: at(), author, sign, anchor: { chain: CONSENSUS, minter: C }, aliases: [token], evm: PIN }), "STATE_ALIASES");
   });
 
   test("C12-268: move entry to a chain the verifier's P14.22 does not list: unsupported, not invalid", async () => {
-    const { anchoring, author, sign, at, id } = await anchoredOn(ROBINHOOD);
+    const { anchoring, author, sign, at, id } = await anchoredOn(OPERATOR);
     const pin10: EvmAnchorPin = { ...PIN };
     const dest = `did:evm:10:${PIN.address}:${tokenIdOf(id, C)}`;
     // The writer refuses first (P9.19).
@@ -181,9 +203,39 @@ describe("P9.28 move entries", () => {
   });
 });
 
+describe("P9.28, P14.22 moves from Base, the one listed chain", () => {
+  test("C12-353: 'Move entry from Base naming Base again, with another minter': rejected, as a move within the same layer (P9.28)", async () => {
+    const onBase = await anchoredOn(BASE);
+    const again = derivedTokenAlias(onBase.id, { chain: BASE, minter: C }, SPEC_CHAINS_PIN);
+    // The writer refuses before signing.
+    await rejects(updateOriginal(onBase.anchoring, { versionTime: onBase.at(), author: onBase.author, sign: onBase.sign, anchor: { chain: BASE, minter: C }, aliases: [again], evm: SPEC_CHAINS_PIN }), "STATE_MOVE_LAYER");
+    // The verifier's state rule rejects the same entry, signed or not: invalid, not unsupported.
+    const previous = onBase.anchoring.state as never;
+    const asset = { ...(onBase.anchoring.state as { asset: object }).asset, anchor: { chain: BASE, minter: C }, aliases: [again] };
+    const state = { id: onBase.id, operation: "update", author: onBase.author, asset, transitions: [] };
+    const scid = onBase.id.slice("did:vh:".length);
+    expect(() => checkEntryState(state as never, { scid, index: 2, previous, deactivatedParameter: false, evm: SPEC_CHAINS_PIN })).toThrow(expect.objectContaining({ code: "STATE_MOVE_LAYER", category: "invalid-evidence" }));
+    // Base moves only to Bitcoin (P14.22).
+    await updateOriginal(onBase.anchoring, { versionTime: onBase.at(), author: onBase.author, sign: onBase.sign, anchor: null, aliases: ["did:btco:reg:99"], evm: SPEC_CHAINS_PIN });
+  });
+
+  test("C12-354: 'Move entry from Base naming an EVM chain this revision does not list': unsupported, not invalid; Base moves only to Bitcoin (P9.19, P9.28, P14.22)", async () => {
+    const onBase = await anchoredOn(BASE);
+    for (const chain of ["eip155:1", "eip155:42161", "eip155:10"]) {
+      const dest = derivedTokenAlias(onBase.id, { chain, minter: C }, SPEC_CHAINS_PIN);
+      await rejects(updateOriginal(onBase.anchoring, { versionTime: onBase.at(), author: onBase.author, sign: onBase.sign, anchor: { chain, minter: C }, aliases: [dest], evm: SPEC_CHAINS_PIN }), "EVM_CHAIN_NOT_LISTED", "unsupported-profile");
+      const previous = onBase.anchoring.state as never;
+      const asset = { ...(onBase.anchoring.state as { asset: object }).asset, anchor: { chain, minter: C }, aliases: [dest] };
+      const state = { id: onBase.id, operation: "update", author: onBase.author, asset, transitions: [] };
+      const scid = onBase.id.slice("did:vh:".length);
+      expect(() => checkEntryState(state as never, { scid, index: 2, previous, deactivatedParameter: false, evm: SPEC_CHAINS_PIN })).toThrow(expect.objectContaining({ code: "EVM_CHAIN_NOT_LISTED", category: "unsupported-profile" }));
+    }
+  });
+});
+
 describe("P9.26 no did:btco signers with an anchor member", () => {
   test("C12-262, C12-301: Original with an EVM anchor naming a did:btco author or editor: rejected", async () => {
-    const { genesis, author, sign, at } = await anchoredOn(ROBINHOOD);
+    const { genesis, author, sign, at } = await anchoredOn(OPERATOR);
     await rejects(updateOriginal(genesis, { versionTime: at(), author, sign, editors: [{ did: "did:btco:reg:5", name: true, metadata: false, resource: false }], evm: PIN }), "STATE_ANCHOR_BTCO_SIGNER");
   });
 
@@ -192,10 +244,10 @@ describe("P9.26 no did:btco signers with an anchor member", () => {
     const author = { did: BTCO, verificationMethod: `${BTCO}#orig`, versionId: `${"a".repeat(64)}i0` };
     let signed = false;
     const sign = async () => ((signed = true), []) as never;
-    await rejects(createOriginal({ versionTime: clock()(), name: "x", resource: photo("x"), author, sign, anchor: { chain: ROBINHOOD, minter: A }, evm: PIN }), "STATE_ANCHOR_BTCO_SIGNER");
+    await rejects(createOriginal({ versionTime: clock()(), name: "x", resource: photo("x"), author, sign, anchor: { chain: OPERATOR, minter: A }, evm: PIN }), "STATE_ANCHOR_BTCO_SIGNER");
     expect(signed).toBe(false);
     // The verifier's state rule: a genesis entry carrying an anchor member and naming a did:btco author.
-    const asset = { name: "x", status: "active", resource: photo("x"), aliases: [], anchor: { chain: ROBINHOOD, minter: A } };
+    const asset = { name: "x", status: "active", resource: photo("x"), aliases: [], anchor: { chain: OPERATOR, minter: A } };
     expect(() => checkEntryState({ id: "did:vh:s", operation: "create", author, asset, transitions: [{ from: null, to: photo("x").digest }] } as never, { scid: "s", index: 0, deactivatedParameter: false, evm: PIN }))
       .toThrow(expect.objectContaining({ code: "STATE_ANCHOR_BTCO_SIGNER" }));
     // Without an anchor member the same author is allowed (P5.13): the rule is P9.26's.
@@ -214,53 +266,53 @@ describe("originals-spec PR 59: the remaining state rows", () => {
     const genesis = await createOriginal({ versionTime: at(), name: "x", resource: photo("x"), author, sign });
     const onBitcoin = await updateOriginal(genesis, { versionTime: at(), author, sign, aliases: ["did:btco:reg:1234"] });
     const id = (genesis.state as { id: string }).id;
-    const token = derivedTokenAlias(id, { chain: ETHEREUM, minter: C }, PIN);
+    const token = derivedTokenAlias(id, { chain: CONSENSUS, minter: C }, PIN);
     // A "move" to an EVM chain: it adds an anchor member, which no entry may (P9.19).
-    await rejects(updateOriginal(onBitcoin, { versionTime: at(), author, sign, anchor: { chain: ETHEREUM, minter: C }, aliases: [token], evm: PIN }), "STATE_ANCHOR");
+    await rejects(updateOriginal(onBitcoin, { versionTime: at(), author, sign, anchor: { chain: CONSENSUS, minter: C }, aliases: [token], evm: PIN }), "STATE_ANCHOR");
     // A "move" to another sat: the did:btco alias is terminal (P9.10).
     await rejects(updateOriginal(onBitcoin, { versionTime: at(), author, sign, aliases: ["did:btco:reg:5678"] }), "STATE_ANCHOR");
     // An Original that moved up to Bitcoin is anchored on Bitcoin: it does not move again (P9.28).
-    const evm = await anchoredOn(ROBINHOOD);
+    const evm = await anchoredOn(OPERATOR);
     const arrived = await updateOriginal(evm.anchoring, { versionTime: evm.at(), author: evm.author, sign: evm.sign, anchor: null, aliases: ["did:btco:reg:99"], evm: PIN });
-    const back = derivedTokenAlias(evm.id, { chain: ETHEREUM, minter: C }, PIN);
-    await rejects(updateOriginal(arrived, { versionTime: evm.at(), author: evm.author, sign: evm.sign, anchor: { chain: ETHEREUM, minter: C }, aliases: [back], evm: PIN }), "STATE_ANCHOR");
+    const back = derivedTokenAlias(evm.id, { chain: CONSENSUS, minter: C }, PIN);
+    await rejects(updateOriginal(arrived, { versionTime: evm.at(), author: evm.author, sign: evm.sign, anchor: { chain: CONSENSUS, minter: C }, aliases: [back], evm: PIN }), "STATE_ANCHOR");
     await rejects(updateOriginal(arrived, { versionTime: evm.at(), author: evm.author, sign: evm.sign, aliases: ["did:btco:reg:100"], evm: PIN }), "STATE_ANCHOR");
   });
 
   test("C12-267: 'Move entry signed by an editor': rejected, outside the grant (P9.28, P5.16)", async () => {
-    const o = await anchoredOn(ROBINHOOD);
+    const o = await anchoredOn(OPERATOR);
     const bobKey = seeded(37);
     const bob = await VhAuthor.create([{ fragment: "edit", signer: bobKey }]);
     const granted = await updateOriginal(o.anchoring, { versionTime: o.at(), author: o.author, sign: o.sign, editors: [{ did: bob.did, name: true, metadata: true, resource: true }], evm: PIN });
     const asBob = { editor: bob.ref("edit"), sign: bob.signer(bobKey, "edit") };
-    const dest = derivedTokenAlias(o.id, { chain: ETHEREUM, minter: C }, PIN);
+    const dest = derivedTokenAlias(o.id, { chain: CONSENSUS, minter: C }, PIN);
     // Even with every content right, an editor cannot write a move entry: not up a chain, nor to Bitcoin.
     // Keeping the token left behind also breaks the alias rule, which the asset check finds first.
-    await rejects(updateOriginal(granted, { versionTime: o.at(), ...asBob, anchor: { chain: ETHEREUM, minter: C }, evm: PIN }), "STATE_ALIASES");
+    await rejects(updateOriginal(granted, { versionTime: o.at(), ...asBob, anchor: { chain: CONSENSUS, minter: C }, evm: PIN }), "STATE_ALIASES");
     await rejects(updateOriginal(granted, { versionTime: o.at(), ...asBob, anchor: null, evm: PIN }), "STATE_ALIASES");
-    await rejects(updateOriginal(granted, { versionTime: o.at(), ...asBob, anchor: { chain: ETHEREUM, minter: C }, aliases: [dest], evm: PIN }), "EDITOR_AUTHOR_ONLY", "outside-grant");
+    await rejects(updateOriginal(granted, { versionTime: o.at(), ...asBob, anchor: { chain: CONSENSUS, minter: C }, aliases: [dest], evm: PIN }), "EDITOR_AUTHOR_ONLY", "outside-grant");
     // An editor's change of `anchor` in a state that is otherwise valid (here before anchoring, with no
     // token alias yet) is outside every grant, as the engine's editor hook reports it (P5.16, P9.28).
     const early = await updateOriginal(o.genesis, { versionTime: o.at(), author: o.author, sign: o.sign, editors: [{ did: bob.did, name: true, metadata: true, resource: true }], evm: PIN });
-    await rejects(updateOriginal(early, { versionTime: o.at(), ...asBob, anchor: { chain: ROBINHOOD, minter: C }, evm: PIN }), "EDITOR_AUTHOR_ONLY", "outside-grant");
-    const earlyState = { ...(early.state as object), editor: bob.ref("edit"), asset: { ...(early.state as { asset: object }).asset, anchor: { chain: ROBINHOOD, minter: C } } };
+    await rejects(updateOriginal(early, { versionTime: o.at(), ...asBob, anchor: { chain: OPERATOR, minter: C }, evm: PIN }), "EDITOR_AUTHOR_ONLY", "outside-grant");
+    const earlyState = { ...(early.state as object), editor: bob.ref("edit"), asset: { ...(early.state as { asset: object }).asset, anchor: { chain: OPERATOR, minter: C } } };
     expect(() => checkEditorChange(earlyState as never, { scid: o.id.slice(7), index: 2, previous: early.state as never, deactivatedParameter: false, evm: PIN }))
       .toThrow(expect.objectContaining({ code: "EDITOR_AUTHOR_ONLY", category: "outside-grant" }));
     // The verifier's state rule on a complete move state an editor signed, with and without the editor rules first.
     const previous = granted.state as never;
     const scid = o.id.slice("did:vh:".length);
-    const asset = { ...(granted.state as { asset: object }).asset, anchor: { chain: ETHEREUM, minter: C }, aliases: [dest] };
+    const asset = { ...(granted.state as { asset: object }).asset, anchor: { chain: CONSENSUS, minter: C }, aliases: [dest] };
     const state = { id: o.id, operation: "update", author: o.author, editor: bob.ref("edit"), asset, transitions: [] };
     expect(() => checkEntryState(state as never, { scid, index: 3, previous, deactivatedParameter: false, evm: PIN, editorRules: false })).toThrow(expect.objectContaining({ code: "STATE_MOVE_BY_EDITOR", category: "outside-grant" }));
     expect(() => checkEntryState(state as never, { scid, index: 3, previous, deactivatedParameter: false, evm: PIN })).toThrow(expect.objectContaining({ category: "outside-grant" }));
     // The author's own move from the same parent is accepted.
-    await updateOriginal(granted, { versionTime: o.at(), author: o.author, sign: o.sign, anchor: { chain: ETHEREUM, minter: C }, aliases: [dest], evm: PIN });
+    await updateOriginal(granted, { versionTime: o.at(), author: o.author, sign: o.sign, anchor: { chain: CONSENSUS, minter: C }, aliases: [dest], evm: PIN });
   });
 
   test("C12-282: 'aliases holding the token's CAIP-19 asset ID, or a did:evm DID with an uppercase address': rejected (P14.18)", async () => {
-    const { genesis, author, sign, at, token } = await anchoredOn(ROBINHOOD);
+    const { genesis, author, sign, at, token } = await anchoredOn(OPERATOR);
     const caip19 = caip19Of(token);
-    expect(caip19.startsWith("eip155:4663/erc721:")).toBe(true);
+    expect(caip19.startsWith(`${OPERATOR}/erc721:`)).toBe(true);
     for (const aliases of [[caip19], [token, caip19], [`did:${caip19}`]]) {
       await rejects(updateOriginal(genesis, { versionTime: at(), author, sign, aliases, evm: PIN }), "STATE_ALIASES");
     }
@@ -276,10 +328,10 @@ describe("originals-spec PR 59: the remaining state rows", () => {
   });
 
   test("C12-300: 'Grant naming the Original's token alias': rejected (P5.15)", async () => {
-    const { anchoring, author, sign, at, token } = await anchoredOn(ROBINHOOD);
+    const { anchoring, author, sign, at, token } = await anchoredOn(OPERATOR);
     await rejects(updateOriginal(anchoring, { versionTime: at(), author, sign, editors: [{ did: token, name: true, metadata: false, resource: false }], evm: PIN }), "STATE_EDITORS");
     // Nor before anchoring, while the token alias is not yet listed: it is still the Original's (P5.15).
-    const { genesis, author: a2, sign: s2, at: at2, token: t2 } = await anchoredOn(TEMPO);
+    const { genesis, author: a2, sign: s2, at: at2, token: t2 } = await anchoredOn(CONSORTIUM);
     await rejects(updateOriginal(genesis, { versionTime: at2(), author: a2, sign: s2, editors: [{ did: t2, name: true, metadata: false, resource: false }], evm: PIN }), "STATE_EDITORS");
   });
 });

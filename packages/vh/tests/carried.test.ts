@@ -860,10 +860,10 @@ describe("P7.15, P7.16: writing", () => {
     const { entries } = await original([{ data: PNG, mediaType: "image/png" }]);
     // No writer here may write an `anchor` member (P14.21); the disclosure is checked on a log that has one.
     const withAnchor = structuredClone(entries) as LogEntry[];
-    (withAnchor[0].state.asset as JsonObject).anchor = { chain: "eip155:4663", minter: "0x" + "ab".repeat(20) };
+    (withAnchor[0].state.asset as JsonObject).anchor = { chain: "eip155:8453", minter: "0x" + "ab".repeat(20) };
     const d = carriedDisclosure(withAnchor);
-    expect(d.anchor).toEqual({ chain: "eip155:4663", minter: "0x" + "ab".repeat(20) });
-    expect(d.text).toContain("eip155:4663");
+    expect(d.anchor).toEqual({ chain: "eip155:8453", minter: "0x" + "ab".repeat(20) });
+    expect(d.text).toContain("eip155:8453");
     expect(d.text).toContain("0x" + "ab".repeat(20));
   });
 
@@ -983,6 +983,7 @@ describe("P7.14: anchored Originals", () => {
 
   test("C12-288 (changed at 1b5c484), C12-342: \"Carried log with an `anchor` member naming a chain the reader's revision does not list, or read while P14.21 pins no contract, with or without an anchoring entry\" and \"…whose genesis entry has an `anchor` member and that holds no anchoring entry\": unsupported, not invalid, not a historical checkpoint; nothing verified", async () => {
     const { alice, entries } = await original([{ data: PNG, mediaType: "image/png" }]);
+    // eip155:1 is a chain P14.22 no longer lists (ce19572), and no contract is pinned (P14.21).
     const withAnchor = structuredClone(entries) as LogEntry[];
     (withAnchor[0].state.asset as JsonObject).anchor = { chain: "eip155:1", minter: "0x" + "cd".repeat(20) };
     const L = enc(serializeLog(withAnchor));

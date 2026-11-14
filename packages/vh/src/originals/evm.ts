@@ -65,16 +65,17 @@ const assessed = Date.UTC(2026, 10, 11);
 const row = (name: string, id: number, genesisHash: string, cls: TrustClass): ListedChain =>
   Object.freeze({ name, chain: `eip155:${id}`, chainId: BigInt(id), genesisHash, classes: Object.freeze([Object.freeze({ from: assessed, class: cls })]) });
 
-/** P14.22 as of originals-spec PR 59 (a3ffdc1; the table is unchanged since 3ed0f89), assessed 11 November 2026. PROVISIONAL. */
+/**
+ * P14.22 as of originals-spec PR 59 ce19572 (owner decision, 14 November 2026): one chain, Base, a
+ * proven chain, its row as assessed 11 November 2026. PROVISIONAL. With Base alone no move between EVM
+ * chains is possible: an Original anchored on Base moves only to Bitcoin (P9.28). The chains the first
+ * list named (Ethereum, Monad, Arbitrum One, Arc, Tempo, Robinhood Chain, Elysium) were removed, so an
+ * `anchor` member naming one is unsupported, not invalid, and a writer refuses it (P9.19). The trust
+ * classes, layers and move rules stay for a later revision; `EvmAnchorPin.chains` can list other chains
+ * for an experiment, as the tests and the devnet journeys do.
+ */
 export const EVM_CHAINS: ReadonlyArray<ListedChain> = Object.freeze([
-  row("Ethereum", 1, "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3", "consensus"),
-  row("Monad", 143, "0x0c47353304f22b1c15706367d739b850cda80b5c87bbc335014fef3d88deaac9", "consensus"),
   row("Base", 8453, "0xf712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd", "exit-protected"),
-  row("Arbitrum One", 42161, "0x7ee576b35482195fc49205cec9af72ce14f003b9ae69f6ba0faef4514be8b442", "exit-protected"),
-  row("Arc", 5042, "0x09944e07412986bb417fd0006c89ffb71ee523d68ce2017ec2dabc944c42edad", "consortium"),
-  row("Tempo", 4217, "0x49d7ec7085e77bf5a403d0fcb4cfc42a4084a89dfff60477579c5e09c9e03c54", "consortium"),
-  row("Robinhood Chain", 4663, "0xaad15f3d702aaea00caf3e9bb56395efe9127bc3b31b24921abf1eee3409305c", "operator"),
-  row("Elysium", 99901, "0x14cd46a8e7cfd201c7a79d307c320213f984e7a2b3297cd4e2c4b514538db600", "operator"),
 ]);
 
 /**
@@ -95,7 +96,10 @@ export interface EvmAnchorPin {
   addresses?: Readonly<Record<string, string>>;
   /** keccak256 of the runtime code, lowercase 0x hex (P9.21). */
   codeHash: string;
-  /** Chains to use instead of `EVM_CHAINS`, as for a devnet. Default `EVM_CHAINS`. */
+  /**
+   * Chains to use instead of `EVM_CHAINS`, as for a devnet. Default `EVM_CHAINS`, which is Base alone
+   * (P14.22 at PR 59 ce19572). EXPERIMENTAL: a list here is the experiment's, not the spec's.
+   */
   chains?: ReadonlyArray<ListedChain>;
 }
 
