@@ -161,7 +161,7 @@ on; it never reports an unanchored Original as current (P7.10). The
   and a verifier reports the log `limit-exceeded` at that entry
   (`ENTRY_TOO_LARGE`).
 - **Carried files (P7.11-P7.16, P14.14-P14.17; EXPERIMENTAL,
-  originals-spec PR 59 at a3ffdc1).** `readCarried` reports an `overall`
+  originals-spec PR 59 at 1b5c484).** `readCarried` reports an `overall`
   result for the file: `failed` with an explicit reason whenever the file is
   not a carried version (`file-digest-mismatch`,
   `carrier-not-for-media-type`, `json-member-not-last`,
@@ -173,11 +173,20 @@ on; it never reports an unanchored Original as current (P7.10). The
   anchoring entry is a `historical-checkpoint`: valid as of it, with no
   statement about anchoring since, and an anchored Original's pre-anchor
   checkpoint may be carried without anchor evidence (P7.14, P7.15).
-  Importing is not an opt-in to resolve (P7.13): an Original first stored by
+  An opt-in to resolve applies to a single read: there is no standing or
+  default opt-in, and each read that may resolve passes its own
+  `resolveSigners: true` (P7.13; owner decision, 13 November 2026).
+  Importing never counts as one: an Original first stored by
   `importCarried` is marked (`OriginalsStore.putCarriedImport`, optional;
   `MemoryStore` and `FileStore` keep it), and later reads of it ask a
   function `authors` source or `identityFetch` only with
-  `get(did, { resolveSigners: true })`. After EVM anchoring, `carry` writes a
+  `get(did, { resolveSigners: true })`. A carried log whose genesis entry has
+  an `anchor` member is unsupported while P14.21 pins no contract, even with
+  no anchoring entry, and is then not read as a historical checkpoint
+  (P7.14). The writer places a text block only where the version's own
+  parser reads it as a comment, and refuses (`CARRIER_CANNOT_ADD`, with
+  `details.reason`) otherwise, including `no-parser` for a syntax it has no
+  parser for (P14.16); the per-type refusals are the spec's examples. After EVM anchoring, `carry` writes a
   checkpoint from the anchoring entry on only once a token accepted it at
   its finalized block (see [EVM anchoring](#evm-anchoring-experimental-originals-spec-pr-59)).
 - **One resource (P4.1, P4.4, P14.4–P14.6; originals-spec #53).** `create`
@@ -1379,7 +1388,8 @@ serving 900,000 headers, which bounds a production cold start.
 
 ## EVM anchoring (EXPERIMENTAL; originals-spec PR 59)
 
-Built to originals-spec PR 59 at `a3ffdc1` (P9.18–P9.29, P14.18–P14.22).
+Built to originals-spec PR 59 at `1b5c484` (P9.18–P9.29, P14.18–P14.22),
+with the owner decisions of 13 November 2026.
 P14.21 pins no anchor contract, so nothing here works without an
 `EvmAnchorPin` you supply, as for a contract you deployed on a local devnet,
 and nothing built on one supports an interoperability claim. Without the
@@ -1397,7 +1407,7 @@ const sdk = OriginalsSDK.create({
   store, authors,
   evm: {
     pin,                                     // { address, codeHash, chains?: [...EVM_CHAINS, devnet] }
-    providers: { "eip155:4663": [rpcA, { url: rpcB, name: "provider-b" }] }, // P9.22: two are compared
+    providers: { "eip155:4663": [rpcA, { url: rpcB, name: "provider-b" }] }, // P9.22: one is enough; two are compared
     fetch,                                   // optional; the global fetch by default
   },
 });
@@ -1434,18 +1444,52 @@ state.original; // once "finalized": the Original verified from its tokens (anch
   configured provider of its chain at the finalized block (`readEvmToken`,
   P9.21, P9.22), with records above it as observed. Or pass your own reads:
   `get(did, { evm: [evidence] })`. The tokens decide from the anchoring entry
-  on (P9.20). With neither, the result is the committed log, unverified on
-  the chain (`evm-evidence-missing`) and never current, as an anchored
-  Original reads without Bitcoin evidence. `load` and `import` read the
-  configured providers too, or take `{ evm }`; a package is never read as
-  the local log (P7.14).
+  on (P9.20). With neither, or when no token can be read, evidence is
+  missing (`evm-evidence-missing`): the result holds at most the entries
+  before the first anchoring entry, valid as of the checkpoint before it with
+  claimed ordering, and `report.evm.notCheckedAgainstAnchor` lists the rest
+  (P7.14). `load` and `import` read the configured providers too, or take
+  `{ evm }`; a package is never read as the local log (P7.14).
+- **Providers (P9.22; owner decision, 13 November 2026).** One usable
+  provider is enough, even when it is the only one configured. A provider
+  that reports another chain ID or block 0 hash, or cannot serve the
+  contract's state (records included) at the finalized block, is dropped:
+  its answers are not evidence, and the others' reads stand. The reader
+  marks such a provider `stateUnavailable` and reads the rest again at the
+  lower of their own finalized blocks. Evidence is missing only when no
+  usable provider remains (`EVM_NO_PROVIDER`, `EVM_STATE_UNAVAILABLE`,
+  `EVM_RECORDS_UNREADABLE`). Two usable providers that disagree are missing
+  evidence (`EVM_PROVIDERS_DISAGREE`), and neither is dropped to settle it.
+  Every stretch, owner and uniqueness names the providers its read came from
+  (`providers`), lists those dropped (`excludedProviders`), and is marked
+  `uncorroborated: true` when only one usable provider answered.
+- **The writer's local copy (P9.18; owner decision, 13 November 2026).**
+  Before publishing, the writer verifies its committed log whole, from
+  genesis through the entry it publishes, as a local copy: unverified on the
+  chain, never current, with `report.evm.localCopy` true and the reason
+  `local-copy`. A commit, a publication's pre-check and `verifyCommitted`
+  produce one; `get` never does. A local-copy result is valid only for the
+  writer's own check before publishing: do not give it to anyone else.
 - **Retained state (P9.22, P9.25).** The store keeps the finalized blocks a
   verification relied on and its checkpoint per token
   (`report.retain.evm`, `report.retain.evmCheckpoints`) through the optional
   `getRetainedEvm` and `putRetainedEvm` (`MemoryStore`; `FileStore` under
   `<root>/evm/`). The next read passes the blocks back, so a replaced block is
-  reported, and resumes each token from its checkpoint when the committed
-  log holds the checkpoint's head.
+  reported. A checkpoint (`EvmCheckpoint`, owner decision of 13 November
+  2026) is the accepted head entry's versionId, `<number>-<entry hash>`, with
+  the chain read that verified it: `chain` (CAIP-2), `contract`, `tokenId`,
+  `record` (the index of the record that accepted the head), `block` (the
+  finalized block's number and hash) and `class` (the trust class at that
+  block). It holds no entries; its other members (`anchor`, `accepted`,
+  `conflicting`, `latest`, `arrival`, `departed`) are record placements this
+  verifier keeps to continue the rules, and are PROVISIONAL. A value lacking
+  any member is not a checkpoint (`isEvmCheckpoint`) and is dropped. The
+  next read resumes a token after the checkpoint's record index only when
+  the committed log's entry N is the checkpoint's head
+  (`resumableCheckpoint`); otherwise it reads the token from its first
+  record. No checkpoint is made while a publication waits on an unverifiable
+  entry (P9.15). Checkpoints in the earlier format are not checkpoints and
+  are dropped.
 - **Commits (P9.12, P9.13).** An entry committed after the anchoring entry is
   verified as the local log and is never reported as accepted until a
   publication of it is final. When a token the providers read accepted an
@@ -1478,10 +1522,11 @@ state.original; // once "finalized": the Original verified from its tokens (anch
   naming the move entry and sat): it is the Bitcoin writer's anchoring
   inscription. `prepareEntryInscription` inscribes the log through the move
   entry on the sat, only once the departure is accepted and final on the
-  token left (`EVM_DEPARTURE_NOT_FINAL`). It verifies that log with
-  `verifyCommitted`, since a fresh reader of a package needs the chain the
-  Original is anchored on now (P7.14), and does not check the arrival
-  against its signer's later DID state (P9.29).
+  token left (`EVM_DEPARTURE_NOT_FINAL`). It then verifies that log through
+  the move entry as a local copy with `verifyCommitted` (P9.18, P9.29),
+  since a fresh reader of a package needs the chain the Original is anchored
+  on now (P7.14), and does not check the arrival against its signer's later
+  DID state (P9.29).
 - **Carried files (P7.15).** From the anchoring entry on, `carry` and
   `carriedDisclosure` accept only a checkpoint a token accepted at its
   finalized block (`CARRIER_NOT_ACCEPTED` otherwise, including when no token
