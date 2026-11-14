@@ -3880,11 +3880,10 @@
         4,
         5
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/evm-sdk.test.ts"
-      ],
-      "note": "Tested: the writer refuses while the departure is not yet accepted or not final on the chain left (packages/sdk/tests/unit/originals/evm-sdk.test.ts). Remains: a local copy that does not verify through the move entry is refused by the same pre-inscription check as any entry (packages/sdk/src/originals/bitcoin-writer.ts, verifyThrough), not exercised for a move."
+      ]
     },
     {
       "id": "C12-278",

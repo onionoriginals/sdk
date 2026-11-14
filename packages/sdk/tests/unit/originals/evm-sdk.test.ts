@@ -429,6 +429,11 @@ describe("moves (P9.28, P9.29)", () => {
     const own = await env.sdk.verifyCommitted(o.did, moved.original.checkpoint);
     expect(own.evm).toMatchObject({ localCopy: true });
     expect(own.history.status).toBe("valid");
+    // C12-341: with the departure final, a local copy that does not verify through the move entry is still refused
+    // before anything is signed, here because no author DID evidence verifies it (P9.18, P9.29).
+    const blind = OriginalsSDK.create({ store: env.store, authors: () => Promise.resolve(undefined), clock: clock(), evm: env.evm });
+    const refused = await rejects(prepareEntryInscription({ sdk: blind, did: o.did, fundingUtxos: [utxo], satSigner, changeAddress: "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080", feeRate: 2, network: "regtest", provider, clock: blocks, index: "ord-a", recoveryStore: null }), "ORIGINAL_NOT_VERIFIED");
+    expect(refused.message).toContain("no verified history for author DID");
     await expect(inscribe()).rejects.toThrow("not reached");
   });
 });
