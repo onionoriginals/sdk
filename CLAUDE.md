@@ -57,7 +57,9 @@ terminology. Cite spec rules by ID (P5.3, D4) in code comments, tests and PRs.
   either to an anchor. Anchoring on Bitcoin is terminal and happens once
   (P9.10, P9.16). Under experimental PR 59 an Original anchored on an EVM
   chain is not terminal: a move entry by the author takes it only up a layer,
-  to a proven chain or to Bitcoin, never sideways or down (P9.20, P9.28).
+  never sideways or down (P9.20, P9.28). PR 59 lists one chain, Base, a
+  proven chain, so an Original on Base moves only to Bitcoin (P14.22); the
+  class and layer model stays for chains a later revision lists.
 - **No witnesses.** Asset logs never activate VH witnesses (P9.8, P9.9;
   owner decision Q14). Unanchored ordering is claimed only; anchoring is how an
   Original gets ordering evidence and a single history: proven on Bitcoin,

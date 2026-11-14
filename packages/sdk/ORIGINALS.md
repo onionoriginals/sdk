@@ -1388,8 +1388,8 @@ serving 900,000 headers, which bounds a production cold start.
 
 ## EVM anchoring (EXPERIMENTAL; originals-spec PR 59)
 
-Built to originals-spec PR 59 at `1b5c484` (P9.18–P9.29, P14.18–P14.22),
-with the owner decisions of 13 November 2026.
+Built to originals-spec PR 59 at `ce19572` (P9.18–P9.29, P14.18–P14.22),
+with the owner decisions of 13 and 14 November 2026.
 P14.21 pins no anchor contract, so nothing here works without an
 `EvmAnchorPin` you supply, as for a contract you deployed on a local devnet,
 and nothing built on one supports an interoperability claim. Without the
@@ -1399,6 +1399,20 @@ with one verifies as unsupported, never invalid (section 14). The wording of
 the notices, the label names, the retained-state shape and the error codes
 are PROVISIONAL.
 
+**Chains (P14.22; owner decision, 14 November 2026).** The spec lists one
+chain, Base (`eip155:8453`, class `exit-protected`, a proven chain), and
+`EVM_CHAINS` holds that row alone. An `anchor` member naming any other chain,
+such as one the first list named (`eip155:1`, `eip155:4663` and the rest,
+removed on 14 November 2026), is unsupported, not invalid, and `create`
+refuses it (`EVM_CHAIN_NOT_LISTED`, `unsupported-profile`). An Original
+anchored on Base moves only to Bitcoin: a move entry naming Base again with
+another minter is a move within the same layer (`STATE_MOVE_LAYER`), and one
+naming an EVM chain the list does not hold is unsupported
+(`EVM_CHAIN_NOT_LISTED`). The trust classes, the layers and the rules for
+moves between EVM chains stay in the code for a later revision that lists
+another chain; `EvmAnchorPin.chains` lets an experiment list devnet chains
+of any class, as the tests and the anvil journeys do.
+
 ```ts
 import { MemoryStore, OriginalsSDK } from "@originals/sdk/originals";
 import { evmGenesisNotice } from "@originals/sdk/originals/evm";
@@ -1407,13 +1421,13 @@ const sdk = OriginalsSDK.create({
   store, authors,
   evm: {
     pin,                                     // { address, codeHash, chains?: [...EVM_CHAINS, devnet] }
-    providers: { "eip155:4663": [rpcA, { url: rpcB, name: "provider-b" }] }, // P9.22: one is enough; two are compared
+    providers: { "eip155:8453": [rpcA, { url: rpcB, name: "provider-b" }] }, // P9.22: one is enough; two are compared
     fetch,                                   // optional; the global fetch by default
   },
 });
 
 // P9.27: tell the author what the first chain means, then pass the same notice back.
-const anchor = { chain: "eip155:4663", minter: "0x…" };
+const anchor = { chain: "eip155:8453", minter: "0x…" };   // Base, the one chain P14.22 lists
 const notice = evmGenesisNotice(anchor, pin);       // permanent, upward only, trust class, chain lifetime,
                                                    // staged publications and cost, the minter fixed
 await sdk.create({ name, resource, author, signer, anchor, acknowledged: notice });
@@ -1510,7 +1524,8 @@ state.original; // once "finalized": the Original verified from its tokens (anch
   replaces the `anchor` member, or removes it for Bitcoin, and the token
   alias with the destination's alias. It returns the P9.29 notice, which
   refuses a move that is not upward and one whose arrival would exceed
-  350,000 bytes (`MOVE_ARRIVAL_TOO_LARGE`). A sideways or downward move is
+  350,000 bytes (`MOVE_ARRIVAL_TOO_LARGE`). Under the spec's list the only
+  move is from Base to Bitcoin (P14.22). A sideways or downward move is
   refused by the state rules (`STATE_MOVE_LAYER`), and a move before the
   token alias is listed with `STATE_MOVE_BEFORE_ANCHOR`.
   `move(did, { prepared, signer, acknowledged })` signs that exact draft
@@ -1537,5 +1552,6 @@ state.original; // once "finalized": the Original verified from its tokens (anch
 The unit tests (`tests/unit/originals/evm-sdk.test.ts`) run this workflow
 against a fake anchor contract. `bun run --cwd packages/sdk test:evm-anvil`
 runs it on two local anvil devnets, one of class `operator` and one of class
-`consensus`, through a move from the first to the second. It skips without
-`anvil`. Only local chains are used.
+`consensus`, listed through the pin's `chains`, through a move from the first
+to the second. It skips without `anvil`. Only local chains are used; real-chain
+evidence on Base is an owner release gate (D6).

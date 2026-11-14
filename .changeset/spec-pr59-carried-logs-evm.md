@@ -4,7 +4,7 @@
 ---
 
 Experimental: carried logs and EVM anchoring, built to originals-spec PR 59
-(`1b5c484`, with the owner decisions of 13 November 2026). Everything EVM is
+(`ce19572`, with the owner decisions of 13 and 14 November 2026). Everything EVM is
 unsupported by default, because the spec pins no anchor contract (P14.21).
 
 - Carried logs (P7.11–P7.16, P14.14–P14.17): `readCarriedFile`,
@@ -21,6 +21,16 @@ unsupported by default, because the spec pins no anchor contract (P14.21).
   adds a JSON-RPC reader and a writer that uses a wallet you supply, from
   `@originals/sdk/originals/evm`.
   - A writer refuses an `anchor` member unless it is given an `EvmAnchorPin`.
+  - Chains (P14.22; owner decision, 14 November 2026): `EVM_CHAINS` lists
+    one chain, Base (`eip155:8453`, `exit-protected`, proven). An `anchor`
+    member naming any other chain, including the seven the first list named
+    (Ethereum, Monad, Arbitrum One, Arc, Tempo, Robinhood Chain, Elysium), is
+    unsupported, not invalid, and a writer refuses it
+    (`EVM_CHAIN_NOT_LISTED`). An Original on Base moves only to Bitcoin: a
+    move entry naming Base again is a same-layer move (`STATE_MOVE_LAYER`),
+    and one naming an unlisted EVM chain is unsupported. The trust classes,
+    layers and moves between EVM chains are kept for a later revision; an
+    `EvmAnchorPin`'s `chains` can list devnet chains for an experiment.
   - `OriginalsSDK` takes an `evm` option (`pin`, `providers`, `fetch`).
     `create` takes `anchor` with the acknowledged P9.27 notice
     (`acknowledged`). `anchor()` lists the token alias. `mintEvm`,

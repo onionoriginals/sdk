@@ -177,8 +177,9 @@ reworded C12-260 row. They are kept below as found.
    single EVM version must run on all listed chains (this build uses
    `cancun`). The proxy at `0x4e59…956c` also has to exist on each chain. It
    is deployed by a pre-EIP-155 keyless transaction, which some nodes and
-   chains refuse, and chains with their own fee or transaction models (Tempo,
-   Arc) may not have it. *Fix:* P14.21 should name the EVM version as the
+   chains refuse, and chains with their own fee or transaction models may not
+   have it. (Since originals-spec PR 59 `ce19572`, P14.22 lists Base alone, so
+   this matters for the chains a later revision lists.) *Fix:* P14.21 should name the EVM version as the
    lowest common one. It should record, per P14.22 row, that the proxy
    exists, or name a fallback factory, and keep the address per chain if it
    must differ.

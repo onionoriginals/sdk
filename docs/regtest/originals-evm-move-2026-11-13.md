@@ -75,5 +75,5 @@ All three are fixed in `f84242ad` (`packages/vh/src/originals/verify.ts`,
   `EVM_ARRIVAL_ON_BITCOIN` rather than `MOVED_TO_BITCOIN`, because the token
   writer never reads the sat. It refuses correctly, but the message tells the
   writer to inscribe an arrival that already exists.
-- Public chains, Robinhood Chain, real wallets, and mainnet or testnet proof
-  are owner release gates.
+- Public chains (since originals-spec PR 59 `ce19572`, Base is the one listed
+  chain), real wallets, and mainnet or testnet proof are owner release gates.
