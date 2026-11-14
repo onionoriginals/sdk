@@ -100,6 +100,91 @@ intrinsic costs) is 22.7M for the 100 kB publish, 0.59M for `publishSameBody`,
 and 0.44M for a `body()` read of 100,000 bytes. Reads are free in `eth_call`,
 but they still count against a provider's `eth_call` gas cap.
 
+## Cost on Base mainnet (forked, 14 November 2026)
+
+Measured with `contracts/script/measure-base.ts`, which never broadcasts:
+
+- **Method.** Anvil 1.9.0 forked Base mainnet (chain 8453) at block
+  57,539,177 (`0x6f12f483…ebbc`), with `--network base` and
+  `--enable-tx-gas-limit`. Every transaction went to the fork, sent from
+  anvil's unlocked dev accounts. The contract was deployed through the proxy,
+  which exists on Base, at the README address with the README runtime code
+  hash. Publications went through the SDK writer (`prepareEvmPublication`,
+  `submitEvmPublication`, default `maxTxBytes` 60,000). The departure went
+  through `OriginalsSDK` (`prepareMove` to a sat, `move`, then the departure
+  publication). Bodies and metadata notes are random bytes, so they
+  compress about as poorly as real media.
+- **Pricing.** Read-only calls went to `https://mainnet.base.org` at block
+  57,539,287 (23:17 UTC). The L1 data fee is
+  `GasPriceOracle.getL1Fee(<the signed transaction bytes from the fork>)`.
+  The operator fee is `getOperatorFee(gasUsed)`, and it is 0:
+  `operatorFeeScalar` and `operatorFeeConstant` are both 0. The L2 fee is
+  `gasUsed × (base fee + priority fee)`, taken from `eth_feeHistory` over
+  1,024 blocks with the 10th, 50th and 90th reward percentiles:
+  - low: minimum base fee + median p10 tip = 0.00525 gwei
+  - typical: latest base fee + median p50 tip = 0.00615 gwei
+  - high: maximum base fee + median p90 tip = 0.0226 gwei
+
+  The base fee sat at Base's minimum of 0.005 gwei (Jovian `extraData`) over
+  the whole window. Its maximum was 0.0050347 gwei. `eth_gasPrice` was
+  0.006 gwei and `eth_maxPriorityFeePerGas` was 0.001 gwei. The oracle read:
+  `l1BaseFee` 0.531 gwei, `blobBaseFee` 0.032 gwei, `baseFeeScalar` 2,269,
+  `blobBaseFeeScalar` 1,055,762, Ecotone, Fjord, Isthmus and Jovian all
+  active, and `daFootprintGasScalar` 148.
+- **USD.** Coinbase's ETH-USD spot price was $1,740.07 at
+  2026-11-14T23:17Z. The L1 fee is a single reading and is the same in all
+  three bands.
+
+| Operation | Stored bytes | Txs | Gas used (largest tx) | L2 fee, typical | L1 data fee | Total, typical (low–high) |
+|---|---|---|---|---|---|---|
+| Deployment through the proxy | n/a | 1 | 1,972,407 | $0.0211 | $0.0005 | **$0.022** (0.019–0.078) |
+| `mint` | n/a | 1 | 68,595 | $0.0007 | <$0.0001 | **$0.0007** (0.0006–0.0027) |
+| First publication: genesis + anchoring entries, 1 kB body (`publish`) | 3,063 | 1 | 890,772 | $0.0095 | $0.0002 | **$0.0097** (0.0083–0.035) |
+| Edit, rename, small state (`publishSameBody`) | 1,034 | 1 | 358,314 | $0.0038 | $0.0001 | **$0.0039** (0.0034–0.014) |
+| Edit, 10 kB asset metadata (`publishSameBody`) | 11,053 | 1 | 2,527,259 | $0.0270 | $0.0009 | **$0.028** (0.024–0.100) |
+| Edit, 30 kB asset metadata (`publishSameBody`) | 31,053 | 1 | 6,912,348 | $0.0740 | $0.0025 | **$0.076** (0.066–0.27) |
+| First publication, 10 kB body (`publish`) | 12,063 | 1 | 2,838,378 | $0.0304 | $0.0009 | **$0.031** (0.027–0.11) |
+| First publication, 50 kB body (`publish`) | 52,062 | 1 | 11,604,530 | $0.124 | $0.0041 | **$0.128** (0.110–0.46) |
+| First publication, 100 kB body (`begin` + 2 `append` + `commit`) | 102,067 | 4 | 22,663,888 (13,199,094) | $0.243 | $0.0081 | **$0.251** (0.215–0.90) |
+| First publication, maximum (`begin` + 6 `append` + `commit`) | 349,992 | 8 | 77,143,740 (13,199,094) | $0.825 | $0.028 | **$0.853** (0.733–3.06) |
+| Move to Bitcoin: departure (`publishSameBody`, move entry) | 846 | 1 | 317,604 | $0.0034 | $0.0001 | **$0.0035** (0.0030–0.0125) |
+
+Findings:
+
+- **The per-transaction cap is 2^24 gas.** Base has enforced EIP-7825's
+  16,777,216 gas per transaction since its Azul upgrade (Base docs,
+  "Throughput and limits"). The block gas limit read from the chain was
+  40,000,000. In 60 recent blocks the largest gas limit any transaction
+  carried was 15,000,000, and none was over 2^24. On the fork, a single 100 kB `publish` needs
+  22,533,097 gas and is refused ("tx.gas_limit > resolved tx gas limit cap").
+  A public node's `eth_estimateGas` and `eth_call` do not show the cap, and
+  neither does anvil's `eth_estimateGas`.
+- **350 kB fits, in 8 transactions.** The largest transaction, a
+  60,000-byte `append`, uses 13.2M gas (13.21M estimated gas limit). That
+  is 79% of the cap and about 220 gas per stored byte. Its signed size is
+  60,217 bytes, under the usual 128 KiB pool limit. Under the cap one
+  `append` could carry about 75 kB, which would save one transaction
+  (about 21k gas) at 350 kB. The SDK's 60,000-byte default is sound for
+  Base. Its comment's assumptions (2^24 cap, 128 KiB pool) hold there.
+- **Execution dominates.** About 97% of the fee is L2 execution, mostly the
+  200 gas per byte of code deposit. The L1 data fee is about $0.008 per
+  100 kB, and there is no operator fee. Under Jovian, a 60 kB `append` has a
+  DA footprint of about 60,000 × 148 ≈ 8.9M gas. That is below its 13.2M
+  gasUsed, so the footprint does not limit it.
+- **The cost rides on the tip.** The base fee is pinned at the minimum, so
+  the low–high band comes almost entirely from the priority fee
+  percentiles, and from the ETH price.
+- **Comparison.** Earlier mainnet readings (10–11 November, recorded in the
+  owner's notes, not in this README) put a 100 kB publication at about
+  $0.11 on Robinhood Chain, which then charged no L1 data fee, and about
+  $19 on Bitcoin at 1 sat/vB. On Base today it is about $0.25 typical
+  ($0.22–0.90), roughly 2.3 times Robinhood and 1/75 of Bitcoin at
+  1 sat/vB. Re-measure rather than reuse any of these numbers.
+
+```sh
+bun contracts/script/measure-base.ts [--rpc <Base RPC>] [--out result.json]   # or BASE_RPC_URL; forks, never broadcasts
+```
+
 ## Commands
 
 ```sh
