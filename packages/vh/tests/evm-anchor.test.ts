@@ -18,7 +18,9 @@ import {
   parseBtcoAlias,
   parseEvmAlias,
   readInscribedEntries,
+  isEvmCheckpoint,
   resolveDidEvm,
+  resumableCheckpoint,
   updateOriginal,
   verifyOriginal,
   carriedDisclosure,
@@ -128,7 +130,7 @@ const missingEvidence = (r: OriginalsReport) => {
 };
 
 describe("P9.27 the report of an Original anchored on an EVM chain", () => {
-  test("C12-279: 'Report for an Original anchored on an EVM chain': names the chain, its class, the token, the finalized block and the providers; never a Bitcoin anchor", async () => {
+  test("C12-279 (changed at 1b5c484): 'Report for an Original anchored on an EVM chain': names the chain, its class, the token, the finalized block and the providers its read came from, marked uncorroborated when only one answered; never a Bitcoin anchor", async () => {
     const o = await original();
     const r = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log)]))]);
     expect(r.history.status).toBe("valid");
@@ -137,9 +139,15 @@ describe("P9.27 the report of an Original anchored on an EVM chain", () => {
     expect(r.ownership).toBeNull();
     expect(r.ordering).toBe("evm-attested-by-operator");
     const s = r.evm!.stretches[0];
-    expect(s).toMatchObject({ chain: ROBINHOOD, name: "Robinhood Chain", class: "operator", layer: "attested", token: o.alias, block: { number: 1000, hash: blockHash(ROBINHOOD, 1000) }, providers: ["rpc-a", "rpc-b"] });
+    expect(s).toMatchObject({ chain: ROBINHOOD, name: "Robinhood Chain", class: "operator", layer: "attested", token: o.alias, block: { number: 1000, hash: blockHash(ROBINHOOD, 1000) }, providers: ["rpc-a", "rpc-b"], uncorroborated: false });
     expect(s.caip19).toBe(`${ROBINHOOD}/erc721:${PIN.address}/${parseEvmAlias(o.alias).tokenId}`);
-    expect(r.evm!.owner).toMatchObject({ address: HOLDER, chain: ROBINHOOD, class: "operator", describes: "attested-by-operator", token: o.alias, block: { number: 1000 } });
+    expect(r.evm!.owner).toMatchObject({ address: HOLDER, chain: ROBINHOOD, class: "operator", describes: "attested-by-operator", token: o.alias, block: { number: 1000 }, providers: ["rpc-a", "rpc-b"], uncorroborated: false });
+    expect(s.uniqueness).toMatchObject({ status: "attested-by-operator", providers: ["rpc-a", "rpc-b"], uncorroborated: false });
+    // P9.22 (1b5c484): a read only one usable provider answered is named and marked uncorroborated.
+    const one = await verify(o.alice, [token(o.alias, [read(ROBINHOOD, [rec(0, o.log)])])]);
+    expect(one.evm!.stretches[0]).toMatchObject({ providers: ["rpc-a"], uncorroborated: true });
+    expect(one.evm!.owner).toMatchObject({ providers: ["rpc-a"], uncorroborated: true });
+    expect(one.evm!.stretches[0].uniqueness).toMatchObject({ providers: ["rpc-a"], uncorroborated: true });
     expect(s.entries).toEqual([o.anchoring.versionId]);
     expect(s.carried).toEqual([o.genesis.versionId, o.v2.versionId]);
     // The body of the anchoring publication is the current version, read from the chain (P9.25).
@@ -247,7 +255,7 @@ describe("P9.22 finality and providers", () => {
     expect(r.current).toBe(true); // the finalized state is current as of its block
   });
 
-  test("C12-245: 'Two providers report different hashes for the lower of their finalized blocks, or a different record, bytes or ownerOf': missing evidence until they agree", async () => {
+  test("C12-245 (changed at 1b5c484): 'Two usable providers report different hashes for the lower of their finalized blocks, or a different record, bytes or ownerOf': missing evidence until they agree; neither is dropped to reach a result", async () => {
     const o = await original();
     const e4 = await o.next(o.anchoring, { name: "Renamed" });
     const ok = [rec(0, o.log), rec(1, e4)];
@@ -261,6 +269,9 @@ describe("P9.22 finality and providers", () => {
       const r = await verify(o.alice, [token(o.alias, reads)], o.log);
       missingEvidence(r);
       expect(r.evm!.stretches[0].missing?.code).toBe("EVM_PROVIDERS_DISAGREE");
+      // P9.22: neither provider is dropped to settle it; both are named.
+      expect(r.evm!.stretches[0].excludedProviders).toEqual([]);
+      expect(r.evm!.stretches[0].providers).toEqual(["rpc-a", "rpc-b"]);
       expect(r.evm!.owner).toBeNull();
       expect(r.history.entries).toBe(2);
     }
@@ -324,7 +335,7 @@ describe("P9.23, P9.24 ownership and the anchor", () => {
     expect(s.conflicting).toEqual([expect.objectContaining({ index: 1, versionId: o.anchoring.versionId })]);
     expect(r.head).toBe(anchoringB.versionId);
     expect(r.fork).toBeNull();
-    expect(s.uniqueness).toEqual({ status: "attested-by-operator", chain: ROBINHOOD, class: "operator", block: { number: 1000, hash: blockHash(ROBINHOOD, 1000) }, providers: ["rpc-a", "rpc-b"] });
+    expect(s.uniqueness).toEqual({ status: "attested-by-operator", chain: ROBINHOOD, class: "operator", block: { number: 1000, hash: blockHash(ROBINHOOD, 1000) }, providers: ["rpc-a", "rpc-b"], uncorroborated: false });
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 
@@ -725,7 +736,7 @@ describe("P9.28, P9.29 moves", () => {
     expect(r.current).toBe(false);
   });
 
-  test("C12-289 (changed at a3ffdc1), C12-312: 'Departure final, destination chain cannot be read': departure finalized, destination unreachable; missing evidence; no arrival claimed; at most the entries before the first anchoring entry", async () => {
+  test("C12-289 (changed at a3ffdc1), C12-312 (changed at 1b5c484), C12-339: 'Departure final, destination chain cannot be read': departure finalized, destination unreachable; missing evidence; no arrival claimed or denied; at most the entries before the first anchoring entry; the entries through the move entry, though the chain left accepted them, not checked against the current anchor; no owner and nothing current", async () => {
     const m = await moving(ETHEREUM, 70);
     for (const dest of [[], [token(m.dest, two(ETHEREUM, null, { owner: CAROL }))]]) {
       const r = await verify(m.alice, [token(m.alias, two(ROBINHOOD, [rec(0, m.log), rec(1, m.move)])), ...dest], m.through);
@@ -737,6 +748,12 @@ describe("P9.28, P9.29 moves", () => {
       expect(r.evm!.stretches[1]).toMatchObject({ token: m.dest, status: "unverified", missing: expect.objectContaining({ code: expect.any(String) }) });
       expect(r.reasons).toContain("evm-destination-unreachable");
       expect(r.reasons).not.toContain("departed-not-arrived");
+      // P9.29, P7.14 (1b5c484): valid as of the checkpoint before the anchoring entry, with claimed ordering.
+      expect(r.head).toBe(m.v2.versionId);
+      expect(r.ordering).toBe("claimed");
+      expect(r.state?.anchor).toEqual({ chain: ROBINHOOD, minter: A });
+      expect(r.evm!.notCheckedAgainstAnchor).toEqual([m.anchoring.versionId, m.move.versionId]);
+      expect(r.current).toBe(false);
     }
   });
 
@@ -848,16 +865,21 @@ describe("P3.9, P14.18 did:evm resolution", () => {
 });
 
 describe("originals-spec PR 59 a3ffdc1: P9.22 providers and finality", () => {
-  test("C12-325: 'Provider that cannot serve state at the finalized block because finality trails its retained state': not usable for that read; missing evidence", async () => {
+  test("C12-325 (changed at 1b5c484): 'Provider that cannot serve state at the finalized block because finality trails its retained state': not usable; dropped, and the reads of the other usable providers stand; missing evidence only when none remains", async () => {
     const o = await original(ROBINHOOD, 101);
     const gone: EvmProviderRead = { ...read(ROBINHOOD, null, { provider: "rpc-b", codeHash: null, owner: null }), stateUnavailable: true };
-    // Beside a provider that served it: still missing, never decided on the other provider alone.
+    // Beside a provider that served it: dropped, and the other's read stands, uncorroborated (owner decision, 13 November 2026).
     const r = await verify(o.alice, [token(o.alias, [read(ROBINHOOD, [rec(0, o.log)]), gone])], o.log);
-    missingEvidence(r);
-    expect(r.evm!.stretches[0].missing?.code).toBe("EVM_STATE_UNAVAILABLE");
-    // Never unsupported for its absent code, and never not anchored.
-    expect(r.evm!.status).not.toBe("unsupported");
-    expect(r.history.entries).toBe(2);
+    expect(r.evm?.status).toBe("anchored");
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.evm!.stretches[0]).toMatchObject({ providers: ["rpc-a"], uncorroborated: true, excludedProviders: [{ provider: "rpc-b", reason: "state-unavailable" }] });
+    expect(r.evm!.stretches[0].missing).toBeUndefined();
+    // Alone, it leaves no usable provider: missing evidence, never unsupported for its absent code, never not anchored.
+    const alone = await verify(o.alice, [token(o.alias, [gone])], o.log);
+    missingEvidence(alone);
+    expect(alone.evm!.stretches[0].missing?.code).toBe("EVM_STATE_UNAVAILABLE");
+    expect(alone.evm!.status).not.toBe("unsupported");
+    expect(alone.history.entries).toBe(2);
   });
 
   test("C12-326: 'Provider read at its own, later finalized block, compared with the other provider at the lower block': not evidence for the comparison", async () => {
@@ -878,7 +900,7 @@ describe("originals-spec PR 59 a3ffdc1: P9.22 providers and finality", () => {
     expect(first.current).toBe(true);
     const retained = { original: first.retain.original!, authors: first.retain.authors, anchor: first.retain.anchor! };
     const checkpoints = first.retain.evmCheckpoints!;
-    expect(checkpoints).toEqual([expect.objectContaining({ token: o.alias, records: 2, block: { number: 1000, hash: blockHash(ROBINHOOD, 1000) }, head: e4.versionId })]);
+    expect(checkpoints).toEqual([expect.objectContaining({ chain: ROBINHOOD, contract: PIN.address, tokenId: String(parseEvmAlias(o.alias).tokenId), record: 1, block: { number: 1000, hash: blockHash(ROBINHOOD, 1000) }, head: e4.versionId, class: "operator" })]);
     // Later, at block 1200, with no evidence about block 1000: finality is assumed; nothing is re-read.
     const assumed = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log), rec(1, e4)], { finalized: 1200 }))], undefined, { retained: first.retain.evm! });
     expect(assumed.evm!.stretches[0].finality).toBe("unchecked");
@@ -901,40 +923,140 @@ describe("originals-spec PR 59 a3ffdc1: P9.22 providers and finality", () => {
   });
 });
 
-describe("originals-spec PR 59 a3ffdc1: P9.25 checkpoints", () => {
-  test("C12-328: 'Token with many records, verifier holding a checkpoint': MAY resume from the checkpoint and read only later records; no record cap", async () => {
-    const o = await original(ROBINHOOD, 104);
+describe("P9.25 checkpoints (originals-spec PR 59 1b5c484)", () => {
+  /** An Original with three publications after its anchor; the first read verifies through e5 at record 2. */
+  async function checkpointed(seed: number) {
+    const o = await original(ROBINHOOD, seed);
     const e4 = await o.next(o.anchoring, { name: "Four" });
     const e5 = await o.next(e4, { name: "Five" });
     const e6 = await o.next(e5, { name: "Six" });
     const r0 = rec(0, o.log);
     const early = [r0, rec(1, e4), sameBody(2, e5, r0)];
     const first = await verify(o.alice, [token(o.alias, two(ROBINHOOD, early))]);
-    expect(first.head).toBe(e5.versionId);
     const [cp] = first.retain.evmCheckpoints!;
-    expect(cp).toMatchObject({ token: o.alias, records: 3, head: e5.versionId, anchor: { index: 0, versionId: o.anchoring.versionId }, departed: false });
-    // Later: only records 3 and on are read, at a later block; record 3 refers to record 0's body.
-    const later = [sameBody(3, e6, r0, TS0 + 600)];
-    const resumed = await verifyOriginal({
-      log: [...o.log, e4, e5], authors: [o.alice.evidence()], now: NOW, bytes: (d) => describedBytes(d),
-      evm: { pin: PIN, tokens: [token(o.alias, two(ROBINHOOD, later, { finalized: 1300 }).map((x) => ({ ...x, from: 3 })))], checkpoints: [cp] },
+    /** The records after the checkpoint's record index, read at a later block. */
+    const later = (records: EvmRecord[], from = 3) => [token(o.alias, two(ROBINHOOD, records, { finalized: 1300 }).map((x) => ({ ...x, from })))];
+    const resume = (log: LogEntry[], tokens: EvmTokenEvidence[], checkpoints: unknown[] = [cp]) =>
+      verifyOriginal({ log, authors: [o.alice.evidence()], now: NOW, bytes: (d) => describedBytes(d), evm: { pin: PIN, tokens, checkpoints: checkpoints as typeof cp[] } });
+    return { ...o, e4, e5, e6, r0, early, first, cp, later, resume };
+  }
+
+  test("C12-328 (changed at 1b5c484): 'Token with many records, verifier holding a checkpoint and a supplied log whose entry N has the checkpoint's versionId': MAY resume and read only the records after its record index; no record cap", async () => {
+    const c = await checkpointed(104);
+    expect(c.first.head).toBe(c.e5.versionId);
+    // P9.25: the head entry's versionId, the chain (CAIP-2), the token (contract and token ID), the accepting record's
+    // index, the finalized block's number and hash, and the chain's class at that block. No entries.
+    expect(c.cp).toMatchObject({
+      head: c.e5.versionId, chain: ROBINHOOD, contract: PIN.address, tokenId: String(parseEvmAlias(c.alias).tokenId), record: 2,
+      block: { number: 1000, hash: blockHash(ROBINHOOD, 1000) }, class: "operator",
     });
+    expect(JSON.stringify(c.cp)).not.toContain('"proof"');
+    // Later: only records 3 and on are read, at a later block; record 3 refers to record 0's body.
+    const resumed = await c.resume([...c.log, c.e4, c.e5], c.later([sameBody(3, c.e6, c.r0, TS0 + 600)]));
     expect(resumed.history.status, JSON.stringify(resumed.history.failure)).toBe("valid");
-    expect(resumed.head).toBe(e6.versionId);
+    expect(resumed.head).toBe(c.e6.versionId);
     expect(resumed.current, JSON.stringify(resumed.reasons)).toBe(true);
     const s = resumed.evm!.stretches[0];
-    expect(s.resumedFrom).toEqual({ records: 3, block: cp.block });
-    expect(s.anchor).toMatchObject({ index: 0, versionId: o.anchoring.versionId });
-    expect(s.accepted.map((p) => [p.index, p.versionId])).toEqual([[1, e4.versionId], [2, e5.versionId], [3, e6.versionId]]);
-    expect(resumed.retain.evmCheckpoints).toEqual([expect.objectContaining({ records: 4, head: e6.versionId, block: { number: 1300, hash: blockHash(ROBINHOOD, 1300) } })]);
-    // A later read with no checkpoint, or no copy holding its head, is missing evidence, never decided on what was read.
-    const reads = two(ROBINHOOD, later, { finalized: 1300 }).map((x) => ({ ...x, from: 3 }));
-    const none = await verify(o.alice, [token(o.alias, reads)], [...o.log, e4, e5]);
+    expect(s.resumedFrom).toEqual({ head: c.e5.versionId, record: 2, block: c.cp.block });
+    expect(s.anchor).toMatchObject({ index: 0, versionId: c.anchoring.versionId });
+    expect(s.accepted.map((p) => [p.index, p.versionId])).toEqual([[1, c.e4.versionId], [2, c.e5.versionId], [3, c.e6.versionId]]);
+    expect(resumed.retain.evmCheckpoints).toEqual([expect.objectContaining({ record: 3, head: c.e6.versionId, block: { number: 1300, hash: blockHash(ROBINHOOD, 1300) } })]);
+    // Entries after line N in the supplied log are not evidence; the later records are.
+    const e6b = await c.next(c.e5, { name: "Six, never published" });
+    const extra = await c.resume([...c.log, c.e4, c.e5, e6b], c.later([sameBody(3, c.e6, c.r0, TS0 + 600)]));
+    expect(extra.head).toBe(c.e6.versionId);
+    // A later read with no checkpoint is missing evidence, never decided on what was read.
+    const none = await c.resume([...c.log, c.e4, c.e5], c.later([sameBody(3, c.e6, c.r0, TS0 + 600)]), []);
     missingEvidence(none);
     expect(none.evm!.stretches[0].missing?.code).toBe("EVM_RECORDS_UNREADABLE");
-    const nocopy = await verifyOriginal({ authors: [o.alice.evidence()], now: NOW, bytes: (d) => describedBytes(d), evm: { pin: PIN, tokens: [token(o.alias, reads)], checkpoints: [cp] } });
-    expect(nocopy.evm?.status).not.toBe("anchored");
-    expect(nocopy.current).toBe(false);
+  });
+
+  test("C12-328: a checkpoint's record index is the record that accepted the head, not the count read: a rejected record after it is read again", async () => {
+    const o = await original(ROBINHOOD, 106);
+    const e4 = await o.next(o.anchoring, { name: "Four" });
+    const e5 = await o.next(e4, { name: "Five" });
+    const stray = await o.next(o.v2, { name: "Does not extend the head" });
+    const first = await verify(o.alice, [token(o.alias, two(ROBINHOOD, [rec(0, o.log), rec(1, e4), rec(2, stray)]))]);
+    const [cp] = first.retain.evmCheckpoints!;
+    expect(cp).toMatchObject({ head: e4.versionId, record: 1 });
+    const r = await verifyOriginal({
+      log: [...o.log, e4], authors: [o.alice.evidence()], now: NOW, bytes: (d) => describedBytes(d),
+      evm: { pin: PIN, tokens: [token(o.alias, two(ROBINHOOD, [rec(2, stray), rec(3, e5)], { finalized: 1300 }).map((x) => ({ ...x, from: 2 })))], checkpoints: [cp] },
+    });
+    expect(r.head).toBe(e5.versionId);
+    expect(r.evm!.stretches[0].ignored).toContainEqual(expect.objectContaining({ index: 2, reason: "does-not-extend-head" }));
+  });
+
+  test("C12-349: 'Checkpoint with a supplied log that ends before the checkpoint's versionId, or whose entry N has another entry hash': not resumed from; the token read from its first record", async () => {
+    const c = await checkpointed(107);
+    const other5 = await c.next(c.e4, { name: "Another five" });
+    const records = c.later([sameBody(3, c.e6, c.r0, TS0 + 600)]);
+    for (const log of [[...c.log, c.e4], [...c.log, c.e4, other5]]) {
+      // A read that resumed anyway is not evidence of the earlier records: missing evidence.
+      const r = await c.resume(log, records);
+      missingEvidence(r);
+      expect(r.evm!.stretches[0].missing?.code).toBe("EVM_CHECKPOINT_UNUSABLE");
+      expect(r.evm!.stretches[0].resumedFrom).toBeUndefined();
+      // Read from the first record, the checkpoint is not needed and the token decides.
+      const full = await c.resume(log, [token(c.alias, two(ROBINHOOD, [...c.early, sameBody(3, c.e6, c.r0, TS0 + 600)], { finalized: 1300 }))]);
+      expect(full.head).toBe(c.e6.versionId);
+      expect(full.evm!.stretches[0].resumedFrom).toBeUndefined();
+      expect(full.current, JSON.stringify(full.reasons)).toBe(true);
+    }
+    // The resumer's choice (P9.25), exported for readers: only a log whose entry N has the head's versionId.
+    expect(resumableCheckpoint([c.cp], c.alias, [...c.log, c.e4, c.e5])).toBe(c.cp);
+    expect(resumableCheckpoint([c.cp], c.alias, [...c.log, c.e4, c.e5, c.e6])).toBe(c.cp);
+    expect(resumableCheckpoint([c.cp], c.alias, [...c.log, c.e4])).toBeUndefined();
+    expect(resumableCheckpoint([c.cp], c.alias, [...c.log, c.e4, other5])).toBeUndefined();
+    // A versionId found at another line is not entry N.
+    expect(resumableCheckpoint([c.cp], c.alias, [c.genesis, c.e4, c.e5] as LogEntry[])).toBeUndefined();
+  });
+
+  test("C12-350: 'Retained result lacking the head versionId, the chain, the contract address or token ID, the record index, the finalized block's number or hash, or the trust class at that block': not a checkpoint; not resumed from", async () => {
+    const c = await checkpointed(108);
+    expect(isEvmCheckpoint(c.cp)).toBe(true);
+    const drop = (path: string[]): unknown => {
+      const x = structuredClone(c.cp) as unknown as Record<string, Record<string, unknown>>;
+      if (path.length === 1) delete (x as Record<string, unknown>)[path[0]];
+      else delete x[path[0]][path[1]];
+      return x;
+    };
+    for (const path of [["head"], ["chain"], ["contract"], ["tokenId"], ["record"], ["block", "number"], ["block", "hash"], ["block"], ["class"]]) {
+      const broken = drop(path);
+      expect(isEvmCheckpoint(broken), path.join(".")).toBe(false);
+      const r = await c.resume([...c.log, c.e4, c.e5], c.later([sameBody(3, c.e6, c.r0, TS0 + 600)]), [broken]);
+      missingEvidence(r);
+      expect(r.evm!.stretches[0].resumedFrom).toBeUndefined();
+      // Nor is it retained for later (P9.25).
+      expect(r.retain.evmCheckpoints ?? []).toEqual([]);
+    }
+    // Members that do not agree with one another are not a checkpoint either: a token ID of another Original.
+    expect(isEvmCheckpoint({ ...c.cp, tokenId: "1" })).toBe(true); // form alone; the token must still be this one's
+    const elsewhere = await c.resume([...c.log, c.e4, c.e5], c.later([sameBody(3, c.e6, c.r0, TS0 + 600)]), [{ ...c.cp, tokenId: "1" }]);
+    missingEvidence(elsewhere);
+  });
+
+  test("C12-351: 'Verification during which a publication waits on an unverifiable entry': no checkpoint made", async () => {
+    const o = await original(ROBINHOOD, 109);
+    const older = o.alice.entries.slice();
+    await o.alice.rotate([{ fragment: "orig", signer: o.key }, { fragment: "spare", signer: seeded(110) }]);
+    const blocking = await updateOriginal(o.anchoring, { versionTime: o.at(), name: "Names a version the reader lacks", author: o.alice.ref("orig"), sign: o.alice.signer(o.key, "orig"), evm: PIN });
+    const waiting = await o.next(o.anchoring, { name: "Valid, later in chain order" });
+    const r = await verifyOriginal({
+      authors: [o.alice.evidence(older)], now: NOW, bytes: (d) => describedBytes(d),
+      evm: { pin: PIN, tokens: [token(o.alias, two(ROBINHOOD, [rec(0, o.log), rec(1, blocking), rec(2, waiting)]))] },
+    });
+    expect(r.head).toBe(o.anchoring.versionId);
+    expect(r.evm!.stretches[0].ignored).toContainEqual(expect.objectContaining({ index: 2, reason: "waiting-for-earlier-unverifiable" }));
+    expect(r.notices).toContain("publications-waiting");
+    expect(r.retain.evmCheckpoints ?? []).toEqual([]);
+    // Once nothing waits, a checkpoint is made.
+    const fresh = await verifyOriginal({
+      authors: [o.alice.evidence()], now: NOW, bytes: (d) => describedBytes(d),
+      evm: { pin: PIN, tokens: [token(o.alias, two(ROBINHOOD, [rec(0, o.log), rec(1, blocking), rec(2, waiting)]))] },
+    });
+    expect(fresh.head).toBe(blocking.versionId);
+    expect(fresh.retain.evmCheckpoints).toEqual([expect.objectContaining({ head: blocking.versionId, record: 1 })]);
   });
 });
 
@@ -1159,8 +1281,8 @@ describe("originals-spec PR 59: tokenURI and carried files from publications", (
   });
 });
 
-describe("the writer's own committed log, before publishing (P9.18 read through P9.20; EXPERIMENTAL)", () => {
-  test("C12-28: 'After anchoring, author-signed entry not inscribed on the sat': with `localCopy` and no token read, the local log verifies whole, unverified on the chain and never current", async () => {
+describe("the writer's own committed log, before publishing (P9.18; owner decision, 13 November 2026)", () => {
+  test("C12-28, C12-332: 'Writer checking its committed log before publishing an entry, the entry not yet on the chain': with `localCopy` and no token read, verified whole as a local copy, unverified on the chain and never current", async () => {
     const o = await original(ROBINHOOD, 140);
     const later = await o.next(o.anchoring, { name: "Harbor, later" });
     const log = [...o.log, later];
@@ -1171,10 +1293,31 @@ describe("the writer's own committed log, before publishing (P9.18 read through 
     missingEvidence(r);
     expect(r.ordering).toBe("claimed");
     expect(r.evm?.owner).toBeNull();
+    // P9.18: the result says it is a local copy, so it is never mistaken for a reader's result.
+    expect(r.evm).toMatchObject({ localCopy: true, status: "unverified" });
+    expect(r.reasons).toContain("local-copy");
     // Without the opt-in, as for a carried log or a package (P7.14): at most the entries before the anchoring entry.
     const copy = await verify(o.alice, [], log);
     expect(copy.history.entries).toBe(2);
     expect(copy.head).toBe(o.v2.versionId);
+    expect(copy.evm?.localCopy).toBe(false);
+  });
+
+  test("C12-333: 'Local-copy result placed in a report given to a reader, or presented as anchored or current': never; whatever the token read shows, a result with one is no local copy", async () => {
+    const o = await original(ROBINHOOD, 143);
+    const later = await o.next(o.anchoring, { name: "Harbor, later" });
+    for (const tokens of [[], [token(o.alias, two(ROBINHOOD, [rec(0, o.log)]))], [token(o.alias, two(ROBINHOOD, [rec(0, o.log), rec(1, later)]))]]) {
+      const r = await verifyOriginal({ log: [...o.log, later], authors: [o.alice.evidence()], now: NOW, bytes: (d) => describedBytes(d), evm: { pin: PIN, tokens, localCopy: true } });
+      if (r.evm!.localCopy) {
+        expect(r.evm!.status).toBe("unverified");
+        expect(r.current).toBe(false);
+        expect(r.ordering).toBe("claimed");
+        expect(r.reasons).toContain("local-copy");
+      } else {
+        expect(r.evm!.status).toBe("anchored");
+        expect(r.reasons).not.toContain("local-copy");
+      }
+    }
   });
 
   test("P7.14: a token read decides even with `localCopy`: the local log is never preferred to the anchor", async () => {
@@ -1190,5 +1333,96 @@ describe("the writer's own committed log, before publishing (P9.18 read through 
     const r = await verifyOriginal({ log: o.log, authors: [o.alice.evidence()], now: NOW, evm: { pin: null, tokens: [], localCopy: true } });
     expect(r.evm?.status).toBe("unsupported");
     expect(r.validAsOf).toBeNull();
+  });
+});
+
+describe("P9.22 usable providers (originals-spec PR 59 1b5c484; owner decision, 13 November 2026)", () => {
+  test("C12-334: 'One provider configured, passing P9.21's checks and serving the contract's state at the finalized block': verified on its read; the report names it and marks the read uncorroborated", async () => {
+    const o = await original(ROBINHOOD, 120);
+    const r = await verify(o.alice, [token(o.alias, [read(ROBINHOOD, [rec(0, o.log)], { provider: "only" })])]);
+    expect(r.history.status).toBe("valid");
+    expect(r.evm?.status).toBe("anchored");
+    expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+    expect(r.evm!.stretches[0]).toMatchObject({ providers: ["only"], uncorroborated: true, excludedProviders: [], block: { number: 1000 } });
+    expect(r.evm!.owner).toMatchObject({ providers: ["only"], uncorroborated: true });
+  });
+
+  test("C12-335: 'Two providers configured, one reporting another chain ID or block 0 hash, or unable to serve state at the finalized block': that provider dropped, its answers not evidence; the other's read stands, named and marked uncorroborated", async () => {
+    const o = await original(ROBINHOOD, 121);
+    const good = read(ROBINHOOD, [rec(0, o.log)], { provider: "rpc-a" });
+    // Each failing provider would otherwise disagree with the good one: its answers are not evidence.
+    const lying = [rec(0, o.genesis)];
+    const cases: Array<[EvmProviderRead, string]> = [
+      [read(ROBINHOOD, lying, { provider: "rpc-b", chainId: 1n }), "wrong-chain-id"],
+      [read(ROBINHOOD, lying, { provider: "rpc-b", genesisHash: "0x" + "ee".repeat(32) }), "wrong-genesis-hash"],
+      // Its finalized block is the lower one, but it cannot serve state there: dropped, and not the common block.
+      [{ ...read(ROBINHOOD, null, { provider: "rpc-b", finalized: 990, codeHash: null, owner: null }), stateUnavailable: true }, "state-unavailable"],
+      // Records it could not read from state at the block, the code being the pinned code.
+      [read(ROBINHOOD, null, { provider: "rpc-b" }), "state-unavailable"],
+    ];
+    for (const [bad, reason] of cases) {
+      for (const reads of [[good, bad], [bad, good]]) {
+        const r = await verify(o.alice, [token(o.alias, reads)], o.log);
+        expect(r.evm?.status, reason).toBe("anchored");
+        expect(r.head).toBe(o.anchoring.versionId);
+        expect(r.evm!.stretches[0]).toMatchObject({ providers: ["rpc-a"], uncorroborated: true, excludedProviders: [{ provider: "rpc-b", reason }], block: { number: 1000 } });
+        expect(r.evm!.owner).toMatchObject({ address: HOLDER, providers: ["rpc-a"], uncorroborated: true });
+        expect(r.current, JSON.stringify(r.reasons)).toBe(true);
+      }
+    }
+  });
+
+  test("C12-336: 'Every configured provider fails P9.21's checks or cannot serve state at the finalized block': missing evidence", async () => {
+    const o = await original(ROBINHOOD, 122);
+    const unavailable = (provider: string): EvmProviderRead => ({ ...read(ROBINHOOD, null, { provider, codeHash: null, owner: null }), stateUnavailable: true });
+    const cases: Array<[EvmProviderRead[], string]> = [
+      [[unavailable("rpc-a"), unavailable("rpc-b")], "EVM_STATE_UNAVAILABLE"],
+      [[read(ROBINHOOD, [rec(0, o.log)], { provider: "rpc-a", chainId: 1n }), unavailable("rpc-b")], "EVM_STATE_UNAVAILABLE"],
+      [[read(ROBINHOOD, [rec(0, o.log)], { provider: "rpc-a", chainId: 1n }), read(ROBINHOOD, [rec(0, o.log)], { provider: "rpc-b", genesisHash: "0x" + "ee".repeat(32) })], "EVM_NO_PROVIDER"],
+      [[read(ROBINHOOD, null, { provider: "rpc-a" })], "EVM_RECORDS_UNREADABLE"],
+    ];
+    for (const [reads, code] of cases) {
+      const r = await verify(o.alice, [token(o.alias, reads)], o.log);
+      missingEvidence(r);
+      expect(r.evm!.stretches[0].missing?.code).toBe(code);
+      expect(r.evm!.stretches[0].providers).toEqual([]);
+      expect(r.evm!.owner).toBeNull();
+      expect(r.history.entries).toBe(2);
+    }
+  });
+});
+
+describe("P9.24 after a finality failure (originals-spec PR 59 1b5c484)", () => {
+  test("C12-337: 'Anchor on a chain of any trust class, after a finality failure on that chain': uniqueness not established, never established or attested", async () => {
+    const seeds: Record<string, number> = { [ROBINHOOD]: 130, [TEMPO]: 131, [ETHEREUM]: 132, [BASE]: 133 };
+    for (const chain of [ROBINHOOD, TEMPO, ETHEREUM, BASE]) {
+      const o = await original(chain, seeds[chain]);
+      const retained = [{ chain, number: 1000, hash: blockHash(chain, 1000) }];
+      const held = await verify(o.alice, [token(o.alias, two(chain, [rec(0, o.log)]))], undefined, { retained });
+      expect(held.evm!.stretches[0].uniqueness.status, chain).not.toBe("not-established");
+      const failed = await verify(o.alice, [token(o.alias, two(chain, [rec(0, o.log)], { finalized: 1200, blockHashes: [{ number: 1000, hash: blockHash(chain, 1000, 4) }] }))], undefined, { retained });
+      expect(failed.evm!.stretches[0].finality, chain).toBe("failed");
+      expect(failed.evm!.stretches[0].uniqueness, chain).toEqual({ status: "not-established" });
+      expect(failed.current).toBe(false);
+    }
+  });
+});
+
+describe("P9.29 after an unconfirmed move (originals-spec PR 59 1b5c484)", () => {
+  test("C12-338: 'Moved Original with publications after the arrival, a chain it left cannot be read': those entries verified as part of the log and reported as following an unconfirmed move; none current", async () => {
+    const m = await moving(ETHEREUM, 134);
+    const after = await m.next(m.move, { name: "Published after the arrival" });
+    const r = await verify(m.alice, [
+      token(m.alias, two(ROBINHOOD, null)),
+      token(m.dest, two(ETHEREUM, [rec(0, m.through, TS0 + 600), rec(1, after, TS0 + 700)], { owner: CAROL })),
+    ], [...m.through, after]);
+    expect(r.history).toMatchObject({ status: "valid", entries: 5 });
+    expect(r.head).toBe(after.versionId);
+    expect(r.evm).toMatchObject({ move: "unconfirmed", owner: null });
+    expect(r.evm!.stretches[1]).toMatchObject({ chain: ETHEREUM, arrival: true, entries: [after.versionId] });
+    expect(r.evm!.stretches[1].accepted.map((p) => p.versionId)).toEqual([after.versionId]);
+    expect(r.reasons).toContain("move-unconfirmed");
+    expect(r.current).toBe(false);
+    expect(r.validAsOf?.checkpoint).toBe(after.versionId);
   });
 });

@@ -265,16 +265,18 @@ export interface EvmProviderRead {
    */
   records: EvmRecord[] | null;
   /**
-   * P9.25 (PR 59 a3ffdc1, MAY): the first record index read, when the reader
-   * resumed from a retained checkpoint (`EvmCheckpoint.records`). Default 0:
-   * every record. A verifier accepts a later start only with that checkpoint.
+   * P9.25 (MAY): the first record index read, when the reader resumed from a
+   * retained checkpoint: its `record` + 1. Default 0: every record. A
+   * verifier accepts a later start only with that checkpoint and a log that
+   * reaches its head (`resumableCheckpoint`).
    */
   from?: number;
   /**
-   * P9.22 (PR 59 a3ffdc1): the provider could not serve the contract's state
-   * at `block`, as when finality trails the state it keeps. It is not usable
-   * for that read, and its failure is missing evidence. Its other fields then
-   * carry no state.
+   * P9.22 (PR 59 1b5c484): the provider could not serve the contract's state
+   * at `block`, as when finality trails the state it keeps, or its records
+   * could not be read there. It is not usable: the verifier drops it, its
+   * answers are not evidence, and the reads of the providers that remain
+   * usable stand. Its other fields then carry no state.
    */
   stateUnavailable?: boolean;
   /** Records seen above `block` (observed, never accepted; P9.22), for pending labels. */
@@ -310,41 +312,61 @@ export interface RetainedEvmBlock {
 }
 
 /**
- * P9.25 (PR 59 a3ffdc1, MAY): a retained verified checkpoint of one token, from
- * which a verifier resumes and reads only later records. It is the accepted
- * head at a record index and the finalized block it was read at, with what
- * the verifier needs to continue the P9.13-P9.15 rules from there without
- * re-reading earlier records: the anchor (or arrival), what was accepted
- * after it, each with the timestamp its record holds, and the greatest
- * record timestamp so far (P9.20). PROVISIONAL shape; the spec defines no
- * format. A checkpoint resting on a block the chain replaced is discarded
- * (P9.22). The verifier resumes only with a copy of the log that holds the
- * checkpoint's head (P7.14: the copy is checked against the checkpoint, never
- * preferred to the token).
+ * P9.25 (PR 59 1b5c484, MAY; owner decision, 13 November 2026): a retained
+ * verified checkpoint of one token, from which a verifier resumes and reads
+ * only the records after its record index.
+ *
+ * The spec's minimum members: the accepted head entry's versionId
+ * (`<number>-<entry hash>`, which pins every earlier entry), and the chain
+ * read that verified it: the chain (CAIP-2), the token as the contract address
+ * and the token ID, the index of the record that accepted the head entry, the
+ * number and hash of the finalized block it was read at (P9.22), and the
+ * chain's trust class at that block (P9.27). A retained result lacking any of
+ * them is not a checkpoint (`isEvmCheckpoint`). A checkpoint holds no entries:
+ * whoever resumes supplies the log, whose entry N must have the head's
+ * versionId (`resumableCheckpoint`); otherwise the token is read from its
+ * first record. None is made while a publication waits on an unverifiable
+ * entry (P9.15), and one resting on a block the chain replaced is discarded
+ * (P9.22).
+ *
+ * PROVISIONAL, beyond those members: what this verifier keeps to continue the
+ * P9.13-P9.15 rules without re-reading earlier records, which the spec leaves
+ * to the implementation: the anchor (or arrival), the publications accepted
+ * after it and the conflicting anchors through the record index, each with the
+ * timestamp its record holds, the greatest record timestamp through it
+ * (P9.20), and whether the head is a move entry. They are record placements,
+ * never entries.
  */
 export interface EvmCheckpoint {
-  chain: string;
-  /** The token alias (P14.18). */
-  token: string;
-  /** The number of records read: the next index a resumed read starts at. */
-  records: number;
-  /** The finalized block the checkpoint was read at (P9.22). */
-  block: { number: number; hash: string };
-  /** The accepted head's versionId. */
+  /** The accepted head entry's versionId, `<number>-<entry hash>` (P9.25). */
   head: string;
-  /** Whether the anchor is an arrival (P9.29). */
-  arrival: boolean;
+  /** The chain, as its CAIP-2 ID (P9.25, [S31]). */
+  chain: string;
+  /** The anchor contract's address, lowercase 0x hex (P9.25, P14.21). */
+  contract: string;
+  /** The token ID, decimal (P9.25, P14.19). */
+  tokenId: string;
+  /** The index of the record that accepted the head entry (P9.25). A resumed read starts after it. */
+  record: number;
+  /** The finalized block the read was made at (P9.22, P9.25). */
+  block: { number: number; hash: string };
   /**
-   * The anchor or arrival, the publications accepted after it in index order,
-   * and the conflicting anchors: record index, versionId, the timestamp the
-   * record holds (s) and its inscription time (ms; P9.20).
+   * The chain's trust class at that block (P9.25, P9.27): the class this
+   * verifier's revision of P14.22 gave it when the block was read.
+   * PROVISIONAL: how the history of classes is kept and resolved is open (D6).
    */
+  class: TrustClass;
+  /** PROVISIONAL: whether the anchor is an arrival (P9.29). */
+  arrival: boolean;
+  /** PROVISIONAL: the anchor or arrival, record index, versionId, record timestamp (s) and inscription time (ms; P9.20). */
   anchor: EvmCheckpointPlacement;
+  /** PROVISIONAL: the publications accepted after it, through `record`, in index order. */
   accepted: EvmCheckpointPlacement[];
+  /** PROVISIONAL: the conflicting anchors at or below `record` (P9.16, P9.24). */
   conflicting: EvmCheckpointPlacement[];
-  /** The greatest timestamp among the records read (s), for the inscription time of later ones (P9.20). */
+  /** PROVISIONAL: the greatest timestamp among the records through `record` (s), for later inscription times (P9.20). */
   latest: number;
-  /** Whether a move entry was accepted: nothing later is accepted on this token (P9.29). */
+  /** PROVISIONAL: whether the head is a move entry: nothing later is accepted on this token (P9.29). */
   departed: boolean;
 }
 
@@ -353,4 +375,67 @@ export interface EvmCheckpointPlacement {
   versionId: string;
   timestamp: number;
   time: number;
+}
+
+const TRUST_CLASSES: ReadonlyArray<string> = ["consensus", "exit-protected", "consortium", "operator"];
+const VERSION_ID = /^([1-9][0-9]{0,15})-\S+$/;
+const HASH = /^0x[0-9a-f]{64}$/i;
+const DECIMAL = /^(0|[1-9][0-9]{0,77})$/;
+const index = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+const placement = (v: unknown): v is EvmCheckpointPlacement =>
+  isJsonObject(v) && index(v.index) && typeof v.versionId === "string" && VERSION_ID.test(v.versionId) && typeof v.timestamp === "number" && Number.isFinite(v.timestamp) &&
+  typeof v.time === "number" && Number.isFinite(v.time);
+
+/**
+ * P9.25: whether a retained value is a checkpoint: every minimum member
+ * present and well formed, and this verifier's own members consistent with
+ * them (the head is the last placement, at the record index). Anything else
+ * is not a checkpoint and is never resumed from.
+ */
+export function isEvmCheckpoint(value: unknown): value is EvmCheckpoint {
+  if (!isJsonObject(value)) return false;
+  const v = value as Record<string, unknown>;
+  if (typeof v.head !== "string" || !VERSION_ID.test(v.head)) return false;
+  if (typeof v.chain !== "string" || !CHAIN.test(v.chain) || BigInt(v.chain.slice(7)) >= TWO_64) return false;
+  if (typeof v.contract !== "string" || !ADDRESS.test(v.contract)) return false;
+  if (typeof v.tokenId !== "string" || !DECIMAL.test(v.tokenId) || BigInt(v.tokenId) >= TWO_256) return false;
+  if (!index(v.record)) return false;
+  if (!isJsonObject(v.block) || !index(v.block.number) || typeof v.block.hash !== "string" || !HASH.test(v.block.hash)) return false;
+  if (typeof v.class !== "string" || !TRUST_CLASSES.includes(v.class)) return false;
+  if (typeof v.arrival !== "boolean" || typeof v.departed !== "boolean" || typeof v.latest !== "number" || !Number.isFinite(v.latest)) return false;
+  if (!placement(v.anchor) || !Array.isArray(v.accepted) || !v.accepted.every(placement) || !Array.isArray(v.conflicting) || !v.conflicting.every(placement)) return false;
+  const record = v.record;
+  const last = v.accepted.at(-1) ?? v.anchor;
+  return last.index === record && last.versionId === v.head && v.conflicting.every((c) => c.index <= record);
+}
+
+/** The did:evm alias of a checkpoint's token (P14.18). */
+export function checkpointAlias(c: Pick<EvmCheckpoint, "chain" | "contract" | "tokenId">): string {
+  return evmAliasOf(c.chain, c.contract, BigInt(c.tokenId));
+}
+
+/** The entry number of a versionId, `<number>-<entry hash>` (P9.25). */
+export function versionNumber(versionId: string): number | undefined {
+  const m = VERSION_ID.exec(versionId);
+  return m ? Number(m[1]) : undefined;
+}
+
+/**
+ * P9.25: the retained checkpoint of `alias` that `log` lets a verifier resume
+ * from: a checkpoint (`isEvmCheckpoint`) whose head is the versionId of the
+ * log's entry N, N being the head's number. A log that ends before entry N, or
+ * whose entry N has another versionId, resumes from none, and the token is
+ * then read from its first record. Of several, the one with the highest
+ * record index.
+ */
+export function resumableCheckpoint(checkpoints: ReadonlyArray<unknown>, alias: string, log: ReadonlyArray<unknown>): EvmCheckpoint | undefined {
+  let best: EvmCheckpoint | undefined;
+  for (const c of checkpoints) {
+    if (!isEvmCheckpoint(c) || checkpointAlias(c) !== alias) continue;
+    const n = versionNumber(c.head)!;
+    const entry = log[n - 1] as { versionId?: unknown } | null | undefined;
+    if (entry?.versionId !== c.head) continue;
+    if (!best || c.record > best.record) best = c;
+  }
+  return best;
 }

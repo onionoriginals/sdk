@@ -46,7 +46,7 @@ import { didWebvhLogUrl } from "../webvh/index.js";
 import { NATIVE_SHA256_MIN_BYTES, bytesView } from "../crypto/index.js";
 import { deriveDocument, exactNumberError, originalsSpecialisation } from "./profile.js";
 import { assembleFromEvm, type EvmAnchoringReport, type EvmAssembly, type EvmEvidence } from "./evm-anchor.js";
-import type { EvmCheckpoint, RetainedEvmBlock } from "./evm.js";
+import { checkpointAlias, isEvmCheckpoint, type EvmCheckpoint, type RetainedEvmBlock } from "./evm.js";
 import { ORIGINALS_LIMITS, ORIGINALS_METHOD, resourceDigest, resourceDigestAsync, signerOf, type AssetState, type EntryState } from "./state.js";
 
 export interface VerifyOriginalOptions {
@@ -337,7 +337,11 @@ export interface OriginalsReport {
    */
   retain: {
     original: string | null; authors: Record<string, string>; anchor?: RetainedAnchor; evm?: RetainedEvmBlock[];
-    /** P9.25 (PR 59 a3ffdc1): verified checkpoints per token, to resume from (`EvmEvidence.checkpoints`). EXPERIMENTAL. */
+    /**
+     * P9.25 (PR 59 1b5c484): checkpoints per token, to resume from (`EvmEvidence.checkpoints`): each the head
+     * entry's versionId with the chain read that verified it. None is made while a publication waits on an
+     * unverifiable entry. EXPERIMENTAL.
+     */
     evmCheckpoints?: EvmCheckpoint[];
   };
 }
@@ -874,6 +878,8 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     const reason = why[evmReport.status];
     if (reason) reasons.push(reason);
     if (evmReport.move === "unconfirmed") reasons.push("move-unconfirmed");
+    // P9.18 (1b5c484): a local copy is only the writer's own check before publishing; never current.
+    if (evmReport.localCopy) reasons.push("local-copy");
     // P9.29: a final departure whose destination could not be read; no arrival claimed or denied.
     if (evmReport.arrival === "unknown" && evmReport.destination !== null) reasons.push("evm-destination-unreachable");
     if (evmReport.stretches.some((s) => s.finality === "failed")) reasons.push("evm-finality-failed");
@@ -920,10 +926,13 @@ function retainedEvm(now: RetainedEvmBlock[], before: RetainedEvmBlock[] | undef
   return [...(before ?? []).filter((b) => !chains.has(b.chain) && !replaced(b.chain, b.number)), ...now];
 }
 
-/** P9.25: this read's checkpoints, and earlier ones for tokens it did not read, unless they rest on a replaced block (P9.22). */
-function retainedCheckpoints(now: EvmCheckpoint[], before: EvmCheckpoint[] | undefined, replaced: (chain: string, number: number) => boolean): EvmCheckpoint[] {
-  const tokens = new Set(now.map((c) => c.token));
-  return [...(before ?? []).filter((c) => !tokens.has(c.token) && !replaced(c.chain, c.block.number)), ...now];
+/**
+ * P9.25: this read's checkpoints, and earlier ones for tokens it did not read, unless they rest on a
+ * replaced block (P9.22). A retained value that is not a checkpoint is dropped.
+ */
+function retainedCheckpoints(now: EvmCheckpoint[], before: unknown[] | undefined, replaced: (chain: string, number: number) => boolean): EvmCheckpoint[] {
+  const tokens = new Set(now.map(checkpointAlias));
+  return [...(before ?? []).filter(isEvmCheckpoint).filter((c) => !tokens.has(checkpointAlias(c)) && !replaced(c.chain, c.block.number)), ...now];
 }
 
 /** Whether an entry's asset state has an `anchor` member: its Original starts on an EVM chain (P9.19). */
