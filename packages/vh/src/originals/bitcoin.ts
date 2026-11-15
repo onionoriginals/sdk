@@ -54,7 +54,8 @@ import type { LogEntry, LogVerification } from "../log/index.js";
 import { authorKey, stillAuthorized, versionNumberOf, type AuthorHistory, type AuthorVersion } from "./author.js";
 import { btcoAliasOf, chainOrder, parseBtcoAlias, readSat, type ChainPosition, type PlacementReason, type SatEvidence, type SatInscription, type SatRead } from "./btco.js";
 import { decodeCbor } from "./cbor.js";
-import { ORIGINALS_LIMITS, checkDescriptor, isMoveEntry, resourceDigest, signerOf, type AssetState, type AuthorRef, type EntryState, type ResourceDescriptor } from "./state.js";
+import { isMoveEntry } from "./evm.js";
+import { ORIGINALS_LIMITS, checkDescriptor, resourceDigest, signerOf, type AssetState, type AuthorRef, type EntryState, type ResourceDescriptor } from "./state.js";
 
 /**
  * The largest inscription, its metadata and body together, in bytes (P9.17,

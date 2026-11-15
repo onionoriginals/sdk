@@ -18,7 +18,7 @@ import {
   tokenIdOf,
   updateOriginal,
   type EvmAnchorPin,
-} from "../src/originals/index.js";
+} from "../src/originals/evm-internal.js";
 import { OPERATOR_CHAIN, CONSENSUS_CHAIN, CONSORTIUM_CHAIN, TEST_CHAINS } from "./helpers/evm-chains.js";
 import { VhAuthor, clock, photo, seeded } from "./helpers/originals.js";
 

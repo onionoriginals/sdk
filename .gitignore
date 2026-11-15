@@ -118,3 +118,6 @@ playwright/.cache/
 
 # Local agent/skill configuration — keep out of the public tree (#381).
 docs/agents/
+
+# Unstripped vh declarations for the monorepo's `originals-internal` condition (never published)
+packages/vh/internal-types/

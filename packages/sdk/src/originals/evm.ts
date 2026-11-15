@@ -1,8 +1,10 @@
 /**
- * `@originals/sdk/originals/evm`: EVM anchoring adapters (originals-spec PR 59,
- * P9.19-P9.29, P14.18-P14.22). EXPERIMENTAL: the spec pins no anchor contract
- * (P14.21), so every call takes an `EvmAnchorPin` the caller supplies, and
- * nothing built on it supports an interoperability claim. Browser-safe.
+ * INTERNAL: EVM anchoring adapters (originals-spec PR 59, P9.19-P9.29,
+ * P14.18-P14.22), not exported from any package entry point until the spec
+ * pins an audited anchor contract (P14.21; owner decision, 14 November 2026;
+ * plan 011 phase 12). EXPERIMENTAL: every call takes an `EvmAnchorPin` the
+ * caller supplies, and nothing built on it supports an interoperability
+ * claim. Browser-safe.
  *
  * - `readEvmToken`: the evidence `@originals/vh` verifies (`EvmTokenEvidence`).
  * - `mintEvmToken`, `prepareEvmPublication`, `submitEvmPublication`,

@@ -37,8 +37,11 @@
  *   fetches and verifies the host's new head and has the caller's signer sign
  *   the caller's reconciled change against it; the SDK never merges or signs
  *   on its own.
- * - EVM anchoring (originals-spec PR 59, P9.19-P9.29; EXPERIMENTAL, under an
- *   `evm` pin the caller supplies, since P14.21 pins none): `create` with an
+ * - EVM anchoring (originals-spec PR 59, P9.19-P9.29; EXPERIMENTAL and
+ *   INTERNAL: not in the published API until P14.21 pins an audited anchor
+ *   contract, and enabled only by the unexported `createEvmOriginalsSDK`,
+ *   under an `evm` pin the caller supplies; otherwise an `anchor` member is
+ *   unsupported, never invalid, and `create` refuses one): `create` with an
  *   `anchor` member once the author acknowledged the P9.27 notice; `anchor`
  *   lists the derived token alias; `mintEvm`, `prepareEvmPublication`,
  *   `submitEvmPublication` and `evmPublicationStatus` publish the committed
@@ -89,15 +92,10 @@ import {
   type SatEvidence,
   type ValidAsOf,
   type VerifyOriginalOptions,
-  checkAnchor,
-  derivedTokenAlias,
-  parseEvmAlias,
-  resumableCheckpoint,
-  type EvmAnchor,
-  type EvmAnchorPin,
-  type EvmEvidence,
-  type EvmTokenEvidence,
 } from "@originals/vh/originals";
+// EVM anchoring is internal until the spec pins an anchor contract (P14.21): types only here; the
+// functions arrive through `options.evm.runtime`, which only `createEvmOriginalsSDK` supplies.
+import type { EvmAnchor, EvmAnchorPin, EvmEvidence, EvmTokenEvidence } from "@originals/vh/internal/evm";
 import { didWebvhFilesUrl, didWebvhLogUrl, parseDidWebvh } from "@originals/vh/webvh";
 import { inscriptionMetadata } from "./inscription.js";
 import { MANIFEST, signerPath, readEvidence, readEvidenceFiles, readManifest, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
@@ -107,21 +105,21 @@ import { describeEntry, summarize, type EntrySummary, type OriginalsSigner } fro
 import type { HostAnswer, SharedHost } from "./shared.js";
 import { MemoryStore, headOf, higherVersion, refusedVersionId, staleHead, type OriginalsStore, type StoredRefused } from "./store.js";
 import type { ZipLimits } from "./zip.js";
-import { readEvmToken, type EvmProvider } from "./evm-reader.js";
-import {
-  evmPublicationStatus as tokenPublicationStatus,
-  mintEvmToken,
-  prepareEvmPublication as prepareTokenPublication,
-  submitEvmPublication as submitTokenPublication,
-  type EvmPublicationResult,
-  type EvmTxStatus,
-  type EvmWallet,
-  type EvmWriterContext,
-  type MintResult,
-  type PreparedEvmPublication,
+import type { EvmProvider } from "./evm-reader.js";
+import type {
+  EvmPublicationResult,
+  EvmTxStatus,
+  EvmWallet,
+  EvmWriterContext,
+  MintResult,
+  PreparedEvmPublication,
 } from "./evm-writer.js";
-import { evmGenesisNotice, evmMoveNotice, type EvmGenesisNotice, type EvmMoveNotice, type EvmPublicationNotice } from "./evm-notice.js";
+import type { EvmGenesisNotice, EvmMoveNotice, EvmPublicationNotice } from "./evm-notice.js";
 import type { EvmFetch } from "./evm-rpc.js";
+import type { EvmRuntime } from "./evm-runtime.js";
+
+/** The published verifier, builders and carried-log reader: they take no EVM anchor contract pin (P14.21). */
+const PUBLISHED_VH = { verifyOriginal, prepareCreateOriginal, prepareUpdateOriginal, readCarriedFile } as const;
 
 export type AuthorSource = AuthorDidEvidence[] | ((did: string) => Promise<AuthorDidEvidence | undefined>);
 
@@ -168,6 +166,7 @@ export interface OriginalsSDKOptions {
    * EXPERIMENTAL (originals-spec PR 59): EVM anchoring. Without it, an
    * Original with an `anchor` member is unsupported, never invalid (section
    * 14, P14.21), and none can be created.
+   * @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API. Only `createEvmOriginalsSDK` enables it.
    */
   evm?: OriginalsEvmOptions;
 }
@@ -176,6 +175,7 @@ export interface OriginalsSDKOptions {
  * EXPERIMENTAL (originals-spec PR 59, P9.19-P9.29). P14.21 pins no anchor
  * contract, so the caller supplies one (`pin`), as for a local devnet, and
  * nothing built on it supports an interoperability claim.
+ * @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API.
  */
 export interface OriginalsEvmOptions {
   /** The anchor contract pin, with any devnet chains it adds (P14.21, P14.22). */
@@ -196,7 +196,12 @@ export interface OriginalsEvmOptions {
   pollMs?: number;
   timeoutMs?: number;
   sleep?: (ms: number) => Promise<void>;
+  /** The EVM functions, set by `createEvmOriginalsSDK`; without them the option is ignored. */
+  runtime?: EvmRuntime;
 }
+
+/** The `evm` option once enabled. */
+type EvmEnabled = OriginalsEvmOptions & { runtime: EvmRuntime };
 
 /**
  * The Original's one resource at genesis, its version 1 (P4.1, P4.4; owner
@@ -233,12 +238,14 @@ export interface CreateInput {
    * EXPERIMENTAL (originals-spec PR 59, P9.19, P14.18): anchor the Original on
    * an EVM chain listed in the pin, with this minter, fixed at genesis.
    * Requires the SDK's `evm` option and `acknowledged`.
+   * @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API. Without it, `create` refuses an anchor (EVM_NO_ANCHOR_CONTRACT).
    */
   anchor?: EvmAnchor;
   /**
    * P9.27: the notice the author was shown and acknowledged before the
    * genesis entry is written, exactly as `evmGenesisNotice(anchor, pin)`
    * returns it. Without it, or for another anchor, nothing is written.
+   * @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API.
    */
   acknowledged?: EvmGenesisNotice;
 }
@@ -446,6 +453,7 @@ export interface CarryOptions {
    * (`readEvmToken`). Without it the configured providers are read; a
    * checkpoint from the anchoring entry on is accepted only once it is
    * accepted on the token at its finalized block (P7.15, P9.22).
+   * @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API.
    */
   evm?: EvmTokenEvidence[];
 }
@@ -484,6 +492,7 @@ export interface ReadCarriedOptions {
    * carried log has an `anchor` member (P7.14, P9.20). Reading a carried
    * file makes no chain request of its own; it is read with the configured
    * pin and this evidence.
+   * @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API.
    */
   evm?: EvmTokenEvidence[];
 }
@@ -900,7 +909,7 @@ function aliasesOfLine(line: string): string[] {
  * P9.29): the token each `anchor` member derives (P14.19), and each did:evm
  * alias listed. The verifier decides which of them count.
  */
-function tokenAliasesOf(log: string, pin: EvmAnchorPin): string[] {
+function tokenAliasesOf(log: string, pin: EvmAnchorPin, derivedTokenAlias: EvmRuntime["derivedTokenAlias"]): string[] {
   const did = originalOf(log);
   const out = new Set<string>();
   for (const line of lines(log)) {
@@ -932,8 +941,10 @@ function sameNotice(given: { kind?: unknown; text?: unknown } | undefined, expec
 }
 
 /** Where a move goes (P9.28): a listed EVM chain and its minter, or a Bitcoin sat. */
+/** @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API. */
 export type MoveDestination = EvmAnchor | { sat: string };
 
+/** @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API. */
 export interface PrepareMoveInput {
   /** The checkpoint the move entry builds on. */
   parent: string;
@@ -942,6 +953,7 @@ export interface PrepareMoveInput {
   to: MoveDestination;
 }
 
+/** @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API. */
 export interface PreparedMove {
   draft: Draft;
   /** What the author must be told first (P9.29); pass it back as `acknowledged`. */
@@ -949,8 +961,10 @@ export interface PreparedMove {
 }
 
 /** What a publication on a token is for (P9.17 through P9.20, P9.29). */
+/** @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API. */
 export type EvmPublicationKind = "anchoring" | "entry" | "departure" | "arrival";
 
+/** @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API. */
 export interface EvmPublicationPlan {
   original: string;
   kind: EvmPublicationKind;
@@ -968,6 +982,7 @@ export interface EvmPublicationPlan {
   prepared: PreparedEvmPublication;
 }
 
+/** @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API. */
 export interface EvmPublicationOptions {
   /** The wallet that sends: the token's holder or an address it approved (P9.23). */
   wallet: EvmWallet;
@@ -975,6 +990,7 @@ export interface EvmPublicationOptions {
   rpc?: string;
 }
 
+/** @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API. */
 export interface SubmittedEvmPublication extends EvmPublicationResult {
   original: string;
   chain: string;
@@ -983,6 +999,7 @@ export interface SubmittedEvmPublication extends EvmPublicationResult {
   status: EvmTxStatus;
 }
 
+/** @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API. */
 export interface EvmPublicationState {
   status: EvmTxStatus;
   transactions: Array<{ hash: string; status: EvmTxStatus }>;
@@ -997,9 +1014,23 @@ export class OriginalsSDK {
   /** Originals this instance first stored from a carried file, for a store that keeps no mark itself (P7.13). */
   private readonly carriedImports = new Set<string>();
 
+  /** EVM anchoring, only when `createEvmOriginalsSDK` supplied its functions (P14.21). */
+  private readonly evm: EvmEnabled | undefined;
+
   private constructor(private readonly options: OriginalsSDKOptions) {
     this.store = options.store ?? new MemoryStore();
     this.clock = options.clock ?? (() => Date.now());
+    this.evm = options.evm?.runtime ? (options.evm as EvmEnabled) : undefined;
+  }
+
+  /** The verifier, builders and carried-log reader: the published ones, or with EVM enabled the ones that take its pin. */
+  private get vh(): Pick<EvmRuntime, "verifyOriginal" | "prepareCreateOriginal" | "prepareUpdateOriginal" | "readCarriedFile"> {
+    return this.evm?.runtime ?? PUBLISHED_VH;
+  }
+
+  /** The EVM functions, or unsupported-profile: P14.21 pins no anchor contract (section 14). */
+  private get rt(): EvmRuntime {
+    return this.evmOn().runtime;
   }
 
   static create(options: OriginalsSDKOptions): OriginalsSDK {
@@ -1353,8 +1384,10 @@ export class OriginalsSDK {
    */
   private async evmEvidence(log: string, mode: EvmMode): Promise<EvmEvidence | undefined> {
     if (genesisAnchorOf(log) === undefined && mode.kind !== "supplied") return undefined;
-    const evm = this.options.evm;
-    const pin = evm?.pin ?? null;
+    if (!this.evm) return undefined; // the published verifier takes no EVM evidence: an anchor member is unsupported
+    const evm = this.evm;
+    const rt = evm.runtime;
+    const pin = evm.pin ?? null;
     const did = originalOf(log);
     let kept: Awaited<ReturnType<NonNullable<OriginalsStore["getRetainedEvm"]>>>;
     try {
@@ -1362,6 +1395,8 @@ export class OriginalsSDK {
     } catch (error) {
       if (!(error instanceof OriginalsError)) throw error;
     }
+    // P9.25: a retained value lacking any of a checkpoint's members is not one (the store keeps what it was given).
+    if (kept) kept = { blocks: kept.blocks, checkpoints: kept.checkpoints.filter((c) => rt.isEvmCheckpoint(c)) };
     const blocks = kept?.blocks ?? [];
     const base = { pin, ...(blocks.length > 0 ? { retained: blocks } : {}) };
     if (mode.kind === "supplied") return { ...base, tokens: mode.tokens, ...(kept && kept.checkpoints.length > 0 ? { checkpoints: kept.checkpoints } : {}) };
@@ -1369,10 +1404,10 @@ export class OriginalsSDK {
     const entries = versionIds(log).map((versionId) => ({ versionId }));
     const providersOf = evm.providers;
     // Each token is read independently, so the reads run together; results keep the log's order.
-    const results = await Promise.all(tokenAliasesOf(log, pin).map(async (alias) => {
+    const results = await Promise.all(tokenAliasesOf(log, pin, rt.derivedTokenAlias).map(async (alias) => {
       let chain: string;
       try {
-        chain = parseEvmAlias(alias).chain;
+        chain = rt.parseEvmAlias(alias).chain;
       } catch (error) {
         if (error instanceof OriginalsError) return undefined;
         throw error;
@@ -1380,9 +1415,9 @@ export class OriginalsSDK {
       const providers = providersOf[chain];
       if (!providers || providers.length === 0) return undefined;
       // P9.25 (MAY): resume only from a checkpoint whose head is this log's entry N, as the verifier requires.
-      const checkpoint = resumableCheckpoint(kept?.checkpoints ?? [], alias, entries);
+      const checkpoint = rt.resumableCheckpoint(kept?.checkpoints ?? [], alias, entries);
       try {
-        const read = await readEvmToken({ alias }, {
+        const read = await rt.readEvmToken({ alias }, {
           pin, providers, observe: true,
           ...(evm.fetch ? { fetch: evm.fetch } : {}),
           ...(evm.rangeBytes !== undefined ? { rangeBytes: evm.rangeBytes } : {}),
@@ -1424,7 +1459,7 @@ export class OriginalsSDK {
     const comparisons = await this.comparisons(log);
     const evm = await this.evmEvidence(log, evmMode);
     const run = (authors: AuthorDidEvidence[]) =>
-      verifyOriginal({
+      this.vh.verifyOriginal({
         log,
         ...(bitcoin ? { bitcoin } : {}),
         ...(evm ? { evm } : {}),
@@ -1482,8 +1517,12 @@ export class OriginalsSDK {
    * the anchor on, and without it the result is unverified (P9.12, P9.13).
    * For an Original first stored by importing a carried file, no resolver
    * request is made unless `resolveSigners` is true: the import was no
-   * opt-in to resolve (P7.13).
-   *
+   * opt-in to resolve (P7.13). An Original whose genesis entry has an
+   * `anchor` member is unsupported, never invalid (section 14, P14.21).
+   */
+  async get(did: string, options?: { checkpoint?: string; bitcoin?: SatEvidence[]; resolveSigners?: boolean }): Promise<OriginalView>;
+  /**
+   * @internal Unreleased until the spec pins an anchor contract (P14.21).
    * EXPERIMENTAL: for an Original with an `anchor` member, its tokens decide
    * from the anchoring entry on (P9.20): pass `evm`, what providers read
    * (`readEvmToken`), or configure `evm.providers` and the SDK reads every
@@ -1494,6 +1533,7 @@ export class OriginalsSDK {
    * the anchor (P7.14). It is never a local copy: that is only the writer's
    * own check before publishing (P9.18; `verifyCommitted`).
    */
+  async get(did: string, options?: { checkpoint?: string; bitcoin?: SatEvidence[]; resolveSigners?: boolean; evm?: EvmTokenEvidence[] }): Promise<OriginalView>;
   async get(did: string, options: { checkpoint?: string; bitcoin?: SatEvidence[]; resolveSigners?: boolean; evm?: EvmTokenEvidence[] } = {}): Promise<OriginalView> {
     return this.read(did, options, options.evm ? { kind: "supplied", tokens: options.evm } : OWN_LOG);
   }
@@ -1540,7 +1580,7 @@ export class OriginalsSDK {
     // mediaType, then size): a getter on the resource sees what it saw. The size is the view's, so
     // hashed, sized and kept agree.
     const resource: ResourceDescriptor = { mediaType: r.mediaType, size: (void r.bytes, view.length), digest };
-    const entry = prepareCreateOriginal({
+    const entry = this.vh.prepareCreateOriginal({
       versionTime: this.versionTime(), name: input.name, ...(input.metadata !== undefined ? { metadata: input.metadata } : {}), resource, author: input.author,
       ...(input.editors !== undefined ? { editors: input.editors } : {}),
       ...(input.anchor !== undefined ? { anchor: input.anchor, evm: pin } : {}),
@@ -1551,15 +1591,19 @@ export class OriginalsSDK {
 
   /** The configured pin, or unsupported-profile: P14.21 pins no anchor contract (section 14). */
   private evmPin(): EvmAnchorPin {
-    const pin = this.options.evm?.pin;
-    if (!pin) sdkError("unsupported-profile", "EVM_NO_ANCHOR_CONTRACT", "P14.21 pins no anchor contract, so no anchor member is written; configure the experimental `evm` option with a pin to do so anyway");
-    return pin;
+    return this.evmOn().pin;
+  }
+
+  /** The enabled `evm` option, or unsupported-profile (section 14, P14.21). */
+  private evmOn(): EvmEnabled {
+    if (!this.evm?.pin) sdkError("unsupported-profile", "EVM_NO_ANCHOR_CONTRACT", "P14.21 pins no anchor contract, so no anchor member is written, and EVM anchoring is not part of this release");
+    return this.evm;
   }
 
   /** P9.27: the genesis notice for `anchor` under the pin, which the author must have acknowledged. */
   private evmAnchorAcknowledged(anchor: EvmAnchor, acknowledged: EvmGenesisNotice | undefined): EvmAnchorPin {
     const pin = this.evmPin();
-    const notice = evmGenesisNotice(anchor, pin);
+    const notice = this.rt.evmGenesisNotice(anchor, pin);
     if (!sameNotice(acknowledged, notice)) {
       sdkError("invalid-evidence", "EVM_NOTICE_REQUIRED", "show the author evmGenesisNotice(anchor, pin) first and pass it back as `acknowledged`: the first chain is permanent and fixes the minter (P9.27)", { notice });
     }
@@ -1614,7 +1658,7 @@ export class OriginalsSDK {
       // Read as often and in the order as before (instanceof, digest, copy, mediaType, size); the size is the view's.
       resource = { mediaType: r.mediaType ?? current.mediaType, size: (void r.bytes, read.length), digest };
     }
-    const entry = prepareUpdateOriginal(head, {
+    const entry = this.vh.prepareUpdateOriginal(head, {
       versionTime: this.versionTime(head.versionTime),
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
@@ -1625,7 +1669,7 @@ export class OriginalsSDK {
       ...(aliases ? { aliases } : {}),
       ...(anchor !== undefined ? { anchor } : {}),
       // A token alias is checked against the pinned contract (P14.18, P14.21).
-      ...(this.options.evm ? { evm: this.options.evm.pin } : {}),
+      ...(this.evm ? { evm: this.evm.pin } : {}),
     });
     const summary = summarize(entry, head.state as unknown as EntryState);
     return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary, display: describeEntry(summary), bytes };
@@ -1691,7 +1735,7 @@ export class OriginalsSDK {
       // EXPERIMENTAL (P9.19, P14.19): the anchoring entry lists the one token the anchor member derives.
       if (input.sat !== undefined) sdkError("invalid-evidence", "ANCHOR_IS_EVM", `${did} names ${state.anchor.chain} as its anchor chain at genesis: it is anchored on its token, never on a sat (P9.19)`);
       if (aliases.some((a) => a.startsWith("did:evm:"))) sdkError("invalid-evidence", "ALREADY_ANCHORED", `${did} already lists its token alias (P9.19)`);
-      alias = derivedTokenAlias(did, state.anchor, this.evmPin());
+      alias = this.rt.derivedTokenAlias(did, state.anchor, this.evmPin());
     } else {
       if (typeof input.sat !== "string") sdkError("invalid-evidence", "INPUT_INVALID", "anchor input.sat is the anchoring sat's did:btco alias (P9.10)");
       parseBtcoAlias(input.sat);
@@ -1715,7 +1759,7 @@ export class OriginalsSDK {
   /** A writer context for `chain` (P9.21): the configured pin, and `rpc` or the chain's first configured provider. */
   private writer(chain: string, wallet: EvmWallet, rpc?: string): EvmWriterContext {
     const pin = this.evmPin();
-    const evm = this.options.evm!;
+    const evm = this.evmOn();
     const first = evm.providers?.[chain]?.[0];
     const url = rpc ?? (typeof first === "string" ? first : first?.url);
     if (!url) sdkError("incomplete-evidence", "EVM_PROVIDERS_REQUIRED", `name a JSON-RPC provider for ${chain} in options.evm.providers, or pass rpc`);
@@ -1733,12 +1777,14 @@ export class OriginalsSDK {
    * (P14.19): the genesis chain's before anchoring, the destination's after a
    * move entry is committed (P9.29). Minting anchors nothing (P9.23). Returns
    * the existing token if it was minted before.
+   * @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API.
    */
   async mintEvm(did: string, options: EvmPublicationOptions): Promise<MintResult> {
+    this.evmOn(); // unsupported-profile unless EVM anchoring is enabled (P14.21)
     options = optionsObject(options, ["wallet", "rpc"], "mint options");
     const { state } = await this.read(did, {}, LOCAL);
     if (!state.anchor) sdkError("invalid-evidence", "NOT_EVM_ANCHORED", `${did} has no anchor member: its anchor chain is Bitcoin (P9.19)`);
-    return mintEvmToken(this.writer(state.anchor.chain, options.wallet, options.rpc), { original: did, anchor: state.anchor });
+    return this.rt.mintEvmToken(this.writer(state.anchor.chain, options.wallet, options.rpc), { original: did, anchor: state.anchor });
   }
 
   /**
@@ -1784,7 +1830,7 @@ export class OriginalsSDK {
     if (at < 0) sdkError("stale-parent", "EVM_HEAD_NOT_STORED", `the token accepted ${head}, which the committed log does not hold; nothing is rebased (P9.13, P2.1)`, { report });
     if (e.status === "departed-not-arrived") {
       // Not Bitcoin: that was refused above.
-      return { kind: "arrival", start: 0, index: at, alias: derivedTokenAlias(did, anchorOfLine(all[at])!, pin), all, ids };
+      return { kind: "arrival", start: 0, index: at, alias: this.rt.derivedTokenAlias(did, anchorOfLine(all[at])!, pin), all, ids };
     }
     if (at + 1 >= ids.length) sdkError("invalid-evidence", "NOTHING_TO_PUBLISH", `${last.token} already shows the committed head ${head}`);
     const before = anchorOfLine(all[at]);
@@ -1844,8 +1890,10 @@ export class OriginalsSDK {
    * refers to the body the token already stores (`publishSameBody`, P14.20).
    * A departure to Bitcoin is followed by the Bitcoin writer's anchoring
    * inscription (EVM_ARRIVAL_ON_BITCOIN).
+   * @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API.
    */
   async prepareEvmPublication(did: string, options: EvmPublicationOptions & { maxTxBytes?: number; sameBody?: "auto" | number | false }): Promise<EvmPublicationPlan> {
+    this.evmOn(); // unsupported-profile unless EVM anchoring is enabled (P14.21)
     options = optionsObject(options, ["wallet", "rpc", "maxTxBytes", "sameBody"], "EVM publication options");
     const t = await this.evmNext(did);
     const through = t.all.slice(0, t.index + 1);
@@ -1853,8 +1901,8 @@ export class OriginalsSDK {
     const descriptor = (parseJson(t.all[t.index]) as unknown as { state: EntryState }).state.asset.resource;
     const body = await this.resourceBytes(descriptor.digest);
     if (!body) sdkError("incomplete-evidence", "RESOURCE_BYTES_MISSING", `the publication of ${t.ids[t.index]} carries resource version ${descriptor.digest} as its body, and this store does not hold those bytes (P9.17, P9.25)`, { digest: descriptor.digest });
-    const chain = parseEvmAlias(t.alias).chain;
-    const prepared = await prepareTokenPublication(this.writer(chain, options.wallet, options.rpc), {
+    const chain = this.rt.parseEvmAlias(t.alias).chain;
+    const prepared = await this.rt.prepareEvmPublication(this.writer(chain, options.wallet, options.rpc), {
       alias: t.alias, lines: t.all.slice(t.start, t.index + 1), body,
       ...(options.maxTxBytes !== undefined ? { maxTxBytes: options.maxTxBytes } : {}),
       ...(options.sameBody !== undefined ? { sameBody: options.sameBody } : {}),
@@ -1872,8 +1920,10 @@ export class OriginalsSDK {
    * a pool holds its transactions or its block is not finalized, submitted,
    * not observed, otherwise. It counts only once final (P9.22): ask
    * `evmPublicationStatus`.
+   * @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API.
    */
   async submitEvmPublication(did: string, plan: EvmPublicationPlan, options: EvmPublicationOptions & { acknowledged: EvmPublicationNotice }): Promise<SubmittedEvmPublication> {
+    this.evmOn(); // unsupported-profile unless EVM anchoring is enabled (P14.21)
     options = optionsObject(options, ["wallet", "rpc", "acknowledged"], "EVM submission options");
     if (plan?.original !== did || !plan.prepared) sdkError("invalid-evidence", "INPUT_INVALID", "submitEvmPublication takes a plan from prepareEvmPublication for this Original");
     if (!sameNotice(options.acknowledged, plan.notice)) {
@@ -1884,8 +1934,8 @@ export class OriginalsSDK {
       sdkError("stale-parent", "HEAD_NOT_NEXT", `${plan.versionId} on ${plan.alias} is no longer the next publication: ${t.ids[t.index]} on ${t.alias} is; prepare again (P9.13)`);
     }
     const ctx = this.writer(plan.chain, options.wallet, options.rpc);
-    const result = await submitTokenPublication(ctx, plan.prepared);
-    const state = await tokenPublicationStatus(ctx.rpc, result.txHashes, ctx.fetch ? { fetch: ctx.fetch } : {});
+    const result = await this.rt.submitEvmPublication(ctx, plan.prepared);
+    const state = await this.rt.evmPublicationStatus(ctx.rpc, result.txHashes, ctx.fetch ? { fetch: ctx.fetch } : {});
     return { ...result, original: did, chain: plan.chain, versionId: plan.versionId, status: state.status };
   }
 
@@ -1893,11 +1943,13 @@ export class OriginalsSDK {
    * P9.18 read through P9.27: the label of a submitted publication, and once
    * it is finalized the Original verified from its tokens: anchored, not
    * anchored, or anchored with incomplete identity evidence.
+   * @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API.
    */
   async evmPublicationStatus(did: string, submitted: Pick<SubmittedEvmPublication, "chain" | "txHashes">, options: { rpc?: string } = {}): Promise<EvmPublicationState> {
+    this.evmOn(); // unsupported-profile unless EVM anchoring is enabled (P14.21)
     options = optionsObject(options, ["rpc"], "EVM status options");
     const ctx = this.writer(submitted.chain, { address: "0x" + "00".repeat(20), sendTransaction: () => Promise.reject(new Error("read only")) }, options.rpc);
-    const state = await tokenPublicationStatus(ctx.rpc, submitted.txHashes, ctx.fetch ? { fetch: ctx.fetch } : {});
+    const state = await this.rt.evmPublicationStatus(ctx.rpc, submitted.txHashes, ctx.fetch ? { fetch: ctx.fetch } : {});
     if (state.status !== "finalized") return state;
     return { ...state, original: await this.get(did) };
   }
@@ -1909,8 +1961,10 @@ export class OriginalsSDK {
    * the Original lists, and only upward. Returns the P9.29 notice, which
    * refuses a move that is not upward and one whose arrival would exceed
    * 350,000 bytes (MOVE_NOT_UPWARD, MOVE_ARRIVAL_TOO_LARGE).
+   * @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API.
    */
   async prepareMove(did: string, input: PrepareMoveInput): Promise<PreparedMove> {
+    this.evmOn(); // unsupported-profile unless EVM anchoring is enabled (P14.21)
     exactKeys(input, ["parent", "author", "to"], "move input");
     const pin = this.evmPin();
     const { view, log } = await this.parentOf(did, input.parent);
@@ -1919,7 +1973,7 @@ export class OriginalsSDK {
       const btco = view.state.aliases.some((a) => a.startsWith("did:btco:"));
       sdkError("invalid-evidence", "MOVE_NOT_FROM_EVM", btco ? `${did} is anchored on Bitcoin, which is terminal: it does not move (P9.10, P9.28)` : `${did} has no anchor member: it is on the path to Bitcoin and has no chain to move from (P9.19)`);
     }
-    const current = derivedTokenAlias(did, from, pin);
+    const current = this.rt.derivedTokenAlias(did, from, pin);
     if (!view.state.aliases.includes(current)) sdkError("invalid-evidence", "STATE_MOVE_BEFORE_ANCHOR", `${did} does not list its token alias yet: it moves only from a chain it is anchored on; anchor it first (P9.28)`);
     const to = input.to;
     if (typeof to !== "object" || to === null) sdkError("invalid-evidence", "INPUT_INVALID", "move input.to is {chain, minter} or {sat}");
@@ -1933,14 +1987,14 @@ export class OriginalsSDK {
     } else {
       exactKeys(to, ["chain", "minter"], "move input.to");
       // P14.18: checked before the alias is derived, so a malformed chain is a structured refusal, not a parse error.
-      anchor = checkAnchor({ chain: to.chain, minter: to.minter }, "move input.to");
-      destination = derivedTokenAlias(did, anchor, pin);
+      anchor = this.rt.checkAnchor({ chain: to.chain, minter: to.minter }, "move input.to");
+      destination = this.rt.derivedTokenAlias(did, anchor, pin);
     }
     const aliases = view.state.aliases.map((a) => (a === current ? destination : a));
     const draft = await this.prepareUpdate(did, { parent: input.parent, author: input.author }, aliases, anchor);
     // P9.29: the arrival carries the whole log through the move entry, sized with the shortest proof a signature encodes to.
     const proof = [{ type: "DataIntegrityProof", cryptosuite: "eddsa-jcs-2022", verificationMethod: input.author.verificationMethod, proofPurpose: "assertionMethod", proofValue: multibaseEncode(new Uint8Array(64)) }];
-    const notice = evmMoveNotice({ from, to: anchor, lines: [...lines(log), JSON.stringify({ ...draft.entry, proof })], version: view.state.resource, pin });
+    const notice = this.rt.evmMoveNotice({ from, to: anchor, lines: [...lines(log), JSON.stringify({ ...draft.entry, proof })], version: view.state.resource, pin });
     return { draft, notice };
   }
 
@@ -1950,8 +2004,10 @@ export class OriginalsSDK {
    * parent. It is then published as the departure on the token left, by that
    * token's holder, and as the arrival: on the destination token, minted by
    * the destination's minter, or by the Bitcoin writer on the sat.
+   * @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API.
    */
   async move(did: string, input: { prepared: PreparedMove; signer: OriginalsSigner; acknowledged: EvmMoveNotice }): Promise<CommitResult> {
+    this.evmOn(); // unsupported-profile unless EVM anchoring is enabled (P14.21)
     exactKeys(input, ["prepared", "signer", "acknowledged"], "move input");
     const draft = input.prepared?.draft;
     if (draft?.kind !== "draft" || draft.original !== did || draft.parent === null) sdkError("invalid-evidence", "INPUT_INVALID", "move takes a prepared move from prepareMove for this Original");
@@ -1959,7 +2015,7 @@ export class OriginalsSDK {
     const { view, log } = await this.parentOf(did, draft.parent);
     const to = (draft.entry.state as unknown as EntryState).asset.anchor ?? null;
     if (!view.state.anchor) sdkError("invalid-evidence", "MOVE_NOT_FROM_EVM", `${did} has no anchor member to move from (P9.28)`);
-    const notice = (line: string) => evmMoveNotice({ from: view.state.anchor!, to, lines: [...lines(log), line], version: view.state.resource, pin });
+    const notice = (line: string) => this.rt.evmMoveNotice({ from: view.state.anchor!, to, lines: [...lines(log), line], version: view.state.resource, pin });
     const proof = [{ type: "DataIntegrityProof", cryptosuite: "eddsa-jcs-2022", verificationMethod: (draft.entry.state as unknown as EntryState).author.verificationMethod, proofPurpose: "assertionMethod", proofValue: multibaseEncode(new Uint8Array(64)) }];
     if (!sameNotice(input.acknowledged, notice(JSON.stringify({ ...draft.entry, proof })))) {
       sdkError("invalid-evidence", "EVM_NOTICE_REQUIRED", "show the author the notice prepareMove returned for this draft and pass it back as `acknowledged`: a move cannot be reversed (P9.29)");
@@ -2082,7 +2138,7 @@ export class OriginalsSDK {
    * accepted history first. Nothing is rebased (P2.1, P4.5).
    */
   private async tokenHeadHeld(did: string, log: string): Promise<void> {
-    if (!this.options.evm?.providers || genesisAnchorOf(log) === undefined) return;
+    if (!this.evm?.providers || genesisAnchorOf(log) === undefined) return;
     const report = await this.verify(log, undefined, undefined, undefined, undefined, OWN_LOG);
     const e = report.evm;
     if (!e || (e.status !== "anchored" && e.status !== "departed-not-arrived" && e.status !== "moved-to-bitcoin")) return;
@@ -2299,6 +2355,9 @@ export class OriginalsSDK {
    * no network unless `identityFetch` is configured; its requests are then
    * bounded by a budget of their own (`retrievalLimits`).
    */
+  async load(zip: Uint8Array, options?: { bitcoin?: SatEvidence[] }): Promise<LoadedEvidence>;
+  /** @internal With EVM token reads: unreleased until the spec pins an anchor contract (P14.21). */
+  async load(zip: Uint8Array, options?: { bitcoin?: SatEvidence[]; evm?: EvmTokenEvidence[] }): Promise<LoadedEvidence>;
   async load(zip: Uint8Array, options: { bitcoin?: SatEvidence[]; evm?: EvmTokenEvidence[] } = {}): Promise<LoadedEvidence> {
     return this.loadContents(readEvidence(zip, this.options.archiveLimits), "package", [], undefined, options.bitcoin, options.evm);
   }
@@ -2316,7 +2375,7 @@ export class OriginalsSDK {
     // P7.14: evidence from elsewhere is never the local log; without token reads, at most the entries before anchoring.
     const evm = await this.evmEvidence(contents.log, tokens ? { kind: "supplied", tokens } : OWN_LOG);
     const run = (authors: AuthorDidEvidence[]) =>
-      verifyOriginal({
+      this.vh.verifyOriginal({
         ...(bitcoin ? { bitcoin } : {}),
         ...(evm ? { evm } : {}),
         aliases: aliasEvidence,
@@ -2685,13 +2744,13 @@ export class OriginalsSDK {
             return chosen;
           }
         : undefined;
-    const report = await readCarriedFile(file, {
+    const report = await this.vh.readCarriedFile(file, {
       ...(options.hint !== undefined ? { hint: options.hint } : {}),
       authors,
       ...(resolveSigners ? { resolveSigners } : {}),
       ...(options.bitcoin ? { bitcoin: options.bitcoin } : {}),
       // EXPERIMENTAL (P7.14): the configured pin and the caller's token reads; reading a file makes no chain request.
-      ...(this.options.evm || options.evm ? { evm: { pin: this.options.evm?.pin ?? null, tokens: options.evm ?? [] } } : {}),
+      ...(this.evm ? { evm: { pin: this.evm.pin, tokens: options.evm ?? [] } } : {}),
       ...(text ? await this.comparisons(text) : {}),
       now: this.clock(),
     });

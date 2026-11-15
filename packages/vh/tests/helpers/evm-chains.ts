@@ -1,4 +1,4 @@
-import type { ListedChain, TrustClass } from "../../src/originals/index.js";
+import type { ListedChain, TrustClass } from "../../src/originals/evm-internal.js";
 
 /**
  * Made-up chains for an anchor pin's `chains` override (`EvmAnchorPin.chains`).

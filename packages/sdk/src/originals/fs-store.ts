@@ -69,7 +69,7 @@
  */
 import { OriginalsError } from "@originals/vh";
 import { sha256 } from "@originals/vh/crypto";
-import { isEvmCheckpoint, type AuthorDidEvidence, type RetainedAnchor } from "@originals/vh/originals";
+import type { AuthorDidEvidence, RetainedAnchor } from "@originals/vh/originals";
 import { hex } from "@scure/base";
 import type { InscriptionRecoveryRecord, InscriptionRecoveryStore } from "../bitcoin/inscription-recovery.js";
 import type { ClockStore } from "./bitcoin.js";
@@ -649,6 +649,7 @@ export class FileStore implements OriginalsStore {
     return this.track(() => this.putRetainedNow(did, versionId));
   }
 
+  /** @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API. */
   async discardRetained(did: string, versionId: string | null): Promise<void> {
     return this.track(() => {
       // Serialized with putRetained on the same DID; the one write that may lower it (P9.22).
@@ -690,7 +691,7 @@ export class FileStore implements OriginalsStore {
     return this.track(() => this.writeAtomically(join(this.root, "anchors"), this.didFile(did), JSON.stringify({ did, anchor })));
   }
 
-  /** EXPERIMENTAL: what the last EVM verification retained (P9.22, P9.25), read back only when well formed. */
+  /** EXPERIMENTAL: what the last EVM verification retained (P9.22, P9.25). @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API. */
   async getRetainedEvm(did: string): Promise<RetainedEvm | undefined> {
     const text = await this.readText(join(this.root, "evm", this.didFile(did)));
     if (text === undefined) return undefined;
@@ -698,11 +699,12 @@ export class FileStore implements OriginalsStore {
     if (record.did !== did || !Array.isArray(record.blocks) || !Array.isArray(record.checkpoints)) return undefined;
     const block = (b: unknown) => typeof b === "object" && b !== null && typeof (b as { number?: unknown }).number === "number" && typeof (b as { hash?: unknown }).hash === "string";
     const blocks = record.blocks.filter((b) => block(b) && typeof (b as { chain?: unknown }).chain === "string") as RetainedEvm["blocks"];
-    // P9.25: a retained result lacking any of a checkpoint's members is not one.
-    const checkpoints = record.checkpoints.filter(isEvmCheckpoint);
+    // P9.25: whether each is a checkpoint is decided where it is used (EVM anchoring is internal, P14.21).
+    const checkpoints = record.checkpoints.filter((c) => typeof c === "object" && c !== null && !Array.isArray(c)) as RetainedEvm["checkpoints"];
     return { blocks, checkpoints };
   }
 
+  /** @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API. */
   async putRetainedEvm(did: string, retained: RetainedEvm): Promise<void> {
     return this.track(() => this.writeAtomically(join(this.root, "evm"), this.didFile(did), JSON.stringify({ did, blocks: retained.blocks, checkpoints: retained.checkpoints })));
   }

@@ -22,7 +22,8 @@
 import { OriginalsError } from "@originals/vh";
 import { parseJson } from "@originals/vh/json";
 import { resourceDigestAsync } from "@originals/vh/originals";
-import type { AuthorDidEvidence, EvmCheckpoint, RetainedAnchor, RetainedEvmBlock } from "@originals/vh/originals";
+import type { AuthorDidEvidence, RetainedAnchor } from "@originals/vh/originals";
+import type { EvmCheckpoint, RetainedEvmBlock } from "@originals/vh/internal/evm";
 
 export interface StoredOriginal {
   /** The committed asset log, `did.jsonl` text. Asset logs have no witness file (P9.8). */
@@ -61,7 +62,7 @@ export interface StoredPending {
   entry: string;
 }
 
-/** What an Original's EVM verification retains (P9.22, P9.25; EXPERIMENTAL, PROVISIONAL shape). */
+/** What an Original's EVM verification retains (P9.22, P9.25; EXPERIMENTAL, PROVISIONAL shape). @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API. */
 export interface RetainedEvm {
   blocks: RetainedEvmBlock[];
   checkpoints: EvmCheckpoint[];
@@ -104,6 +105,7 @@ export interface OriginalsStore {
    * Optional. Replace an Original's retained versionId, lowering or removing it (null): only after a
    * report's `retain.discardOriginal`, when a finalized block it rested on was replaced (P9.22). A
    * store without it keeps the higher versionId.
+   * @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API.
    */
   discardRetained?(did: string, versionId: string | null): Promise<void>;
   /**
@@ -121,8 +123,10 @@ export interface OriginalsStore {
    * verification, so a replaced finalized block is reported (P9.22) and a read
    * can resume from a checkpoint (P9.25). A store without them reads every
    * record each time and finds a replaced block only within one verification.
+   * @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API.
    */
   getRetainedEvm?(did: string): Promise<RetainedEvm | undefined>;
+  /** @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API. */
   putRetainedEvm?(did: string, retained: RetainedEvm): Promise<void>;
   /**
    * Optional. Mark an Original first stored by importing a carried file, and
@@ -252,6 +256,7 @@ export class MemoryStore implements OriginalsStore {
     return Promise.resolve();
   }
 
+  /** @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API. */
   discardRetained(did: string, versionId: string | null): Promise<void> {
     if (versionId === null) this.retained.delete(did);
     else this.retained.set(did, versionId);
@@ -268,11 +273,13 @@ export class MemoryStore implements OriginalsStore {
     return Promise.resolve();
   }
 
+  /** @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API. */
   getRetainedEvm(did: string): Promise<RetainedEvm | undefined> {
     const kept = this.evm.get(did);
     return Promise.resolve(kept ? structuredClone(kept) : undefined);
   }
 
+  /** @internal EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): not part of the published API. */
   putRetainedEvm(did: string, retained: RetainedEvm): Promise<void> {
     this.evm.set(did, structuredClone({ blocks: retained.blocks, checkpoints: retained.checkpoints }));
     return Promise.resolve();

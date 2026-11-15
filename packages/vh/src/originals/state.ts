@@ -9,7 +9,7 @@ import { OriginalsError, fail } from "../errors.js";
 import { canonicalize, isJsonObject, type JsonObject, type JsonValue } from "../json/index.js";
 import { parseDidWebvh } from "../webvh/index.js";
 import { parseBtcoAlias } from "./btco.js";
-import { LAYER_RANK, anchorAddress, checkAnchor, evmAliasOf, layerOfAnchor, parseEvmAlias, tokenIdOf, type EvmAnchor, type EvmAnchorPin } from "./evm.js";
+import { LAYER_RANK, anchorAddress, checkAnchor, layerOfAnchor, parseEvmAlias, sameAnchor, tokenIdOf, type EvmAnchor, type EvmAnchorPin } from "./evm.js";
 
 /** PROVISIONAL (D1): the extension's method value; it implies vh-log:1.0. */
 export const ORIGINALS_METHOD = "originals:1.0";
@@ -72,6 +72,7 @@ export interface AssetState {
   /**
    * The anchor chain and minter (P14.18, P9.19; originals-spec PR 59,
    * proposed, EXPERIMENTAL). Absent means the anchor chain is Bitcoin.
+   * @internal Unreleased until the spec pins an anchor contract (P14.21): stripped from the published types.
    */
   anchor?: EvmAnchor;
 }
@@ -378,6 +379,7 @@ export interface EntryStateContext {
    * spec pins none). With it, a token alias's contract address is checked and
    * its chain list is used for move layers; without it, the address is not
    * checked here, and a verifier reports the Original unsupported (section 14).
+   * @internal Unreleased until the spec pins an anchor contract (P14.21): stripped from the published types.
    */
   evm?: EvmAnchorPin | null;
   /**
@@ -385,6 +387,7 @@ export interface EntryStateContext {
    * it, when the verifier has read it: layers are judged by the classes that
    * applied then (P9.28, P14.22; originals-spec PR 59, proposed). Without it,
    * by the classes of the revision this verifier implements. PROVISIONAL.
+   * @internal Unreleased until the spec pins an anchor contract (P14.21): stripped from the published types.
    */
   moveTime?: number;
 }
@@ -414,12 +417,6 @@ export function checkEditorChange(state: JsonObject, ctx: EntryStateContext): vo
   if (s.editor !== undefined) checkEditorEntry(checkEditorRef(s.editor), operation, author, asset, ctx.previous);
 }
 
-const sameAnchor = (a: EvmAnchor | undefined, b: EvmAnchor | undefined) => a?.chain === b?.chain && a?.minter === b?.minter;
-
-/** Whether an entry is a move entry: it changes or removes its parent's `anchor` member (P9.28). */
-export function isMoveEntry(asset: AssetState, previous: AssetState | undefined): boolean {
-  return previous?.anchor !== undefined && !sameAnchor(previous.anchor, asset.anchor);
-}
 
 /**
  * P9.19, P9.28 (originals-spec PR 59, proposed, EXPERIMENTAL): the `anchor`
@@ -462,11 +459,6 @@ function checkAnchorChange(s: JsonObject, asset: AssetState, ctx: EntryStateCont
   } else if (!asset.aliases.some((x) => x.startsWith("did:btco:"))) {
     invalid("STATE_MOVE_ALIAS", "a move to Bitcoin lists the destination sat's did:btco alias (P9.28)");
   }
-}
-
-/** The did:evm alias of the token P14.19 derives, under a pin, at the address P14.21 fixes for its chain (P14.18). */
-export function derivedTokenAlias(didVh: string, anchor: EvmAnchor, pin: EvmAnchorPin): string {
-  return evmAliasOf(anchor.chain, anchorAddress(pin, anchor.chain), tokenIdOf(didVh, anchor.minter));
 }
 
 /** Validate an entry's state against the Originals rules and its predecessor. */

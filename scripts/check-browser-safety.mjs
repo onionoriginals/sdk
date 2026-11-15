@@ -24,10 +24,9 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
  * guarded the moment it is published. `originals/index.js` is the browser-first
  * Originals workflow, and `originals/bitcoin-writer.js` the Bitcoin writer the
  * landing runs in the browser to prepare and sign an Original's inscription
- * (plan 011, PR 10b); `originals/evm.js` the experimental EVM anchor adapters
- * (originals-spec PR 59); the other SDK entries reach Node-only paths lazily.
+ * (plan 011, PR 10b); the other SDK entries reach Node-only paths lazily.
  */
-const SDK_BROWSER_FIRST = new Set(['originals/index.js', 'originals/bitcoin-writer.js', 'originals/evm.js', 'did/index.js']);
+const SDK_BROWSER_FIRST = new Set(['originals/index.js', 'originals/bitcoin-writer.js', 'did/index.js']);
 const sdkExports = JSON.parse(readFileSync(resolve(ROOT, 'packages/sdk/package.json'), 'utf8')).exports ?? {};
 const SDK_ENTRIES = Object.values(sdkExports)
   .filter((value) => typeof value === 'object' && value !== null && typeof value.import === 'string' && value.import.endsWith('.js'))
@@ -45,6 +44,12 @@ const GUARDED_ENTRIES = [
   { dist: 'packages/vh/dist', entry: 'fetch/index.js', browserFirst: true },
   { dist: 'packages/vh/dist', entry: 'webvh/index.js', browserFirst: true },
   { dist: 'packages/vh/dist', entry: 'originals/index.js', browserFirst: true },
+  // Internal, not exported (P14.21 pins no anchor contract): the EVM anchoring modules stay browser-safe
+  // for when plan 011 phase 12 exposes them.
+  // They import @originals/vh/internal/evm, which resolves only under the private `originals-internal` condition.
+  { dist: 'packages/vh/dist', entry: 'originals/evm-internal.js', browserFirst: true, internal: true },
+  { dist: 'packages/sdk/dist', entry: 'originals/evm.js', browserFirst: true, internal: true },
+  { dist: 'packages/sdk/dist', entry: 'originals/evm-runtime.js', browserFirst: true, internal: true },
   // @originals/auth's root is types + the isomorphic turnkeySignBytes, and its
   // client entry runs in a browser by definition. Neither was guarded, which is
   // how a Buffer-dependent "isomorphic" export shipped green (plan 046, item 2).
@@ -143,19 +148,19 @@ function findEagerBuiltins(entry, dist) {
  * `Buffer` deleted, checks exactly the thing that matters: does importing
  * this entry point crash right now, in a Buffer-less runtime.
  */
-function importsWithoutGlobalBuffer(entryAbsPath) {
+function importsWithoutGlobalBuffer(entryAbsPath, internal = false) {
   const href = pathToFileURL(entryAbsPath).href;
   const code = `delete globalThis.Buffer;
 import(${JSON.stringify(href)}).then(() => process.exit(0), (e) => {
   console.error(e && e.stack ? e.stack : String(e));
   process.exit(1);
 });`;
-  const result = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8' });
+  const result = spawnSync(process.execPath, [...(internal ? ['--conditions=originals-internal'] : []), '-e', code], { encoding: 'utf8' });
   return { ok: result.status === 0, stderr: result.stderr };
 }
 
 let failed = false;
-for (const { dist, entry, browserFirst = false } of GUARDED_ENTRIES) {
+for (const { dist, entry, browserFirst = false, internal = false } of GUARDED_ENTRIES) {
   const distAbs = resolve(ROOT, dist);
   const abs = resolve(distAbs, entry);
   const label = `${dist}/${entry}`;
@@ -176,7 +181,7 @@ for (const { dist, entry, browserFirst = false } of GUARDED_ENTRIES) {
   // the class of bug the static scans above cannot (#838) and is gated
   // regardless of `browserFirst`, since a crash on plain import is never
   // acceptable for an entry point a browser/edge/Deno consumer can import.
-  const runtimeImport = importsWithoutGlobalBuffer(abs);
+  const runtimeImport = importsWithoutGlobalBuffer(abs, internal);
   if (violations.size === 0 && bufferHits.size === 0 && runtimeImport.ok) {
     const note = bufferAdvisory.size > 0 ? ' (Buffer advisory above)' : '';
     console.log(`✓ ${label} — no eager Node builtins${browserFirst ? ' or Buffer globals' : ''}, imports cleanly with no global Buffer${note}`);

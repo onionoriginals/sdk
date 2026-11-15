@@ -6,7 +6,7 @@
  * EXPERIMENTAL (originals-spec PR 59).
  */
 import { describe, expect, test } from "bun:test";
-import { originalHash, tokenIdOf } from "../src/originals/index.js";
+import { originalHash, tokenIdOf } from "../src/originals/evm-internal.js";
 
 const DID = "did:vh:QmTokenIdVectorTokenIdVectorTokenIdVectorAb";
 const MINTER = "0x70997970c51812dc3a010c7d01b50e0d17dc79c8";

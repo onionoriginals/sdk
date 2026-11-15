@@ -1031,6 +1031,7 @@ export interface ReadCarriedOptions {
    * what providers read from the tokens (P7.14, P9.21-P9.29). Without a pin
    * (the spec pins none, P14.21) the Original is unsupported and nothing is
    * verified.
+   * @internal Unreleased until the spec pins an anchor contract (P14.21): stripped from the published types.
    */
   evm?: EvmEvidence;
   /** The highest versionIds verified before, and other copies, as for `verifyOriginal` (P7.6, P7.8). */

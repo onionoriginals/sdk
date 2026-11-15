@@ -37,8 +37,10 @@ export interface PrepareCreateInput {
    * pins none (P14.21), and a writer MUST NOT write an anchor member until it
    * does, nor one naming a chain P14.22 does not list. The SDK tells the author
    * what the choice means before writing it (P9.27).
+   * @internal Unreleased until the spec pins an anchor contract (P14.21): stripped from the published types.
    */
   anchor?: EvmAnchor;
+  /** @internal The P14.21 anchor contract pin (EXPERIMENTAL). */
   evm?: EvmAnchorPin;
 }
 
@@ -76,8 +78,10 @@ export interface PrepareUpdateInput {
    * EXPERIMENTAL: a move entry (P9.28) replaces the anchor member with the
    * destination chain's, or removes it (null) for a move to Bitcoin; list the
    * destination's alias in `aliases` too. Requires `evm`. Author entries only.
+   * @internal Unreleased until the spec pins an anchor contract (P14.21): stripped from the published types.
    */
   anchor?: EvmAnchor | null;
+  /** @internal The P14.21 anchor contract pin (EXPERIMENTAL). */
   evm?: EvmAnchorPin;
 }
 

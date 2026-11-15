@@ -48,7 +48,7 @@ import {
   type EvmRecord,
   type EvmTokenEvidence,
   type RetainedEvmBlock,
-} from "@originals/vh/originals";
+} from "@originals/vh/internal/evm";
 import { keccakHex } from "./evm-abi.js";
 import { EvmRevert, EvmRpc, type BlockRef, type EvmFetch } from "./evm-rpc.js";
 

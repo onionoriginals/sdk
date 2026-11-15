@@ -86,7 +86,8 @@ if (await originalsRestart.exited) process.exit(originalsRestart.exitCode ?? 1);
 // EXPERIMENTAL (originals-spec PR 59, plan 011 phase 12): an Original anchored on a local anvil
 // devnet moves up to Bitcoin; the arrival is inscribed only once the departure is final, and a
 // fresh reader checks both chains. Skips (exit 0) without Foundry's anvil.
-const evmMove = Bun.spawn([process.execPath, 'scripts/regtest/originals-evm-move.ts'], {
+// EVM anchoring is internal until P14.21 pins a contract: its vh entry resolves only under this condition.
+const evmMove = Bun.spawn([process.execPath, '--conditions=originals-internal', 'scripts/regtest/originals-evm-move.ts'], {
   cwd: root,
   env: {
     ...process.env, ...binaries,

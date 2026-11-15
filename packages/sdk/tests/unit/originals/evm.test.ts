@@ -18,7 +18,7 @@ import {
   updateOriginal,
   type EvmAnchorPin,
   type ListedChain,
-} from "@originals/vh/originals";
+} from "@originals/vh/internal/evm";
 import { OriginalsError } from "@originals/vh";
 import { decodeArgs, encodeArgs, encodeCall, eventTopic, keccakHex, toHex } from "../../../src/originals/evm-abi.js";
 import {

@@ -18,10 +18,11 @@ import { localSigner } from "@originals/vh/crypto";
 import { parseJson } from "@originals/vh/json";
 import { signWith, type LogEntry } from "@originals/vh/log";
 import { OriginalsError } from "@originals/vh";
-import { EVM_CHAINS, derivedTokenAlias, parseEvmAlias, updateOriginal, type EvmAnchor, type EvmAnchorPin, type ListedChain } from "@originals/vh/originals";
+import { EVM_CHAINS, derivedTokenAlias, parseEvmAlias, updateOriginal, type EvmAnchor, type EvmAnchorPin, type ListedChain } from "@originals/vh/internal/evm";
 import { keccakHex } from "../../../src/originals/evm-abi.js";
 import { evmGenesisNotice, prepareEvmPublication as preparePublication, readEvmToken, submitEvmPublication as submitPublication } from "../../../src/originals/evm.js";
 import { FileStore } from "../../../src/originals/fs-store.js";
+import { createEvmOriginalsSDK } from "../../../src/originals/evm-runtime.js";
 import { InscriptionClock, MemoryStore, OriginalsSDK, type OriginalsEvmOptions, type OriginalsStore } from "../../../src/originals/index.js";
 import { nextPendingEntry, prepareEntryInscription } from "../../../src/originals/bitcoin-writer.js";
 import type { OrdinalsProvider } from "../../../src/adapters/types.js";
@@ -70,7 +71,8 @@ async function setup(options: { providers?: boolean; evm?: boolean; store?: Orig
     ...(options.providers === false ? {} : { providers: { [OPERATOR.chain]: ["http://a-1", { url: "http://a-2", name: "a-2" }], [CONSENSUS.chain]: ["http://b-1"], [CONSORTIUM.chain]: ["http://c-1"] } }),
   };
   const store = options.store ?? new MemoryStore();
-  const sdk = OriginalsSDK.create({ store, authors: () => Promise.resolve(alice.evidence()), clock: clock(), ...(options.evm === false ? {} : { evm }) });
+  const base = { store, authors: () => Promise.resolve(alice.evidence()), clock: clock() };
+  const sdk = options.evm === false ? OriginalsSDK.create(base) : createEvmOriginalsSDK({ ...base, evm });
   const signer = alice.signer("orig", KEY);
   const author = alice.ref("orig");
   return { alice, A, B, C, calls, fetch, evm, store, sdk, signer, author };
@@ -132,7 +134,11 @@ describe("create with an EVM anchor (P9.19, P9.27, section 14)", () => {
     const anchor = { chain: OPERATOR.chain, minter: MINTER };
     await rejects(bare.sdk.create({ name: "Harbor", resource: { mediaType: "text/markdown", bytes: V1 }, author: env.author, signer: env.signer, anchor, acknowledged: evmGenesisNotice(anchor, PIN) }), "EVM_NO_ANCHOR_CONTRACT", "unsupported-profile");
     const err = await rejects(bare.sdk.get(o.did), "ORIGINAL_NOT_VERIFIED");
-    expect((err.details as { report: { evm: { status: string } } }).report.evm.status).toBe("unsupported");
+    // The published SDK reports it unsupported, not invalid, with no EVM section (section 14, P14.21).
+    const report = (err.details as { report: { history: { status: string; failure?: { code: string } } } }).report;
+    expect(report.history.status).toBe("unsupported");
+    expect(report.history.failure?.code).toBe("EVM_NO_ANCHOR_CONTRACT");
+    expect(report).not.toHaveProperty("evm");
   });
 });
 
@@ -353,8 +359,12 @@ describe("verifying from the tokens (P9.20-P9.25)", () => {
       const reopened = await FileStore.open(root);
       expect(await reopened.getRetainedEvm(o.did)).toEqual(kept!);
       const file = readdirSync(join(root, "evm"))[0]!;
-      writeFileSync(join(root, "evm", file), JSON.stringify({ did: o.did, blocks: [{ chain: 1 }], checkpoints: [{}] }));
-      expect(await reopened.getRetainedEvm(o.did)).toEqual({ blocks: [], checkpoints: [] });
+      writeFileSync(join(root, "evm", file), JSON.stringify({ did: o.did, blocks: [{ chain: 1 }], checkpoints: [{}, "x"] }));
+      // The store drops what is not even an object; the SDK resumes from no value that is not a checkpoint (P9.25).
+      expect(await reopened.getRetainedEvm(o.did)).toEqual({ blocks: [], checkpoints: [{}] as never[] });
+      const again = createEvmOriginalsSDK({ store: reopened, authors: () => Promise.resolve(env.alice.evidence()), clock: clock(), evm: env.evm });
+      expect((await again.get(o.did)).report.evm?.status).toBe("anchored");
+      expect((await reopened.getRetainedEvm(o.did))?.checkpoints[0]).toMatchObject({ head: o.anchoring, record: 0 });
       await reopened.close();
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -472,7 +482,7 @@ describe("moves (P9.28, P9.29)", () => {
     expect(own.history.status).toBe("valid");
     // C12-341: with the departure final, a local copy that does not verify through the move entry is still refused
     // before anything is signed, here because no author DID evidence verifies it (P9.18, P9.29).
-    const blind = OriginalsSDK.create({ store: env.store, authors: () => Promise.resolve(undefined), clock: clock(), evm: env.evm });
+    const blind = createEvmOriginalsSDK({ store: env.store, authors: () => Promise.resolve(undefined), clock: clock(), evm: env.evm });
     const refused = await rejects(prepareEntryInscription({ sdk: blind, did: o.did, fundingUtxos: [utxo], satSigner, changeAddress: "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080", feeRate: 2, network: "regtest", provider, clock: blocks, index: "ord-a", recoveryStore: null }), "ORIGINAL_NOT_VERIFIED");
     expect(refused.message).toContain("no verified history for author DID");
     await expect(inscribe()).rejects.toThrow("not reached");

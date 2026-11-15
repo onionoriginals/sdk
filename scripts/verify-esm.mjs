@@ -23,6 +23,12 @@
  * transitive deps (incl. auth's dependency on @originals/sdk) resolve from the
  * monorepo root — so auth is tested against the LOCAL sdk, not the published one.
  *
+ * It also guards what is unreleased: EVM anchoring (originals-spec PR 59) is
+ * built but not part of the published API until the spec pins an anchor
+ * contract (P14.21; owner decision, 14 November 2026). No exported entry point
+ * may export an EVM name at run time, and no published declaration reachable
+ * from an export map's `types` may declare or reference one.
+ *
  * Run AFTER `bun run build`. Exits non-zero on the first failure.
  */
 import { existsSync, mkdirSync, mkdtempSync, unlinkSync, symlinkSync, rmdirSync, readdirSync, statSync, lstatSync, realpathSync, renameSync, readFileSync } from 'node:fs';
@@ -85,6 +91,41 @@ function specifiersFromExports(pkg) {
   return [...specs].sort();
 }
 
+/** A runtime export name of unreleased EVM anchoring (P14.21). */
+const EVM_NAME = /evm/i;
+/** An EVM declaration or reference in a .d.ts line (string literals such as "evm-proven" aside). */
+const EVM_DECLARATION = /\b(Evm[A-Z]\w*|EVM_\w+|\w+Evm\b|evm\??:)|@originals\/vh\/internal\//;
+
+/**
+ * The published declarations of a package: every .d.ts reachable through
+ * relative imports from an unconditional `types` target of its export map.
+ * Returns the lines that declare or reference EVM anchoring, outside comments
+ * and private members.
+ */
+function evmDeclarations(pkg) {
+  const pkgDir = resolve(repoRoot, pkg.dir);
+  const json = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'));
+  const seen = new Set();
+  const hits = [];
+  const visit = (file) => {
+    if (seen.has(file) || !existsSync(file)) return;
+    seen.add(file);
+    const text = readFileSync(file, 'utf8');
+    text.split('\n').forEach((line, i) => {
+      const t = line.trim();
+      if (/^(\*|\/\/|\/\*|private )/.test(t)) return;
+      if (EVM_DECLARATION.test(t)) hits.push(`${toPosix(relative(repoRoot, file))}:${i + 1}: ${t.slice(0, 160)}`);
+    });
+    for (const m of text.matchAll(/from\s+["'](\.[^"']+)["']|import\(["'](\.[^"']+)["']\)/g)) {
+      visit(join(dirname(file), (m[1] ?? m[2]).replace(/\.js$/, '.d.ts')));
+    }
+  };
+  for (const value of Object.values(json.exports ?? {})) {
+    if (typeof value === 'object' && value !== null && typeof value.types === 'string') visit(join(pkgDir, value.types));
+  }
+  return hits;
+}
+
 const createdLinks = [];
 // Point node_modules/<name> at the freshly built workspace package. Never trust a
 // pre-existing link/dir unless it resolves to this workspace. Preserve the
@@ -124,7 +165,13 @@ try {
 
   for (const spec of allTargets) {
     try {
-      await import(spec);
+      const mod = await import(spec);
+      const leaked = Object.keys(mod).filter((k) => EVM_NAME.test(k));
+      if (leaked.length > 0) {
+        console.error(`✗ ${spec}: exports unreleased EVM anchoring (P14.21): ${leaked.join(', ')}`);
+        failures++;
+        continue;
+      }
       checked++;
     } catch (err) {
       console.error(`✗ ${spec}: ${err?.code ?? ''} ${err?.message ?? err}`);
@@ -132,6 +179,12 @@ try {
     }
   }
   if (failures === 0) console.log(`✓ ${checked} exported entry point(s) import cleanly under Node`);
+  for (const p of packages) {
+    const hits = evmDeclarations(p);
+    for (const hit of hits) console.error(`✗ ${p.name} declares unreleased EVM anchoring (P14.21): ${hit}`);
+    failures += hits.length;
+  }
+  if (failures === 0) console.log('✓ no published entry point exports or declares EVM anchoring (P14.21)');
 } finally {
   for (const { linkPath, backup } of createdLinks.reverse()) {
     // unlinkSync removes the symlink itself (never its target).

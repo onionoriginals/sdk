@@ -41,7 +41,7 @@ import {
   type EvmAnchor,
   type EvmAnchorPin,
   type ResourceDescriptor,
-} from "@originals/vh/originals";
+} from "@originals/vh/internal/evm";
 import { concatBytes, encodeCall, eventTopic, fromHex, keccakHex, toHex } from "./evm-abi.js";
 import { EvmRevert, EvmRpc, type EvmFetch, type EvmReceipt } from "./evm-rpc.js";
 import { ANCHOR_READS, EVM_MAX_MEDIA_TYPE_BYTES } from "./evm-reader.js";

@@ -63,7 +63,7 @@ import * as btc from '@scure/btc-signer';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { localSigner } from '@originals/vh/crypto';
 import { createLog, serializeLog, signWith } from '@originals/vh/log';
-import { EVM_CHAINS, decodeCbor, derivedTokenAlias, verifyOriginal, type AuthorDidEvidence, type EvmAnchorPin, type ListedChain } from '@originals/vh/originals';
+import { EVM_CHAINS, decodeCbor, derivedTokenAlias, verifyOriginal, type AuthorDidEvidence, type EvmAnchorPin, type ListedChain } from '@originals/vh/internal/evm';
 import { RegtestProvider } from '../../packages/sdk/src/adapters/providers/RegtestProvider';
 import type { InscriptionRecoveryRecord, InscriptionRecoveryStore } from '../../packages/sdk/src/bitcoin/inscription-recovery';
 import type { BitcoinSigner } from '../../packages/sdk/src/types/common';
@@ -71,6 +71,7 @@ import type { Utxo } from '../../packages/sdk/src/types/bitcoin';
 import { InscriptionClock, MemoryStore, OriginalsSDK, btcoAlias, keySigner, satEvidence } from '../../packages/sdk/src/originals/index';
 import { prepareEntryInscription, readAnchored, submitEntryInscription } from '../../packages/sdk/src/originals/bitcoin-writer';
 import { keccakHex } from '../../packages/sdk/src/originals/evm-abi';
+import { createEvmOriginalsSDK } from '../../packages/sdk/src/originals/evm-runtime';
 import { EvmRpc, evmGenesisNotice, readEvmToken, waitForEvmReceipt, type EvmFetch, type EvmWallet } from '../../packages/sdk/src/originals/evm';
 import { startRegtest } from './environment';
 
@@ -198,7 +199,7 @@ try {
   const signer = keySigner({ keyType: 'Ed25519', secretKey: signingKey, verificationMethod: author.verificationMethod });
 
   const store = new MemoryStore();
-  const sdk = OriginalsSDK.create({ store, authors: [authorEvidence], evm: { pin, providers: { [CHAIN]: [url] }, fetch, pollMs: 50 } });
+  const sdk = createEvmOriginalsSDK({ store, authors: [authorEvidence], evm: { pin, providers: { [CHAIN]: [url] }, fetch, pollMs: 50 } });
   const recorded = () => ({ recoveryStore, recoveryIds: [...records.keys()] });
   const storedLines = async (of: string) => (await sdk.committedLog(of)).trimEnd().split('\n');
   const carried = (metadata: Uint8Array | null | undefined) =>

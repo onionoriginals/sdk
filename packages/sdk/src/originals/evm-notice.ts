@@ -26,7 +26,7 @@ import {
   type ListedChain,
   type ResourceDescriptor,
   type TrustClass,
-} from "@originals/vh/originals";
+} from "@originals/vh/internal/evm";
 import { parseJson } from "@originals/vh/json";
 import { inscriptionMetadata, isActiveContent } from "./inscription.js";
 

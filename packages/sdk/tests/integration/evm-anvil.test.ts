@@ -41,7 +41,7 @@ import {
   verifyOriginal,
   type EvmAnchorPin,
   type ListedChain,
-} from "@originals/vh/originals";
+} from "@originals/vh/internal/evm";
 import { keccakHex, toHex } from "../../src/originals/evm-abi.js";
 import {
   EvmRpc,
@@ -57,7 +57,8 @@ import {
   type EvmWriterContext,
 } from "../../src/originals/evm.js";
 import { inscriptionMetadata } from "../../src/originals/inscription.js";
-import { MemoryStore, OriginalsSDK } from "../../src/originals/index.js";
+import { MemoryStore } from "../../src/originals/index.js";
+import { createEvmOriginalsSDK } from "../../src/originals/evm-runtime.js";
 import { Author, seed } from "../unit/originals/helpers.js";
 
 const ROOT = resolve(import.meta.dir, "../../../..");
@@ -313,7 +314,7 @@ describe.skipIf(!enabled)("EVM anchoring on anvil (PR 59, experimental)", () => 
     const A = "eip155:31337";
     const B = "eip155:31338";
     const store = new MemoryStore();
-    const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], evm: { pin, providers: { [A]: [url, { url, name: "anvil-a2" }], [B]: [urlB] }, fetch: realFetch, pollMs: 50 } });
+    const sdk = createEvmOriginalsSDK({ store, authors: [alice.evidence()], evm: { pin, providers: { [A]: [url, { url, name: "anvil-a2" }], [B]: [urlB] }, fetch: realFetch, pollMs: 50 } });
     const minter = anvilWallet(rpc, MINTER);
     const carol = anvilWallet(rpcB, CAROL);
     const final = async (r: EvmRpc) => void (await r.request("anvil_mine", ["0x3"]));

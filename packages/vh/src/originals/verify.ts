@@ -99,6 +99,7 @@ export interface VerifyOriginalOptions {
    * Bitcoin (P9.20); a supplied log is one more source, never preferred to
    * the anchor (P7.14). Without a pin, or for an unlisted chain, the Original
    * is unsupported, never invalid (P9.19, section 14).
+   * @internal Unreleased until the spec pins an anchor contract (P14.21): stripped from the published types.
    */
   evm?: EvmEvidence;
   now?: number | Date;
@@ -211,7 +212,7 @@ export interface ResourceVersion {
   bytes: "verified" | "missing" | "mismatch";
   /** Whether these bytes were read from an inscription's body on the anchoring sat (P9.17, P9.18). */
   onBitcoin: boolean;
-  /** The EVM chain whose accepted publication's body these bytes were read from (P9.25); never Bitcoin. EXPERIMENTAL. */
+  /** @internal The EVM chain whose accepted publication's body these bytes were read from (P9.25); never Bitcoin. EXPERIMENTAL. */
   onEvm?: string;
 }
 
@@ -293,6 +294,7 @@ export interface OriginalsReport {
    * trust class, the entries accepted there, the finalized block and the
    * providers, and the token's holder as owner (P9.23, P9.27, P9.29). Never
    * Bitcoin anchoring: `anchoring` and `ownership` are Bitcoin's alone.
+   * @internal Unreleased until the spec pins an anchor contract (P14.21): stripped from the published types.
    */
   evm: EvmAnchoringReport | null;
   /**
@@ -336,17 +338,21 @@ export interface OriginalsReport {
    * so accepting one later is a reported change of head (P9.15).
    */
   retain: {
-    original: string | null; authors: Record<string, string>; anchor?: RetainedAnchor; evm?: RetainedEvmBlock[];
+    original: string | null; authors: Record<string, string>; anchor?: RetainedAnchor;
+    /** @internal EVM finalized blocks relied on (P9.22). EXPERIMENTAL. */
+    evm?: RetainedEvmBlock[];
     /**
      * P9.25 (PR 59 1b5c484): checkpoints per token, to resume from (`EvmEvidence.checkpoints`): each the head
      * entry's versionId with the chain read that verified it. None is made while a publication waits on an
      * unverifiable entry. EXPERIMENTAL.
+     * @internal Unreleased until the spec pins an anchor contract (P14.21): stripped from the published types.
      */
     evmCheckpoints?: EvmCheckpoint[];
     /**
      * P9.22: a finalized block this verification or an earlier one relied on was replaced, so the
      * retained head is discarded and `original` replaces it, even when lower or null. A store
      * that never lowers a retained versionId must replace it here. EXPERIMENTAL.
+     * @internal Unreleased until the spec pins an anchor contract (P14.21): stripped from the published types.
      */
     discardOriginal?: true;
   };

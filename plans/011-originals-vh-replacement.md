@@ -209,6 +209,18 @@ Each PR is test-first and driven by the §12 matrix. Every §12 row gets a stabl
 | **12c** | 4 | Anchor contract (`contracts/`, Foundry). **Gated on owner decision:** an audit, then the address and code hash pinned in P14.21 and the chain list | Forge tests in CI; audit report; P14.21 pin |
 | **12d** | 4 | SDK EVM reader, writer and workflow (mint, publish, move up a layer, EVM-to-Bitcoin arrival), split from #1061, after 12c | anvil journey (`test:evm-anvil`) and a **real Core/ord regtest** EVM-to-Bitcoin move; no public chain, testnet or mainnet without owner approval |
 
+**Phase 12 release gate (owner decision, 14 November 2026).** #1061 ships 12a
+(carried logs and the P14.13 entry limit) in the next npm release. The EVM
+code of 12b and 12d stays in the repository, tested, but internal: no
+published entry point of `@originals/vh` or `@originals/sdk` exports or
+declares it (`@originals/vh/internal/evm` resolves only under the private
+`originals-internal` export condition; the SDK enables it only through the
+unexported `createEvmOriginalsSDK`), and the published packages report an
+`anchor` member unsupported and refuse to write one. 12b and 12d expose the
+API once 12c pins an audited contract in P14.21: export the internal entries
+and drop the `@internal` tags. `verify:esm`, `typecheck:public` and the
+`public-surface` tests guard the line until then.
+
 Each PR is registered with `link_pull_request` and nothing gets merged without your go-ahead.
 
 ### 3.1 Publishing `@originals/vh` (owner decision Q11, 2026-10-18)

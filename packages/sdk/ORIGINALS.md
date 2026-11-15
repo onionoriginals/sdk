@@ -1386,7 +1386,38 @@ The counts are exact and asserted by `tests/unit/originals/clock-bench.test.ts`
 on a 20,000-header chain; the latencies exclude a real node's own cost of
 serving 900,000 headers, which bounds a production cold start.
 
-## EVM anchoring (EXPERIMENTAL; originals-spec PR 59)
+## EVM anchoring (EXPERIMENTAL; originals-spec PR 59) — not part of the public API yet
+
+**Not released (owner decision, 14 November 2026).** EVM anchoring is built
+and tested in this repository but is not part of the published API of
+`@originals/vh` or `@originals/sdk` until the spec pins an audited anchor
+contract (P14.21; plan 011 phase 12b/12d expose it once 12c pins one). No
+published entry point exports or declares it: there is no
+`@originals/sdk/originals/evm` subpath, the published `OriginalsSDK` has no
+`evm` option and no EVM methods (and ignores an `evm` option passed anyway),
+and `@originals/vh/originals` has no EVM names, no `evm` option on
+`verifyOriginal`, `readCarriedFile` or the builders, and no `evm` section in
+its report. What the published packages do:
+
+- An Original whose genesis entry has an `anchor` member verifies as
+  unsupported, never invalid (section 14): `history.status` is
+  `unsupported` with the failure `EVM_NO_ANCHOR_CONTRACT`
+  (`unsupported-profile`), the reason `unsupported-profile`, and it is never
+  current. This holds for `verifyOriginal`, `get`, `load` and carried-log
+  reads (`readCarriedFile`, `readCarried`, `importCarried`).
+- A writer refuses to write an `anchor` member: `create` and the vh builders
+  throw `EVM_NO_ANCHOR_CONTRACT` (`unsupported-profile`), even when handed a
+  pin.
+
+The rest of this section describes the internal implementation, which the
+tests and the regtest journeys use: `createEvmOriginalsSDK` from
+`src/originals/evm-runtime.ts` (an `OriginalsSDK` whose `evm` option is
+honoured), the adapters in `src/originals/evm.ts`, and
+`@originals/vh/internal/evm`, which resolves only under the private
+`originals-internal` export condition (`bun test --conditions=originals-internal`,
+`customConditions` in TypeScript). `verify:esm`, `typecheck:public` and the
+`public-surface` tests in both packages fail if any of it reaches a published
+entry point.
 
 Built to originals-spec `master` `5c42958`, after PR 59 and #63 (P9.18–P9.29, P14.18–P14.22),
 with the owner decisions of 13 and 14 November 2026.
@@ -1414,10 +1445,12 @@ another chain; `EvmAnchorPin.chains` lets an experiment list devnet chains
 of any class, as the tests and the anvil journeys do.
 
 ```ts
-import { MemoryStore, OriginalsSDK } from "@originals/sdk/originals";
-import { evmGenesisNotice } from "@originals/sdk/originals/evm";
+// Internal paths: none of this is published yet (P14.21).
+import { MemoryStore } from "@originals/sdk/originals";
+import { createEvmOriginalsSDK } from "./src/originals/evm-runtime.js";
+import { evmGenesisNotice } from "./src/originals/evm.js";
 
-const sdk = OriginalsSDK.create({
+const sdk = createEvmOriginalsSDK({
   store, authors,
   evm: {
     pin,                                     // { address, codeHash, chains?: [...EVM_CHAINS, devnet] }

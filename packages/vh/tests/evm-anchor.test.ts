@@ -35,7 +35,7 @@ import {
   type RetainedEvmBlock,
   type SatEvidence,
   type SatInscription,
-} from "../src/originals/index.js";
+} from "../src/originals/evm-internal.js";
 import { CONSENSUS_CHAIN, CONSORTIUM_CHAIN, OPERATOR_CHAIN, ROLLUP_CHAIN, TEST_CHAINS } from "./helpers/evm-chains.js";
 import { VhAuthor, bytes, carrying, clock, describedBytes, photo, seeded } from "./helpers/originals.js";
 

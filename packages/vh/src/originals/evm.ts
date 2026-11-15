@@ -14,6 +14,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { utf8ToBytes } from "@noble/hashes/utils.js";
 import { OriginalsError, fail } from "../errors.js";
 import { isJsonObject } from "../json/index.js";
+import type { AssetState } from "./state.js";
 
 function invalid(code: string, message: string): never {
   throw new OriginalsError("invalid-evidence", code, message);
@@ -442,4 +443,16 @@ export function resumableCheckpoint(checkpoints: ReadonlyArray<unknown>, alias: 
     if (!best || c.record > best.record) best = c;
   }
   return best;
+}
+
+export const sameAnchor = (a: EvmAnchor | undefined, b: EvmAnchor | undefined): boolean => a?.chain === b?.chain && a?.minter === b?.minter;
+
+/** Whether an entry is a move entry: it changes or removes its parent's `anchor` member (P9.28). */
+export function isMoveEntry(asset: Pick<AssetState, "anchor">, previous: Pick<AssetState, "anchor"> | undefined): boolean {
+  return previous?.anchor !== undefined && !sameAnchor(previous.anchor, asset.anchor);
+}
+
+/** The did:evm alias of the token P14.19 derives, under a pin, at the address P14.21 fixes for its chain (P14.18). */
+export function derivedTokenAlias(didVh: string, anchor: EvmAnchor, pin: EvmAnchorPin): string {
+  return evmAliasOf(anchor.chain, anchorAddress(pin, anchor.chain), tokenIdOf(didVh, anchor.minter));
 }

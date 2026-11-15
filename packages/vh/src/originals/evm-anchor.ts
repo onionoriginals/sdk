@@ -61,6 +61,7 @@ import {
 import type { SatEvidence, SatInscription } from "./btco.js";
 import {
   anchorAddress,
+  derivedTokenAlias,
   caip19Of,
   checkAnchor,
   checkpointAlias,
@@ -84,7 +85,7 @@ import {
   type RetainedEvmBlock,
   type TrustClass,
 } from "./evm.js";
-import { derivedTokenAlias, type AssetState } from "./state.js";
+import type { AssetState } from "./state.js";
 
 /** What a verifier is given to verify an Original anchored on an EVM chain (P9.21, P9.22). */
 export interface EvmEvidence {

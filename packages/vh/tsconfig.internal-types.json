@@ -1,0 +1,9 @@
+{
+  "//": "Unstripped declarations for the monorepo only (never published): what the SDK compiles against under the private `originals-internal` export condition, so it sees the EVM members the published declarations strip (P14.21).",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "stripInternal": false,
+    "emitDeclarationOnly": true,
+    "outDir": "./internal-types"
+  }
+}
