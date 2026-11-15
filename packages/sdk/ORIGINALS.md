@@ -1388,7 +1388,7 @@ serving 900,000 headers, which bounds a production cold start.
 
 ## EVM anchoring (EXPERIMENTAL; originals-spec PR 59)
 
-Built to originals-spec PR 59 at `ce19572` (P9.18–P9.29, P14.18–P14.22),
+Built to originals-spec `master` `5c42958`, after PR 59 and #63 (P9.18–P9.29, P14.18–P14.22),
 with the owner decisions of 13 and 14 November 2026.
 P14.21 pins no anchor contract, so nothing here works without an
 `EvmAnchorPin` you supply, as for a contract you deployed on a local devnet,

@@ -41,8 +41,8 @@ for (const root of roots) {
 }
 
 describe("section 12 conformance registry", () => {
-  // The pinned table has 347 rows. It is originals-spec ce19572, the head of open PR 59 (carried logs
-  // and EVM anchoring, experimental) on master 915b726, which merged #58; not master itself. #58 and
+  // The pinned table has 347 rows. It is originals-spec master 5c42958, after #59 and #63 merged
+  // (carried logs and EVM anchoring, experimental); its rows are the same as at ce19572. #58 and
   // PR 59 at 3ed0f89 added C12-200 to C12-307; PR 59 at a3ffdc1 rewords twelve rows, splits C12-222,
   // and adds 24 rows, C12-308 to C12-331; at 1b5c484 it rewords six rows and adds 20, C12-332 to
   // C12-351; at ce19572 (P14.22 lists Base alone) it rewords three rows and adds 3, C12-352 to

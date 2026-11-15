@@ -3,8 +3,8 @@
 '@originals/sdk': minor
 ---
 
-Experimental: carried logs and EVM anchoring, built to originals-spec PR 59
-(`ce19572`, with the owner decisions of 13 and 14 November 2026). Everything EVM is
+Experimental: carried logs and EVM anchoring, built to originals-spec `master`
+(`5c42958`, after PR 59 and #63, with the owner decisions of 13 and 14 November 2026). Everything EVM is
 unsupported by default, because the spec pins no anchor contract (P14.21).
 
 - Carried logs (P7.11–P7.16, P14.14–P14.17): `readCarriedFile`,
