@@ -343,6 +343,12 @@ export interface OriginalsReport {
      * unverifiable entry. EXPERIMENTAL.
      */
     evmCheckpoints?: EvmCheckpoint[];
+    /**
+     * P9.22: a finalized block this verification or an earlier one relied on was replaced, so the
+     * retained head is discarded and `original` replaces it, even when lower or null. A store
+     * that never lowers a retained versionId must replace it here. EXPERIMENTAL.
+     */
+    discardOriginal?: true;
   };
 }
 
@@ -623,7 +629,8 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   }
   if (evmAssembly) {
     // Section 14, P9.19, P9.21, P7.14: an anchor this verifier cannot support is unsupported, and nothing is verified.
-    if (evmAssembly.report.status === "unsupported" && evmAssembly.report.stretches.length === 0) return unsupportedReport(evmAssembly.report, options, raw && raw.length > 0 ? raw : assembly?.entries ?? raw);
+    // An unsupported destination reached by a move carries no entries either: never verify an empty log as valid (section 7).
+    if (evmAssembly.report.status === "unsupported" && (evmAssembly.report.stretches.length === 0 || evmAssembly.entries.length === 0)) return unsupportedReport(evmAssembly.report, options, raw && raw.length > 0 ? raw : assembly?.entries ?? raw);
     input = evmAssembly.entries;
     assembly = evmAssembly.bitcoin;
   }
@@ -844,6 +851,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       ...(evmAssembly && (evmAssembly.checkpoints.length > 0 || (options.evm?.checkpoints?.length ?? 0) > 0)
         ? { evmCheckpoints: retainedCheckpoints(evmAssembly.checkpoints, options.evm?.checkpoints, onReplaced) }
         : {}),
+      ...(replaced.length > 0 ? { discardOriginal: true as const } : {}),
     },
   };
   for (const h of histories) {

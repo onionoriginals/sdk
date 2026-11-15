@@ -840,6 +840,17 @@ describe("P9.28, P9.29 moves", () => {
     expect(r.current).toBe(false);
   });
 
+  test("C12-354 (review): a move whose destination holds other code at the pinned address is unsupported, never a valid empty history (section 14, section 7)", async () => {
+    const m = await moving(CONSENSUS, 78);
+    const r = await verify(m.alice, [
+      token(m.alias, two(OPERATOR, [rec(0, m.log), rec(1, m.move)])),
+      token(m.dest, two(CONSENSUS, [rec(0, m.through, TS0 + 600)], { codeHash: "0x" + "ee".repeat(32) })),
+    ]);
+    expect(r.evm).toMatchObject({ status: "unsupported", unsupported: { code: "EVM_ANCHOR_CODE_MISMATCH" } });
+    expect(r.history.status).not.toBe("valid");
+    expect(r.current).toBe(false);
+  });
+
   test("C12-295: 'Move entry's signing key removed, or its signer DID deactivated, after the departure and before the arrival': arrival accepted", async () => {
     for (const how of ["rotate", "deactivate"] as const) {
       const m = await moving(CONSENSUS, how === "rotate" ? 73 : 74);
@@ -973,6 +984,9 @@ describe("originals-spec PR 59 a3ffdc1: P9.22 providers and finality", () => {
     expect(r.current).toBe(false);
     // Discarded: the retained head e4, the checkpoint at block 1000 and the block itself.
     expect(r.retain.original).toBe(o.anchoring.versionId);
+    // Lower than the retained e4, so the report tells a store that never lowers to replace it (P9.22).
+    expect(r.retain.discardOriginal).toBe(true);
+    expect(first.retain.discardOriginal).toBeUndefined();
     expect(r.retain.evm).toEqual([{ chain: OPERATOR, number: 1200, hash: blockHash(OPERATOR, 1200) }]);
     expect(r.retain.evmCheckpoints ?? []).toEqual([]);
   });
@@ -1142,6 +1156,15 @@ describe("originals-spec PR 59 a3ffdc1: P9.19, P9.23 not anchored", () => {
     const r = await verifyOriginal({ authors: [o.alice.evidence()], now: NOW, evm: { pin: PIN, tokens } });
     expect(r.evm?.status).toBe("not-anchored");
     expect(r.evm?.owner).toBeNull();
+    expect(r.current).toBe(false);
+  });
+
+  test("P9.22, P9.25: with no copy, a token no usable provider read is missing evidence, never not anchored", async () => {
+    const o = await original(OPERATOR, 107);
+    const unread = two(OPERATOR, [], { owner: HOLDER }).map((r) => ({ ...r, records: null, stateUnavailable: true }));
+    const r = await verifyOriginal({ authors: [o.alice.evidence()], now: NOW, evm: { pin: PIN, tokens: [token(o.alias, unread)] } });
+    expect(r.evm?.status).toBe("unverified");
+    expect(r.reasons).toContain("evm-evidence-missing");
     expect(r.current).toBe(false);
   });
 });

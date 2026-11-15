@@ -89,6 +89,7 @@ import {
   type SatEvidence,
   type ValidAsOf,
   type VerifyOriginalOptions,
+  checkAnchor,
   derivedTokenAlias,
   parseEvmAlias,
   resumableCheckpoint,
@@ -1323,12 +1324,20 @@ export class OriginalsSDK {
 
   /** Keep the highest versionIds a report verified. The report never lowers them. */
   private async retain(report: OriginalsReport): Promise<void> {
-    if (report.original && report.retain.original) await this.store.putRetained(report.original, report.retain.original);
+    // P9.22: after a replaced finalized block the verifier discards the retained head; the store may lower it only here.
+    if (report.original && report.retain.discardOriginal && this.store.discardRetained) await this.store.discardRetained(report.original, report.retain.original);
+    else if (report.original && report.retain.original) await this.store.putRetained(report.original, report.retain.original);
     for (const [did, versionId] of Object.entries(report.retain.authors)) await this.store.putRetained(did, versionId);
     if (report.original && report.retain.anchor && this.store.putRetainedAnchor) await this.store.putRetainedAnchor(report.original, report.retain.anchor);
     // P9.22, P9.25: the finalized blocks relied on and the checkpoints per token, as the verifier left them.
+    // A report that retains only one of the two (a token read that left evidence missing retains no
+    // block) leaves the other as this store kept it, rather than clearing it.
     if (report.original && (report.retain.evm || report.retain.evmCheckpoints) && this.store.putRetainedEvm) {
-      await this.store.putRetainedEvm(report.original, { blocks: report.retain.evm ?? [], checkpoints: report.retain.evmCheckpoints ?? [] });
+      const kept = report.retain.evm && report.retain.evmCheckpoints ? undefined : await this.store.getRetainedEvm?.(report.original);
+      await this.store.putRetainedEvm(report.original, {
+        blocks: report.retain.evm ?? kept?.blocks ?? [],
+        checkpoints: report.retain.evmCheckpoints ?? kept?.checkpoints ?? [],
+      });
     }
   }
 
@@ -1358,18 +1367,18 @@ export class OriginalsSDK {
     if (mode.kind === "supplied") return { ...base, tokens: mode.tokens, ...(kept && kept.checkpoints.length > 0 ? { checkpoints: kept.checkpoints } : {}) };
     if (mode.kind === "local" || !pin || !evm?.providers) return { ...base, tokens: [], ...(mode.kind === "local" ? { localCopy: true } : {}) };
     const entries = versionIds(log).map((versionId) => ({ versionId }));
-    const tokens: EvmTokenEvidence[] = [];
-    const used: NonNullable<EvmEvidence["checkpoints"]> = [];
-    for (const alias of tokenAliasesOf(log, pin)) {
+    const providersOf = evm.providers;
+    // Each token is read independently, so the reads run together; results keep the log's order.
+    const results = await Promise.all(tokenAliasesOf(log, pin).map(async (alias) => {
       let chain: string;
       try {
         chain = parseEvmAlias(alias).chain;
       } catch (error) {
-        if (error instanceof OriginalsError) continue;
+        if (error instanceof OriginalsError) return undefined;
         throw error;
       }
-      const providers = evm.providers[chain];
-      if (!providers || providers.length === 0) continue;
+      const providers = providersOf[chain];
+      if (!providers || providers.length === 0) return undefined;
       // P9.25 (MAY): resume only from a checkpoint whose head is this log's entry N, as the verifier requires.
       const checkpoint = resumableCheckpoint(kept?.checkpoints ?? [], alias, entries);
       try {
@@ -1380,12 +1389,19 @@ export class OriginalsSDK {
           ...(blocks.length > 0 ? { retained: blocks } : {}),
           ...(checkpoint ? { from: checkpoint.record + 1 } : {}),
         });
-        tokens.push(read.evidence);
-        if (checkpoint) used.push(checkpoint);
+        return { evidence: read.evidence, checkpoint };
       } catch (error) {
         // An alias of another contract or an unlisted chain: the verifier reports it (P9.19, P9.21).
         if (!(error instanceof OriginalsError)) throw error;
+        return undefined;
       }
+    }));
+    const tokens: EvmTokenEvidence[] = [];
+    const used: NonNullable<EvmEvidence["checkpoints"]> = [];
+    for (const r of results) {
+      if (!r) continue;
+      tokens.push(r.evidence);
+      if (r.checkpoint) used.push(r.checkpoint);
     }
     if (tokens.length === 0) return { ...base, tokens: [] };
     const others = (kept?.checkpoints ?? []).filter((c) => !used.includes(c));
@@ -1916,7 +1932,8 @@ export class OriginalsSDK {
       destination = to.sat;
     } else {
       exactKeys(to, ["chain", "minter"], "move input.to");
-      anchor = { chain: to.chain, minter: to.minter };
+      // P14.18: checked before the alias is derived, so a malformed chain is a structured refusal, not a parse error.
+      anchor = checkAnchor({ chain: to.chain, minter: to.minter }, "move input.to");
       destination = derivedTokenAlias(did, anchor, pin);
     }
     const aliases = view.state.aliases.map((a) => (a === current ? destination : a));

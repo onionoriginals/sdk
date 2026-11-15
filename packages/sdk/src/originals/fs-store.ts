@@ -649,6 +649,19 @@ export class FileStore implements OriginalsStore {
     return this.track(() => this.putRetainedNow(did, versionId));
   }
 
+  async discardRetained(did: string, versionId: string | null): Promise<void> {
+    return this.track(() => {
+      // Serialized with putRetained on the same DID; the one write that may lower it (P9.22).
+      const key = `retained:${did}`;
+      const run = (this.locks.get(key) ?? Promise.resolve()).then(async () => {
+        if (versionId === null) await fs.rm(join(this.root, "retained", this.didFile(did)), { force: true });
+        else await this.writeAtomically(join(this.root, "retained"), this.didFile(did), JSON.stringify({ did, versionId }));
+      });
+      this.locks.set(key, run.catch(() => undefined));
+      return run;
+    });
+  }
+
   private putRetainedNow(did: string, versionId: string): Promise<void> {
     // Serialized per DID and never lowered, so a concurrent read cannot undo a newer retain (P7.8).
     const key = `retained:${did}`;

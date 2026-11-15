@@ -101,6 +101,12 @@ export interface OriginalsStore {
   getRetained(did: string): Promise<string | undefined>;
   putRetained(did: string, versionId: string): Promise<void>;
   /**
+   * Optional. Replace an Original's retained versionId, lowering or removing it (null): only after a
+   * report's `retain.discardOriginal`, when a finalized block it rested on was replaced (P9.22). A
+   * store without it keeps the higher versionId.
+   */
+  discardRetained?(did: string, versionId: string | null): Promise<void>;
+  /**
    * The anchor last reported for an anchored Original, so a later change of
    * anchor is reported, never silent (P9.16). Optional: a store without it
    * reports a change only within one verification.
@@ -243,6 +249,12 @@ export class MemoryStore implements OriginalsStore {
 
   putRetained(did: string, versionId: string): Promise<void> {
     this.retained.set(did, higherVersion(this.retained.get(did), versionId));
+    return Promise.resolve();
+  }
+
+  discardRetained(did: string, versionId: string | null): Promise<void> {
+    if (versionId === null) this.retained.delete(did);
+    else this.retained.set(did, versionId);
     return Promise.resolve();
   }
 

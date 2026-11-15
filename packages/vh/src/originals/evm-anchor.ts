@@ -647,7 +647,13 @@ export async function assembleFromEvm(
     ({ status, move: "none", stretches: [], owner: null, destination: null, arrival: null, carried: { entries: [], ordering: "claimed" }, unsupported: null, warnings: [], notCheckedAgainstAnchor: [], localCopy: false });
   // P3.9, P9.23: tokens with no anchoring or arrival publication of any Original, whatever was minted
   // or whatever `tokenURI` says, show no Original.
-  if (genesis === undefined && (!copy || copy.length === 0) && evidence.tokens.length > 0) return empty(bare("not-anchored"));
+  // P9.22, P9.25: a token no usable provider read every record of shows nothing either way: that is
+  // missing evidence, never not anchored.
+  if (genesis === undefined && (!copy || copy.length === 0) && evidence.tokens.length > 0) {
+    const searched = evidence.tokens.filter((t) => evidence.resolving === undefined || t.alias === evidence.resolving);
+    const read = searched.some((t) => t.reads.some((r) => r.records !== null && r.stateUnavailable !== true && (r.from ?? 0) === 0));
+    return empty(bare(read ? "not-anchored" : "unverified"));
+  }
   const genesisAnchor = assetOf(genesis)?.anchor;
   if (genesisAnchor === undefined) return null;
   const did = (genesis as { state?: { id?: unknown } }).state?.id;
@@ -722,7 +728,7 @@ export async function assembleFromEvm(
     let token = readToken(alias, listed, support.pin, supplied, evidence.retained ?? [], evidence.checkpoints ?? [], excluded);
     if (token.kind === "unsupported") return unsupported(token.code, token.message, anchor.chain);
     // P9.22: evidence of a replaced block is a warning, whatever else the read shows.
-    const replacedFrom = token.kind === "read" ? token.replacedFrom : token.replacedFrom;
+    const replacedFrom = token.replacedFrom;
     if (replacedFrom !== undefined) {
       replaced.push({ chain: listed.chain, from: replacedFrom });
       if (!warnings.includes("authoritative-source-changed")) warnings.push("authoritative-source-changed");

@@ -256,6 +256,45 @@ describe("verifying from the tokens (P9.20-P9.25)", () => {
     expect(read.every((i) => i >= 2)).toBe(true);
   });
 
+  test("C12-327: after a replaced finalized block the store discards the retained head the verifier discarded, though it never lowers otherwise (P9.22)", async () => {
+    for (const make of [() => new MemoryStore(), () => null] as const) {
+      const root = mkdtempSync(join(tmpdir(), "originals-discard-"));
+      try {
+        const store = make() ?? (await FileStore.open(root));
+        const env = await setup({ store });
+        const o = await published(env);
+        const v = await env.sdk.edit(o.did, { parent: o.anchoring, name: "On the replaced fork", author: env.author, signer: env.signer });
+        await publish(env, o.did, o.wallet, env.A);
+        await env.sdk.get(o.did);
+        expect(await store.getRetained(o.did)).toBe(v.original.checkpoint);
+        // The fork that held the edit's record is replaced: every block hash changes and the record is gone.
+        env.A.fork = "replacement";
+        env.A.records.get(parseEvmAlias(o.alias).tokenId)!.pop();
+        env.A.latest += 1;
+        finalize(env.A);
+        const after = await env.sdk.get(o.did);
+        expect(after.report.retain.discardOriginal, JSON.stringify(after.report.reasons)).toBe(true);
+        expect(after.report.evm?.warnings).toContain("authoritative-source-changed");
+        expect(await store.getRetained(o.did)).not.toBe(v.original.checkpoint);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test("P9.22: a read that leaves the token's evidence missing keeps the finalized blocks the store retained", async () => {
+    const env = await setup();
+    const o = await published(env);
+    await env.sdk.get(o.did);
+    const kept = (await env.store.getRetainedEvm!(o.did))!;
+    expect(kept.blocks.length).toBe(1);
+    const { evidence } = await readEvmToken({ alias: o.alias }, { pin: PIN, providers: ["http://a-1"], fetch: env.fetch });
+    const unusable = { ...evidence, reads: evidence.reads.map((r) => ({ ...r, records: null, stateUnavailable: true })) };
+    const missing = await env.sdk.get(o.did, { evm: [unusable] });
+    expect(missing.report.evm?.status).toBe("unverified");
+    expect(await env.store.getRetainedEvm!(o.did)).toEqual(kept);
+  });
+
   test("C12-349, C12-350: a retained checkpoint the committed log's entry N does not match, or that lacks a member, is not resumed from: the token is read from its first record", async () => {
     const env = await setup();
     const o = await published(env);
@@ -347,6 +386,8 @@ describe("moves (P9.28, P9.29)", () => {
     const o = await published(env);
     // P9.28: never sideways or down.
     await rejects(env.sdk.prepareMove(o.did, { parent: o.anchoring, author: env.author, to: { chain: CONSORTIUM.chain, minter: CAROL } }), "STATE_MOVE_LAYER");
+    // P14.18: a malformed destination is a structured refusal, never a raw parse error.
+    await rejects(env.sdk.prepareMove(o.did, { parent: o.anchoring, author: env.author, to: { chain: "eip155:x", minter: CAROL } }), "STATE_ANCHOR_CHAIN");
     const to = { chain: CONSENSUS.chain, minter: CAROL };
     // Only the author prepares a move entry (P9.28).
     await rejects(env.sdk.prepareMove(o.did, { parent: o.anchoring, author: env.author, to, editor: env.author } as never), "INPUT_INVALID");

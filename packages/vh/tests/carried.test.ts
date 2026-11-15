@@ -633,6 +633,14 @@ describe("P14.16, P7.15: text block writer refusals", () => {
     for (const mediaType of TEXT_BLOCK_MEDIA_TYPES) expect(textBlockRefusal("", mediaType), mediaType).not.toBe("no-parser");
   });
 
+  test("P14.16: HTML ignores the `/` of `<script/>`, so its content stays raw; XHTML closes it", () => {
+    for (const element of ["script", "textarea", "title"]) {
+      expect(textBlockRefusal(`<p>hi</p>\n<${element} />\n`, "text/html"), element).toBe("unclosed-element");
+      expect(textBlockRefusal(`<p>hi</p>\n<${element}/>\n`, "text/markdown"), element).toBe("unclosed-element");
+      expect(textBlockRefusal(`<p>hi</p>\n<${element}/>\n`, "application/xhtml+xml"), element).toBeUndefined();
+    }
+  });
+
   test("P14.16: XML types refuse an ending inside a comment or CDATA section; CSS inside a comment or string", async () => {
     for (const mediaType of ["image/svg+xml", "application/xml", "text/xml"]) {
       expect((await refusal(enc("<svg><!-- open"), mediaType))?.reason).toBe("unclosed-comment");

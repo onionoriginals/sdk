@@ -62,7 +62,7 @@ const RAW_ELEMENTS = ["script", "style", "textarea", "title", "xmp", "noscript",
  * `xml`: SVG and XML, refused when it ends inside a comment, a CDATA section,
  * a processing instruction or a tag; element content is always markup there.
  */
-function markupRefusal(text: string, dialect: "html" | "xml"): TextBlockRefusal | undefined {
+function markupRefusal(text: string, dialect: "html" | "xml", selfClosing = false): TextBlockRefusal | undefined {
   const t = lower(text);
   let i = 0;
   while (i < t.length) {
@@ -113,7 +113,9 @@ function markupRefusal(text: string, dialect: "html" | "xml"): TextBlockRefusal 
     if (name && dialect === "html") {
       const element = name[1];
       if (element === "plaintext") return "unclosed-element";
-      if (RAW_ELEMENTS.includes(element) && t[j - 1] !== "/") {
+      // An HTML parser ignores the `/` of `<script/>`: the element is still open and its content raw.
+      // Only XHTML, parsed as XML, closes it there.
+      if (RAW_ELEMENTS.includes(element) && !(selfClosing && t[j - 1] === "/")) {
         const end = t.indexOf(`</${element}`, i);
         if (end < 0) return "unclosed-element";
         i = end;
@@ -396,8 +398,9 @@ export function textBlockRefusal(text: string, mediaType: string): TextBlockRefu
     case "text/markdown":
       return markdownRefusal(text);
     case "text/html":
-    case "application/xhtml+xml":
       return markupRefusal(text, "html");
+    case "application/xhtml+xml":
+      return markupRefusal(text, "html", true);
     case "image/svg+xml":
     case "application/xml":
     case "text/xml":

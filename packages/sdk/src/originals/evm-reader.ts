@@ -273,20 +273,9 @@ export async function readEvmToken(ref: EvmTokenRef, options: ReadEvmTokenOption
       if (!(error instanceof EvmRevert)) return unusable(read.block, error);
       read.owner = null; // ownerOf reverts for a token that does not exist (ERC-721).
     }
-    try {
-      read.records = await readRecords(h.rpc, address, parsed.tokenId, at, range, from);
-    } catch (error) {
-      // P9.22, P9.25: records it cannot read from state at the block make it unusable, never a partial log.
-      return unusable(read.block, error);
-    }
-    if (options.observe) {
-      // Observed records only label publications (P9.27); failing to read them costs no evidence.
-      try {
-        read.observed = await observed(h.rpc, address, parsed.tokenId, from + read.records.length);
-      } catch (error) {
-        note(error);
-      }
-    }
+    // P9.22: the hashes of the retained blocks, read before the records, so a replaced block is found even when
+    // the replacement removed records a checkpoint rested on. Such a checkpoint is discarded (P9.22), so this
+    // provider's read starts from the first record instead of resuming from it (P9.25).
     const earlier = (options.retained ?? []).filter((b) => b.chain === parsed.chain && b.number <= common);
     if (earlier.length > 0) {
       read.blockHashes = [];
@@ -297,6 +286,23 @@ export async function readEvmToken(ref: EvmTokenRef, options: ReadEvmTokenOption
         } catch (error) {
           note(error); // P9.22 does not require these reads; one that fails only checks less.
         }
+      }
+    }
+    const replaced = (read.blockHashes ?? []).some((got) => earlier.some((b) => b.number === got.number && b.hash.toLowerCase() !== got.hash.toLowerCase()));
+    const start = replaced ? 0 : from;
+    if (start === 0) delete read.from;
+    try {
+      read.records = await readRecords(h.rpc, address, parsed.tokenId, at, range, start);
+    } catch (error) {
+      // P9.22, P9.25: records it cannot read from state at the block make it unusable, never a partial log.
+      return unusable(read.block, error);
+    }
+    if (options.observe) {
+      // Observed records only label publications (P9.27); failing to read them costs no evidence.
+      try {
+        read.observed = await observed(h.rpc, address, parsed.tokenId, start + read.records.length);
+      } catch (error) {
+        note(error);
       }
     }
     return { read, failures: failed };

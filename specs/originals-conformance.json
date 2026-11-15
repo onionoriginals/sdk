@@ -4600,7 +4600,8 @@
       ],
       "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/evm-anchor.test.ts"
+        "packages/vh/tests/evm-anchor.test.ts",
+        "packages/sdk/tests/unit/originals/evm-sdk.test.ts"
       ]
     },
     {
