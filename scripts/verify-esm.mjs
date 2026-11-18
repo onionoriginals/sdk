@@ -36,6 +36,7 @@ const packages = [
   { name: '@originals/vh', dir: 'packages/vh' },
   { name: '@originals/sdk', dir: 'packages/sdk' },
   { name: '@originals/auth', dir: 'packages/auth' },
+  { name: '@originals/code', dir: 'packages/code' },
 ];
 
 function walkFiles(dir) {

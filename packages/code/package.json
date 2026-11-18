@@ -1,0 +1,78 @@
+{
+  "name": "@originals/code",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Originals for code (PROVISIONAL): git branches mirrored as signed, offline-verifiable Originals, repo Originals with delegates and thresholds, canonical heads and per-path grants",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "originals-code": "./dist/cli.js"
+  },
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./fs": {
+      "types": "./dist/fs.d.ts",
+      "import": "./dist/fs.js",
+      "default": "./dist/fs.js"
+    },
+    "./git": {
+      "types": "./dist/git.d.ts",
+      "import": "./dist/git.js",
+      "default": "./dist/git.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "bun test tests/",
+    "test:coverage": "bun test tests/ --coverage",
+    "lint": "eslint \"src/**/*.ts\"",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "acceptance": "bun scripts/acceptance.ts"
+  },
+  "keywords": [
+    "originals",
+    "version-control",
+    "git",
+    "provenance"
+  ],
+  "author": "Aviary Tech",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/onionoriginals/sdk"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.0.1",
+    "@originals/sdk": "^6.1.0",
+    "@originals/vh": "^0.4.0",
+    "fflate": "^0.8.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/bun": "^1.4.4",
+    "@types/node": "^26.6.6",
+    "@typescript-eslint/eslint-plugin": "^8.72.1",
+    "@typescript-eslint/parser": "^8.72.1",
+    "bun-types": "^1.3.1",
+    "eslint": "^10.14.0",
+    "prettier": "^3.9.10",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=20.10.0"
+  }
+}
