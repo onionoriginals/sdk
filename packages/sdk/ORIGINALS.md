@@ -156,10 +156,13 @@ on; it never reports an unanchored Original as current (P7.10). The
   entry is written (string escapes, number forms) does not count: a line
   longer than the limit whose JCS form is within it is accepted, and a
   shorter line whose JCS form is over it is rejected. `verifyLog` no longer
-  takes stored sizes (`lineBytes`), and `parseLog` keeps none. A commit of a
-  larger entry fails with `limit-exceeded` (`COMMIT_VERIFICATION_FAILED`),
-  and a verifier reports the log `limit-exceeded` at that entry
-  (`ENTRY_TOO_LARGE`).
+  takes stored sizes (`lineBytes`), and `parseLog` keeps none. The SDK
+  refuses to sign a larger entry (P14.13): one over the limit even with the
+  shortest proof a 64-byte signature encodes to fails with `limit-exceeded`
+  (`ENTRY_TOO_LARGE`) before the signer is asked; one that only its actual
+  proof takes over fails after signing (`COMMIT_VERIFICATION_FAILED`,
+  `limit-exceeded`) and is never committed. A verifier reports the log
+  `limit-exceeded` at that entry (`ENTRY_TOO_LARGE`).
 - **Carried files (P7.11-P7.16, P14.14-P14.17; PROVISIONAL,
   originals-spec PR 64 at 940c6d4).** `readCarried` reports an `overall`
   result for the file: `failed` with an explicit reason whenever the file is
@@ -315,6 +318,20 @@ review). The writer's sort, date, UTF-8 flag and mode rules bind it only; the
 reader ignores them otherwise. It never replaces a
 newer local history with an older prefix (P7.5). Loading a package never
 confers signing authority (P8.4).
+
+A package is one more copy of the log, not read from the anchor (P7.1,
+P7.14). `load` of an anchored Original's package without `bitcoin` evidence
+reports `bitcoin-evidence-missing` and verifies at most the entries before
+the first anchoring entry; the anchoring entry and every later one are listed
+in `LoadedEvidence.notCheckedAgainstAnchor`, not checked against the anchor
+(C12-297). With `bitcoin` the state is the anchor's, and the package is
+never preferred to it: a package checkpoint the anchor does not hold is
+`checkpoint-not-found`. The Bitcoin writer's own check of its committed log
+before inscribing is P9.18's local copy, verified whole and never current;
+it is not a report given to anyone. `import` stores a package's log whole
+(P7.5) after checking it the same way, never current without the anchor. `get` without Bitcoin evidence still
+reports a stored anchored log whole, unverified and never current (C12-333
+stays partial).
 
 The SDK and resolvers do not encrypt. Plaintext metadata and base64 are not
 confidentiality (P8.2).

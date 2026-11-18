@@ -201,8 +201,10 @@ were mapped to the pinned table by their text:
   The 27 preview rows are new, C12-355 to C12-381 in table order (rows 120
   and 122–147), and stay `todo` until plan 011 phase 12b, a stacked PR.
   C12-192, C12-193 and C12-194 are `partial` until then. C12-297 (an
-  evidence package read without the anchor) is `todo`: only the EVM build
-  met it.
+  evidence package read without the anchor) is covered for Bitcoin: such a
+  package reports missing evidence and at most the entries before the first
+  anchoring entry, while the writer's own check of its committed log stays
+  P9.18's local copy, verified whole.
 
 Positive checkpoints come with positive and negative fixtures, pinned
 decisions and a dependency inventory. Fixtures, dry runs and disposable regtest

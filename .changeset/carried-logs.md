@@ -22,4 +22,18 @@ on 18 November 2026. Bitcoin is the only anchor.
   P14.16).
 - Breaking: the 65,536-byte entry limit is measured over the entry's JCS form
   in UTF-8 in every format (P14.13), not over the stored line. `verifyLog` no
-  longer takes `lineBytes`, and `parseLog` no longer records line sizes.
+  longer takes `lineBytes`, and `parseLog` no longer records line sizes. A
+  stored line within 65,536 bytes whose JCS form is over it is now rejected.
+- `@originals/sdk`: the SDK refuses to sign an entry over the limit (P14.13).
+  One over it even with the shortest proof fails with `ENTRY_TOO_LARGE`
+  (`limit-exceeded`) before the signer is asked; before, it was signed and
+  then refused (`COMMIT_VERIFICATION_FAILED`), which still happens only when
+  the actual proof takes it over.
+- `@originals/sdk`: a package is a copy not read from the anchor (P7.1,
+  P7.14). `load` of an anchored Original's package without `bitcoin`
+  evidence reports `bitcoin-evidence-missing` and verifies at most the
+  entries before the first anchoring entry; before, it verified the whole
+  log. `LoadedEvidence.notCheckedAgainstAnchor` lists the anchoring entry and
+  later ones. `import`, and the Bitcoin writer's own check of its committed
+  log, still verify the copy whole, never current without the anchor (P7.5,
+  P9.18).

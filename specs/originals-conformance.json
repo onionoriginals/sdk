@@ -1409,7 +1409,7 @@
       "coveredBy": [
         "packages/vh/tests/bitcoin.test.ts"
       ],
-      "note": "The verifier never reports a writer's local copy (its committed log, read with no Bitcoin evidence) as anchored or current (packages/vh/tests/bitcoin.test.ts). Not tested: that it never reaches a report given to a reader. An evidence package read without the anchor is still verified whole, as a local copy is, rather than to the entries before its anchoring entry (see C12-297)."
+      "note": "The verifier never reports a writer's local copy (its committed log, read with no Bitcoin evidence) as anchored or current (packages/vh/tests/bitcoin.test.ts); only the Bitcoin writer's own pre-inscription check reads it whole, and a package or hosted copy read without the anchor reports at most the entries before the anchoring entry (C12-297). Not tested: that nothing else reaches a reader. `OriginalsSDK.get` without Bitcoin evidence still reports a stored anchored log whole (unverified, never current), whether the store's own history or one imported from a package."
     },
     {
       "id": "C12-176",
@@ -2528,7 +2528,7 @@
         "packages/vh/tests/carried.test.ts",
         "packages/vh/tests/originals.test.ts"
       ],
-      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release. Reworded at a3ffdc1 (originals-spec PR 59); was: \"Entry whose UTF-8 line is 65,536 bytes / 65,537 bytes\" / \"Accepted / rejected (P14.13)\". Tested in did.jsonl, an inscription (packages/vh/tests/bitcoin.test.ts), and the trailer, text block and JSON member carriers (packages/vh/tests/carried.test.ts). Reworded at 940c6d4 (originals-spec PR 64); was: \"Entry whose JCS form is 65,536 / 65,537 UTF-8 bytes, in `did.jsonl`, an inscription, a publication or any carrier\" / \"Accepted / rejected (P14.13)\"."
+      "note": "PROVISIONAL: a section 14 wire-format value (D4); section 14 is merged (originals-spec #48), and its values stay provisional until an interoperable release. Reworded at a3ffdc1 (originals-spec PR 59); was: \"Entry whose UTF-8 line is 65,536 bytes / 65,537 bytes\" / \"Accepted / rejected (P14.13)\". Tested in did.jsonl, an inscription (packages/vh/tests/bitcoin.test.ts), and the trailer, text block and JSON member carriers at 65,536 / 65,537 (packages/vh/tests/carried.test.ts). The SDK refuses to sign an entry over the limit even with the shortest proof before asking the signer, and commits one of exactly 65,536 bytes (packages/sdk/tests/unit/originals/sdk.test.ts). Reworded at 940c6d4 (originals-spec PR 64); was: \"Entry whose JCS form is 65,536 / 65,537 UTF-8 bytes, in `did.jsonl`, an inscription, a publication or any carrier\" / \"Accepted / rejected (P14.13)\"."
     },
     {
       "id": "C12-151",
@@ -3467,9 +3467,10 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts",
         "packages/vh/tests/carried.test.ts"
       ],
-      "note": "Reworded at 940c6d4 (originals-spec PR 64); was: \"Writer asked to inscribe or publish a carried file as a body\" / \"The carrier is removed first; the body is the version’s bytes (P7.16, P9.17, P9.25)\"."
+      "note": "A carried file imported by another writer, which then anchors the Original: the prepared anchoring inscription's body is the version's bytes, without the carrier (packages/sdk/tests/unit/originals/bitcoin-writer.test.ts); `removeCarrier` itself in packages/vh/tests/carried.test.ts. Reworded at 940c6d4 (originals-spec PR 64); was: \"Writer asked to inscribe or publish a carried file as a body\" / \"The carrier is removed first; the body is the version’s bytes (P7.16, P9.17, P9.25)\"."
     },
     {
       "id": "C12-291",
@@ -3495,8 +3496,11 @@
         1,
         4
       ],
-      "status": "todo",
-      "note": "Not implemented for Bitcoin: with no Bitcoin evidence, `verifyOriginal` reports a supplied log whole (unverified, never current), as it does for the writer's local copy (P9.18), so a package read without the anchor reports entries after the anchoring entry. P7.14 at 940c6d4 asks for at most the entries before the first anchoring entry. Carried logs already do (C12-234). The EVM build met this row only for EVM tokens."
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/bitcoin.test.ts"
+      ],
+      "note": "A package read without the anchor (`OriginalsSDK.load`) reports missing evidence and verifies at most the entries before the first anchoring entry, listing the anchoring entry and later ones in `notCheckedAgainstAnchor`; with the anchor, the state is the anchor's, and a package checkpoint the anchor does not hold is not found (packages/sdk/tests/unit/originals/bitcoin.test.ts). A hosted snapshot (`loadPublished`) takes the same path, untested for an anchored Original. The Bitcoin writer's own check of its committed log stays P9.18's local copy, verified whole (C12-332). The EVM build met this row only for EVM tokens."
     },
     {
       "id": "C12-298",
