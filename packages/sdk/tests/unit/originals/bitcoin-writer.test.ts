@@ -575,6 +575,21 @@ describe("C12-112: the anchoring inscription is the log through the anchoring en
     }
   });
 
+  test("C12-290: \"Writer asked to inscribe a carried file as a body\": the carrier is removed first; the body is the version's bytes (P7.16, P9.17)", async () => {
+    const { sdk, did, alice, signer } = await original();
+    const file = await sdk.carry(did, { disclosed: await sdk.carriedDisclosure(did) });
+    expect(file.carrier).toEqual({ kind: "trailer" });
+    expect(file.bytes.length).toBeGreaterThan(bytes("one").length);
+    // The carried file reaches another writer, which anchors and inscribes the Original from it.
+    const writer = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: clock() });
+    expect((await writer.importCarried(file.bytes, { resolveSigners: true })).status).toBe("imported");
+    const head = (await writer.get(did, { resolveSigners: true })).checkpoint;
+    await writer.anchor(did, { parent: head, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) });
+    const pair = await pairFor(writer, did, node(snapshot([])).provider);
+    // With the carrier the bytes would not match the descriptor; the body is the version alone.
+    expect(bodyOf(pair.prepared)).toEqual({ body: bytes("one"), contentType: "image/jpeg", contentEncoding: undefined });
+  });
+
   test("C12-194: after a name-only edit, the next inscription carries the unchanged current version again", async () => {
     const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 1);
     const all = await lines();

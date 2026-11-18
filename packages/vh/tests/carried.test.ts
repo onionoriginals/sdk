@@ -365,6 +365,34 @@ describe("P14.15: trailers", () => {
     }
   });
 
+  test("C12-150: \"Entry whose JCS form is 65,536 / 65,537 UTF-8 bytes, in `did.jsonl`, an inscription or any carrier\": accepted / rejected, in a text block", async () => {
+    const md = enc("# Big\n");
+    const { alice, at, ref, sign } = await original([{ data: md, mediaType: "text/markdown" }]);
+    const atSize = async (target: number) => {
+      let pad = 65_000;
+      for (let i = 0; i < 40; i++) {
+        const e = await createOriginal({ versionTime: at(), name: "Big", metadata: { pad: "a".repeat(pad) }, resource: described(md, "text/markdown"), author: ref, sign });
+        const size = enc(canonicalize(e as unknown as JsonValue)).length;
+        if (size === target) return e;
+        pad += target - size;
+      }
+      throw new Error(`no entry of ${target} bytes`);
+    };
+    for (const [target, ok] of [[65_536, true], [65_537, false]] as const) {
+      const e = await atSize(target);
+      // An ASCII entry line with some escapes, so the line is longer than the JCS form: the JCS form is what counts.
+      const line = asciiEntryLine(e as unknown as JsonValue, "<!--").replace("aaaa", "\\u0061\\u0061\\u0061\\u0061");
+      expect(enc(line).length).toBe(target + 20);
+      const r = await readCarriedFile(concat(md, enc(`\n<!--\n=====BEGIN ORIGINAL=====\n${line}\n=====END ORIGINAL=====\n-->\n`)), { authors: [alice.evidence()], now: NOW });
+      expect(r.carrier).toEqual({ kind: "text-block", comment: "<!--" });
+      if (ok) expect(r.verified, JSON.stringify(r.report?.history.failure ?? r.chain)).toEqual({ log: true, version: true });
+      else {
+        expect(r.chain.failure).toMatchObject({ category: "limit-exceeded", code: "ENTRY_TOO_LARGE" });
+        expect(r.verified).toEqual({ log: false, version: false });
+      }
+    }
+  });
+
   test("C12-211: \"Trailer whose log breaks P14.2\": trailer found; log invalid", async () => {
     const { entries } = await original([{ data: PNG, mediaType: "image/png" }]);
     for (const L of [enc(serializeLog(entries).replace("\n", "\r\n")), enc(serializeLog(entries).slice(0, -1)), enc(JSON.stringify(entries[0], null, 1) + "\n")]) {
@@ -515,7 +543,8 @@ describe("P14.16: text blocks", () => {
     const r = await readCarriedFile(file, { authors: [alice.evidence()], now: NOW });
     expect(r.verified.version).toBe(true);
     // Un-escaped after signing: raw non-ASCII, `--`, or the closer inside the block is no carrier.
-    for (const swap of [(s: string) => s.replace("M\\u00f4le", "Môle"), (s: string) => s.replace("Harbor notes", "Harbor -- notes"), (s: string) => s.replace("Harbor notes", "Harbor --> notes")]) {
+    // So is a carriage return anywhere but before its line feed (P14.16).
+    for (const swap of [(s: string) => s.replace("M\\u00f4le", "Môle"), (s: string) => s.replace("Harbor notes", "Harbor -- notes"), (s: string) => s.replace("Harbor notes", "Harbor --> notes"), (s: string) => s.replace("Harbor notes", "Harbor\rnotes")]) {
       expect(locateCarrier(concat(MD3, enc(swap(block)))).status).toBe("none");
     }
     // `/*` comments: a `*/` inside a line is no carrier; the writer writes `*\/`.
