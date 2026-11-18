@@ -1,8 +1,8 @@
 # 049 — Originals for code: signed, offline-verifiable version control on Originals
 
-Status: **phases 0–3 in progress on `feat/originals-for-code`; phase 4 is a
-proposed spec change waiting for the owner's decision; phase 5 is a plan
-item.** Written 2026-11-18 against `main` at `e5a3e3d4`. Rule IDs refer to
+Status: **phases 0–3 implemented on `feat/originals-for-code` (§8 has the
+results); phase 4 is a proposed spec change waiting for the owner's
+decision (§6); phase 5 is a plan item, not built.** Written 2026-11-18 against `main` at `e5a3e3d4`. Rule IDs refer to
 the pinned Originals Protocol (`aviarytech/originals-spec@45ed1dc`, see
 [`specs/README.md`](../specs/README.md)); terms follow
 [`CONTEXT.md`](../CONTEXT.md) and the consumer contract
@@ -146,8 +146,9 @@ mirrored), so the commit hash is reported as **claimed** by the signer.
   keys are delegates. Each listed branch Original must name this repo and ref
   in its metadata and be authored by that delegate: the binding counts only in
   both directions (as an alias does, P3.6).
-- `grants` lists path grants for non-delegates (phase 3). A delegate is
-  unrestricted within its own branch.
+- `grants` lists path grants (phase 3). A branch's own author is
+  unrestricted in that branch; every other signer of it, another delegate
+  included, needs a path grant.
 
 ## 2. Verification and reports (section 7: reports stay separate)
 
@@ -262,6 +263,10 @@ See §6. Waits for the owner's decision.
 
 ### Phase 5 — `git-remote-originals` (plan item)
 
+Not built in this pass: phases 0–3 already make a large PR, and the helper
+depends on O3 (whether commit objects are mirrored), which is the owner's
+call. The design:
+
 A git remote helper (`git-remote-originals`, gitremote-helpers(7)) so that
 `git clone originals::<bundle or host URL>` works: `capabilities`, `list`
 (the canonical heads and each delegate's head, verified), `import` through
@@ -281,7 +286,7 @@ too; that is open question O3. `push` maps to `mirror` plus a shared-host
 | K4 | Branch metadata `code` members; `versionTime` = signing time |
 | K5 | Repo document members; repo author = founding delegate |
 | K6 | Canonical-head rule (§3, phase 2), including invalid/forked branches not voting |
-| K7 | Path-grant pattern grammar; delegates unrestricted |
+| K7 | Path-grant pattern grammar (a final `**` matches one or more segments, as in gitignore); a branch's author unrestricted in its own branch, every other signer needs a grant; an invalid entry makes the whole branch invalid for canonical heads |
 | K8 | Bundle layout and object pack; deflate-raw per object |
 | K9 | Gitlinks refused; first-parent only; second parents not mirrored |
 | K10 | Local did:vh identities and key files for the CLI (development only) |
@@ -328,7 +333,9 @@ Radicle. Today one author signs every author entry of the repo Original.
 - **P5.16 / P5.17** — only author entries change grants. Threshold entries
   would be the only entries allowed to change the delegate set, thresholds and
   grants.
-- **P14.x entry members** — an entry's `proof` is exactly one proof today.
+- **P14.1, P14.8 (exact members)** — an entry carries exactly one proof
+  today (ORIGINALS.md, "Exact members"); a threshold entry carries several.
+  The owner should confirm which section 14 rule fixes the proof count.
 
 **Proposal (a separate profile, not a change to `originals:1.0`).** Define
 `originals-quorum:0.1` (name open), a did:vh extension alongside
@@ -366,5 +373,38 @@ Original may be anchored, and who signs the anchoring entry (P9.10, P9.12).
   verifier check the commit hash and let a remote helper rebuild identical
   commits; it exposes author emails (P8.2: no confidentiality).
 - **O4 — Originals verification cost.** `verifyOriginal` hashes every
-  resource version and checks every proof; fine at 663 entries, to be
-  measured near 10,000.
+  resource version and checks every proof; 4.3 s for the whole bundle at 663
+  entries (§8), to be measured near 10,000.
+- **O5 — bundle size.** The bundle is one ZIP read with the SDK's codec,
+  whose default bound is 512 MiB (`ZIP_LIMITS`); this repository's bundle is
+  69 MiB. Larger repositories need a raised bound or a split object pack.
+- **O6 — storage against git.** Objects are deflated one by one with no
+  deltas: 65.2 MiB for this repository's first-parent history, against git's
+  35.6 MiB pack of the same objects (§8). Delta compression inside the pack
+  (K8) would close most of the gap without changing any digest.
+- **O7 — editor branches for non-delegates.** Today a contributor who is not
+  a delegate writes into a delegate's branch as an editor. Radicle instead
+  lets anyone publish their own namespace and only counts delegates'. Both
+  fit the model; the second needs no editor grant and is closer to Radicle.
+
+## 8. Results (2026-11-18)
+
+Phases 0–3 are in `packages/code` with tests citing CODE-01 to CODE-17
+(92 tests, all passing; network disabled in every test).
+
+**CODE-ACC on this repository** (`bun run acceptance` in `packages/code`,
+`main` at `5814ad89`; Apple Silicon laptop):
+
+| | |
+|---|---|
+| History | 1,525 commits, 663 on the first-parent chain, 2,006 files at `main` |
+| Mirror | 663 entries in 10.2 s; 6,422 trees and 8,955 blobs converted (163.1 MiB raw); every git tree id recomputed from the objects during the mirror |
+| Store | 15,377 objects, 65.2 MiB compressed, plus 3.0 MiB of Originals logs and root trees |
+| git packs | all refs 113.9 MiB; `main` 37.2 MiB; `main` first-parent objects only 35.6 MiB |
+| Bundle | 69.3 MiB, written in 4.9 s |
+| Verify | 4.3 s, offline (0 fetch attempts), no key: repo and branch valid as Originals and under the code profile, content complete, 663 of 663 git tree ids match, canonical head of `refs/heads/main` agreed at `5814ad89`, equal to git's; `current: false` |
+
+The store is about 1.8 times git's pack of the same objects (O6) and about
+0.6 times the whole repository's 114 MiB pack, which also holds every
+other ref and every second-parent commit.
+
