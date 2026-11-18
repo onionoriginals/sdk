@@ -60,6 +60,7 @@ import {
   writeCarriedFile,
   ORIGINALS_INSCRIPTION_MAX_BYTES,
   ORIGINALS_LIMITS,
+  isImageMediaType,
   type Carrier,
   type CarriedDisclosure,
   type CarriedFileReport,
@@ -72,6 +73,7 @@ import {
   type EditorRef,
   type EntryState,
   type OriginalsReport,
+  type PreviewDescriptor,
   type ResourceDescriptor,
   type ResourceVersion,
   type RetainedVersions,
@@ -89,6 +91,7 @@ import { describeEntry, summarize, type EntrySummary, type OriginalsSigner } fro
 import type { HostAnswer, SharedHost } from "./shared.js";
 import { MemoryStore, headOf, higherVersion, refusedVersionId, staleHead, type OriginalsStore, type StoredRefused } from "./store.js";
 import type { ZipLimits } from "./zip.js";
+import type { PreviewReport } from "./preview.js";
 
 export type AuthorSource = AuthorDidEvidence[] | ((did: string) => Promise<AuthorDidEvidence | undefined>);
 
@@ -183,6 +186,39 @@ export interface EditInput {
   editor?: EditorRef;
   /** Replace the editor grants; null removes them all (P5.15, P5.17). Author only. */
   editors?: EditorGrant[] | null;
+  /**
+   * For an anchored Original, what its inscription carries (P9.30): see
+   * `PreviewChoice`. Refused for an Original no anchoring entry has been
+   * signed for: previews are made only for Bitcoin (PREVIEW_NOT_FOR_BITCOIN).
+   */
+  body?: PreviewChoice["body"];
+  preview?: PreviewChoice["preview"];
+}
+
+/**
+ * What an entry prepared for Bitcoin names as its preview (P9.30, P14.5;
+ * owner decision, 18 November 2026). Only the anchoring entry and entries
+ * after it are prepared for Bitcoin.
+ *
+ * - `body: "preview"` (the default): name a preview when the entry may name a
+ *   new one, that is, the anchoring entry or an entry with a new version: for
+ *   a version of an `image/` type, the writer generates a WebP of at most
+ *   8,192 bytes (`generateImagePreview`), never the author; for any other
+ *   type, the author's `preview`, or none. An entry that keeps the version
+ *   keeps its parent's preview, or none. With none named, the inscription has
+ *   no body unless the full version is chosen when inscribing.
+ * - `body: "full"`: name no preview, so the inscription can carry the full
+ *   version, within 350,000 bytes with its entries (P9.17). For an entry that
+ *   keeps the version, this removes the parent's preview until the version
+ *   next changes. Pass `body: "full"` again to `prepareEntryInscription`.
+ *
+ * Whatever is named, the commit's `preview` says what, or why none, so the
+ * author can be told (P9.30).
+ */
+export interface PreviewChoice {
+  body?: "preview" | "full";
+  /** The author's preview of a version that is not an image: any media type, 1 to 8,192 bytes. */
+  preview?: { bytes: Uint8Array; mediaType: string };
 }
 
 export interface Draft {
@@ -197,8 +233,10 @@ export interface Draft {
   readonly summary: EntrySummary;
   /** What the signer is shown (P5.11): `describeEntry(summary)`. */
   readonly display: string;
-  /** New resource bytes by digest. */
+  /** New resource bytes by digest, and the bytes of a preview the entry names (P9.30). */
   readonly bytes: ReadonlyMap<string, Uint8Array>;
+  /** For an entry prepared for Bitcoin: the preview it names, or why none, to tell the author (P9.30). */
+  readonly preview?: PreviewReport;
 }
 
 /** A signed entry verified against its exact parent, not yet history (P6.1). */
@@ -212,8 +250,10 @@ export interface SignedCandidate {
   /** The entry as one JSON line, no newline: the exact bytes a host stores and compares (P6.7). */
   readonly line: string;
   readonly summary: EntrySummary;
-  /** New resource bytes by digest. */
+  /** New resource bytes by digest, and the bytes of a preview the entry names (P9.30). */
   readonly bytes: ReadonlyMap<string, Uint8Array>;
+  /** For an entry prepared for Bitcoin: the preview it names, or why none (P9.30). */
+  readonly preview?: PreviewReport;
 }
 
 /**
@@ -289,6 +329,13 @@ export interface OriginalView {
 export interface CommitResult {
   status: "committed" | "duplicate";
   original: OriginalView;
+  /**
+   * For an entry prepared for Bitcoin (the anchoring entry and every later
+   * one): the preview it names, or why none. Show `message` to the author: an
+   * image the writer could not decode, or could not fit in 8,192 bytes, gets
+   * no preview, and the author must be told (P9.30).
+   */
+  preview?: PreviewReport;
 }
 
 export interface EvidencePackage {
@@ -797,6 +844,18 @@ function logResourceVersions(log: string): Array<{ version: number; digest: stri
   return out;
 }
 
+/**
+ * The body an entry's inscription carries at least (P9.17, P9.30): its
+ * preview, the full version when the author chose it, or none. An entry with
+ * no preview can always be inscribed with no body, so only that choice makes
+ * the full version count.
+ */
+function plannedBody(entry: { state: unknown }, report: PreviewReport | undefined): number {
+  const asset = (entry.state as EntryState).asset;
+  if (asset.preview) return asset.preview.size;
+  return report?.body === "full" ? asset.resource.size : 0;
+}
+
 export class OriginalsSDK {
   private readonly store: OriginalsStore;
   private readonly clock: () => number;
@@ -1154,6 +1213,9 @@ export class OriginalsSDK {
       verifyOriginal({
         log,
         ...(bitcoin ? { bitcoin } : {}),
+        // This store's own committed log: with no Bitcoin evidence the writer checks it whole, as a
+        // local copy, never current (P9.18).
+        localCopy: true,
         aliases,
         authors,
         bytes,
@@ -1281,7 +1343,7 @@ export class OriginalsSDK {
   }
 
   async prepareEdit(did: string, input: EditInput): Promise<Draft> {
-    exactKeys(input, ["parent", "name", "metadata", "resource", "author", "editor", "editors", "signer"], "edit input");
+    exactKeys(input, ["parent", "name", "metadata", "resource", "author", "editor", "editors", "signer", "body", "preview"], "edit input");
     return this.prepareUpdate(did, input);
   }
 
@@ -1308,7 +1370,7 @@ export class OriginalsSDK {
       // Read as often and in the order as before (instanceof, digest, copy, mediaType, size); the size is the view's.
       resource = { mediaType: r.mediaType ?? current.mediaType, size: (void r.bytes, read.length), digest };
     }
-    const entry = prepareUpdateOriginal(head, {
+    const built = prepareUpdateOriginal(head, {
       versionTime: this.versionTime(head.versionTime),
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
@@ -1318,8 +1380,111 @@ export class OriginalsSDK {
       ...(input.editors !== undefined ? { editors: input.editors } : {}),
       ...(aliases ? { aliases } : {}),
     });
-    const summary = summarize(entry, head.state as unknown as EntryState);
-    return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary, display: describeEntry(summary), bytes };
+    // Read once, now, before anything is awaited: the entry holds the caller's objects (C12-02).
+    const entry = parseJson(JSON.stringify(built)) as unknown as UnsignedEntry;
+    const parentState = head.state as unknown as EntryState;
+    const choice: PreviewChoice = { ...(input.body !== undefined ? { body: input.body } : {}), ...(input.preview !== undefined ? { preview: input.preview } : {}) };
+    const chosen = await this.previewEntry(head, entry, bytes, choice, input.editor !== undefined);
+    const summary = summarize(chosen.entry, parentState);
+    return { kind: "draft", signed: false, original: did, parent: input.parent, entry: chosen.entry, summary, display: describeEntry(summary), bytes, ...(chosen.report ? { preview: chosen.report } : {}) };
+  }
+
+  /**
+   * P9.30: the preview an entry prepared for Bitcoin names. `entry` was built
+   * with the builder's default (the parent's preview for the same version,
+   * none for a new one) and copied before anything was awaited; it is rebuilt
+   * from that copy with the preview chosen. An entry not prepared for Bitcoin
+   * names none, and a choice for it is refused.
+   */
+  private async previewEntry(head: LogEntry, entry: UnsignedEntry, bytes: Map<string, Uint8Array>, choice: PreviewChoice, editor: boolean): Promise<{ entry: UnsignedEntry; report?: PreviewReport }> {
+    const parent = (head.state as unknown as EntryState).asset;
+    const next = (entry.state as unknown as EntryState).asset;
+    if (!next.aliases.some((a) => a.startsWith("did:btco:"))) {
+      if (choice.body !== undefined || choice.preview !== undefined) {
+        sdkError("invalid-evidence", "PREVIEW_NOT_FOR_BITCOIN", "previews are made only for entries prepared for Bitcoin, from the anchoring entry on: anchor the Original first (P9.30)");
+      }
+      return { entry };
+    }
+    const snapshot = entry;
+    const plan = await this.planPreview(parent, next, bytes, choice, editor);
+    if (plan.preview === undefined) return { entry, report: plan.report };
+    if (plan.bytes) bytes.set(plan.preview!.digest, plan.bytes);
+    const s = snapshot.state as unknown as EntryState;
+    const rebuilt = s.operation === "deactivate"
+      ? prepareDeactivateOriginal(head, { versionTime: snapshot.versionTime, author: s.author, preview: null })
+      : prepareUpdateOriginal(head, {
+          versionTime: snapshot.versionTime, name: s.asset.name, metadata: s.asset.metadata ?? null, resource: s.asset.resource,
+          ...(s.editor ? { editor: s.editor } : { author: s.author, aliases: s.asset.aliases, editors: s.asset.editors ?? null }),
+          preview: plan.preview,
+        });
+    return { entry: rebuilt, report: plan.report };
+  }
+
+  /**
+   * Decide the preview of an entry prepared for Bitcoin (P9.30). `preview`
+   * undefined keeps the builder's default; null names none; a descriptor names
+   * that one, its bytes in `bytes`.
+   */
+  private async planPreview(parent: AssetState, next: AssetState, newBytes: ReadonlyMap<string, Uint8Array>, choice: PreviewChoice, editor: boolean): Promise<{ preview?: PreviewDescriptor | null; bytes?: Uint8Array; report: PreviewReport }> {
+    const body = choice.body ?? "preview";
+    if (body !== "preview" && body !== "full") sdkError("invalid-evidence", "INPUT_INVALID", "body is \"preview\" or \"full\" (P9.30)");
+    const supplied = choice.preview;
+    if (supplied !== undefined) {
+      if (typeof supplied !== "object" || supplied === null || !(supplied.bytes instanceof Uint8Array) || typeof supplied.mediaType !== "string") {
+        sdkError("invalid-evidence", "INPUT_INVALID", "preview is {bytes: Uint8Array, mediaType} (P9.30)");
+      }
+      exactKeys(supplied, ["bytes", "mediaType"], "preview");
+    }
+    const anchoring = !parent.aliases.some((a) => a.startsWith("did:btco:"));
+    const newVersion = parent.resource.digest !== next.resource.digest;
+    const what = next.resource.mediaType;
+    if (!newVersion && !anchoring) {
+      // The same version: its parent's preview, or none; never a new one (P9.30).
+      if (supplied) sdkError("invalid-evidence", "PREVIEW_NEEDS_NEW_VERSION", "a new preview goes only with a new version of the resource, or with the anchoring entry (P9.30)");
+      if (body === "full") {
+        if (parent.preview && editor) sdkError("outside-grant", "EDITOR_OUTSIDE_GRANT", "an editor entry that does not change the resource carries its parent's preview unchanged (P5.16, P9.30)");
+        return {
+          ...(parent.preview ? { preview: null } : {}),
+          report: { status: "none", body: "full", reason: "full-version-chosen", message: `No preview is named${parent.preview ? ", removing the parent's until the version next changes" : ""}: the inscription can carry the full version (pass body "full" when inscribing) (P9.30).` },
+        };
+      }
+      return parent.preview
+        ? { report: { status: "kept", body: "preview", descriptor: parent.preview, message: `The entry keeps its parent's preview (${parent.preview.mediaType}, ${parent.preview.size} bytes); the inscription carries it again (P9.30).` } }
+        : { report: { status: "none", body: "none", reason: "parent-named-none", message: "Its parent names no preview, so neither does this entry: the inscription has no body unless the full version is chosen when inscribing (P9.30)." } };
+    }
+    if (body === "full") {
+      if (supplied) sdkError("invalid-evidence", "INPUT_INVALID", "a preview and body \"full\" exclude each other: with the full version the entry names no preview (P9.30)");
+      return { preview: null, report: { status: "none", body: "full", reason: "full-version-chosen", message: "No preview is named: the inscription can carry the full version (pass body \"full\" when inscribing) (P9.30)." } };
+    }
+    const none = (reason: NonNullable<PreviewReport["reason"]>, message: string) => ({ preview: null, report: { status: "none" as const, body: "none" as const, reason, message } });
+    const avoid = newVersion && parent.preview ? [parent.preview.digest] : [];
+    if (isImageMediaType(what)) {
+      if (supplied) sdkError("invalid-evidence", "PREVIEW_OF_IMAGE_SUPPLIED", `the writer generates the preview of an ${what} version as WebP; the author does not supply it (P9.30)`);
+      const version = newBytes.get(next.resource.digest) ?? (await this.resourceBytes(next.resource.digest));
+      if (!version) return none("version-bytes-missing", `This SDK does not hold the bytes of the ${what} version, so it cannot make its preview: no preview is named, and the inscription has no body unless the full version is chosen (P9.30).`);
+      const { generateImagePreview } = await import("./preview.js");
+      const made = await generateImagePreview(version, what, { avoid });
+      if (made.status === "failed") return none(made.failure.reason, `No preview could be made for this ${what} version: ${made.failure.message}. The inscription has no body unless the full version is chosen.`);
+      const p = made.preview;
+      return {
+        preview: p.descriptor, bytes: p.bytes,
+        report: {
+          status: "generated", body: "preview", descriptor: p.descriptor, generated: { width: p.width, height: p.height, quality: p.quality, source: p.source },
+          message: `A ${p.width}×${p.height} WebP preview (${p.bytes.length} bytes) of the ${what} version is named; the inscription carries it, not the full version (P9.30).`,
+        },
+      };
+    }
+    if (supplied) {
+      const bytes = copyBytes(bytesView(supplied.bytes)!, supplied.bytes);
+      if (bytes.length < 1) sdkError("invalid-evidence", "PREVIEW_EMPTY", "a preview is at least 1 byte (P9.30)");
+      if (bytes.length > ORIGINALS_LIMITS.previewBytes) sdkError("limit-exceeded", "PREVIEW_TOO_LARGE", `a preview is at most ${ORIGINALS_LIMITS.previewBytes} bytes; this one is ${bytes.length} (P9.30, P14.13)`);
+      const descriptor: PreviewDescriptor = { mediaType: supplied.mediaType, size: bytes.length, digest: resourceDigest(bytes) };
+      if (avoid.includes(descriptor.digest) && parent.preview?.mediaType === descriptor.mediaType) {
+        sdkError("invalid-evidence", "PREVIEW_REUSED", "an entry with a new version names a preview made for it, never its parent's unchanged (P9.30)");
+      }
+      return { preview: descriptor, bytes, report: { status: "supplied", body: "preview", descriptor, message: `The author's ${descriptor.mediaType} preview (${bytes.length} bytes) is named; the inscription carries it, not the full version (P9.30).` } };
+    }
+    return none("not-an-image", `No preview was supplied for this ${what} version, which is not an image: the inscription has no body unless the full version is chosen (P9.30).`);
   }
 
   async edit(did: string, input: EditInput & { signer: OriginalsSigner }): Promise<CommitResult> {
@@ -1327,15 +1492,23 @@ export class OriginalsSDK {
   }
 
   /** Only the author deactivates (P5.16, P6.5). */
-  async prepareDeactivate(did: string, input: { parent: string; author: AuthorRef }): Promise<Draft> {
-    exactKeys(input, ["parent", "author", "signer"], "deactivate input");
+  /**
+   * Only the author deactivates (P5.16, P6.5). For an anchored Original the
+   * deactivation keeps its parent's preview, or with `body: "full"` names none
+   * (P9.30).
+   */
+  async prepareDeactivate(did: string, input: { parent: string; author: AuthorRef; body?: PreviewChoice["body"] }): Promise<Draft> {
+    exactKeys(input, ["parent", "author", "signer", "body"], "deactivate input");
     const { head } = await this.parentOf(did, input.parent);
-    const entry = prepareDeactivateOriginal(head, { versionTime: this.versionTime(head.versionTime), author: input.author });
+    const bytes = new Map<string, Uint8Array>();
+    // Read once, now, before anything is awaited (C12-02).
+    const built = parseJson(JSON.stringify(prepareDeactivateOriginal(head, { versionTime: this.versionTime(head.versionTime), author: input.author }))) as unknown as UnsignedEntry;
+    const { entry, report } = await this.previewEntry(head, built, bytes, input.body !== undefined ? { body: input.body } : {}, false);
     const summary = summarize(entry, head.state as unknown as EntryState);
-    return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary, display: describeEntry(summary), bytes: new Map() };
+    return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary, display: describeEntry(summary), bytes, ...(report ? { preview: report } : {}) };
   }
 
-  async deactivate(did: string, input: { parent: string; author: AuthorRef; signer: OriginalsSigner }): Promise<CommitResult> {
+  async deactivate(did: string, input: { parent: string; author: AuthorRef; signer: OriginalsSigner; body?: PreviewChoice["body"] }): Promise<CommitResult> {
     return this.commit(await this.prepareDeactivate(did, input), input.signer);
   }
 
@@ -1366,19 +1539,22 @@ export class OriginalsSDK {
    * version together would exceed 350,000 bytes is refused before anything
    * is committed (ANCHORING_LOG_TOO_LARGE, P9.17; originals-spec #53).
    */
-  async anchor(did: string, input: { parent: string; author: AuthorRef; signer: OriginalsSigner; sat: string }): Promise<CommitResult> {
-    exactKeys(input, ["parent", "author", "signer", "sat"], "anchor input");
+  async anchor(did: string, input: { parent: string; author: AuthorRef; signer: OriginalsSigner; sat: string } & PreviewChoice): Promise<CommitResult> {
+    exactKeys(input, ["parent", "author", "signer", "sat", "body", "preview"], "anchor input");
     parseBtcoAlias(input.sat);
     const aliases = (await this.get(did)).state.aliases;
     if (aliases.some((a) => a.startsWith("did:btco:"))) sdkError("invalid-evidence", "ALREADY_ANCHORED", `${did} is already anchored (P9.10)`);
-    const draft = await this.prepareUpdate(did, { parent: input.parent, author: input.author }, [...aliases, input.sat]);
+    const draft = await this.prepareUpdate(did, {
+      parent: input.parent, author: input.author, ...(input.body !== undefined ? { body: input.body } : {}), ...(input.preview !== undefined ? { preview: input.preview } : {}),
+    }, [...aliases, input.sat]);
     // The anchoring inscription carries the whole log through the anchoring entry as metadata and
-    // the current version as its body, so together they must fit: refuse before committing (P9.17).
+    // the body the entry sets: its preview, or the full version when chosen, or none. Together they
+    // must fit: refuse before committing (P9.17).
     const candidate = await this.sign(draft, input.signer);
     const carried = [...lines(await this.stored(did)), candidate.line];
-    const size = inscriptionMetadata(carried).length + (candidate.entry.state as unknown as EntryState).asset.resource.size;
+    const size = inscriptionMetadata(carried).length + plannedBody(candidate.entry, draft.preview);
     if (size > ORIGINALS_INSCRIPTION_MAX_BYTES) {
-      sdkError("limit-exceeded", "ANCHORING_LOG_TOO_LARGE", `the log of ${did} through the anchoring entry and its current version would be ${size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, { size, limit: ORIGINALS_INSCRIPTION_MAX_BYTES });
+      sdkError("limit-exceeded", "ANCHORING_LOG_TOO_LARGE", `the log of ${did} through the anchoring entry and the body it inscribes would be ${size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, { size, limit: ORIGINALS_INSCRIPTION_MAX_BYTES });
     }
     return this.commitCandidate(candidate);
   }
@@ -1425,7 +1601,7 @@ export class OriginalsSDK {
     // asked to sign an entry that is refused anyway; checked again on the signed entry below.
     const afterAnchor = ((parentEntry?.state as unknown as EntryState | undefined)?.asset?.aliases ?? []).some((a) => a.startsWith("did:btco:"));
     const checkInscribable = (e: LogEntry) => {
-      const size = inscriptionMetadata([JSON.stringify(e)]).length + (e.state as unknown as EntryState).asset.resource.size;
+      const size = inscriptionMetadata([JSON.stringify(e)]).length + plannedBody(e, draft.preview);
       if (size > ORIGINALS_INSCRIPTION_MAX_BYTES) {
         sdkError("limit-exceeded", "INSCRIPTION_TOO_LARGE", `entry ${e.versionId} and the resource version it names would be ${size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, { size, limit: ORIGINALS_INSCRIPTION_MAX_BYTES });
       }
@@ -1460,6 +1636,7 @@ export class OriginalsSDK {
     }
     const signed: SignedCandidate = {
       kind: "candidate", original: draft.original, parent: draft.parent, versionId: entry.versionId, entry, line: JSON.stringify(entry), summary: draft.summary, bytes: draft.bytes,
+      ...(draft.preview ? { preview: draft.preview } : {}),
     };
     this.signedReports.set(signed, { log: candidate, report });
     return signed;
@@ -1485,7 +1662,7 @@ export class OriginalsSDK {
     const signed = this.signedReports.get(candidate);
     const report = signed?.log === log ? signed.report : await this.verify(log);
     await this.retain(report);
-    return { status: "committed", original: this.view(candidate.original, report) };
+    return { status: "committed", original: this.view(candidate.original, report), ...(candidate.preview ? { preview: candidate.preview } : {}) };
   }
 
   // ---------------------------------------------------------------- shared hosts
@@ -1510,8 +1687,10 @@ export class OriginalsSDK {
     // same signed bytes (P6.4). Staged bytes are content addressed and never a version on their own (P6.1).
     for (const [digest, bytes] of candidate.bytes) await this.store.putResource(digest, bytes);
     await this.store.putPending(did, { parent: candidate.parent, entry: candidate.line });
+    // The host takes resource versions only: a preview is not one (P9.30), and it stays with this store.
+    const versions = new Set((candidate.entry.state as unknown as EntryState).transitions.map((t) => t.to));
     const answer = checkAnswer(
-      await host.submit({ original: did, entry: candidate.line, resources: Object.fromEntries(candidate.bytes), identities: await this.authorEvidence(stored ? `${stored.trimEnd()}\n${candidate.line}` : candidate.line) }),
+      await host.submit({ original: did, entry: candidate.line, resources: Object.fromEntries([...candidate.bytes].filter(([digest]) => versions.has(digest))), identities: await this.authorEvidence(stored ? `${stored.trimEnd()}\n${candidate.line}` : candidate.line) }),
       did,
     );
     if (answer.status === "stale-parent") {
@@ -1670,8 +1849,19 @@ export class OriginalsSDK {
       completeness: missing.length === 0 ? "complete" : "partial",
       missing,
     };
-    return { bytes: writeEvidence({ manifest, log: prefix, authors, bytes }), manifest };
+    const zip = writeEvidence({ manifest, log: prefix, authors, bytes });
+    this.ownPackages.add(zip);
+    return { bytes: zip, manifest };
   }
+
+  /**
+   * The packages this SDK wrote of its own committed logs, by identity: loading
+   * one of them is the writer's own check, which verifies an anchored log whole
+   * as a local copy with no Bitcoin evidence (P9.18). Any other package is a
+   * copy not read from the anchor: without Bitcoin evidence it yields at most
+   * the entries before the anchoring entry (P7.1, P7.14).
+   */
+  private readonly ownPackages = new WeakSet<Uint8Array>();
 
   /**
    * Verify an evidence package without storing it. Needs no key (P7.3), and
@@ -1703,6 +1893,7 @@ export class OriginalsSDK {
     const run = (authors: AuthorDidEvidence[]) =>
       verifyOriginal({
         ...(bitcoin ? { bitcoin } : {}),
+        ...(localCopy ? { localCopy } : {}),
         aliases: aliasEvidence,
         log: k > 0 ? serializeLines(all.slice(0, k)) : contents.log,
         authors,

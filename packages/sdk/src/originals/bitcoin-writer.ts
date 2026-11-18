@@ -23,7 +23,11 @@
  * the last entry names, under that version's media type, with no content
  * encoding, so the sat shows the Original's current version; an entry that
  * changes only the name or metadata inscribes the current version again.
- * Metadata and body together are at most 350,000 bytes
+ * Since the owner decision of 18 November 2026 (originals-spec PR 64; P9.17,
+ * P9.30) the body is, by default, the preview the last entry names; with none
+ * named, it is no body at all (no ord body push), or the full version when
+ * the caller passes `body: "full"`. Metadata and body together are at most
+ * 350,000 bytes
  * (`ORIGINALS_INSCRIPTION_MAX_BYTES`). Entries committed after the anchoring
  * entry before the anchor is accepted wait, and then go one per later block.
  *
@@ -32,7 +36,8 @@
  *   until Bitcoin shows the anchor, then the successor of the accepted head
  *   (P9.13).
  * - `prepareEntryInscription` builds the commit and reveal for the next entry
- *   (or an explicit `versionId`, refused unless it is next: HEAD_NOT_NEXT).
+ *   (or an explicit `versionId`, refused unless it is next: HEAD_NOT_NEXT),
+ *   with the body the entry sets (`body`; P9.30).
  *   Before building, it verifies the stored log through that entry and the
  *   identity evidence of every signer of it, author and editors, and refuses
  *   otherwise (ANCHORING_NOT_VERIFIED for the anchoring inscription, P9.18;
@@ -94,11 +99,12 @@ import {
   anchoringIndex,
   parseBtcoAlias,
   type OriginalsReport,
+  type PreviewDescriptor,
   type ResourceDescriptor,
   type SatEvidence,
 } from "@originals/vh/originals";
-import { rawMetadataPerEnvelope } from "../bitcoin/ordinals-tags.js";
-import { descriptorOfLine, inscriptionMetadata, inscriptionNotice, type InscriptionNotice } from "./inscription.js";
+import { envelopeBodiesPresent, rawMetadataPerEnvelope } from "../bitcoin/ordinals-tags.js";
+import { descriptorOfLine, inscriptionMetadata, inscriptionNotice, previewOfLine, type InscribedBody, type InscriptionCost, type InscriptionNotice } from "./inscription.js";
 import type { OrdinalsProvider } from "../adapters/types.js";
 import { prepareInscriptionOnSat, type InscribeOnSatParams, type PreparedInscriptionOnSat } from "../bitcoin/inscribe-on-sat.js";
 import {
@@ -159,54 +165,89 @@ async function storedLog(sdk: OriginalsSDK, did: string): Promise<StoredLog> {
 }
 
 /**
+ * What an inscription's body is to be (P9.17, P9.30): the preview its last
+ * entry names; or, when it names none, the full version (`body: "full"`) or
+ * no body at all (the default).
+ */
+type BodyPlan = { kind: "preview"; descriptor: PreviewDescriptor } | { kind: "full"; descriptor: ResourceDescriptor } | { kind: "none" };
+
+/**
  * What the inscription publishing the entry at `index` carries, without its
- * body (P9.17, P14.12): the CBOR metadata of the stored lines from genesis
- * through the anchoring entry for the anchor, otherwise of that one line; the
- * resource descriptor of the last of them, whose version is the body and
- * whose media type is the content type.
+ * body bytes (P9.17, P14.12): the CBOR metadata of the stored lines from
+ * genesis through the anchoring entry for the anchor, otherwise of that one
+ * line; the resource descriptor and preview of the last of them; and the body
+ * it sets.
  */
 interface Planned {
   lines: string[];
   metadata: Uint8Array;
   resource: ResourceDescriptor;
+  /** The preview the last entry names, if any (P9.30). */
+  preview?: PreviewDescriptor;
+  body: BodyPlan;
   /** Metadata and body together (P9.17). */
   size: number;
 }
 
-function planFor(log: StoredLog, index: number): Planned {
+/** What to inscribe as the body of an entry that names no preview: none (the default), or the full version (P9.30). */
+export type BodyChoice = "preview" | "full";
+
+function planFor(log: StoredLog, index: number, choice: BodyChoice = "preview"): Planned {
   const lines = index === log.anchor ? log.lines.slice(0, log.anchor + 1) : [log.lines[index]];
   const metadata = inscriptionMetadata(lines);
   let resource: ResourceDescriptor;
+  let preview: PreviewDescriptor | undefined;
   try {
     resource = descriptorOfLine(lines[lines.length - 1]);
+    preview = previewOfLine(lines[lines.length - 1]);
   } catch {
-    refuse("invalid-evidence", "STORED_LOG_UNREADABLE", `entry ${log.ids[index]} names no resource descriptor`);
+    refuse("invalid-evidence", "STORED_LOG_UNREADABLE", `entry ${log.ids[index]} names no valid resource descriptor or preview`);
   }
-  return { lines, metadata, resource, size: metadata.length + resource.size };
+  if (choice !== "preview" && choice !== "full") refuse("invalid-evidence", "INPUT_INVALID", "body is \"preview\" or \"full\" (P9.30)");
+  if (preview && choice === "full") {
+    refuse("invalid-evidence", "PREVIEW_NAMED", `entry ${log.ids[index]} names a preview, so its inscription's body is that preview, never the full version (P9.17, P9.30)`);
+  }
+  const body: BodyPlan = preview ? { kind: "preview", descriptor: preview } : choice === "full" ? { kind: "full", descriptor: resource } : { kind: "none" };
+  return { lines, metadata, resource, ...(preview ? { preview } : {}), body, size: metadata.length + (body.kind === "none" ? 0 : body.descriptor.size) };
 }
 
-/** The inscription's full contents: the plan and the stored bytes of the version it names (P9.17). */
-async function contentsFor(sdk: OriginalsSDK, log: StoredLog, index: number, plan: Planned = planFor(log, index)): Promise<Planned & { body: Uint8Array }> {
-  const body = await sdk.resourceBytes(plan.resource.digest);
+/** The inscription's full contents: the plan and the stored bytes of its body, or null for none (P9.17, P9.30). */
+async function contentsFor(sdk: OriginalsSDK, log: StoredLog, index: number, plan: Planned): Promise<Planned & { bodyBytes: Uint8Array | null }> {
+  if (plan.body.kind === "none") return { ...plan, bodyBytes: null };
+  const { digest } = plan.body.descriptor;
+  // Content-addressed: the bytes returned are the ones whose digest matched (P4.3).
+  const body = await sdk.resourceBytes(digest);
   if (!body) {
-    refuse("incomplete-evidence", "RESOURCE_BYTES_MISSING", `the inscription of ${log.ids[index]} carries resource version ${plan.resource.digest} as its body, and this SDK does not hold those bytes (P9.17)`, { digest: plan.resource.digest, versionId: log.ids[index] });
+    if (plan.body.kind === "preview") {
+      refuse("incomplete-evidence", "PREVIEW_BYTES_MISSING", `the inscription of ${log.ids[index]} carries the preview ${digest} its entry names as its body, and this SDK does not hold those bytes (P9.17, P9.30)`, { digest, versionId: log.ids[index] });
+    }
+    refuse("incomplete-evidence", "RESOURCE_BYTES_MISSING", `the inscription of ${log.ids[index]} carries resource version ${digest} as its body, and this SDK does not hold those bytes (P9.17)`, { digest, versionId: log.ids[index] });
   }
-  return { ...plan, body };
+  return { ...plan, bodyBytes: body };
 }
 
 function checkSize(log: StoredLog, index: number, plan: Planned): void {
   if (plan.size <= ORIGINALS_INSCRIPTION_MAX_BYTES) return;
-  const details = { size: plan.size, limit: ORIGINALS_INSCRIPTION_MAX_BYTES, versionId: log.ids[index] };
+  const details = { size: plan.size, limit: ORIGINALS_INSCRIPTION_MAX_BYTES, versionId: log.ids[index], body: plan.body.kind };
   if (index === log.anchor) {
-    refuse("limit-exceeded", "ANCHORING_LOG_TOO_LARGE", `the log through the anchoring entry and the version it names are ${plan.size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, details);
+    refuse("limit-exceeded", "ANCHORING_LOG_TOO_LARGE", `the log through the anchoring entry and the body it inscribes are ${plan.size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, details);
   }
-  refuse("limit-exceeded", "INSCRIPTION_TOO_LARGE", `entry ${log.ids[index]} and the version it names are ${plan.size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, details);
+  refuse("limit-exceeded", "INSCRIPTION_TOO_LARGE", `entry ${log.ids[index]} and the body it inscribes are ${plan.size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, details);
 }
 
-/** The digests of the versions the inscriptions through `index` carry as bodies: from the anchoring entry on (P9.17). */
-function inscribedDigests(log: StoredLog, index: number): Set<string> {
-  const out = new Set<string>();
-  for (let k = log.anchor; k <= index && k < log.lines.length; k++) {
+/**
+ * The digests of the versions Bitcoin holds in full through `index`: the
+ * bodies of the anchor and the inscriptions accepted after it that are the
+ * full version, and `also` (the one about to be inscribed in full) (P9.17,
+ * P9.18). A preview never counts (P9.30).
+ */
+function inscribedDigests(log: StoredLog, report: OriginalsReport | undefined, index: number, also?: string): Set<string> {
+  const out = new Set<string>(also ? [also] : []);
+  const a = report?.anchoring;
+  if (a?.status !== "anchored" || !a.anchor) return out;
+  for (const p of [a.anchor, ...a.accepted]) {
+    const k = log.ids.indexOf(p.versionId);
+    if (p.body !== "version" || k < 0 || k > index) continue;
     try {
       out.add(descriptorOfLine(log.lines[k]).digest);
     } catch {
@@ -360,7 +401,7 @@ function offChainOf(did: string, through: string, report: OriginalsReport, inscr
  * is reported (`offChain`), never a gate (P7.4). Freshness is a separate
  * policy and is not gated here.
  */
-async function verifyThrough(sdk: OriginalsSDK, did: string, log: StoredLog, index: number): Promise<OffChainEvidence> {
+async function verifyThrough(sdk: OriginalsSDK, did: string, log: StoredLog, index: number, onBitcoin: ReadonlySet<string> = new Set()): Promise<OffChainEvidence> {
   const versionId = log.ids[index];
   const code = index === log.anchor ? "ANCHORING_NOT_VERIFIED" : "ENTRY_NOT_VERIFIED";
   const what = index === log.anchor ? "the anchoring entry" : `entry ${versionId}`;
@@ -389,7 +430,7 @@ async function verifyThrough(sdk: OriginalsSDK, did: string, log: StoredLog, ind
     const category = problems.every((p) => p === "identity-evidence-incomplete") ? "incomplete-evidence" : r.history.failure?.category ?? "invalid-evidence";
     refuse(category, code, `${did} does not verify through ${what}; not inscribed (P9.18): ${problems.join(", ")}`, { problems, report: r });
   }
-  return offChainOf(did, versionId, r, inscribedDigests(log, index));
+  return offChainOf(did, versionId, r, onBitcoin);
 }
 
 export type EntryInscriptionParams = Omit<InscribeOnSatParams, "buildContent" | "recoveryStore"> & {
@@ -423,6 +464,13 @@ export type EntryInscriptionParams = Omit<InscribeOnSatParams, "buildContent" | 
    * output, so at most one of them lands.
    */
   replaces?: string[];
+  /**
+   * The body (P9.17, P9.30). `"preview"`, the default: the preview the entry
+   * names, or, when it names none, no body at all. `"full"`: the full version,
+   * for an entry that names no preview (refused, PREVIEW_NAMED, for one that
+   * names one), within 350,000 bytes with the entries.
+   */
+  body?: BodyChoice;
 };
 
 export interface PreparedEntryInscription {
@@ -435,12 +483,17 @@ export interface PreparedEntryInscription {
   /** Committed entries after this one, still to publish. */
   remaining: number;
   /**
-   * What to tell the author before submitting (P9.18; C12-193): the version
-   * the body carries, and the log with its name and metadata, become public
-   * and permanent on Bitcoin, never removed by a later entry (P8.3), with a
-   * warning when that version is active content (P9.7).
+   * What to tell the author before submitting (P9.18; C12-193): whether the
+   * body is the preview, the full version or none; that it, and the log with
+   * its name and metadata, become public and permanent on Bitcoin, never
+   * removed by a later entry (P8.3); what the pair costs at its fee rate;
+   * and a warning when the body is active content (P9.7).
    */
   notice: InscriptionNotice;
+  /** What the body carries (P9.17, P9.30). */
+  body: InscribedBody["kind"];
+  /** The pair's fees at its fee rate (P9.18). */
+  cost: InscriptionCost;
   /** What Bitcoin will not hold, through `versionId` (P9.18). */
   offChain: OffChainEvidence;
   /** `checked` with a recovery store; `skipped` when `recoveryStore: null` was passed (P9.6). */
@@ -456,7 +509,7 @@ export interface PreparedEntryInscription {
 
 /** Build (not broadcast) the pair that publishes the next committed entry on the anchoring sat. */
 export async function prepareEntryInscription(params: EntryInscriptionParams): Promise<PreparedEntryInscription> {
-  const { sdk, did, clock, index: satIndex, versionId, recoveryStore, recoveryIds, replaces = [], indexes, ...rest } = params;
+  const { sdk, did, clock, index: satIndex, versionId, recoveryStore, recoveryIds, replaces = [], indexes, body: choice = "preview", ...rest } = params;
   if (recoveryStore === undefined) {
     refuse("invalid-evidence", "RECOVERY_STORE_REQUIRED", "pass the writer's recoveryStore, so a pair that can still land is not prepared twice (P9.6), or recoveryStore: null to skip that check deliberately");
   }
@@ -464,7 +517,8 @@ export async function prepareEntryInscription(params: EntryInscriptionParams): P
   if (NETWORK[log.sat.network] !== params.network) {
     refuse("invalid-evidence", "NETWORK_MISMATCH", `${log.sat.did} is a ${log.sat.network} sat; the writer is on ${params.network}`);
   }
-  // A log and current version over the limit through the anchoring entry can never be anchored (P9.17).
+  // A log through the anchoring entry over the limit with its least body (its preview, or none) can
+  // never be anchored (P9.17).
   const anchorPlan = planFor(log, log.anchor);
   checkSize(log, log.anchor, anchorPlan);
   const { pending, found, disagreement } = await observe(sdk, did, log, { provider: params.provider, clock, index: satIndex, ...(indexes ? { indexes } : {}), ...(recoveryStore ? { recoveryStore } : {}), ...(recoveryIds ? { recoveryIds } : {}) });
@@ -484,24 +538,66 @@ export async function prepareEntryInscription(params: EntryInscriptionParams): P
     const ids = inFlight.map((c) => c.record.recoveryId);
     refuse("stale-parent", "PAIR_IN_FLIGHT", `a recorded pair for ${target} can still land (${ids.join(", ")}); resume it, or name it in \`replaces\` to prepare a replacement (P9.6)`, { recoveryIds: ids });
   }
-  // The stored lines, as signed, and the stored bytes of the version they name (P9.6, P9.17).
-  const plan = index === log.anchor ? anchorPlan : planFor(log, index);
+  // The stored lines, as signed, and the stored bytes of the body they set (P9.6, P9.17, P9.30).
+  const plan = planFor(log, index, choice);
   checkSize(log, index, plan);
   const contents = await contentsFor(sdk, log, index, plan);
-  const offChain = await verifyThrough(sdk, did, log, index);
+  const offChain = await verifyThrough(sdk, did, log, index, inscribedDigests(log, pending.view.report, index, plan.body.kind === "full" ? plan.resource.digest : undefined));
   const prepared = await prepareInscriptionOnSat({
     ...rest,
     buildContent: (satoshi) => {
       if (satoshi !== log.sat.sat) {
         refuse("invalid-evidence", "WRONG_SAT", `the first funding UTXO holds sat ${satoshi}, not the anchoring sat ${log.sat.sat}`);
       }
-      // Pre-encoded CBOR, written as metadata pushes of at most 520 bytes (P14.12).
-      return Promise.resolve({ content: contents.body, contentType: contents.resource.mediaType, metadata: contents.metadata });
+      // Pre-encoded CBOR, written as metadata pushes of at most 520 bytes (P14.12). No body: no body
+      // push and no content type; an empty full version is still a body (P9.17, P14.12).
+      if (contents.body.kind === "none") return Promise.resolve({ content: null, metadata: contents.metadata });
+      return Promise.resolve({ content: contents.bodyBytes!, contentType: contents.body.descriptor.mediaType, metadata: contents.metadata, allowEmptyBody: true });
     },
   });
   const carries = index === log.anchor ? log.ids.slice(0, index + 1) : [target];
-  const notice = inscriptionNotice(carries, contents.resource);
-  return { versionId: target, carries, sat: log.sat.did, remaining: pending.remaining - 1, notice, offChain, inFlightGuard: recoveryStore ? "checked" : "skipped", replaces: [...replaces], prepared };
+  const body: InscribedBody = plan.body.kind === "none" ? { kind: "none" } : { kind: plan.body.kind, ...plan.body.descriptor };
+  const cost = pairCost(prepared, params.feeRate);
+  const notice = inscriptionNotice(carries, contents.resource, body, cost);
+  return {
+    versionId: target, carries, sat: log.sat.did, remaining: pending.remaining - 1, notice, body: body.kind, cost, offChain,
+    inFlightGuard: recoveryStore ? "checked" : "skipped", replaces: [...replaces], prepared,
+  };
+}
+
+/** A built pair's fees (P9.18): the commit's inputs less its outputs, and the commit output less the reveal's. */
+function pairCost(prepared: PreparedInscriptionOnSat, feeRate: number): InscriptionCost {
+  const commit = btc.Transaction.fromRaw(hex.decode(prepared.signedCommitHex), { allowUnknownInputs: true, allowUnknownOutputs: true });
+  const reveal = btc.Transaction.fromRaw(hex.decode(prepared.revealTxHex), { allowUnknownInputs: true, allowUnknownOutputs: true });
+  const sum = (tx: btc.Transaction) => Array.from({ length: tx.outputsLength }, (_, i) => Number(tx.getOutput(i).amount ?? 0n)).reduce((a, b) => a + b, 0);
+  const inputs = prepared.fundingUtxos.reduce((a, u) => a + u.value, 0);
+  const commitOut = Number(commit.getOutput(0).amount ?? 0n);
+  const commitFee = inputs - sum(commit);
+  const postage = sum(reveal);
+  const revealFee = commitOut - postage;
+  return { feeRate, commitFee, revealFee, total: commitFee + revealFee, postage };
+}
+
+/**
+ * Not normative (P9.30): wait for a lower fee rate before inscribing. Polls
+ * `currentFeeRate` every `intervalMs` (default 60 s) until it is at most
+ * `maxFeeRate`, then resolves with it; `signal` stops waiting (it rejects with
+ * the signal's reason). The caller decides: by default the SDK inscribes at
+ * the current rate, and tells the author the cost first either way (P9.18).
+ */
+export async function waitForFeeRate(options: { currentFeeRate: () => Promise<number>; maxFeeRate: number; intervalMs?: number; signal?: AbortSignal }): Promise<number> {
+  const { currentFeeRate, maxFeeRate, intervalMs = 60_000, signal } = options;
+  if (!(maxFeeRate > 0)) refuse("invalid-evidence", "INPUT_INVALID", "maxFeeRate is a positive sat/vB rate");
+  for (;;) {
+    signal?.throwIfAborted();
+    const rate = await currentFeeRate();
+    if (Number.isFinite(rate) && rate <= maxFeeRate) return rate;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => { signal?.removeEventListener("abort", stop); resolve(); }, intervalMs);
+      const stop = () => { clearTimeout(timer); reject(signal!.reason instanceof Error ? signal!.reason : new Error("aborted")); };
+      signal?.addEventListener("abort", stop, { once: true });
+    });
+  }
 }
 
 export interface SubmitEntryParams extends ReadAnchoredOptions {
@@ -538,11 +634,11 @@ export async function submitEntryInscription(params: SubmitEntryParams): Promise
   const index = log.ids.indexOf(pair.versionId);
   if (index < 0) refuse("invalid-evidence", "ENTRY_NOT_STORED", `${pair.versionId} is not in the stored log of ${did}`);
   const inscribed = inscribedOf(pair.prepared);
-  // The reveal's body is checked against the descriptor (size and digest), so a submit needs no
-  // stored copy of the bytes: the pair already carries them (P9.6, P9.17).
+  // The reveal's body is checked against the preview or descriptor it must match (size and digest), so
+  // a submit needs no stored copy of the bytes: the pair already carries them (P9.6, P9.17, P9.30).
   const expected = planFor(log, index);
   if (!inscribed || !sameInscription(inscribed, expected) || pair.prepared.satoshi !== log.sat.sat) {
-    refuse("invalid-evidence", "PAIR_BODY_MISMATCH", `the pair does not inscribe the stored entries of ${pair.versionId} and the version they name on ${log.sat.did}`);
+    refuse("invalid-evidence", "PAIR_BODY_MISMATCH", `the pair does not inscribe the stored entries of ${pair.versionId} and the body they set on ${log.sat.did}`);
   }
   const { pending, found, disagreement, holding } = await observe(sdk, did, log, { ...read, provider, recoveryStore });
   refuseDisagreement(did, disagreement);
@@ -555,7 +651,7 @@ export async function submitEntryInscription(params: SubmitEntryParams): Promise
     const ids = others.map((c) => c.record.recoveryId);
     refuse("stale-parent", "PAIR_IN_FLIGHT", `another recorded pair for ${pair.versionId} can still land (${ids.join(", ")}); resume it, or name it in \`replaces\` (P9.6)`, { recoveryIds: ids });
   }
-  await verifyThrough(sdk, did, log, index);
+  await verifyThrough(sdk, did, log, index, inscribedDigests(log, pending.view.report, index));
   return submitPreparedInscriptionOnSat({ prepared: pair.prepared, provider, recoveryStore });
 }
 
@@ -663,7 +759,8 @@ export type CatchUpStep =
 interface Inscribed {
   metadata: Uint8Array;
   contentType: string | undefined;
-  body: Uint8Array;
+  /** Null when the envelope has no body push at all (P14.12). */
+  body: Uint8Array | null;
 }
 
 /**
@@ -681,7 +778,8 @@ function inscribedOf(prepared: PreparedInscriptionOnSat): Inscribed | undefined 
     if (inscriptions?.length !== 1 || inscriptions[0].tags.contentEncoding !== undefined) return undefined;
     const metadata = rawMetadataPerEnvelope(script, 1)[0];
     if (!metadata) return undefined;
-    return { metadata, contentType: inscriptions[0].tags.contentType, body: inscriptions[0].body };
+    const present = envelopeBodiesPresent(script, 1)[0];
+    return { metadata, contentType: inscriptions[0].tags.contentType, body: present ? inscriptions[0].body : null };
   } catch {
     return undefined;
   }
@@ -689,13 +787,19 @@ function inscribedOf(prepared: PreparedInscriptionOnSat): Inscribed | undefined 
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
 
-/** Whether a reveal inscribes exactly these entries and the version they name (P9.6, P9.17). */
-function sameInscription(i: Inscribed, expected: { metadata: Uint8Array; resource: ResourceDescriptor; body?: Uint8Array }): boolean {
-  if (!sameBytes(i.metadata, expected.metadata) || i.contentType !== expected.resource.mediaType) return false;
-  // Without the bytes at hand, the body is checked against the descriptor it must be (P9.17, P4.3).
-  return expected.body !== undefined
-    ? sameBytes(i.body, expected.body)
-    : i.body.length === expected.resource.size && resourceDigest(i.body) === expected.resource.digest;
+/**
+ * Whether a reveal inscribes exactly these entries with a body they allow
+ * (P9.6, P9.17, P9.30): the preview the last entry names; or, with none named,
+ * the full version under its media type, or no body and no content type.
+ * Without the bytes at hand, a body is checked against the descriptor it must
+ * match (P4.3).
+ */
+function sameInscription(i: Inscribed, expected: Pick<Planned, "metadata" | "resource" | "preview">): boolean {
+  if (!sameBytes(i.metadata, expected.metadata)) return false;
+  const matches = (body: Uint8Array, d: ResourceDescriptor) => body.length === d.size && resourceDigest(body) === d.digest;
+  if (expected.preview) return i.body !== null && i.contentType === expected.preview.mediaType && matches(i.body, expected.preview);
+  if (i.body === null) return i.contentType === undefined;
+  return i.contentType === expected.resource.mediaType && matches(i.body, expected.resource);
 }
 
 /** Where the provider sees a transaction: `unknown` when it cannot say (no mempool view, or an error). */
@@ -915,7 +1019,7 @@ export async function catchUp(params: CatchUpParams): Promise<CatchUpStep> {
     }
     // P9.18: the log is verified through the entry again before its pair is broadcast, as when it was prepared.
     try {
-      await verifyThrough(sdk, did, log, log.ids.indexOf(versionId));
+      await verifyThrough(sdk, did, log, log.ids.indexOf(versionId), inscribedDigests(log, pending.view.report, log.ids.indexOf(versionId)));
     } catch (error) {
       if (!(error instanceof OriginalsError)) throw error;
       const commit: CommitSeen = best.commit === "confirmed" || best.commit === "mempool" ? best.commit : "not-observed";
@@ -1063,6 +1167,7 @@ export async function transferHandoff(sdk: OriginalsSDK, did: string, options?: 
   let checkpoint: string | undefined;
   // The head Bitcoin accepts, when the sat was read: only versions through it are on Bitcoin (P9.18).
   let accepted: string | null = null;
+  let acceptedReport: OriginalsReport | undefined;
   if ("checkpoint" in options) checkpoint = options.checkpoint;
   else if (options.through !== "committed") {
     if (!("provider" in options) || !options.provider) {
@@ -1074,6 +1179,7 @@ export async function transferHandoff(sdk: OriginalsSDK, did: string, options?: 
     }
     checkpoint = pending.accepted;
     accepted = pending.accepted;
+    acceptedReport = pending.view.report;
   }
   const pkg = await sdk.package(did, checkpoint === undefined ? {} : { checkpoint });
   // The writer's local copy (P9.18): it lists what is off chain from its own committed log.
@@ -1082,7 +1188,7 @@ export async function transferHandoff(sdk: OriginalsSDK, did: string, options?: 
   // P9.18: a version counts as on Bitcoin only when an accepted inscription carries it. Through the
   // committed head or an exact checkpoint no sat is read, so nothing is assumed inscribed and every
   // version is listed as off chain: a locally committed version Bitcoin does not show is handed over.
-  const onBitcoin = accepted === null ? new Set<string>() : inscribedDigests(log, Math.min(log.ids.indexOf(accepted), log.ids.indexOf(pkg.manifest.checkpoint)));
+  const onBitcoin = accepted === null || !acceptedReport ? new Set<string>() : inscribedDigests(log, acceptedReport, Math.min(log.ids.indexOf(accepted), log.ids.indexOf(pkg.manifest.checkpoint)));
   return { package: pkg, offChain: offChainOf(did, pkg.manifest.checkpoint, loaded.report, onBitcoin) };
 }
 

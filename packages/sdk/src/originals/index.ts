@@ -14,4 +14,12 @@ export * from "./shared.js";
 export * from "./web.js";
 export * from "./bitcoin.js";
 // What an Originals inscription carries and what the author is told before one (P9.17, P9.18, P14.12).
-export { inscriptionMetadata, descriptorOfLine, isActiveContent, inscriptionNotice, type InscriptionNotice } from "./inscription.js";
+export {
+  inscriptionMetadata, descriptorOfLine, previewOfLine, isActiveContent, inscriptionNotice,
+  type InscriptionNotice, type InscribedBody, type InscriptionCost,
+} from "./inscription.js";
+// Bitcoin previews (P9.30): the WebP preview of an image version, its codecs loaded only when one is made.
+export {
+  generateImagePreview, configurePreviewCodecs, PREVIEW_MAX_BYTES, PREVIEW_EDGES, PREVIEW_QUALITIES, PREVIEW_FAIR_QUALITY,
+  type GeneratedPreview, type PreviewFailure, type PreviewResult, type PreviewReport, type GeneratePreviewOptions, type PreviewCodecConfig, type ImageFormat,
+} from "./preview.js";
