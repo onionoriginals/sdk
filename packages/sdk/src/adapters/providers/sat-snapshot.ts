@@ -484,13 +484,15 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
       return unsupported(decoded);
     }
     if (!('read' in step) || !step.read) return (step as { publication: Publication }).publication;
-    const { observation, mediaType, length, pool } = step.read;
+    const { observation, mediaType, length, pool, info } = step.read;
     const got = fetched[k] as { bodyTooLarge: true } | { content: Uint8Array | null; metadataTooLarge: true } | { content: Uint8Array | null; metadataHex: string | null } | { content: Uint8Array | null; metadataBytes: Uint8Array };
     const over = (metadataPresent: boolean): Publication =>
       ({ ...observation, body: { status: 'unavailable', reason: 'over-budget', mediaType, contentLength: length, ...(metadataPresent ? { metadataPresent: true as const } : {}) } });
     if ('bodyTooLarge' in got) return over(pool === 'originals');
     if ('metadataTooLarge' in got) return over(true);
-    if ('metadataBytes' in got) return { ...observation, body: { status: 'complete', mediaType: mediaType ?? NO_CONTENT_TYPE, bytes: got.content ?? new Uint8Array(), metadata: got.metadataBytes } };
+    // A null content length: no body at all, which P14.12 tells apart from an empty one.
+    const noBody = info.content_length === null ? { noBody: true as const } : {};
+    if ('metadataBytes' in got) return { ...observation, body: { status: 'complete', mediaType: mediaType ?? NO_CONTENT_TYPE, bytes: got.content ?? new Uint8Array(), metadata: got.metadataBytes, ...noBody } };
     let metadata: Uint8Array | null = null;
     if (got.metadataHex !== null) {
       if (used[pool] + got.metadataHex.length / 2 > cap[pool]) return over(true);
@@ -499,7 +501,7 @@ async function collectSatSnapshot(reader: SatSnapshotReader, satoshi: string, ex
       used[pool] += decoded.length;
       metadata = decoded;
     }
-    return { ...observation, body: { status: 'complete', mediaType: mediaType ?? NO_CONTENT_TYPE, bytes: got.content ?? new Uint8Array(), metadata } };
+    return { ...observation, body: { status: 'complete', mediaType: mediaType ?? NO_CONTENT_TYPE, bytes: got.content ?? new Uint8Array(), metadata, ...noBody } };
   });
   await readIndex();
   const after = await readTip();

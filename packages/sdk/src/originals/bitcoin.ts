@@ -482,7 +482,7 @@ export async function satEvidence(snapshot: SatSnapshot, options: SatEvidenceOpt
     const confirmations = p.confirmed ? tip.height - p.creation.height + 1 : 0;
     const content =
       body.status === "complete"
-        ? { mediaType: body.mediaType, content: body.bytes, metadata: body.metadata }
+        ? { mediaType: body.mediaType, content: body.bytes, metadata: body.metadata, ...(body.noBody ? { noBody: true } : {}) }
         : {
             // No content-type tag: no media type, never a resource's (P14.12).
             mediaType: ("mediaType" in body ? body.mediaType : null) ?? "",

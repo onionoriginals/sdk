@@ -14,7 +14,11 @@ export type { PreparedInscriptionOnSat, InscriptionRecoveryRecord, InscriptionRe
 
 export interface InscribeOnSatParams {
   /** `metadata`: a `Uint8Array` is pre-encoded CBOR document bytes for the Ordinals `metadata` tag, preferred over a plain object where the value may contain an integer outside `[-2^32, 2^32)` (see `createCommitTransaction`'s doc comment for why). */
-  buildContent: (satoshi: string) => Promise<{ content: Uint8Array; contentType: string; metadata?: Uint8Array | Record<string, unknown> }>;
+  /**
+   * `content: null` inscribes no body and needs no `contentType` (P14.12);
+   * `allowEmptyBody` permits a body of zero bytes, which is still a body.
+   */
+  buildContent: (satoshi: string) => Promise<{ content: Uint8Array | null; contentType?: string; metadata?: Uint8Array | Record<string, unknown>; allowEmptyBody?: boolean }>;
   /**
    * The funding UTXOs this inscription spends, in the order they are spent.
    * `fundingUtxos[0]` is the IDENTITY input: its first sat becomes the
@@ -78,14 +82,14 @@ export async function prepareInscriptionOnSat(params: InscribeOnSatParams): Prom
   if (!v.valid) throw new StructuredError('INVALID_SATOSHI', `Provider returned invalid sat: ${v.error}`);
 
   // 2) Build content embedding did:btco:<sat> (the caller's closure).
-  const { content, contentType, metadata } = await buildContent(satoshi);
+  const { content, contentType, metadata, allowEmptyBody } = await buildContent(satoshi);
 
   // 3) Unsigned commit: the declared funding inputs (identity first),
   // inscription output at vout 0, no pointer. exactUtxos keeps the caller's
   // set AND order — ordinary selection would sort value-descending and could
   // drop the identity input, silently moving the DID sat.
   const commit = await createCommitTransaction({
-    content, contentType, metadata, exactUtxos: true,
+    content, ...(contentType !== undefined ? { contentType } : {}), metadata, exactUtxos: true, ...(allowEmptyBody ? { allowEmptyBody } : {}),
     utxos: fundingUtxos, changeAddress, feeRate, network
   });
   const selected = commit.selectedUtxos.map((u) => `${u.txid.toLowerCase()}:${u.vout}`);
