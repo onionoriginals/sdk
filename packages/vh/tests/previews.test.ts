@@ -93,6 +93,13 @@ describe("the preview member (P9.30, P14.5, P14.6, P14.7, P14.13)", () => {
     expect(ORIGINALS_LIMITS.previewBytes).toBe(8_192);
     const max = await updateOriginal(genesis, { versionTime: time(9), aliases: [SAT], author: ref, sign, preview: sized(8_192) });
     expect((max.state.asset as JsonObject).preview).toEqual(sized(8_192));
+    // A verifier accepts an inscription whose body is a preview of exactly 8,192 bytes (C12-366).
+    const full = new Uint8Array(8_192).fill(7);
+    const exact: ResourceDescriptor = { mediaType: "image/webp", size: full.length, digest: resourceDigest(full) };
+    const anchorMax = await updateOriginal(genesis, { versionTime: time(9), aliases: [SAT], author: ref, sign, preview: exact });
+    const accepted = await verify(alice, [sat([inscribe([genesis, anchorMax], 10, { mediaType: "image/webp", content: full })])]);
+    expect(accepted.anchoring?.status).toBe("anchored");
+    expect(accepted.anchoring?.anchor?.body).toBe("preview");
     for (const [size, code] of [[0, "STATE_PREVIEW"], [8_193, "STATE_PREVIEW_TOO_LARGE"]] as const) {
       const forged = await forge(genesis, { ...assetOf(anchor), preview: sized(size) as unknown as JsonObject }, sign);
       const r = await verify(alice, undefined, [genesis, forged]);
@@ -124,6 +131,16 @@ describe("the preview member (P9.30, P14.5, P14.6, P14.7, P14.13)", () => {
     for (const [mediaType, previewType] of [["image/png", "image/png"], ["image/svg+xml", "image/svg+xml"], ["Image/PNG", "image/jpeg"], ["IMAGE/gif", "text/plain"]]) {
       const { ref, sign, genesis } = await anchored(null, photo(`${B1} ${mediaType}`, mediaType));
       await expect(updateOriginal(genesis, { versionTime: time(9), aliases: [SAT], author: ref, sign, preview: thumb(`p ${mediaType}`, previewType) }), mediaType).rejects.toMatchObject({ code: "STATE_PREVIEW" });
+    }
+    // A verifier rejects such an entry, signed by a writer that broke the rule, and the inscription carrying it.
+    for (const [mediaType, previewType] of [["image/svg+xml", "image/svg+xml"], ["Image/PNG", "image/png"]]) {
+      const { alice, sign, genesis, anchor } = await anchored(null, photo(`${B1} forged ${mediaType}`, mediaType));
+      const preview = thumb(`forged ${mediaType}`, previewType);
+      const forged = await forge(genesis, { ...assetOf(anchor), preview: preview as unknown as JsonObject }, sign);
+      expect((await verify(alice, undefined, [genesis, forged])).history.failure?.code, mediaType).toBe("STATE_PREVIEW");
+      const onSat = await verify(alice, [sat([inscribe([genesis, forged], 10)])]);
+      expect(onSat.anchoring?.status, mediaType).toBe("not-anchored");
+      expect(onSat.anchoring?.ignored, mediaType).toEqual([expect.objectContaining({ reason: "invalid-entry", code: "STATE_PREVIEW" })]);
     }
     const { anchor } = await anchored(P1, photo("svg", "Image/SVG+XML"));
     expect((anchor.state.asset as JsonObject).preview).toEqual(P1);
@@ -367,6 +384,11 @@ describe("editors and previews (P5.16, P9.30)", () => {
     const forged = await forge(granted.anchor, { ...withoutPreview, name: "N" }, granted.asBob.sign, { editor: granted.bob.ref("edit") as unknown as JsonObject });
     const r = await verify([granted.alice, granted.bob], undefined, [...granted.copy, forged]);
     expect(r.history.failure?.code).toBe("EDITOR_OUTSIDE_GRANT");
+    // And one by an editor without a resource grant that names the preview of a new version.
+    const outside = await forge(ungranted.anchor, { ...assetOf(ungranted.anchor), resource: v2 as unknown as JsonObject, preview: P2 as unknown as JsonObject }, ungranted.asBob.sign, { editor: ungranted.bob.ref("edit") as unknown as JsonObject });
+    const rejected = await verify([ungranted.alice, ungranted.bob], undefined, [...ungranted.copy, outside]);
+    expect(rejected.history.status).toBe("invalid");
+    expect(rejected.history.failure?.category).toBe("outside-grant");
   });
 
   test("checkEntryState applies the same rules to an editor entry outside the engine", async () => {
