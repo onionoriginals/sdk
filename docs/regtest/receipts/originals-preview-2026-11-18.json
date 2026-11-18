@@ -1,0 +1,180 @@
+{
+  "journey": "originals-preview",
+  "network": "regtest",
+  "versions": {
+    "core": "Bitcoin Core daemon version v31.1.0 bitcoind",
+    "ord": "ord 0.29.0"
+  },
+  "anchor": {
+    "did": "did:vh:QmRjuvfhscqmMAE9AVtQC8BffNztoq67ZrLii56v6tVRNi",
+    "sat": "did:btco:reg:5000000000",
+    "preview": {
+      "mediaType": "image/webp",
+      "size": 6790,
+      "digest": "zQmX2Ry7RVZM1dEJDhwnWggkpXhPCRCP3hVZ82qKiRttEMF"
+    },
+    "generated": {
+      "width": 256,
+      "height": 192,
+      "quality": 50,
+      "source": {
+        "format": "png",
+        "width": 640,
+        "height": 480,
+        "firstFrameOnly": false
+      }
+    },
+    "versionBytes": 372751,
+    "versionId": "2-QmW9phm6SXXMRQYGBbPDy6gUyuT8sXDostSRb1wjc66zSE",
+    "inscription": "267a69978ec3fc38c7170fff1739250561b822c418ccea75e6fc24f2430adbf4i0",
+    "commitTxId": "ab2e4c04687640dd146840321343126053a10cfe3b3e862605fe7aec1cac5d73",
+    "revealTxId": "267a69978ec3fc38c7170fff1739250561b822c418ccea75e6fc24f2430adbf4",
+    "body": "preview",
+    "contentType": "image/webp",
+    "contentLength": 6790,
+    "cost": {
+      "feeRate": 1,
+      "commitFee": 244,
+      "revealFee": 2574,
+      "total": 2818,
+      "postage": 546
+    }
+  },
+  "rename": {
+    "versionId": "3-QmaxQrX7ZP5kaa6t2err6BdBGd9AxK7rZPYhdLN4oKvwF3",
+    "inscription": "8ad2f2fe7ea45fea2890933c382ff53b8ef0aeb7a26a3f1e624df14090e7f316i0",
+    "commitTxId": "70cb8716aa63e88246c4188026686a78a63cbc44d0f6c2a9e8cbc969837ceafb",
+    "revealTxId": "8ad2f2fe7ea45fea2890933c382ff53b8ef0aeb7a26a3f1e624df14090e7f316",
+    "body": "preview",
+    "contentType": "image/webp",
+    "contentLength": 6790,
+    "cost": {
+      "feeRate": 1,
+      "commitFee": 244,
+      "revealFee": 2312,
+      "total": 2556,
+      "postage": 546
+    }
+  },
+  "newVersion": {
+    "preview": {
+      "mediaType": "image/webp",
+      "size": 7392,
+      "digest": "zQmNPvmSeC33dzTKtR7GFQZ1Gxrx7Do3icf4Kf8A8At2KWQ"
+    },
+    "versionBytes": 43592,
+    "versionId": "4-QmUzdzCKgsfG4BmisuapMo7zhxhifKRAdNUUtfjV1bYXbT",
+    "inscription": "45ef56f0a6825193922c5ea8612062aacbb56e7c12f9fc362234e3f503d5899di0",
+    "commitTxId": "26b22ea9b4f6797d3d53f35e7c991b1ff28ce0771b66cdf54467af88057bb64f",
+    "revealTxId": "45ef56f0a6825193922c5ea8612062aacbb56e7c12f9fc362234e3f503d5899d",
+    "body": "preview",
+    "contentType": "image/webp",
+    "contentLength": 7392,
+    "cost": {
+      "feeRate": 1,
+      "commitFee": 244,
+      "revealFee": 2507,
+      "total": 2751,
+      "postage": 546
+    }
+  },
+  "full": {
+    "versionId": "5-QmRqunu8Esbh9GkgJaVyQ3m97Dj4jeA2uo2VivZYD5bSBg",
+    "inscription": "baac7cbe2134f9ced8ba0e1762cdca1d0efa43bdf875ad545dd12de72d56de4di0",
+    "commitTxId": "88b9fee216de52d6894d958491fd08d7f5bc91efe4c1b53d922fb41ab7ff1f2d",
+    "revealTxId": "baac7cbe2134f9ced8ba0e1762cdca1d0efa43bdf875ad545dd12de72d56de4d",
+    "body": "full",
+    "contentType": "image/png",
+    "contentLength": 43592,
+    "cost": {
+      "feeRate": 1,
+      "commitFee": 244,
+      "revealFee": 12460,
+      "total": 12704,
+      "postage": 546
+    }
+  },
+  "noBody": {
+    "did": "did:vh:QmSE5277tncckQee85uK4e3uMmNGzZa78NZ7XSjU9sanYL",
+    "sat": "did:btco:reg:5001100000",
+    "versionId": "2-QmPZwhUZ5m1ymmWA3XdLn7Pr1ptddtYRcNphgEAbiHpALq",
+    "inscription": "54edc86b95574503e8d57ad0abe4361dad6310155864d525879731d4f7ec5021i0",
+    "commitTxId": "955b971a6eea05c1f59c4854c7a72c6c871c9957cf3c5cf98a4cd87629399ef3",
+    "revealTxId": "54edc86b95574503e8d57ad0abe4361dad6310155864d525879731d4f7ec5021",
+    "body": "none",
+    "contentType": null,
+    "contentLength": null,
+    "cost": {
+      "feeRate": 1,
+      "commitFee": 244,
+      "revealFee": 666,
+      "total": 910,
+      "postage": 546
+    },
+    "ordContentStatus": 404,
+    "readerNoBody": true
+  },
+  "authorPreview": {
+    "preview": {
+      "mediaType": "text/plain",
+      "size": 21,
+      "digest": "zQmVzjB8sxfakK5dYoCDbU7w6nnmPeNfKD6NwvzAFs6nRFr"
+    },
+    "versionId": "3-QmdHLUCfLwUc4TUaiSjtWy3o1Cfm94QMPg3juuX8PBXnUA",
+    "inscription": "a34cb682f2982f2fbad038291e4ccd852454873ff4f373e9b1364852e050c736i0",
+    "commitTxId": "08eb9ae90c15fc0ef24555456f9022a3dd7efaf26ad9e54c59aacf17af77556d",
+    "revealTxId": "a34cb682f2982f2fbad038291e4ccd852454873ff4f373e9b1364852e050c736",
+    "body": "preview",
+    "contentType": "text/plain",
+    "contentLength": 21,
+    "cost": {
+      "feeRate": 1,
+      "commitFee": 244,
+      "revealFee": 465,
+      "total": 709,
+      "postage": 546
+    }
+  },
+  "freshReaders": {
+    "image": {
+      "head": "5-QmRqunu8Esbh9GkgJaVyQ3m97Dj4jeA2uo2VivZYD5bSBg",
+      "current": true,
+      "bodies": [
+        "preview",
+        "preview",
+        "preview",
+        "version"
+      ],
+      "resources": [
+        {
+          "version": 1,
+          "bytes": "missing",
+          "onBitcoin": false
+        },
+        {
+          "version": 2,
+          "bytes": "verified",
+          "onBitcoin": true
+        }
+      ]
+    },
+    "notes": {
+      "head": "3-QmdHLUCfLwUc4TUaiSjtWy3o1Cfm94QMPg3juuX8PBXnUA",
+      "current": true,
+      "bodies": [
+        "none",
+        "preview"
+      ],
+      "resources": [
+        {
+          "version": 1,
+          "bytes": "missing"
+        },
+        {
+          "version": 2,
+          "bytes": "missing"
+        }
+      ]
+    }
+  }
+}

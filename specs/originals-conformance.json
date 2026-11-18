@@ -1607,12 +1607,13 @@
       "phases": [
         4
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/bitcoin.test.ts",
-        "packages/vh/tests/bitcoin.test.ts"
+        "packages/vh/tests/bitcoin.test.ts",
+        "packages/vh/tests/previews.test.ts"
       ],
-      "note": "Reworded at 940c6d4 (originals-spec PR 64); was: \"Inscription whose content type differs from its last entry’s resource `mediaType`, or that has a content encoding\" / \"Rejected (P9.17)\". Partial at 940c6d4: a content type that differs from the resource's, and a content encoding, are rejected; an inscription with a content type and no body is the previews PR's (plan 011 phase 12b, stacked PR)."
+      "note": "Reworded at 940c6d4 (originals-spec PR 64); was: \"Inscription whose content type differs from its last entry’s resource `mediaType`, or that has a content encoding\" / \"Rejected (P9.17)\". Covered in plan 011 phase 12b (stacked on #1061): with no preview named, a content type that differs from the resource's, or a content type with no body, is rejected; any content encoding is rejected."
     },
     {
       "id": "C12-193",
@@ -1622,11 +1623,12 @@
       "phases": [
         4
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
-        "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts"
+        "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts",
+        "packages/sdk/tests/unit/originals/previews.test.ts"
       ],
-      "note": "Reworded at 940c6d4 (originals-spec PR 64); was: \"SDK about to inscribe an entry\" / \"Tells the author the inscribed version, name and metadata become public and permanent, and warns when the version is active content (P9.18)\". Partial at 940c6d4: the notice names the inscribed version, name and metadata as public and permanent and warns on active content (packages/sdk/tests/unit/originals/bitcoin-writer.test.ts); saying whether a preview, the full version or no body is inscribed, what Bitcoin will not hold, and the cost at the fee rate come with previews (plan 011 phase 12b, stacked PR)."
+      "note": "Reworded at 940c6d4 (originals-spec PR 64); was: \"SDK about to inscribe an entry\" / \"Tells the author the inscribed version, name and metadata become public and permanent, and warns when the version is active content (P9.18)\". Covered in plan 011 phase 12b (stacked on #1061): the notice names the body (preview, full version or none), that it and the log with its name and metadata are public and permanent, that the version stays off Bitcoin unless inscribed in full, the pair's fees at its fee rate, and active content."
     },
     {
       "id": "C12-355",
@@ -1636,8 +1638,12 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/previews.test.ts",
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-194",
@@ -1647,12 +1653,13 @@
       "phases": [
         4
       ],
-      "status": "partial",
+      "status": "covered",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/bitcoin-writer.test.ts",
-        "packages/vh/tests/bitcoin.test.ts"
+        "packages/vh/tests/bitcoin.test.ts",
+        "packages/vh/tests/previews.test.ts"
       ],
-      "note": "Reworded at 940c6d4 (originals-spec PR 64); was: \"Inscription after the anchor whose entry changes only the name or metadata\" / \"Body is the unchanged current version, inscribed again (P9.17)\". At 940c6d4 the row is split by whether the parent names a preview: the case with none keeps this id (the body is the full version again, as before, or none); the case with a preview is C12-355 (row 120). Partial at 940c6d4: the full version inscribed again is tested; an inscription with no body is the previews PR's (plan 011 phase 12b, stacked PR)."
+      "note": "Reworded at 940c6d4 (originals-spec PR 64); was: \"Inscription after the anchor whose entry changes only the name or metadata\" / \"Body is the unchanged current version, inscribed again (P9.17)\". At 940c6d4 the row is split by whether the parent names a preview: the case with none keeps this id (the body is the full version again, as before, or none); the case with a preview is C12-355 (row 120). Covered in plan 011 phase 12b (stacked on #1061): the full version again, or no body."
     },
     {
       "id": "C12-356",
@@ -1662,8 +1669,12 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/previews.test.ts",
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-357",
@@ -1673,8 +1684,11 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-358",
@@ -1684,8 +1698,12 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/previews.test.ts",
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-359",
@@ -1695,8 +1713,11 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-360",
@@ -1706,8 +1727,11 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-361",
@@ -1717,8 +1741,11 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-362",
@@ -1728,8 +1755,11 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-363",
@@ -1739,8 +1769,12 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/previews.test.ts",
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-364",
@@ -1750,8 +1784,12 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/previews.test.ts",
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-365",
@@ -1761,8 +1799,12 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/previews.test.ts",
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-366",
@@ -1772,8 +1814,12 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/previews.test.ts",
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-367",
@@ -1783,8 +1829,11 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-368",
@@ -1794,8 +1843,12 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/previews.test.ts",
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-369",
@@ -1805,8 +1858,11 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-370",
@@ -1816,8 +1872,11 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-371",
@@ -1827,8 +1886,12 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/previews.test.ts",
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-372",
@@ -1838,8 +1901,11 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-373",
@@ -1849,8 +1915,11 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-374",
@@ -1860,8 +1929,12 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/previews.test.ts",
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-375",
@@ -1871,8 +1944,11 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-376",
@@ -1882,8 +1958,11 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-377",
@@ -1893,8 +1972,11 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-378",
@@ -1904,8 +1986,12 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/previews.test.ts",
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-379",
@@ -1915,8 +2001,11 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-380",
@@ -1926,8 +2015,12 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/bitcoin.test.ts",
+        "packages/vh/tests/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-381",
@@ -1937,8 +2030,11 @@
       "phases": [
         4
       ],
-      "status": "todo",
-      "note": "Previews: plan 011 phase 12b, stacked PR. Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/previews.test.ts"
+      ],
+      "note": "Covered in plan 011 phase 12b (stacked on #1061). Added at 940c6d4 (originals-spec PR 64, Bitcoin previews; P9.17, P9.30, P14.5, P14.10, P14.12, P14.13)."
     },
     {
       "id": "C12-195",
