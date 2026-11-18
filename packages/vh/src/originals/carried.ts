@@ -1310,10 +1310,15 @@ export async function readCarriedFile(file: Uint8Array, options: ReadCarriedOpti
         `Unverified: the entries chain from the genesis that ${report.original} binds${report.bytes === "match" ? ", and the remaining bytes match the last entry's descriptor" : ""}. Anyone can arrange this without a key; the signatures stay unchecked until the signers' DIDs are resolved.`,
       );
     } else report.statements.push("Unverified: the entries do not chain from a genesis, and the signatures are unchecked.");
-  } else if (report.verified.version) {
-    report.statements.push(`Verified: this file is the version ${named} names, valid as of that checkpoint${report.current ? ", and current on its anchor" : ", never current"}.`);
   } else if (report.verified.log) {
-    report.statements.push(`The carried log of ${named} verifies, valid as of that checkpoint${report.current ? "" : ", never current"}.`);
+    // P7.14: a carried log is a prefix as of its last entry. Only when that entry is the head the anchor
+    // decides is it current; an earlier one is not, though the Original's state on its anchor is.
+    const head = report.report?.checkpoint ?? null;
+    const currency =
+      report.current && head === report.checkpoint ? ", and current on its anchor"
+      : report.current && head !== null ? `, not current: the Original's state on its anchor is at ${head}`
+      : ", never current";
+    report.statements.push(report.verified.version ? `Verified: this file is the version ${named} names, valid as of that checkpoint${currency}.` : `The carried log of ${named} verifies, valid as of that checkpoint${currency}.`);
   }
   if (historical) {
     report.statements.push(

@@ -544,6 +544,13 @@ describe("P14.16, P7.15: text block writer refusals", () => {
     // The same documents, closed, are accepted.
     expect(await refusal(enc("name: harbor\nnotes: |\n  first line\nsize: 3\n"), "application/yaml")).toBeUndefined();
     expect(await refusal(enc("# Notes\n\n```js\nconst x = 1;\n```\n"), "text/markdown")).toBeUndefined();
+    // A root block scalar, with or without `---` and node properties: its content may start at
+    // column 0, so appended `#` lines at column 0 would be part of it (YAML 1.2 parses "|\nfoo\n# x\n"
+    // as the string "foo\n# x\n").
+    for (const doc of ["|\nfoo\n", ">\nfoo\n", "|-\nfoo\n", "--- |\nfoo\n", "--- !!str |\nfoo\n", "!!str |\nfoo\n", "&a |\nfoo\n"]) {
+      expect(await refusal(enc(doc), "application/yaml"), doc).toEqual({ code: "CARRIER_CANNOT_ADD", reason: "yaml-block-scalar" });
+    }
+    expect((await refusal(enc("name: harbor\nnotes: !!str |\n  first line\n"), "application/yaml"))?.reason).toBe("yaml-block-scalar");
     // P14.16's other examples.
     expect((await refusal(enc("<p>hi</p>\n<script>\nlet a = 1;\n"), "text/html"))?.reason).toBe("unclosed-element");
     // An unclosed `pre` is no longer a reason to refuse (P14.16 at a3ffdc1): see C12-321 below.
@@ -582,6 +589,15 @@ describe("P14.16, P7.15: text block writer refusals", () => {
         expect(await refusal(enc(`<p>hi</p>\n<${element}>fallback</${element}>\n`), mediaType)).toBeUndefined();
       }
     }
+    // An HTML parser ends `<?…` and `<!…` (other than a comment) at the first `>`, quotes or not, as a
+    // bogus comment or DOCTYPE: a `script` opened after it is open at the end, whatever `?>` or quote follows.
+    for (const mediaType of ["text/html", "text/markdown"]) {
+      expect((await refusal(enc("<p>hi</p>\n<?x > <script>\nlet a = '?>';\n"), mediaType))?.reason).toBe("unclosed-element");
+      expect((await refusal(enc("<p>hi</p>\n<!x '> <script>\nlet a = '>';\n"), mediaType))?.reason).toBe("unclosed-element");
+      expect((await refusal(enc('<!DOCTYPE html PUBLIC "a>\n<script>\nlet a = ">";\n'), mediaType))?.reason).toBe("unclosed-element");
+    }
+    // XHTML is parsed as XML, where a processing instruction runs to `?>`.
+    expect(await refusal(enc('<?xml version="1.0"?>\n<html><p>hi</p></html>\n'), "application/xhtml+xml")).toBeUndefined();
     // XML: an open tag or processing instruction too.
     for (const mediaType of ["image/svg+xml", "application/xml", "text/xml"]) {
       expect((await refusal(enc('<svg><rect width="1"\n'), mediaType))?.reason).toBe("unclosed-tag");
@@ -955,6 +971,20 @@ describe("P7.14: anchored Originals", () => {
     // A carried log the anchor accepted verifies.
     const agreeing = await readCarriedFile(await carry(bytes(B1), [genesis, renamed, anchor]), { authors: [alice.evidence()], bitcoin: [sat([inscribe([genesis, renamed, anchor], 10)])], now: NOW });
     expect(agreeing.verified).toEqual({ log: true, version: true });
+  });
+
+  test("C12-200, C12-233: an anchored Original's carried log behind the head on its anchor: the version verified as of its checkpoint, never reported current (P7.14)", async () => {
+    const { alice, ref, sign, genesis, renamed, anchor } = await anchored();
+    const later = await updateOriginal(anchor, { versionTime: time(11), name: "Harbor at noon", author: ref, sign });
+    const file = await carry(bytes(B1), [genesis, renamed, anchor]);
+    const r = await readCarriedFile(file, { authors: [alice.evidence()], bitcoin: [sat([inscribe([genesis, renamed, anchor], 10), inscribe([later], 11)])], now: NOW });
+    // The state comes from the anchor, whose head is later than the file's checkpoint.
+    expect(r.report?.checkpoint).toBe(later.versionId);
+    expect(r.verified).toEqual({ log: true, version: true });
+    expect(r.checkpoint).toBe(anchor.versionId);
+    // The file is a prefix as of its last entry: what is current is the anchor's head, not this file.
+    expect(r.statements.join(" ")).not.toContain("current on its anchor");
+    expect(r.statements.join(" ")).toContain(`not current: the Original's state on its anchor is at ${later.versionId}`);
   });
 
   test("C12-317: \"Carried checkpoint from before the anchoring entry of an Original that is now anchored\": allowed; reported as a historical checkpoint, valid as of it, with no statement about current anchoring (P7.14, P7.15)", async () => {

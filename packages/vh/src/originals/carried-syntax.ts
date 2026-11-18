@@ -86,6 +86,14 @@ function markupRefusal(text: string, dialect: "html" | "xml", selfClosing = fals
       i = end + 3;
       continue;
     }
+    // An HTML parser (not XHTML's, which is XML) ends `<?…` and any other `<!…`, a bogus comment or a
+    // DOCTYPE, at the first `>`, inside quotes or not.
+    if (dialect === "html" && !selfClosing && (t.startsWith("<?", lt) || t.startsWith("<!", lt))) {
+      const end = t.indexOf(">", lt + 2);
+      if (end < 0) return "unclosed-tag";
+      i = end + 1;
+      continue;
+    }
     if (t.startsWith("<?", lt)) {
       const end = t.indexOf("?>", lt + 2);
       if (end < 0) return "unclosed-tag";
@@ -179,9 +187,13 @@ function yamlRefusal(text: string): TextBlockRefusal | undefined {
       }
     }
     if (quote) continue;
-    const block = /^(\s*)(?:(?:-\s+)*(?:[^#\s][^#]*?:\s+)?|---\s+)[|>][-+0-9]*\s*(#.*)?$/.exec(line);
+    // Node properties (a tag `!…`, an anchor `&…`) may precede the indicator.
+    const block = /^(\s*)(?:(-\s+)*([^#\s][^#]*?:\s+)?|---\s+)(?:[!&]\S*\s+)*[|>][-+0-9]*\s*(#.*)?$/.exec(line);
     if (block) {
-      scalarIndent = line.startsWith("---") ? -1 : block[1].length;
+      // A root block scalar, under `---` or on its own with no key or sequence entry, has no parent:
+      // its content may start at column 0, so every later line can be part of it.
+      const root = line.startsWith("---") || (block[2] === undefined && block[3] === undefined);
+      scalarIndent = root ? -1 : block[1].length;
     }
   }
   if (quote) return "unterminated-string";
