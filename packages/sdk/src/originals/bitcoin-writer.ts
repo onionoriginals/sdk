@@ -465,10 +465,12 @@ export type EntryInscriptionParams = Omit<InscribeOnSatParams, "buildContent" | 
    */
   replaces?: string[];
   /**
-   * The body (P9.17, P9.30). `"preview"`, the default: the preview the entry
-   * names, or, when it names none, no body at all. `"full"`: the full version,
-   * for an entry that names no preview (refused, PREVIEW_NAMED, for one that
-   * names one), within 350,000 bytes with the entries.
+   * The body (P9.17, P9.30). `"preview"`: the preview the entry names, or,
+   * when it names none, no body at all. `"full"`: the full version, for an
+   * entry that names no preview (refused, PREVIEW_NAMED, for one that names
+   * one), within 350,000 bytes with the entries. Omitted: the body chosen when
+   * the entry was committed (`sdk.chosenBody`), else `"preview"`. Another body
+   * than the one chosen at commit is refused (BODY_CHOICE_CONFLICT).
    */
   body?: BodyChoice;
 };
@@ -509,7 +511,7 @@ export interface PreparedEntryInscription {
 
 /** Build (not broadcast) the pair that publishes the next committed entry on the anchoring sat. */
 export async function prepareEntryInscription(params: EntryInscriptionParams): Promise<PreparedEntryInscription> {
-  const { sdk, did, clock, index: satIndex, versionId, recoveryStore, recoveryIds, replaces = [], indexes, body: choice = "preview", ...rest } = params;
+  const { sdk, did, clock, index: satIndex, versionId, recoveryStore, recoveryIds, replaces = [], indexes, body: asked, ...rest } = params;
   if (recoveryStore === undefined) {
     refuse("invalid-evidence", "RECOVERY_STORE_REQUIRED", "pass the writer's recoveryStore, so a pair that can still land is not prepared twice (P9.6), or recoveryStore: null to skip that check deliberately");
   }
@@ -538,6 +540,13 @@ export async function prepareEntryInscription(params: EntryInscriptionParams): P
     const ids = inFlight.map((c) => c.record.recoveryId);
     refuse("stale-parent", "PAIR_IN_FLIGHT", `a recorded pair for ${target} can still land (${ids.join(", ")}); resume it, or name it in \`replaces\` to prepare a replacement (P9.6)`, { recoveryIds: ids });
   }
+  // The body the author chose when the entry was committed holds: a writer resuming, replacing or
+  // inscribing for the author never inscribes another (P9.18, P9.30).
+  const chosen = await sdk.chosenBody(did, target);
+  if (chosen === "full" && asked !== undefined && asked !== "full") {
+    refuse("invalid-evidence", "BODY_CHOICE_CONFLICT", `${target} was committed with the full version as its inscription's body, and the author was told so; it is not inscribed with another (P9.18, P9.30)`, { versionId: target, chosen });
+  }
+  const choice = asked ?? chosen ?? "preview";
   // The stored lines, as signed, and the stored bytes of the body they set (P9.6, P9.17, P9.30).
   const plan = planFor(log, index, choice);
   checkSize(log, index, plan);
@@ -558,7 +567,7 @@ export async function prepareEntryInscription(params: EntryInscriptionParams): P
   const carries = index === log.anchor ? log.ids.slice(0, index + 1) : [target];
   const body: InscribedBody = plan.body.kind === "none" ? { kind: "none" } : { kind: plan.body.kind, ...plan.body.descriptor };
   const cost = pairCost(prepared, params.feeRate);
-  const notice = inscriptionNotice(carries, contents.resource, body, cost);
+  const notice = inscriptionNotice(carries, contents.resource, body, cost, offChain);
   return {
     versionId: target, carries, sat: log.sat.did, remaining: pending.remaining - 1, notice, body: body.kind, cost, offChain,
     inFlightGuard: recoveryStore ? "checked" : "skipped", replaces: [...replaces], prepared,
@@ -637,7 +646,9 @@ export async function submitEntryInscription(params: SubmitEntryParams): Promise
   // The reveal's body is checked against the preview or descriptor it must match (size and digest), so
   // a submit needs no stored copy of the bytes: the pair already carries them (P9.6, P9.17, P9.30).
   const expected = planFor(log, index);
-  if (!inscribed || !sameInscription(inscribed, expected) || pair.prepared.satoshi !== log.sat.sat) {
+  // The full version the author chose when committing the entry is the only body sent for it (P9.18, P9.30).
+  const fullChosen = (await sdk.chosenBody(did, pair.versionId)) === "full" && expected.body.kind !== "preview";
+  if (!inscribed || !sameInscription(inscribed, expected) || (fullChosen && inscribed.body === null) || pair.prepared.satoshi !== log.sat.sat) {
     refuse("invalid-evidence", "PAIR_BODY_MISMATCH", `the pair does not inscribe the stored entries of ${pair.versionId} and the body they set on ${log.sat.did}`);
   }
   const { pending, found, disagreement, holding } = await observe(sdk, did, log, { ...read, provider, recoveryStore });

@@ -16,7 +16,7 @@ export * from "./bitcoin.js";
 // What an Originals inscription carries and what the author is told before one (P9.17, P9.18, P14.12).
 export {
   inscriptionMetadata, descriptorOfLine, previewOfLine, isActiveContent, inscriptionNotice,
-  type InscriptionNotice, type InscribedBody, type InscriptionCost,
+  type InscriptionNotice, type InscribedBody, type InscriptionCost, type NotOnBitcoin,
 } from "./inscription.js";
 // Bitcoin previews (P9.30): the WebP preview of an image version, its codecs loaded only when one is made.
 export {

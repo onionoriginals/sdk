@@ -144,7 +144,8 @@ try {
   const a = await inscribe(did, satUtxo);
   assert.equal(a.pair.body, 'preview');
   assert.equal(a.pair.notice.body.kind, 'preview');
-  assert.ok(a.pair.notice.text.includes('not on Bitcoin'));
+  assert.ok(a.pair.notice.text.includes('Bitcoin will not hold version 1'), 'the notice names what Bitcoin will not hold (P9.18)');
+  assert.ok(a.pair.notice.text.includes(`the DID history of ${aliceDid}`));
   assert.equal(a.ord.info.content_type, 'image/webp', 'ord serves the preview under image/webp (P14.12)');
   assert.equal(a.ord.info.content_length, p1.size);
   assert.ok(a.ord.content && resourceDigest(a.ord.content) === p1.digest, 'the body is exactly the named preview (P9.17)');
@@ -179,7 +180,9 @@ try {
   const full = await sdk.edit(did, { parent: recut.original.checkpoint, name: 'Harbor at dusk', author, signer, body: 'full' });
   assert.equal(full.preview?.reason, 'full-version-chosen');
   assert.equal(full.original.state.preview, undefined);
-  const d = await inscribe(did, await outputOf(c.pair.prepared.revealTxId, 0), { body: 'full' });
+  // The choice is kept with the entry: the writer, passed no body, inscribes the full version (P9.18, P9.30).
+  assert.equal(await sdk.chosenBody(did, full.original.checkpoint), 'full');
+  const d = await inscribe(did, await outputOf(c.pair.prepared.revealTxId, 0));
   assert.equal(d.pair.body, 'full');
   assert.equal(d.ord.info.content_type, 'image/png');
   assert.ok(d.ord.content && hex(d.ord.content) === hex(v2), 'the full version (P9.17)');

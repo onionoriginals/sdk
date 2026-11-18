@@ -153,6 +153,13 @@ describe("generated previews of image versions (P9.30)", () => {
     const fresh = await verifyOriginal({ bitcoin: [evidence], authors: [alice.evidence()], now: Date.parse("2026-10-19T00:00:00Z") });
     expect(fresh.history.status).toBe("valid");
     expect(fresh.resources.versions).toEqual([expect.objectContaining({ digest: resourceDigest(content), bytes: "missing" })]);
+    // Unless the author chooses the full version: then no preview is named, and the body is the image.
+    const small = png(busy(64, 48, 5));
+    const chosen = await made("image/png", small);
+    const full = await chosen.sdk.anchor(chosen.did, { parent: chosen.head, sat: ALIAS, ...chosen.asAlice, body: "full" });
+    expect(full.preview).toMatchObject({ status: "none", body: "full" });
+    expect(full.original.state.preview).toBeUndefined();
+    expect(asIndexed((await pairFor(chosen.sdk, chosen.did, [])).prepared)).toMatchObject({ mediaType: "image/png", bytes: small });
   });
 
   test("C12-361: an image the writer cannot decode, or cannot fit, gets no preview, the author is told, and the body is none or the full version", async () => {
@@ -343,7 +350,7 @@ describe("previews after the anchor (P9.30)", () => {
 
 describe("what the author is told, and what the package carries (P9.18, P14.10)", () => {
   test("C12-193: the notice says the preview, not the full version, is inscribed, that the version stays off Bitcoin, and the cost", async () => {
-    const { sdk, did, head, asAlice } = await made("image/png", png(busy(500, 400, 8)));
+    const { sdk, did, head, asAlice, alice } = await made("image/png", png(busy(500, 400, 8)));
     const anchored = await sdk.anchor(did, { parent: head, sat: ALIAS, ...asAlice });
     const pair = await pairFor(sdk, did, []);
     const n = pair.notice;
@@ -354,11 +361,16 @@ describe("what the author is told, and what the package carries (P9.18, P14.10)"
     expect(n.cost!.total).toBeGreaterThan(0);
     expect(pair.cost).toEqual(n.cost!);
     expect(n.text).toContain("a preview (image/webp");
-    expect(n.text).toContain("not on Bitcoin");
+    expect(n.text).toContain("not the version itself");
     expect(n.text).toContain(`${n.cost!.total} sats`);
     expect(n.text).toContain("public and permanent");
     // The version stays off Bitcoin (P9.18).
     expect(pair.offChain.resources.map((r) => r.version)).toEqual([1]);
+    // The statement itself says what Bitcoin will not hold: the versions not inscribed in full and the
+    // off-chain signer DID histories, whose replication is not guaranteed (P9.18).
+    expect(n.text).toContain("Bitcoin will not hold version 1");
+    expect(n.text).toContain(`the DID history of ${alice.did}`);
+    expect(n.text).toContain("not guaranteed");
     // With no body the notice says so; an SVG preview is WebP, never active content (P9.7).
     const doc = await made("image/svg+xml", svg());
     await doc.sdk.anchor(doc.did, { parent: doc.head, sat: ALIAS, ...doc.asAlice });
@@ -393,6 +405,60 @@ describe("what the author is told, and what the package carries (P9.18, P14.10)"
     const waiting = waitForFeeRate({ currentFeeRate: () => Promise.resolve(50), maxFeeRate: 5, intervalMs: 5, signal: controller.signal });
     controller.abort(new Error("stopped"));
     await expect(waiting).rejects.toThrow("stopped");
+  });
+});
+
+describe("the body chosen when an entry is committed is the body inscribed (P9.18, P9.30)", () => {
+  test("an entry committed with body full is inscribed in full by default, on any later prepare, and an explicit other body is refused", async () => {
+    const { sdk, did, head, asAlice } = await made("text/plain", bytes("note"));
+    const anchored = await sdk.anchor(did, { parent: head, sat: ALIAS, ...asAlice, body: "full" });
+    expect(anchored.preview).toMatchObject({ body: "full" });
+    // A writer resuming, catching up or replacing the pair passes no body: the author's choice holds.
+    const pair = await pairFor(sdk, did, []);
+    expect(pair.body).toBe("full");
+    expect(pair.notice.body).toMatchObject({ kind: "full" });
+    expect(asIndexed(pair.prepared)).toMatchObject({ mediaType: "text/plain", bytes: bytes("note") });
+    await expect(pairFor(sdk, did, [], { body: "preview" })).rejects.toMatchObject({ code: "BODY_CHOICE_CONFLICT" });
+    // An entry committed without the choice still defaults to no body, and may be inscribed in full when asked.
+    const renamed = await sdk.edit(did, { parent: anchored.original.checkpoint, name: "Renamed", ...asAlice });
+    expect(renamed.preview).toMatchObject({ body: "none" });
+    expect((await pairFor(sdk, did, [pair.prepared])).body).toBe("none");
+    expect((await pairFor(sdk, did, [pair.prepared], { body: "full" })).body).toBe("full");
+  });
+
+  test("the choice is durable: a FileStore reopened by another SDK instance keeps it", async () => {
+    const { mkdtemp } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { FileStore } = await import("../../../src/originals/fs-store.js");
+    const dir = await mkdtemp(join(tmpdir(), "body-choice-"));
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const asAlice = { author: alice.ref("orig"), signer: alice.signer("orig", KEY) };
+    const first = await FileStore.open(dir);
+    const sdk = OriginalsSDK.create({ store: first, authors: async () => alice.evidence(), freshness: "asserted", clock: clock() });
+    const c = await sdk.create({ name: "Harbor", resource: { mediaType: "text/plain", bytes: bytes("note") }, ...asAlice });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    const anchored = await sdk.anchor(c.original.did, { parent: c.original.checkpoint, sat: ALIAS, ...asAlice, body: "full" });
+    await first.close();
+    const second = await FileStore.open(dir);
+    const again = OriginalsSDK.create({ store: second, authors: async () => alice.evidence(), freshness: "asserted", clock: clock() });
+    expect(await again.chosenBody(c.original.did, anchored.original.checkpoint)).toBe("full");
+    expect((await pairFor(again, c.original.did, [])).body).toBe("full");
+    await second.close();
+  });
+
+  test("a pair with no body is not sent for an entry committed with body full (PAIR_BODY_MISMATCH)", async () => {
+    const { sdk, did, head, asAlice, alice } = await made("text/plain", bytes("note"));
+    await sdk.anchor(did, { parent: head, sat: ALIAS, ...asAlice, body: "full" });
+    // Another writer holding the same log, imported without the author's choice, builds a pair with no body.
+    const other = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], freshness: "asserted", clock: clock() });
+    await other.import((await sdk.package(did)).bytes);
+    const bare = await pairFor(other, did, []);
+    expect(bare.body).toBe("none");
+    const { submitEntryInscription } = await import("../../../src/originals/bitcoin-writer.js");
+    const recoveryStore = { save: () => Promise.resolve(), load: () => Promise.resolve(undefined) };
+    await expect(submitEntryInscription({ sdk, did, pair: bare, provider: node(snapshot([])), clock: blocks(), index: INDEX, recoveryStore, recoveryIds: [] }))
+      .rejects.toMatchObject({ code: "PAIR_BODY_MISMATCH" });
   });
 });
 

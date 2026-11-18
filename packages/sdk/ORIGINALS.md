@@ -871,7 +871,9 @@ anchored.preview; // the preview it names, or why none: show `message` to the au
 // of the browser-first entry). The first funding UTXO must hold the sat at offset 0. Until Bitcoin shows
 // the anchor, the inscription's metadata is the whole stored log from genesis through the anchoring entry; then
 // one entry, the one after Bitcoin's head. Its body is the preview the last entry names; with none named, no
-// body at all, or the full version with `body: "full"` (P9.17, P9.30).
+// body at all, or the full version with `body: "full"` (P9.17, P9.30). An entry committed with `body: "full"`
+// keeps that choice (`sdk.chosenBody`, kept by the store): it is inscribed in full by default, and another
+// body is refused (BODY_CHOICE_CONFLICT; a pair without it is not sent, PAIR_BODY_MISMATCH).
 // `versionId` names the entry explicitly; it is refused unless it is next (HEAD_NOT_NEXT). Every read names the index serving it (`index`, P9.11); `indexes` adds independent
 // ones, whose reads are compared (P9.10 SHOULD: an index you run, or two independent ones):
 const read = { provider, clock, index: "ord@node-a", indexes: [{ provider: other, index: "ord@node-b" }] };
@@ -1369,7 +1371,8 @@ await sdk.anchor(did, { parent, author, signer, sat, body: "full" });         //
 await sdk.edit(did, { parent, resource: { bytes }, author, signer });          // a new version: a new preview, or none
 await sdk.edit(did, { parent, name, author, signer });                         // the same version: the parent's preview
 await sdk.edit(did, { parent, name, author, signer, body: "full" });          // ...or none, until the version next changes
-// Inscribing: the preview the entry names; with none, no body, or `body: "full"` for the full version.
+// Inscribing: the preview the entry names; with none, no body, or the full version when the entry was
+// committed with `body: "full"` (kept with it, so a resumed or delegated inscription keeps it) or when passed:
 await prepareEntryInscription({ ...params, body: "full" });
 // The generator alone (browser and Node): deterministic, WASM loaded only when called.
 const r = await generateImagePreview(bytes, "image/png");                   // { status: "generated", preview } | { status: "failed", failure }
@@ -1404,8 +1407,14 @@ configurePreviewCodecs({ resvgWasm: new URL("/assets/resvg.wasm", location.href)
   "version-bytes-missing"`), and the caller must tell the author. A version of
   any other type gets the author's `preview` (any media type, 1 to 8,192
   bytes: `PREVIEW_EMPTY`, `PREVIEW_TOO_LARGE`) or none (`not-an-image`).
-  With none, the inscription has no body unless `body: "full"` is passed to
-  `prepareEntryInscription`; an entry that names a preview cannot be
+  With none, the inscription has no body unless the full version is chosen:
+  with `body: "full"` when the entry is committed, a choice the SDK keeps
+  with the entry (`chosenBody`; the store's optional `putBodyChoice`, which
+  `MemoryStore` and `FileStore` implement), so every later
+  `prepareEntryInscription` inscribes it in full and refuses another body
+  (`BODY_CHOICE_CONFLICT`), and `submitEntryInscription` sends no pair without
+  it (`PAIR_BODY_MISMATCH`); or with `body: "full"` passed to
+  `prepareEntryInscription`. An entry that names a preview cannot be
   inscribed in full (`PREVIEW_NAMED`).
 - **Where previews go (P9.30, P14.5).** Previews are made only for Bitcoin:
   an entry whose aliases list no did:btco DID never names one, and a choice

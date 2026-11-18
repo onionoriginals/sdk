@@ -13,7 +13,7 @@ workspace packages, typechecks the harness, and runs disposable chains in turn:
 - `scripts/regtest/originals-preview.ts`: Bitcoin previews (plan 011 phase
   12b; originals-spec PR 64): a generated WebP preview as the body, the same
   preview after a name-only edit, a new preview with a new version, the full
-  version on request, an inscription with no body (no ord body push; ord
+  version chosen when the entry is committed and kept with it, an inscription with no body (no ord body push; ord
   0.29.0 reports a null content length and serves the metadata), an author's
   preview of a text version, and fresh readers (P9.17, P9.18, P9.30, P14.12);
 - `scripts/regtest/originals-restart.ts`: the Bitcoin writer across a real

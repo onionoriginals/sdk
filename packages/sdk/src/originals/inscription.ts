@@ -116,11 +116,26 @@ export interface InscriptionNotice {
 }
 
 /**
+ * What Bitcoin will not hold through the entry (P9.18): the resource versions
+ * no inscription carries in full, and the off-chain (did:vh, did:webvh)
+ * signer DIDs whose histories stay off Bitcoin.
+ */
+export interface NotOnBitcoin {
+  resources: ReadonlyArray<{ version: number }>;
+  identities: ReadonlyArray<{ did: string }>;
+}
+
+const versionsPhrase = (versions: number[]) =>
+  versions.length === 1 ? `version ${versions[0]}` : `versions ${versions.slice(0, -1).join(", ")} and ${versions[versions.length - 1]}`;
+
+/**
  * The notice for an inscription carrying `entries` whose last entry names the
  * version `d`. `body` defaults to the full version (an entry with no preview,
- * inscribed in full).
+ * inscribed in full). With `notOnBitcoin`, the statement names what Bitcoin
+ * will not hold (P9.18); without it, only that the current version is not on
+ * Bitcoin when the body is not the full version.
  */
-export function inscriptionNotice(entries: readonly string[], d: ResourceDescriptor, body: InscribedBody = { kind: "full", ...d }, cost?: InscriptionCost): InscriptionNotice {
+export function inscriptionNotice(entries: readonly string[], d: ResourceDescriptor, body: InscribedBody = { kind: "full", ...d }, cost?: InscriptionCost, notOnBitcoin?: NotOnBitcoin): InscriptionNotice {
   const activeContent = body.kind !== "none" && isActiveContent(body.mediaType);
   const carried = entries.length === 1
     ? `the entry ${entries[0]}`
@@ -130,10 +145,19 @@ export function inscriptionNotice(entries: readonly string[], d: ResourceDescrip
     : body.kind === "full"
       ? `This inscription puts the full resource version ${d.digest} (${d.mediaType}, ${d.size} bytes) and ${carried}`
       : `This inscription has no body: it puts only ${carried}`;
+  const off: string[] = [];
+  const versions = [...new Set((notOnBitcoin?.resources ?? []).map((r) => r.version))].sort((a, b) => a - b);
+  if (versions.length > 0) off.push(`${versionsPhrase(versions)} of the resource`);
+  for (const i of notOnBitcoin?.identities ?? []) off.push(`the DID history of ${i.did}`);
+  const offChain = notOnBitcoin
+    ? off.length > 0
+      ? ` Bitcoin will not hold ${off.join(", ")}: keep them, publish them or hand them over yourself; their replication is not guaranteed.`
+      : ""
+    : body.kind !== "full" ? ` The version itself (${d.mediaType}, ${d.size} bytes) is not on Bitcoin: keep it, publish it or hand it over yourself.` : "";
   const text =
     `${puts}, with the Original's name and metadata, on Bitcoin. They become public and permanent, ` +
     "and no later entry can remove them." +
-    (body.kind !== "full" ? ` The version itself (${d.mediaType}, ${d.size} bytes) is not on Bitcoin: keep it, publish it or hand it over yourself.` : "") +
+    offChain +
     (cost ? ` At ${cost.feeRate} sat/vB it costs ${cost.total} sats in fees (commit ${cost.commitFee}, reveal ${cost.revealFee}); the sat keeps ${cost.postage} sats of postage.` : "") +
     (body.kind !== "none" && activeContent ? ` ${body.mediaType} is active content: Bitcoin explorers may render it outside the Originals isolation rules.` : "");
   return { version: { digest: d.digest, mediaType: d.mediaType, size: d.size }, body, entries: [...entries], permanent: true, activeContent, ...(cost ? { cost } : {}), text };

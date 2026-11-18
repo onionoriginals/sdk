@@ -210,7 +210,9 @@ export interface EditInput {
  * - `body: "full"`: name no preview, so the inscription can carry the full
  *   version, within 350,000 bytes with its entries (P9.17). For an entry that
  *   keeps the version, this removes the parent's preview until the version
- *   next changes. Pass `body: "full"` again to `prepareEntryInscription`.
+ *   next changes. The choice is kept with the entry (`chosenBody`, the
+ *   store's `putBodyChoice`): `prepareEntryInscription` inscribes the full
+ *   version by default and refuses another body (BODY_CHOICE_CONFLICT).
  *
  * Whatever is named, the commit's `preview` says what, or why none, so the
  * author can be told (P9.30).
@@ -1252,6 +1254,24 @@ export class OriginalsSDK {
   }
 
   /**
+   * The body the author chose for the inscription of the committed entry
+   * `versionId` when it was committed (P9.18, P9.30): `"full"` when it was
+   * committed with `body: "full"`, so it names no preview and its inscription
+   * carries the full version; undefined when no choice was made, and its
+   * inscription carries the preview it names, or no body. The Bitcoin writer
+   * inscribes this body by default and refuses another (BODY_CHOICE_CONFLICT).
+   * Kept by the store when it implements `putBodyChoice`, otherwise by this
+   * instance only.
+   */
+  async chosenBody(did: string, versionId: string): Promise<"full" | undefined> {
+    if (this.bodyChoices.has(`${did} ${versionId}`)) return "full";
+    return (await this.store.getBodyChoice?.(did, versionId)) === "full" ? "full" : undefined;
+  }
+
+  /** Body choices committed through this instance, `${did} ${versionId}` (see `chosenBody`). */
+  private readonly bodyChoices = new Set<string>();
+
+  /**
    * The stored bytes of a resource version, by digest, only when they match it
    * (P4.3); otherwise undefined. The Bitcoin writer inscribes them as the body
    * of the inscription whose last entry names that version (P9.17;
@@ -1445,7 +1465,7 @@ export class OriginalsSDK {
         if (parent.preview && editor) sdkError("outside-grant", "EDITOR_OUTSIDE_GRANT", "an editor entry that does not change the resource carries its parent's preview unchanged (P5.16, P9.30)");
         return {
           ...(parent.preview ? { preview: null } : {}),
-          report: { status: "none", body: "full", reason: "full-version-chosen", message: `No preview is named${parent.preview ? ", removing the parent's until the version next changes" : ""}: the inscription can carry the full version (pass body "full" when inscribing) (P9.30).` },
+          report: { status: "none", body: "full", reason: "full-version-chosen", message: `No preview is named${parent.preview ? ", removing the parent's until the version next changes" : ""}: its inscription carries the full version, the choice kept with the entry (P9.30).` },
         };
       }
       return parent.preview
@@ -1454,7 +1474,7 @@ export class OriginalsSDK {
     }
     if (body === "full") {
       if (supplied) sdkError("invalid-evidence", "INPUT_INVALID", "a preview and body \"full\" exclude each other: with the full version the entry names no preview (P9.30)");
-      return { preview: null, report: { status: "none", body: "full", reason: "full-version-chosen", message: "No preview is named: the inscription can carry the full version (pass body \"full\" when inscribing) (P9.30)." } };
+      return { preview: null, report: { status: "none", body: "full", reason: "full-version-chosen", message: "No preview is named: its inscription carries the full version, the choice kept with the entry (P9.30)." } };
     }
     const none = (reason: NonNullable<PreviewReport["reason"]>, message: string) => ({ preview: null, report: { status: "none" as const, body: "none" as const, reason, message } });
     const avoid = newVersion && parent.preview ? [parent.preview.digest] : [];
@@ -1658,6 +1678,12 @@ export class OriginalsSDK {
     const stored = (await this.store.get(candidate.original))?.log ?? "";
     const log = stored + serializeLog([candidate.entry]);
     for (const [digest, bytes] of candidate.bytes) await this.store.putResource(digest, bytes);
+    // The author's body: "full", kept with the entry before it is committed, so whoever inscribes it
+    // later inscribes the body the author chose and was told of, never no body (P9.18, P9.30).
+    if (this.signedReports.get(candidate) && candidate.preview?.body === "full") {
+      this.bodyChoices.add(`${candidate.original} ${candidate.versionId}`);
+      await this.store.putBodyChoice?.(candidate.original, candidate.versionId, "full");
+    }
     await this.store.commit(candidate.original, { expectedHead: candidate.parent, log });
     const signed = this.signedReports.get(candidate);
     const report = signed?.log === log ? signed.report : await this.verify(log);
