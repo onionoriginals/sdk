@@ -111,6 +111,8 @@ export class CodeWorkspace {
   async updateRepo(repo: string, identity: LocalIdentity, change: (document: RepoDocument) => RepoDocument): Promise<string> {
     const { versionId, document } = await this.repoDocument(repo);
     const next = change(structuredClone(document));
+    // K5: refused before signing, as the verifier would reject it.
+    if (!next.delegates.includes(identity.did)) codeError("invalid-evidence", "REPO_AUTHOR", "the repo Original's author must stay one of its delegates");
     const result = await this.sdk.edit(repo, {
       parent: versionId,
       resource: { bytes: encodeRepoDocument(next), mediaType: REPO_MEDIA_TYPE },

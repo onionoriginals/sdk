@@ -4,7 +4,9 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, chmodSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { MemoryStore } from "@originals/sdk/originals";
-import { CodeWorkspace, MemoryObjectStore, createLocalIdentity, type LocalIdentity } from "../src/index.js";
+import { serializeLog, type LogEntry } from "@originals/vh/log";
+import { writeEvidence } from "@originals/sdk/originals";
+import { CodeWorkspace, MemoryObjectStore, createLocalIdentity, identityEvidence, type LocalIdentity } from "../src/index.js";
 
 export const NOW = Date.parse("2026-11-18T12:00:00Z");
 
@@ -27,9 +29,10 @@ export class FixtureRepo {
   readonly dir: string;
   private n = 0;
 
-  constructor() {
+  constructor(from?: FixtureRepo) {
     this.dir = mkdtempSync(join(tmpdir(), "originals-code-git-"));
-    this.git("init", "-q", "-b", "main");
+    if (from) execFileSync("git", ["clone", "-q", from.dir, this.dir]);
+    else this.git("init", "-q", "-b", "main");
   }
 
   git(...args: string[]): string {
@@ -84,4 +87,31 @@ export async function setup() {
   const repo = new FixtureRepo();
   const ws = workspace();
   return { alice, repo, ws };
+}
+
+/**
+ * Commit a log the writer would refuse, as a dishonest or buggy writer would:
+ * the SDK verifies it under originals:1.0 (which it satisfies) and commits it,
+ * so only the code profile's checks can catch it.
+ */
+export async function importRaw(ws: CodeWorkspace, entries: LogEntry[], signers: Array<Pick<LocalIdentity, "did" | "log">>, expected?: string) {
+  const bytes: Record<string, Uint8Array> = {};
+  for (const e of entries) {
+    const d = (e.state as { asset: { resource: { digest: string } } }).asset.resource.digest;
+    bytes[d] ??= ((await ws.objects.get(d)) ?? (await ws.sdk.resourceBytes(d)))!;
+  }
+  const last = entries[entries.length - 1].versionId;
+  const did = entries[0].state.id as string;
+  const zip = writeEvidence({
+    manifest: { format: "originals-evidence/0.1", profile: "originals:1.0", original: did, checkpoint: last, head: last, completeness: "complete", missing: [] },
+    log: serializeLog(entries),
+    authors: signers.map((s) => identityEvidence(s)),
+    bytes,
+  });
+  return { zip, result: await ws.sdk.import(zip, expected ? { original: expected } : {}) };
+}
+
+export async function logOf(ws: CodeWorkspace, did: string): Promise<LogEntry[]> {
+  const { parseLog } = await import("@originals/vh/log");
+  return parseLog((await ws.originals.get(did))!.log) as unknown as LogEntry[];
 }

@@ -318,10 +318,11 @@ export interface RepositoryReport {
   branches: Array<OriginalResult & { code: BranchCodeReport | null }>;
   /**
    * computed: one result per ref of the repo document at its checkpoint.
-   * incomplete: the repo Original or its document is not verified, so no ref
-   * has a result; never read an empty list as agreement (section 7).
+   * incomplete: evidence for the repo Original or its document is missing.
+   * invalid: the repo Original or its document fails. In both, no ref has a
+   * result; never read an empty list as agreement (section 7).
    */
-  canonicalStatus: "computed" | "incomplete";
+  canonicalStatus: "computed" | "incomplete" | "invalid";
   canonical: CanonicalResult[];
   /** Each Original the results rely on, as of its checkpoint. Never current: nothing here is anchored (P7.10). */
   validAsOf: { repo: string | null; branches: Array<{ original: string; checkpoint: string }> };
@@ -338,6 +339,12 @@ function errorOf(e: unknown): { category: string; code: string; message: string 
   if (e instanceof OriginalsError) return { category: e.category, code: e.code, message: e.message };
   if (e instanceof StructuredError) return { category: "invalid-evidence", code: e.code, message: e.message };
   throw e;
+}
+
+function repoIncomplete(report: OriginalsReport | null, code: RepoCodeReport | null): boolean {
+  if (!report || report.history.status === "incomplete" || report.identityEvidence.status === "incomplete") return true;
+  if (report.history.status !== "valid" || report.authorBinding.status === "failed" || report.fork) return false;
+  return !code || code.history.status === "incomplete";
 }
 
 function entriesThrough(log: string, checkpoint: string | null): LogEntry[] {
@@ -437,7 +444,7 @@ export async function verifyRepository(bundle: Uint8Array, options: VerifyReposi
     manifest: contents.manifest,
     repo: { ...repoResult, code: repoCode },
     branches,
-    canonicalStatus: repoUsable && repoCode?.document ? "computed" : "incomplete",
+    canonicalStatus: repoUsable && repoCode?.document ? "computed" : repoIncomplete(repoResult.report, repoCode) ? "incomplete" : "invalid",
     canonical,
     validAsOf: {
       repo: repoUsable ? repoResult.report!.validAsOf!.checkpoint : null,
