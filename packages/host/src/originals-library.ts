@@ -50,6 +50,7 @@ const PROBLEM = {
   diverged: 'This account holds hosted copies of this Original that disagree. Neither was chosen, and nothing has been removed.',
   otherCopy: 'Another hosted copy of this Original could not be verified. Nothing has been removed.',
   resources: 'Some resource files are unavailable. Keep your evidence export.',
+  bitcoinUnread: 'Bitcoin could not be read, so this anchored Original is shown as it was before it was anchored; its later versions are not checked.',
 };
 
 /**
@@ -59,9 +60,12 @@ const PROBLEM = {
  */
 const diverged = (did: string, message: string) => new OriginalsError('fork', 'EVIDENCE_DIVERGED', message, { did });
 
-/** Why a report cannot be shown as a saved copy, or null when it can (section 7; P6.6). */
-function reportProblem(r: OriginalsReport, did: string): string | null {
-  if (r.original !== did || r.history.status !== 'valid' || r.authorBinding.status !== 'valid' || r.identityEvidence.status !== 'complete' || !r.state) return PROBLEM.unverified;
+/**
+ * Why a report cannot be shown as a saved copy, or null when it can (section 7; P6.6). `named`: a
+ * verified state to show was found without the report's (the entries before an anchoring entry).
+ */
+function reportProblem(r: OriginalsReport, did: string, named = false): string | null {
+  if (r.original !== did || r.history.status !== 'valid' || r.authorBinding.status !== 'valid' || r.identityEvidence.status !== 'complete' || (!r.state && !named)) return PROBLEM.unverified;
   if (r.fork) return PROBLEM.fork;
   return null;
 }
@@ -70,8 +74,19 @@ function reportProblem(r: OriginalsReport, did: string): string | null {
 const unknownDid = (key: string) => `unknown:${key}`;
 const needsRecovery = (did: string, problem: string): LibraryRow => ({ did, title: 'Original needing recovery', availability: 'incomplete', problem });
 
-type HostedCopy = { files: Map<string, Uint8Array>; report?: OriginalsReport; problem?: string };
-const logOf = (c: HostedCopy) => new TextDecoder().decode(c.files.get('asset/did.jsonl') ?? new Uint8Array());
+type HostedCopy = { files: Map<string, Uint8Array>; report?: OriginalsReport; title?: string; problem?: string; unchecked?: boolean };
+const logOf = (c: Pick<HostedCopy, 'files'>) => new TextDecoder().decode(c.files.get('asset/did.jsonl') ?? new Uint8Array());
+
+/** The name in the state of the entry `versionId` of a log that verified through it, or undefined. */
+function nameAt(log: string, versionId: string | null): string | undefined {
+  if (!versionId) return undefined;
+  for (const line of log.split('\n')) {
+    if (!line) continue;
+    const entry = JSON.parse(line) as { versionId?: unknown; state?: { asset?: { name?: unknown } } };
+    if (entry.versionId === versionId) return typeof entry.state?.asset?.name === 'string' ? entry.state.asset.name : undefined;
+  }
+  return undefined;
+}
 
 export function createAnchoringLibrary(dataDir: string, hosted?: OriginalsStore, options: AnchoringLibraryOptions = {}) {
   const root = join(dataDir, 'originals-anchoring');
@@ -168,9 +183,23 @@ export function createAnchoringLibrary(dataDir: string, hosted?: OriginalsStore,
       const copies = byDid.get(did) ?? [];
       byDid.set(did, copies);
       try {
-        const report = (await OriginalsSDK.create({ authors: [] }).load(writeZip(files))).report;
-        const problem = reportProblem(report, did);
-        copies.push({ files, report, ...(problem ? { problem } : {}) });
+        const zip = writeZip(files);
+        const reader = OriginalsSDK.create({ authors: [] });
+        let report = (await reader.load(zip)).report;
+        let unchecked = false;
+        // A copy of an anchored Original read with no Bitcoin evidence yields at most the entries
+        // before its anchoring entry, and no state at the copy's own checkpoint (P7.14; C12-297): only
+        // the sat says what is current (P9.13). The host's sat reader is used when it has one. Without
+        // it, or when the read fails, the row shows the Original as it was before its anchoring entry,
+        // the last state that verified, and says its later versions are unchecked.
+        if (report.anchoring?.status === 'unverified' && report.anchoring.sat.startsWith('did:btco:')) {
+          const read = options.bitcoin ? await satRead(report.anchoring.sat).catch(() => undefined) : undefined;
+          if (read) report = (await reader.load(zip, { bitcoin: read })).report;
+          else unchecked = true;
+        }
+        const title = report.state?.name ?? (report.history.status === 'valid' ? nameAt(logOf({ files }), report.head) : undefined);
+        const problem = title === undefined ? PROBLEM.unverified : reportProblem(report, did, true);
+        copies.push({ files, report, ...(title !== undefined ? { title } : {}), ...(problem ? { problem } : {}), ...(unchecked ? { unchecked } : {}) });
       } catch { copies.push({ files, problem: PROBLEM.unverified }); }
     }
     for (const [did, copies] of byDid) {
@@ -183,8 +212,12 @@ export function createAnchoringLibrary(dataDir: string, hosted?: OriginalsStore,
         out.push({ row: needsRecovery(did, PROBLEM.diverged), files: null });
       } else {
         const r = longest.report!;
-        const problems = [verified.length < copies.length ? PROBLEM.otherCopy : null, r.resources.status !== 'available' ? PROBLEM.resources : null].filter(Boolean);
-        out.push({ row: { did, title: r.state!.name, availability: 'server', bitcoin: !!r.anchoring, ...(problems.length ? { problem: problems.join(' ') } : {}) }, files: longest.files });
+        const problems = [
+          longest.unchecked ? PROBLEM.bitcoinUnread : null,
+          verified.length < copies.length ? PROBLEM.otherCopy : null,
+          r.resources.status !== 'available' ? PROBLEM.resources : null,
+        ].filter(Boolean);
+        out.push({ row: { did, title: longest.title!, availability: 'server', bitcoin: !!r.anchoring, ...(problems.length ? { problem: problems.join(' ') } : {}) }, files: longest.files });
       }
     }
     return out;
