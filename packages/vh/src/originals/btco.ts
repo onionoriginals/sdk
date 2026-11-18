@@ -56,6 +56,13 @@ export interface SatInscription {
   mediaType: string;
   content: Uint8Array;
   /**
+   * True when the inscription has no body at all: its envelope has no empty
+   * data push beginning ord's body (P14.12). `content` is then empty. Absent
+   * or false, it has a body, possibly of zero bytes, which is present, never
+   * absent (P9.17). An index reports this as a null content length.
+   */
+  noBody?: boolean;
+  /**
    * The inscription's raw metadata, or null or absent when it carries none.
    * Originals inscriptions carry none (P9.17); a did:btco DID document is
    * carried here as CBOR (P5.13). For a `delegated` or `content-encoding`

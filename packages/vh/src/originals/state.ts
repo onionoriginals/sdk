@@ -27,6 +27,8 @@ export const ORIGINALS_LIMITS = Object.freeze({
   authorVersions: 1_000,
   /** Editor grants in one asset state (P5.15, P7.7). */
   editors: 32,
+  /** Bytes in a preview (P9.30, P14.13; owner decision, 18 November 2026). */
+  previewBytes: 8_192,
 });
 
 export type Operation = "create" | "update" | "deactivate";
@@ -59,6 +61,15 @@ export interface EditorGrant {
   resource: boolean;
 }
 
+/**
+ * A preview of the resource version an entry names, for an inscription
+ * (P9.30, P14.5): exactly `{mediaType, size, digest}`, as a resource
+ * descriptor (P14.6, P14.7), of 1 to 8,192 bytes. The member name and shape
+ * are PROVISIONAL (D4, D6). A preview is not a resource version: it does not
+ * advance the version (P4.4) and is not in the derived DID document (P14.9).
+ */
+export type PreviewDescriptor = ResourceDescriptor;
+
 export interface AssetState {
   name: string;
   metadata?: JsonObject;
@@ -68,6 +79,11 @@ export interface AssetState {
   aliases: string[];
   /** The editor grants (P5.15). Absent means no editors; PROVISIONAL: an empty list is not used. */
   editors?: EditorGrant[];
+  /**
+   * The preview of `resource` an inscription carries as its body (P9.17,
+   * P9.30), allowed only once `aliases` list a did:btco DID (P14.5).
+   */
+  preview?: PreviewDescriptor;
 }
 
 /** The author DID, its verification method and its exact versionId (P5.1). */
@@ -263,7 +279,7 @@ function checkEditors(value: unknown, authorDid: string | undefined): EditorGran
 
 /** Check an asset state. `authorDid` enables the grant rules that depend on it (P5.15). */
 export function checkAsset(value: unknown, authorDid?: string): AssetState {
-  const a = members(value, ["name", "status", "resource", "aliases"], ["metadata", "editors"], "state.asset");
+  const a = members(value, ["name", "status", "resource", "aliases"], ["metadata", "editors", "preview"], "state.asset");
   if (typeof a.name !== "string" || a.name.length === 0 || a.name.length > ORIGINALS_LIMITS.nameLength) {
     invalid("STATE_NAME", `the name must be a string of 1 to ${ORIGINALS_LIMITS.nameLength} UTF-16 code units (P14.5)`);
   }
@@ -293,7 +309,47 @@ export function checkAsset(value: unknown, authorDid?: string): AssetState {
   }
   if (webvh > 1 || btco > 1) invalid("STATE_ALIASES", "an Original lists at most one did:webvh and one did:btco alias");
   if (a.editors !== undefined) checkEditors(a.editors, authorDid);
+  if (a.preview !== undefined) checkPreview(a.preview, a.resource as unknown as ResourceDescriptor, btco > 0);
   return a as unknown as AssetState;
+}
+
+/**
+ * Whether a `mediaType` is an `image/` type: its type, before the `/`, is
+ * `image`, compared ASCII case-insensitively (P9.30, P14.14). This includes
+ * `image/svg+xml`, which a writer rasterises.
+ */
+export function isImageMediaType(mediaType: string): boolean {
+  const slash = mediaType.indexOf("/");
+  return slash > 0 && mediaType.slice(0, slash).toLowerCase() === "image";
+}
+
+/** The only media type a preview of an `image/` version may have (P9.30). */
+export const IMAGE_PREVIEW_MEDIA_TYPE = "image/webp";
+
+/**
+ * P9.30, P14.5: a `preview` member. Exactly `{mediaType, size, digest}`, each
+ * as for a resource descriptor (P14.6, P14.7); 1 to 8,192 bytes (P14.13); only
+ * in an entry whose `aliases` list a did:btco DID, so never before the
+ * anchoring entry; and `image/webp` for a version of an `image/` type.
+ * PROVISIONAL: a preview's `image/webp` is compared ASCII case-insensitively,
+ * as media types are (RFC 6838); the spec writes it in lower case.
+ */
+export function checkPreview(value: unknown, resource: ResourceDescriptor, prepared: boolean): PreviewDescriptor {
+  const bad: (message: string) => never = (message) => invalid("STATE_PREVIEW", message);
+  if (!prepared) bad("only an entry whose aliases list a did:btco DID may name a preview: previews are made for Bitcoin, from the anchoring entry on (P9.30, P14.5)");
+  let p: PreviewDescriptor;
+  try {
+    p = checkDescriptor(value, "state.asset.preview");
+  } catch (error) {
+    if (error instanceof OriginalsError && error.code === "STATE_RESOURCE") bad(error.message.replace("a resource descriptor", "a preview"));
+    throw error;
+  }
+  if (p.size < 1) bad("a preview is at least 1 byte (P9.30, P14.5)");
+  if (p.size > ORIGINALS_LIMITS.previewBytes) fail("limit-exceeded", "STATE_PREVIEW_TOO_LARGE", `a preview is at most ${ORIGINALS_LIMITS.previewBytes} bytes (P9.30, P14.13)`);
+  if (isImageMediaType(resource.mediaType) && p.mediaType.toLowerCase() !== IMAGE_PREVIEW_MEDIA_TYPE) {
+    bad(`the preview of an image version is ${IMAGE_PREVIEW_MEDIA_TYPE}, not ${p.mediaType} (P9.30)`);
+  }
+  return p;
 }
 
 const same = (a: JsonValue | undefined, b: JsonValue | undefined) => canonicalize(a ?? null) === canonicalize(b ?? null);
@@ -321,6 +377,39 @@ export function checkEditorEntry(editor: EditorRef, operation: string, author: A
   if (asset.name !== before.name && !grant.name) outside("the name");
   if (!same(asset.metadata, before.metadata) && !grant.metadata) outside("the metadata");
   if (!same(asset.resource as unknown as JsonValue, before.resource as unknown as JsonValue) && !grant.resource) outside("the resource");
+  // P5.16, P9.30: naming the preview of a new version is part of the change to the resource its grant
+  // allows; an editor entry that does not change the resource carries its parent's preview unchanged.
+  if (!same(asset.preview as unknown as JsonValue, before.preview as unknown as JsonValue)) {
+    if (asset.resource.digest === before.resource.digest) {
+      fail("outside-grant", "EDITOR_OUTSIDE_GRANT", `${editor.did} may change or remove the preview only with a new version of the resource (P5.16, P9.30)`);
+    }
+    if (!grant.resource) outside("the resource, so not its preview");
+  }
+}
+
+/**
+ * P9.30: the preview an entry names against its parent's. An entry that
+ * changes the resource's digest names a preview of the new version, or none,
+ * never its parent's unchanged. The anchoring entry, the first whose aliases
+ * list a did:btco DID, may name one. Any other entry that keeps the digest,
+ * a deactivation included, carries its parent's preview unchanged or none,
+ * and once none is carried no later entry names one until the digest changes.
+ * That an entry before the anchoring entry names none is `checkPreview`'s.
+ */
+export function checkPreviewTransition(asset: AssetState, previous: AssetState | undefined): void {
+  if (!previous || asset.preview === undefined) return;
+  const parent = previous.preview;
+  const unchanged = parent !== undefined && same(asset.preview as unknown as JsonValue, parent as unknown as JsonValue);
+  if (asset.resource.digest !== previous.resource.digest) {
+    if (unchanged) invalid("STATE_PREVIEW", "an entry that changes the resource names a preview of the new version, or none, never its parent's unchanged (P9.30)");
+    return;
+  }
+  const anchoring = !previous.aliases.some((a) => a.startsWith("did:btco:"));
+  if (!anchoring && !unchanged) {
+    invalid("STATE_PREVIEW", parent === undefined
+      ? "an entry that does not change the resource names no preview when its parent named none (P9.30)"
+      : "an entry that does not change the resource carries its parent's preview unchanged, or none (P9.30)");
+  }
 }
 
 /**
@@ -434,6 +523,8 @@ export function checkEntryState(state: JsonObject, ctx: EntryStateContext): Entr
       invalid("STATE_RESOURCE", "the resource's mediaType and size change only with its digest (P14.6)");
     }
   }
+
+  checkPreviewTransition(asset, ctx.previous?.asset);
 
   if (!Array.isArray(s.transitions)) invalid("STATE_MEMBERS", "state.transitions must be an array");
   s.transitions.forEach((t, i) => {

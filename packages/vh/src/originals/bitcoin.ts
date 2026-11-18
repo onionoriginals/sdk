@@ -16,18 +16,23 @@
  *   inscription that no index reports as an Originals inscription cannot be
  *   an entry: it is ignored and holds back nothing after it (`couldCount`).
  * - An Originals inscription carries complete entries in its metadata (ord
- *   tag 5), as the CBOR encoding of a JSON array of entries; its body is the
- *   exact bytes of the resource version its last entry names, under that
- *   version's media type, with no content encoding. Metadata and body
- *   together are at most 350,000 bytes (P9.17, P14.12; owner decision of 1
- *   November 2026, D6, originals-spec #53). An inscription whose metadata
- *   does not decode to a JSON array is not an Originals inscription. The
- *   anchoring inscription carries the whole log from genesis through the
- *   anchoring entry, its last entry; every later one carries exactly one
- *   entry. So every anchoring inscription checks itself, and a copy of the log
- *   is never needed: one that differs from the sat's entries is ignored. The
- *   bodies of the anchor and of the inscriptions accepted after it are
- *   resource versions on Bitcoin (`Assembly.bytes`, P9.18).
+ *   tag 5), as the CBOR encoding of a JSON array of entries. Its body is set
+ *   by its last entry (P9.17, P9.30, P14.12; owner decisions of 1 and 18
+ *   November 2026, D6): the exact bytes of the preview that entry names, under
+ *   the preview's media type; or, when it names none, the exact bytes of the
+ *   resource version it names, under that version's media type, or no body at
+ *   all and no content type. A body of zero bytes is a body, the version only
+ *   when its size is 0. No body has a content encoding, and no Originals
+ *   inscription names a delegate (PROVISIONAL, P14.12). Metadata and body
+ *   together are at most 350,000 bytes. An inscription whose metadata does not
+ *   decode to a JSON array is not an Originals inscription. The anchoring
+ *   inscription carries the whole log from genesis through the anchoring
+ *   entry, its last entry; every later one carries exactly one entry. So every
+ *   anchoring inscription checks itself, and a copy of the log is never
+ *   needed: one that differs from the sat's entries is ignored. The bodies of
+ *   the anchor and of the inscriptions accepted after it that are the full
+ *   version are resource versions on Bitcoin (`Assembly.bytes`, P9.18); a
+ *   preview never is: it verifies the preview only, never the version.
  * - The anchor is the first valid anchoring inscription, in chain order,
  *   on the sat its anchoring entry names. Any other, on that sat or another,
  *   is a conflicting anchor (P9.16).
@@ -54,7 +59,7 @@ import type { LogEntry, LogVerification } from "../log/index.js";
 import { authorKey, stillAuthorized, versionNumberOf, type AuthorHistory, type AuthorVersion } from "./author.js";
 import { btcoAliasOf, chainOrder, parseBtcoAlias, readSat, type ChainPosition, type PlacementReason, type SatEvidence, type SatInscription, type SatRead } from "./btco.js";
 import { decodeCbor } from "./cbor.js";
-import { ORIGINALS_LIMITS, checkDescriptor, resourceDigest, signerOf, type AuthorRef, type EntryState, type ResourceDescriptor } from "./state.js";
+import { ORIGINALS_LIMITS, checkDescriptor, resourceDigest, signerOf, type AuthorRef, type EntryState, type PreviewDescriptor, type ResourceDescriptor } from "./state.js";
 
 /**
  * The largest inscription, its metadata and body together, in bytes (P9.17,
@@ -100,15 +105,44 @@ function descriptorOf(entry: unknown): ResourceDescriptor | undefined {
   }
 }
 
+/** The preview an entry's state names: none, a descriptor, or `malformed` (P9.30, P14.5). */
+function previewNamedBy(entry: unknown): PreviewDescriptor | "malformed" | undefined {
+  const preview = (stateOf(entry).asset as { preview?: unknown } | undefined)?.preview;
+  if (preview === undefined) return undefined;
+  try {
+    return checkDescriptor(preview, "state.asset.preview");
+  } catch (error) {
+    if (error instanceof OriginalsError) return "malformed";
+    throw error;
+  }
+}
+
+/** What an accepted inscription's body is (P9.17): the named preview, the full version, or none. */
+export type InscriptionBody = "preview" | "version" | "none";
+
+const matches = (content: Uint8Array, d: ResourceDescriptor) => content.length === d.size && resourceDigest(content) === d.digest;
+
 /**
- * P9.17 (originals-spec #53): whether an inscription's body and content type
- * are the resource version its last entry names, or why not.
+ * P9.17, P9.30, P14.12 (owner decision, 18 November 2026): what an
+ * inscription's body is against its last entry, or why it is rejected. With a
+ * preview named, the body must be exactly that preview under its media type.
+ * With none, it must be exactly the version under its media type, or absent
+ * with no content type; a body of zero bytes is present, and is the version
+ * only when its size is 0.
  */
-function bodyMismatch(i: SatInscription, last: LogEntry): "content-type-mismatch" | "body-not-the-resource" | null {
+function bodyOf(i: SatInscription, last: LogEntry): InscriptionBody | "content-type-mismatch" | "body-not-the-resource" | "body-not-the-preview" | "content-type-without-body" {
+  const preview = previewNamedBy(last);
+  if (preview === "malformed") return "body-not-the-preview";
+  if (preview) {
+    if (i.noBody) return "body-not-the-preview";
+    if (i.mediaType !== preview.mediaType) return "content-type-mismatch";
+    return matches(i.content, preview) ? "preview" : "body-not-the-preview";
+  }
   const d = descriptorOf(last);
   if (!d) return "body-not-the-resource";
+  if (i.noBody) return i.mediaType === "" ? "none" : "content-type-without-body";
   if (i.mediaType !== d.mediaType) return "content-type-mismatch";
-  return i.content.length === d.size && resourceDigest(i.content) === d.digest ? null : "body-not-the-resource";
+  return matches(i.content, d) ? "version" : "body-not-the-resource";
 }
 
 export type IgnoredReason =
@@ -116,15 +150,21 @@ export type IgnoredReason =
   | "unconfirmed"
   /** Its metadata does not decode to a JSON array: none, or for example a did:btco DID document (P14.12). */
   | "not-an-originals-inscription"
-  /** Originals metadata on an inscription whose own body is delegated or has a content encoding (P9.14, P9.17). */
+  /** Originals metadata on an inscription whose own body has a content encoding (P9.14, P9.17). */
   | "unsupported-encoding"
+  /** Originals metadata on an inscription that names a delegate, with or without a body (P9.17, P14.12; PROVISIONAL). */
+  | "names-a-delegate"
   | "too-large"
   /** Its metadata breaks the CBOR rules of P14.12, or is an array that is not one of entries. */
   | "undecodable"
-  /** Its content type is not the `mediaType` of its last entry's resource (P9.17). */
+  /** Its content type is not the `mediaType` of the preview its last entry names, or with none named, of its resource (P9.17). */
   | "content-type-mismatch"
-  /** Its body's size or digest is not its last entry's resource descriptor's (P9.17, P4.3). */
+  /** Its last entry names no preview, and its body's size or digest is not its resource descriptor's (P9.17, P4.3). */
   | "body-not-the-resource"
+  /** Its last entry names a preview, and its body is not exactly that preview: another body, the full version, or none (P9.17, P9.30). */
+  | "body-not-the-preview"
+  /** Its last entry names no preview, and it has a content type but no body (P9.17, P14.12). */
+  | "content-type-without-body"
   | "another-original"
   | "does-not-start-at-genesis"
   | "not-one-log"
@@ -162,6 +202,12 @@ export interface Placed {
   height: number;
   confirmations: number;
   inscriptionTime: number;
+  /**
+   * What the inscription's body is (P9.17): the preview its last entry names,
+   * the full version, or none. A preview shows the version on the sat, but is
+   * never evidence of the version's bytes (P9.30).
+   */
+  body: InscriptionBody;
 }
 
 /** The anchor a verifier reported, to retain between verifications (P9.16). */
@@ -445,8 +491,9 @@ export interface Assembly {
   anchorPosition?: ChainPosition;
   /**
    * The resource versions on Bitcoin, by digest: the bodies of the anchor and
-   * of each inscription accepted after it, each checked against its entry's
-   * descriptor (P9.17, P9.18; originals-spec #53).
+   * of each inscription accepted after it that are the full version, each
+   * checked against its entry's descriptor (P9.17, P9.18; originals-spec
+   * #53). A preview is never one (P9.30).
    */
   bytes: Map<string, Uint8Array>;
 }
@@ -475,6 +522,13 @@ export interface AssembleOptions {
   previousAnchor?: RetainedAnchor;
   /** The head reported before, for `headChange` (P9.15). */
   previousHead?: string;
+  /**
+   * The copy is the writer's own committed log (P9.18): with no Bitcoin
+   * evidence it is verified whole, not current. Otherwise a copy read with no
+   * Bitcoin evidence yields at most the entries before its anchoring entry
+   * (P7.14).
+   */
+  localCopy?: boolean;
 }
 
 /**
@@ -519,6 +573,8 @@ export async function assembleFromBitcoin(
   const inChainOrder = () => ignored.sort((a, b) => chainOrder(position.get(a.inscription)!, position.get(b.inscription)!));
   for (const read of reads) for (const x of read.excluded) ignore(read.alias.did, x.inscription, x.reason);
 
+  /** What each usable inscription's body is (P9.17). */
+  const bodies = new Map<SatInscription, InscriptionBody>();
   /** The inscription's entries when it is a usable Originals inscription, else why not. */
   const usable = (read: SatRead, i: SatInscription): LogEntry[] | undefined => {
     const sat = read.alias.did;
@@ -540,14 +596,17 @@ export async function assembleFromBitcoin(
     // P14.12 (originals-spec #53): the metadata decides whether it is an Originals inscription.
     const carried = i.metadata === undefined ? undefined : readInscribedEntries(i.metadata);
     if (i.unsupported) {
-      // A delegated or encoded body is never the resource's exact bytes (P9.14, P9.17).
-      return void ignore(sat, i, carried?.kind === "not-originals" ? "not-an-originals-inscription" : "unsupported-encoding");
+      // An encoded body is never the exact bytes it must be (P9.14, P9.17); an Originals inscription
+      // never names a delegate, with or without a body (P9.17, P14.12; PROVISIONAL).
+      if (carried?.kind === "not-originals") return void ignore(sat, i, "not-an-originals-inscription");
+      return void ignore(sat, i, i.unsupported === "delegated" ? "names-a-delegate" : "unsupported-encoding");
     }
     if (!carried || carried.kind === "not-originals") return void ignore(sat, i, "not-an-originals-inscription");
     if ((i.metadata?.length ?? 0) + i.content.length > ORIGINALS_INSCRIPTION_MAX_BYTES) return void ignore(sat, i, "too-large");
     if (carried.kind === "invalid") return void ignore(sat, i, "undecodable");
-    const mismatch = bodyMismatch(i, carried.entries[carried.entries.length - 1]);
-    if (mismatch) return void ignore(sat, i, mismatch, carried.entries[carried.entries.length - 1]);
+    const body = bodyOf(i, carried.entries[carried.entries.length - 1]);
+    if (body !== "preview" && body !== "version" && body !== "none") return void ignore(sat, i, body, carried.entries[carried.entries.length - 1]);
+    bodies.set(i, body);
     return carried.entries;
   };
 
@@ -607,7 +666,7 @@ export async function assembleFromBitcoin(
   const chosen = mine[0];
 
   const place = (sat: string, i: SatInscription, entry: LogEntry): Placed => ({
-    sat, inscription: i.id, versionId: entry.versionId, height: i.height, confirmations: i.confirmations, inscriptionTime: i.inscriptionTime,
+    sat, inscription: i.id, versionId: entry.versionId, height: i.height, confirmations: i.confirmations, inscriptionTime: i.inscriptionTime, body: bodies.get(i) ?? "none",
   });
   const lastOf = (a: Anchoring) => a.entries[a.entries.length - 1];
   const disputed = reads.flatMap((r) => r.disputed);
@@ -616,11 +675,11 @@ export async function assembleFromBitcoin(
     return k >= 0 ? satNamedBy(copy[k]) : undefined;
   })() : undefined;
 
-  /** The inscriptions' bodies, by the digest each was checked against (P9.17, P9.18). */
+  /** The bodies that are the full version, by the digest each was checked against (P9.17, P9.18); never a preview (P9.30). */
   const bytes = new Map<string, Uint8Array>();
   const keepBody = (i: SatInscription, entry: LogEntry) => {
     const d = descriptorOf(entry);
-    if (d) bytes.set(d.digest, i.content);
+    if (d && bodies.get(i) === "version") bytes.set(d.digest, i.content);
   };
 
   if (!chosen) {
@@ -628,10 +687,11 @@ export async function assembleFromBitcoin(
     const status = evidence.length === 0 || disputed.length > 0 ? "unverified" : "not-anchored";
     const copyAnchor = copy ? anchoringIndex(copy) : -1;
     // Without an anchor on Bitcoin the copy's anchoring entry and what follows are not established,
-    // so the head is the last entry before it (claimed ordering, P7.6), as for not-anchored. With no
-    // Bitcoin evidence at all the copy is the local committed log, reported whole and not current
-    // (bitcoin-evidence-missing): the SDK extends it locally before inscribing (P9.18).
-    const local = status === "unverified" && evidence.length === 0;
+    // so the head is the last entry before it (claimed ordering, P7.6), as for not-anchored, and so
+    // for any copy read with no Bitcoin evidence (P7.14). Only the writer's own committed log, with
+    // no Bitcoin evidence at all, is reported whole and not current (bitcoin-evidence-missing): the
+    // SDK extends it locally before inscribing (P9.18).
+    const local = status === "unverified" && evidence.length === 0 && options.localCopy === true;
     const entries = !copy ? [] : local || copyAnchor < 0 ? copy : copy.slice(0, copyAnchor);
     const change = status === "not-anchored" && options.previousAnchor ? { previous: options.previousAnchor, current: null } : null;
     inChainOrder();

@@ -18,6 +18,7 @@ import {
   type EditorGrant,
   type EditorRef,
   type EntryState,
+  type PreviewDescriptor,
   type ResourceDescriptor,
 } from "./state.js";
 
@@ -62,6 +63,14 @@ export interface PrepareUpdateInput {
   aliases?: string[];
   /** Replaces the editor grants (P5.15); null or [] removes them all. Author entries only (P5.16). */
   editors?: EditorGrant[] | null;
+  /**
+   * The preview an inscription of this entry carries (P9.30, P14.5): allowed
+   * only when the entry's aliases list a did:btco DID. Omitted, an entry that
+   * keeps the resource's digest carries its parent's preview, and one that
+   * changes it names none; null names none. A new preview goes with a new
+   * version, or with the anchoring entry.
+   */
+  preview?: PreviewDescriptor | null;
 }
 
 export interface UpdateOriginalInput extends PrepareUpdateInput {
@@ -113,9 +122,11 @@ function nextAsset(previous: AssetState, input: Omit<PrepareUpdateInput, "versio
     invalidInput("STATE_RESOURCE", "an Original has exactly one resource, never added or removed: give its next version as `resource` (P4.1)");
   }
   const resource = input.resource === undefined ? previous.resource : checkDescriptor(input.resource, "resource");
-  const { metadata: _old, editors: _editors, ...rest } = previous;
+  const { metadata: _old, editors: _editors, preview: _preview, ...rest } = previous;
   const metadata = input.metadata === undefined ? previous.metadata : input.metadata;
   const editors = input.editors === undefined ? previous.editors : input.editors;
+  // P9.30: by default a new version drops the parent's preview, and the same version keeps it.
+  const preview = input.preview === undefined ? (resource.digest === previous.resource.digest ? previous.preview : undefined) : input.preview;
   return {
     ...rest,
     name: input.name ?? previous.name,
@@ -123,6 +134,7 @@ function nextAsset(previous: AssetState, input: Omit<PrepareUpdateInput, "versio
     resource,
     aliases: input.aliases ?? previous.aliases,
     ...(editors !== null && editors !== undefined && editors.length > 0 ? { editors } : {}),
+    ...(preview !== null && preview !== undefined ? { preview } : {}),
   };
 }
 
@@ -164,10 +176,16 @@ export function prepareUpdateOriginal(previous: UnsignedEntry, input: PrepareUpd
   return next(previous, "update", nextAsset(stateOf(previous).asset, input), input);
 }
 
-/** An unsigned deactivation entry after `previous` (P6.5). Only the author deactivates (P5.16). */
-export function prepareDeactivateOriginal(previous: UnsignedEntry, input: { versionTime: string; author: AuthorRef }): UnsignedEntry {
+/**
+ * An unsigned deactivation entry after `previous` (P6.5). Only the author
+ * deactivates (P5.16). It carries its parent's preview, or none with
+ * `preview: null` (P9.30).
+ */
+export function prepareDeactivateOriginal(previous: UnsignedEntry, input: { versionTime: string; author: AuthorRef; preview?: null }): UnsignedEntry {
   if ((input as { editor?: unknown }).editor !== undefined) fail("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor cannot deactivate; only an author entry may (P5.16)");
-  return next(previous, "deactivate", { ...stateOf(previous).asset, status: "deactivated" }, { versionTime: input.versionTime, author: input.author });
+  const { preview: _preview, ...asset } = stateOf(previous).asset;
+  const keep = input.preview === undefined && _preview !== undefined ? { preview: _preview } : {};
+  return next(previous, "deactivate", { ...asset, ...keep, status: "deactivated" }, { versionTime: input.versionTime, author: input.author });
 }
 
 /** A signed update entry after `previous`. */
@@ -176,6 +194,6 @@ export async function updateOriginal(previous: LogEntry, input: UpdateOriginalIn
 }
 
 /** The signed, terminal deactivation entry after `previous`. */
-export async function deactivateOriginal(previous: LogEntry, input: { versionTime: string; author: AuthorRef; sign: EntrySigner }): Promise<LogEntry> {
+export async function deactivateOriginal(previous: LogEntry, input: { versionTime: string; author: AuthorRef; preview?: null; sign: EntrySigner }): Promise<LogEntry> {
   return signEntry(prepareDeactivateOriginal(previous, input), input.sign);
 }

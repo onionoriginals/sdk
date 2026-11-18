@@ -99,6 +99,13 @@ export const photo = (text: string, mediaType = "image/jpeg"): ResourceDescripto
   return { mediaType, size: b.length, digest };
 };
 
+/**
+ * The descriptor of a preview whose bytes are `text` (P9.30, P14.5), by
+ * default `image/webp`; its bytes are remembered, so an inscription whose last
+ * entry names it carries them as its body.
+ */
+export const thumb = (text: string, mediaType = "image/webp"): ResourceDescriptor => photo(text, mediaType);
+
 /** The bytes of a version a test described with `photo`. */
 export function describedBytes(digest: string): Uint8Array | undefined {
   return described.get(digest);
@@ -106,14 +113,15 @@ export function describedBytes(digest: string): Uint8Array | undefined {
 
 /**
  * The fields of an Originals inscription carrying `entries` (P9.17, P14.12;
- * originals-spec #53): metadata, the CBOR of the entries as a JSON array;
- * body, the bytes of the resource version the last entry names; content type,
- * that version's media type.
+ * originals-spec #53, #64): metadata, the CBOR of the entries as a JSON array;
+ * body, the bytes of the preview the last entry names, or with none, of the
+ * resource version it names; content type, that preview's or version's media
+ * type.
  */
 export function carrying(entries: LogEntry | LogEntry[]): Pick<SatInscription, "mediaType" | "content" | "metadata"> {
   const list = Array.isArray(entries) ? entries : [entries];
-  const last = list[list.length - 1] as unknown as { state?: { asset?: { resource?: ResourceDescriptor } } } | undefined;
-  const d = last?.state?.asset?.resource;
+  const last = list[list.length - 1] as unknown as { state?: { asset?: { resource?: ResourceDescriptor; preview?: ResourceDescriptor } } } | undefined;
+  const d = last?.state?.asset?.preview ?? last?.state?.asset?.resource;
   const body = d ? described.get(d.digest) : undefined;
   return { mediaType: d?.mediaType ?? "application/octet-stream", content: body ?? new Uint8Array(), metadata: encodeCbor(list as unknown as JsonValue) };
 }

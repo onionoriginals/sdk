@@ -130,7 +130,7 @@ describe("the anchoring entry (P9.10; plan 012 §3.1, S10)", () => {
     const { alice, copy, ref, sign, anchor } = await anchored();
     const next = await updateOriginal(anchor, { versionTime: time(20), name: "Not yet inscribed", author: ref, sign });
     // No Bitcoin evidence: the writer's own check of its committed log, from genesis through the entry it inscribes next.
-    const r = await verify([...copy, next], alice);
+    const r = await verify([...copy, next], alice, undefined, { localCopy: true });
     expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
     expect(r.head).toBe(next.versionId);
     expect(r.anchoring?.status).toBe("unverified");
@@ -139,6 +139,23 @@ describe("the anchoring entry (P9.10; plan 012 §3.1, S10)", () => {
     expect(r.ordering).toBe("claimed");
     expect(r.ownership).toBeNull();
     expect(r.current).toBe(false);
+  });
+
+  test("C12-297: any other copy of an anchored Original's log read with no Bitcoin evidence reports missing evidence and at most the entries before the anchoring entry (P7.1, P7.14)", async () => {
+    const { alice, copy, ref, sign, anchor, renamed, anchoring } = await anchored();
+    const next = await updateOriginal(anchor, { versionTime: time(20), name: "Not yet inscribed", author: ref, sign });
+    const r = await verify([...copy, next], alice);
+    expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
+    expect(r.head).toBe(renamed.versionId);
+    expect(r.anchoring?.status).toBe("unverified");
+    expect(r.anchoring?.copy).toBe("used");
+    expect(r.reasons).toContain("bitcoin-evidence-missing");
+    expect(r.current).toBe(false);
+    expect(r.ordering).toBe("claimed");
+    // The anchor, when read, is preferred: the copy is compared, never used.
+    const read = await verify([...copy, next], alice, [sat([anchoring(10)])]);
+    expect(read.head).toBe(anchor.versionId);
+    expect(read.anchoring?.copy).toBe("agrees");
   });
 
   test("C12-331: a signed anchoring entry not inscribed on the sat it names is not anchored (P9.10, P9.12)", async () => {
@@ -1348,7 +1365,8 @@ describe("an inscription's body is the resource version its last entry names (P9
       inscribe(next, 21, { content: new Uint8Array(), unsupported: "delegated" }),
     ])]);
     expect(r.head).toBe(anchor.versionId);
-    expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["unsupported-encoding", "unsupported-encoding"]);
+    // C12-380: a delegate is its own reason, with or without a body (P9.17, P14.12).
+    expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["unsupported-encoding", "names-a-delegate"]);
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 
