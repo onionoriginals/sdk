@@ -10,10 +10,18 @@ workspace packages, typechecks the harness, and runs disposable chains in turn:
 - `scripts/regtest/restart-check.ts`: Core and ord restarts;
 - `scripts/regtest/originals-anchor.ts`: anchored Originals end to end (plan 011
   PR 10, plan 012);
+- `scripts/regtest/originals-preview.ts`: Bitcoin previews (plan 011 phase
+  12b; originals-spec PR 64): a generated WebP preview as the body, the same
+  preview after a name-only edit, a new preview with a new version, the full
+  version on request, an inscription with no body (no ord body push; ord
+  0.29.0 reports a null content length and serves the metadata), an author's
+  preview of a text version, and fresh readers (P9.17, P9.18, P9.30, P14.12);
 - `scripts/regtest/originals-restart.ts`: the Bitcoin writer across a real
   process kill, with durable stores and a fresh reader (#975).
 
-The Originals journey asserts each step on real transactions:
+The Originals journey asserts each step on real transactions. It inscribes
+the full version throughout (`body: "full"`), as before previews; previews and
+inscriptions with no body are `originals-preview.ts`:
 
 1. A local Original is anchored to a sat the wallet holds. The SDK verifies
    the log and the author's identity evidence through the anchoring entry,

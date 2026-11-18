@@ -14,7 +14,7 @@ import { authorWithOriginal, fakeChain, headerClock, INDEX, WALLET_ADDRESS, wall
 const chain = fakeChain();
 const landing = inProcessLanding(chain, 'alice');
 const a = await authorWithOriginal();
-const pair = await prepareEntryInscription({ sdk: a.sdk, did: a.did, network: 'regtest', fundingUtxos: [chain.satUtxo, chain.fund(50_000)], satSigner: walletSigner, changeAddress: WALLET_ADDRESS, feeRate: 2, provider: chain.provider, clock: headerClock(), index: INDEX, recoveryStore: null });
+const pair = await prepareEntryInscription({ body: 'full', sdk: a.sdk, did: a.did, network: 'regtest', fundingUtxos: [chain.satUtxo, chain.fund(50_000)], satSigner: walletSigner, changeAddress: WALLET_ADDRESS, feeRate: 2, provider: chain.provider, clock: headerClock(), index: INDEX, recoveryStore: null });
 const zip = (await a.sdk.package(a.did)).bytes;
 await landing.anchoring.submit('alice', { did: a.did, evidence: zip, pair });
 chain.mine();

@@ -69,6 +69,19 @@ const originals = Bun.spawn([process.execPath, 'scripts/regtest/originals-anchor
 });
 if (await originals.exited) process.exit(originals.exitCode ?? 1);
 
+// Bitcoin previews (plan 011 phase 12b; originals-spec PR 64): a preview body, a reused preview, a new
+// preview, a full-file inscription, an inscription with no body, an author's preview, fresh readers.
+const originalsPreview = Bun.spawn([process.execPath, 'scripts/regtest/originals-preview.ts'], {
+  cwd: root,
+  env: {
+    ...process.env, ...binaries,
+    ...(restartReceipt && !process.env.ORIGINALS_REGTEST_PREVIEW_EVIDENCE ? { ORIGINALS_REGTEST_PREVIEW_EVIDENCE: `${restartReceipt}-originals-preview.json` } : {}),
+    ...(process.env.REGTEST_LOGS_DIR ? { ORIGINALS_REGTEST_LOGS: `${process.env.REGTEST_LOGS_DIR}/originals-preview` } : {}),
+  },
+  stdout: 'inherit', stderr: 'inherit',
+});
+if (await originalsPreview.exited) process.exit(originalsPreview.exitCode ?? 1);
+
 // The Bitcoin writer across a real process kill (#975): durable stores, SIGKILL
 // between commit and reveal, identical-pair recovery in a fresh process, and a
 // fresh reader with only public inputs.

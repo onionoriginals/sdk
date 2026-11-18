@@ -55,7 +55,7 @@ test('an old unscoped pair can be adopted only by its verified author and deposi
   const { prepareEntryInscription } = await import('@originals/sdk/originals/bitcoin');
   const a = await authorWithOriginal();
   const chain = fakeChain();
-  const pair = await prepareEntryInscription({ sdk: a.sdk, did: a.did, fundingUtxos: [chain.satUtxo, chain.fund(50_000)], satSigner: walletSigner, changeAddress: WALLET_ADDRESS, feeRate: 2, network: 'regtest', provider: chain.provider, clock: headerClock(), index: INDEX, recoveryStore: null });
+  const pair = await prepareEntryInscription({ body: 'full', sdk: a.sdk, did: a.did, fundingUtxos: [chain.satUtxo, chain.fund(50_000)], satSigner: walletSigner, changeAddress: WALLET_ADDRESS, feeRate: 2, network: 'regtest', provider: chain.provider, clock: headerClock(), index: INDEX, recoveryStore: null });
   const entry = { pair, evidence: base64.encode((await a.sdk.package(a.did)).bytes), savedAt: new Date().toISOString() };
   expect(await legacySubmissionBelongs(entry, a.did, a.author.ref.did, WALLET_ADDRESS)).toBe(true);
   expect(await legacySubmissionBelongs(entry, a.did, 'did:vh:other-account', WALLET_ADDRESS)).toBe(false);
