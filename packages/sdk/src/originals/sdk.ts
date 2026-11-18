@@ -40,8 +40,8 @@
  */
 import { OriginalsError } from "@originals/vh";
 import { bytesView, multibaseEncode, snapshotBytes } from "@originals/vh/crypto";
-import { isJsonObject, parseJson, type JsonObject } from "@originals/vh/json";
-import { serializeLog, vhHash, type LogEntry, type UnsignedEntry } from "@originals/vh/log";
+import { canonicalize, isJsonObject, parseJson, type JsonObject } from "@originals/vh/json";
+import { serializeLog, utf8Length, vhHash, type LogEntry, type UnsignedEntry } from "@originals/vh/log";
 import {
   prepareCreateOriginal,
   prepareDeactivateOriginal,
@@ -59,6 +59,7 @@ import {
   readCarriedFile,
   writeCarriedFile,
   ORIGINALS_INSCRIPTION_MAX_BYTES,
+  ORIGINALS_LIMITS,
   type Carrier,
   type CarriedDisclosure,
   type CarriedFileReport,
@@ -1396,7 +1397,15 @@ export class OriginalsSDK {
         sdkError("limit-exceeded", "INSCRIPTION_TOO_LARGE", `entry ${e.versionId} and the resource version it names would be ${size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, { size, limit: ORIGINALS_INSCRIPTION_MAX_BYTES });
       }
     };
-    if (afterAnchor) checkInscribable({ ...draft.entry, proof: [{ ...proofOptions, proofValue: multibaseEncode(new Uint8Array(64)) }] });
+    const shortest: LogEntry = { ...draft.entry, proof: [{ ...proofOptions, proofValue: multibaseEncode(new Uint8Array(64)) }] };
+    // P14.13: the SDK refuses to sign an entry over the entry limit, measured as its JCS form in UTF-8.
+    // An entry over it even with the shortest proof is refused before the signer is asked; one that a
+    // longer proof takes over is refused after signing, by the verification below, and never committed.
+    const size = utf8Length(canonicalize(shortest as unknown as JsonObject));
+    if (size > ORIGINALS_LIMITS.entryBytes) {
+      sdkError("limit-exceeded", "ENTRY_TOO_LARGE", `entry ${draft.entry.versionId} would be at least ${size} bytes as its JCS form; an entry holds at most ${ORIGINALS_LIMITS.entryBytes} (P14.13)`, { size, limit: ORIGINALS_LIMITS.entryBytes });
+    }
+    if (afterAnchor) checkInscribable(shortest);
     const signature = await signer.sign({
       entry: draft.entry, proofOptions, summary: draft.summary, display: draft.display ?? describeEntry(draft.summary),
       ...(parentEntry ? { parent: { entry: parentEntry, ...(predecessor ? { predecessor } : {}) } } : {}),
