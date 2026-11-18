@@ -3,7 +3,7 @@
  * default), package a repo bundle and verify it with no network and no key.
  * Prints timings and sizes against git's own packs.
  *
- *   bun scripts/acceptance.ts [--git <repo>] [--ref refs/heads/main] [--keep <dir>] [--json <file>]
+ *   bun scripts/acceptance.ts [--git <repo>] [--ref refs/heads/main] [--rev origin/main] [--keep <dir>] [--json <file>]
  */
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -20,6 +20,8 @@ const opt = (name: string) => {
 };
 const gitDir = resolve(opt("git") ?? join(import.meta.dir, "../../.."));
 const ref = opt("ref") ?? "refs/heads/main";
+/** The revision mirrored as `ref`: `--rev origin/main` mirrors the remote's main when the local branch is stale. */
+const rev = opt("rev") ?? ref;
 const keep = opt("keep");
 const root = keep ? resolve(keep) : mkdtempSync(join(tmpdir(), "originals-code-acc-"));
 
@@ -36,19 +38,19 @@ const packDir = join(commonDir, "objects", "pack");
 const repoPack = readdirSync(packDir).filter((f) => f.endsWith(".pack")).reduce((n, f) => n + statSync(join(packDir, f)).size, 0);
 const packOf = (revArgs: string[]) =>
   execFileSync("sh", ["-c", `git -C '${gitDir}' rev-list --objects ${revArgs.join(" ")} | git -C '${gitDir}' pack-objects --stdout -q | wc -c`], { encoding: "utf8", maxBuffer: 1 << 30 }).trim();
-const mainPack = Number(packOf([ref]));
-const firstParentPack = Number(packOf(["--first-parent", ref]));
-const commits = Number(git("rev-list", "--count", ref));
-const firstParent = Number(git("rev-list", "--count", "--first-parent", ref));
-const files = git("ls-tree", "-r", "--name-only", ref).split("\n").length;
+const mainPack = Number(packOf([rev]));
+const firstParentPack = Number(packOf(["--first-parent", rev]));
+const commits = Number(git("rev-list", "--count", rev));
+const firstParent = Number(git("rev-list", "--count", "--first-parent", rev));
+const files = git("ls-tree", "-r", "--name-only", rev).split("\n").length;
 
-console.log(`repository ${gitDir} ${ref}: ${commits} commits (${firstParent} first-parent), ${files} files`);
+console.log(`repository ${gitDir} ${ref} = ${rev} (${git("rev-parse", rev)}): ${commits} commits (${firstParent} first-parent), ${files} files`);
 console.log(`git packs: all refs ${mib(repoPack)}; ${ref} ${mib(mainPack)}; ${ref} first-parent only ${mib(firstParentPack)}`);
 console.log(`workspace ${root}`);
 
 const identity = await createLocalIdentity();
 const ws = await openWorkspace(join(root, "ws"));
-const source = new GitSource(gitDir);
+const source = new GitSource(gitDir, { revisions: { [ref]: rev } });
 let bundle: Uint8Array;
 let mirrorSeconds: number;
 let packageSeconds: number;
@@ -88,7 +90,7 @@ console.log(`verify (offline, ${fetches} fetches attempted): ${verifySeconds.toF
 console.log(`  repo: originals ${report.repo.report?.history.status}, code ${report.repo.code?.history.status}`);
 console.log(`  branch: originals ${b.report?.history.status} (${b.report?.history.entries} entries, validAsOf ${b.report?.validAsOf?.checkpoint}), code ${b.code?.history.status}, binding ${b.code?.binding.status}`);
 console.log(`  content ${b.code?.content.status}: ${b.code?.content.objects} objects, ${mib(b.code?.content.bytes ?? 0)}; git trees ${b.code?.gitBinding.status} (${b.code?.gitBinding.checked} checked)`);
-console.log(`  canonical ${c?.ref}: ${c?.status} ${c?.head?.commit ?? ""} (git: ${git("rev-parse", ref)})`);
+console.log(`  canonical ${c?.ref}: ${c?.status} ${c?.head?.commit ?? ""} (git: ${git("rev-parse", rev)})`);
 console.log(`  current: ${report.current}`);
 
 const result = {
@@ -96,7 +98,7 @@ const result = {
   mirror: { seconds: mirrorSeconds, entries: b.report?.history.entries, trees: source.stats.trees, blobs: source.stats.blobs, blobBytes: source.stats.blobBytes },
   store: { objects: usage.objects, objectBytes: usage.bytes, originalsBytes },
   bundle: { bytes: bundle.length, seconds: packageSeconds },
-  verify: { seconds: verifySeconds, fetches, canonical: c?.status, head: c?.head?.commit, gitHead: git("rev-parse", ref), content: b.code?.content.status, gitTrees: b.code?.gitBinding.status, current: report.current },
+  verify: { seconds: verifySeconds, fetches, canonical: c?.status, head: c?.head?.commit, gitHead: git("rev-parse", rev), content: b.code?.content.status, gitTrees: b.code?.gitBinding.status, current: report.current },
 };
 if (opt("json")) writeFileSync(opt("json")!, `${JSON.stringify(result, null, 2)}\n`);
 if (!keep) rmSync(root, { recursive: true, force: true });

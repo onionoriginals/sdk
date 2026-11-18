@@ -126,12 +126,22 @@ export class GitSource implements CommitSource {
   private readonly memo = new Map<string, string>();
   readonly stats: GitSourceStats = { commits: 0, trees: 0, blobs: 0, blobBytes: 0 };
 
-  constructor(readonly dir: string) {
+  /**
+   * `revisions` maps a ref to the git revision to read for it, so a
+   * remote-tracking branch can be mirrored as `refs/heads/<name>`
+   * (`{ "refs/heads/main": "origin/main" }`). Unmapped refs are read as named.
+   */
+  constructor(
+    readonly dir: string,
+    private readonly options: { revisions?: Record<string, string> } = {},
+  ) {
     this.cat = new CatFile(dir);
   }
 
   async firstParent(ref: string): Promise<string[]> {
-    const { stdout } = await run("git", ["-C", this.dir, "rev-list", "--first-parent", "--reverse", ref], { maxBuffer: 256 * 1024 * 1024 });
+    const rev = this.options.revisions?.[ref] ?? ref;
+    if (rev.startsWith("-")) codeError("invalid-evidence", "GIT_REVISION", `${rev} is not a revision`);
+    const { stdout } = await run("git", ["-C", this.dir, "rev-list", "--first-parent", "--reverse", rev, "--"], { maxBuffer: 256 * 1024 * 1024 });
     return stdout.split("\n").filter((l) => l.length > 0);
   }
 

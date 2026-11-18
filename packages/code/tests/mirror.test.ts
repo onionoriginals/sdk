@@ -205,3 +205,18 @@ describe("gitlinks", () => {
   });
 });
 
+
+describe("revisions", () => {
+  test("a ref can be read from another revision (a remote-tracking branch); option-like revisions are refused", async () => {
+    const repo = new FixtureRepo();
+    cleanup.push(() => repo.remove());
+    const c1 = repo.commit({ "a.txt": "1" });
+    repo.commit({ "a.txt": "2" });
+    const s = new GitSource(repo.dir, { revisions: { "refs/heads/main": c1 } });
+    cleanup.push(() => s.close());
+    expect(await s.firstParent("refs/heads/main")).toEqual([c1]);
+    const bad = new GitSource(repo.dir, { revisions: { "refs/heads/main": "--all" } });
+    cleanup.push(() => bad.close());
+    await expect(bad.firstParent("refs/heads/main")).rejects.toMatchObject({ code: "GIT_REVISION" });
+  });
+});

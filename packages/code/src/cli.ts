@@ -5,7 +5,7 @@
  *
  *   originals-code identity new <file>
  *   originals-code init    --dir <workspace> --identity <file> --name <name>
- *   originals-code mirror  --dir <workspace> --identity <file> --git <repo> [--ref refs/heads/main] [--limit <n>]
+ *   originals-code mirror  --dir <workspace> --identity <file> --git <repo> [--ref refs/heads/main] [--rev <revision>] [--limit <n>]
  *   originals-code package --dir <workspace> --out <bundle.zip> [--omit-blobs]
  *   originals-code verify  <bundle.zip> [--json] [--now <time>]
  *
@@ -91,13 +91,13 @@ async function main(argv: string[]): Promise<number> {
     }
     case "mirror": {
       const ws = await openWorkspace(resolve(need(opts, "dir")));
-      const source = new GitSource(resolve(need(opts, "git")));
+      const ref = typeof opts.ref === "string" ? opts.ref : "refs/heads/main";
+      const source = new GitSource(resolve(need(opts, "git")), typeof opts.rev === "string" ? { revisions: { [ref]: opts.rev } } : {});
       try {
         if (!ws.repo) throw new Error("run init first");
         const identity = parseIdentity(await readFile(need(opts, "identity"), "utf8"));
         await ws.rememberIdentity(identity);
         const started = performance.now();
-        const ref = typeof opts.ref === "string" ? opts.ref : "refs/heads/main";
         const r = await ws.workspace.mirror({ repo: ws.repo, ref, identity, source, ...(typeof opts.limit === "string" ? { limit: Number(opts.limit) } : {}) });
         const s = source.stats;
         console.log(`${r.created ? "created" : "extended"} ${r.branch}: +${r.appended} entries, head ${r.head.commit} (${r.head.versionId})`);

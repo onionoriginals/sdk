@@ -12,8 +12,8 @@ the pinned Originals Protocol (`aviarytech/originals-spec@45ed1dc`, see
 
 A git-like version-control layer whose history is signed, verifies offline,
 and is built from ordinary Originals. The test case is this repository: 1,525
-commits on `main` (663 on its first-parent chain), 2,006 files at `main`, and
-a 115 MiB git pack.
+commits on `main` (675 on its first-parent chain), 2,031 files at `main`, and
+a 114 MiB git pack.
 
 Constraints, set by the owner:
 
@@ -187,7 +187,7 @@ mirrored), so the commit hash is reported as **claimed** by the signer.
   Original's entries with the `@originals/vh/originals` builders. It signs each
   entry once and verifies the whole log once at the end, then imports it
   through `OriginalsSDK.import` (durable commit, P6.2). (The SDK's `edit`
-  verifies the whole history at each commit, which is quadratic over 663
+  verifies the whole history at each commit, which is quadratic over hundreds of
   entries.) Incremental: a later mirror appends only commits after the
   branch's head commit; a head commit that is no longer on the first-parent
   chain (a force-push) is refused as `MIRROR_DIVERGED` — never a silent rebase
@@ -365,7 +365,7 @@ Original may be anchored, and who signs the anchoring entry (P9.10, P9.12).
 - **O1 — repositories over 10,000 first-parent commits** (P7.7). One branch
   Original per ref cannot hold them. Options: segment a branch into a chain of
   Originals (each genesis naming the previous one's last entry), or a profile
-  limit. Not needed for this repository (663).
+  limit. Not needed for this repository (675).
 - **O2 — git ancestry beyond first parents.** Canonical heads only trust
   signed first-parent chains (K6). Mirroring parents in metadata would make
   ancestry claimed, not checked.
@@ -373,14 +373,14 @@ Original may be anchored, and who signs the anchoring entry (P9.10, P9.12).
   verifier check the commit hash and let a remote helper rebuild identical
   commits; it exposes author emails (P8.2: no confidentiality).
 - **O4 — Originals verification cost.** `verifyOriginal` hashes every
-  resource version and checks every proof; 4.3 s for the whole bundle at 663
+  resource version and checks every proof; 4.3 s for the whole bundle at 675
   entries (§8), to be measured near 10,000.
 - **O5 — bundle size.** The bundle is one ZIP read with the SDK's codec,
   whose default bound is 512 MiB (`ZIP_LIMITS`); this repository's bundle is
-  69 MiB. Larger repositories need a raised bound or a split object pack.
+  70 MiB. Larger repositories need a raised bound or a split object pack.
 - **O6 — storage against git.** Objects are deflated one by one with no
-  deltas: 65.2 MiB for this repository's first-parent history, against git's
-  35.6 MiB pack of the same objects (§8). Delta compression inside the pack
+  deltas: 66.1 MiB for this repository's first-parent history, against git's
+  35.7 MiB pack of the same objects (§8). Delta compression inside the pack
   (K8) would close most of the gap without changing any digest.
 - **O7 — editor branches for non-delegates.** Today a contributor who is not
   a delegate writes into a delegate's branch as an editor. Radicle instead
@@ -390,21 +390,20 @@ Original may be anchored, and who signs the anchoring entry (P9.10, P9.12).
 ## 8. Results (2026-11-18)
 
 Phases 0–3 are in `packages/code` with tests citing CODE-01 to CODE-17
-(92 tests, all passing; network disabled in every test).
+(93 tests, all passing; network disabled in every test).
 
-**CODE-ACC on this repository** (`bun run acceptance` in `packages/code`,
-`main` at `5814ad89`; Apple Silicon laptop):
+**CODE-ACC on this repository** (`bun run acceptance -- --rev origin/main`
+in `packages/code`, `main` at `e5a3e3d4`; Apple Silicon laptop):
 
 | | |
 |---|---|
-| History | 1,525 commits, 663 on the first-parent chain, 2,006 files at `main` |
-| Mirror | 663 entries in 10.2 s; 6,422 trees and 8,955 blobs converted (163.1 MiB raw); every git tree id recomputed from the objects during the mirror |
-| Store | 15,377 objects, 65.2 MiB compressed, plus 3.0 MiB of Originals logs and root trees |
-| git packs | all refs 113.9 MiB; `main` 37.2 MiB; `main` first-parent objects only 35.6 MiB |
-| Bundle | 69.3 MiB, written in 4.9 s |
-| Verify | 4.3 s, offline (0 fetch attempts), no key: repo and branch valid as Originals and under the code profile, content complete, 663 of 663 git tree ids match, canonical head of `refs/heads/main` agreed at `5814ad89`, equal to git's; `current: false` |
+| History | 1,537 commits, 675 on the first-parent chain, 2,031 files at `main` |
+| Mirror | 675 entries in 11.5 s; 6,546 trees and 9,046 blobs converted (165.6 MiB raw); every git tree id recomputed from the objects during the mirror |
+| Store | 15,592 objects, 66.1 MiB compressed, plus 3.1 MiB of Originals logs and root trees |
+| git packs | all refs 113.9 MiB; `main` 37.3 MiB; `main` first-parent objects only 35.7 MiB |
+| Bundle | 70.2 MiB, written in 5.5 s |
+| Verify | 4.3 s, offline (0 fetch attempts), no key: repo and branch valid as Originals and under the code profile, content complete, 675 of 675 git tree ids match, canonical head of `refs/heads/main` agreed at `e5a3e3d4`, equal to git's; `current: false` |
 
-The store is about 1.8 times git's pack of the same objects (O6) and about
+The store is about 1.9 times git's pack of the same objects (O6) and about
 0.6 times the whole repository's 114 MiB pack, which also holds every
 other ref and every second-parent commit.
-
