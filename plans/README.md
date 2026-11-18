@@ -35,6 +35,7 @@ page's own copy misdescribes the money path.
 |------|-------|----------|--------|------|------------|--------|
 | 047 | Landing MVP launch — completable mainnet flow, honest tiers, production config (16 units) | P0 | XL | HIGH | PR #491 merged | TODO (not started) |
 | 048 | Map: the VH-Log Originals protocol and author-held signing — answers issue #953's open questions against the pinned stack; one protocol question left (P-256 device keys) | — | map | — | plan 011 delivered | DONE (map only, 2026-10-30) |
+| 049 | Originals for code — branch Originals mirrored from git, repo Original with delegates and thresholds, canonical heads, per-path grants (`@originals/code`); phase 4 is a proposed spec change | — | XL | MED | plan 011 delivered | IN PROGRESS (phases 0–3) |
 
 > Unit gate: 047's Phase A (U1–U7, U10, U15, U16) must land, its volume-mount check pass,
 > and its abort contract be written, before `BTC_NETWORK=mainnet` is enabled in the
