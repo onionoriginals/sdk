@@ -11,7 +11,7 @@ the pinned Originals Protocol (`aviarytech/originals-spec@45ed1dc`, see
 ## 0. Goal and constraints
 
 A git-like version-control layer whose history is signed, verifies offline,
-and is built from ordinary Originals. The test case is this repository: 1,525
+and is built from ordinary Originals. The test case is this repository: 1,537
 commits on `main` (675 on its first-parent chain), 2,031 files at `main`, and
 a 114 MiB git pack.
 
@@ -83,7 +83,7 @@ Originals resource digest (P4.3, P14.7), computed over the exact bytes.
   `type/subtype`, no parameters, as the descriptor rules require).
 
 **Why a tree per directory, not one flat `path → digest, mode` manifest.**
-A flat manifest of this repository is about 240 KB per version, so 663
+A flat manifest of this repository is about 240 KB per version, so 675
 versions would store about 160 MB of manifests alone. Splitting it by
 directory, as git does, stores a directory again only when something under it
 changed, and makes the per-path grant check (phase 3) skip unchanged
