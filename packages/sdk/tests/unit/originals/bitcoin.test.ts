@@ -556,6 +556,53 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     expect(loaded.report.current, JSON.stringify(loaded.report.reasons)).toBe(true);
   });
 
+  test("C12-297: \"Complete evidence package of an anchored Original, read without access to the anchor\": missing evidence; at most the entries before the first anchoring entry; the package not preferred to the anchor (P7.1, P7.14)", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    let t = Date.parse("2026-10-18T11:00:00Z");
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => (t += 1000) });
+    const signer = alice.signer("orig", KEY);
+    const author = alice.ref("orig");
+    const c = await sdk.create({ name: "Harbor", resource: { mediaType: "image/jpeg", bytes: bytes("one") }, author, signer });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    const renamed = await sdk.edit(c.original.did, { parent: c.original.checkpoint, name: "Harbor at dawn", author, signer });
+    const anchored = await sdk.anchor(c.original.did, { parent: renamed.original.checkpoint, author, signer, sat: btcoAlias("regtest", SAT) });
+    const later = await sdk.edit(c.original.did, { parent: anchored.original.checkpoint, name: "Harbor at noon", author, signer });
+    const pkg = await sdk.package(c.original.did);
+    expect(pkg.manifest.completeness).toBe("complete");
+    const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => t });
+
+    // Without the anchor: missing evidence, and at most the entries before the anchoring entry.
+    const offline = await reader.load(pkg.bytes);
+    expect(offline.reasons).toContain("bitcoin-evidence-missing");
+    expect(offline.report.head).toBe(renamed.original.checkpoint);
+    expect(offline.report.validAsOf?.checkpoint).toBe(renamed.original.checkpoint);
+    expect(offline.report.state?.name).toBe("Harbor at dawn");
+    expect(offline.report.ordering).toBe("claimed");
+    expect(offline.report.current).toBe(false);
+    expect(offline.notCheckedAgainstAnchor).toEqual([anchored.original.checkpoint, later.original.checkpoint]);
+    // That is not a contradiction of the manifest's claims about what the package holds.
+    expect(offline.reasons).not.toContain("manifest-completeness-mismatch");
+
+    // With the anchor, which shows only the log through the anchoring entry: the state is the anchor's, not the package's.
+    const log = new TextDecoder().decode(readZip(pkg.bytes).get("asset/did.jsonl")!);
+    const throughAnchor = linesOf(log).slice(0, 3);
+    const evidence = await satEvidence(snapshot([{ id: `${"e".repeat(64)}i0`, height: 4, entries: throughAnchor }]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
+    const online = await reader.load(pkg.bytes, { bitcoin: [evidence] });
+    expect(online.report.anchoring?.status).toBe("anchored");
+    expect(online.report.head).toBe(anchored.original.checkpoint);
+    // The package's checkpoint is not on the anchor, so it is not found there, never taken from the package.
+    expect(online.reasons).toContain("checkpoint-not-found");
+    expect(online.report.validAsOf).toBeNull();
+    expect(online.report.current).toBe(false);
+    expect(online.notCheckedAgainstAnchor).toEqual([]);
+
+    // Importing stores the copy whole (P7.5), as the writer keeps its own: unverified on Bitcoin, never current.
+    const imported = await reader.import(pkg.bytes);
+    expect(imported.status).toBe("imported");
+    expect(imported.original.head).toBe(later.original.checkpoint);
+    expect(imported.original.current).toBe(false);
+  });
+
   test("C12-64: a verifier that knows a newer signer DID version than the package supplies uses the newer one, and says when and where it got it (P7.8; originals-spec #47)", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
     let t = Date.parse("2026-10-18T11:00:00Z");

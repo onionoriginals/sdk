@@ -81,6 +81,7 @@ import {
 } from "@originals/vh/originals";
 import { didWebvhFilesUrl, didWebvhLogUrl, parseDidWebvh } from "@originals/vh/webvh";
 import { inscriptionMetadata } from "./inscription.js";
+import { isLocalCopy } from "./local-copy.js";
 import { MANIFEST, signerPath, readEvidence, readEvidenceFiles, readManifest, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
 import { HOSTED_PREFIX, assertHostable, type HostedFetch, type RetrievalLimits } from "./hosting.js";
 import { Retrieval, retrievalPlan } from "./retrieval.js";
@@ -299,6 +300,14 @@ export interface LoadedEvidence {
   manifest: EvidenceManifest;
   report: OriginalsReport;
   reasons: string[];
+  /**
+   * P7.14: for an anchored Original read without the anchor (no `bitcoin`
+   * evidence), the versionIds of the anchoring entry and every later entry
+   * in this copy. They are not checked against the anchor: `report` covers at
+   * most the entries before the anchoring entry, with `bitcoin-evidence-missing`
+   * among `reasons`. Empty otherwise.
+   */
+  notCheckedAgainstAnchor: string[];
 }
 
 export interface PublishedOriginal extends LoadedEvidence {
@@ -515,6 +524,30 @@ function lines(log: string): string[] {
 
 function versionIds(log: string): string[] {
   return lines(log).map((line) => (parseJson(line) as { versionId: string }).versionId);
+}
+
+/** The index of a log's anchoring entry, its first naming a did:btco alias (P9.10), before verification; -1 with none or an unreadable line. */
+function anchoringIndexOf(logLines: string[]): number {
+  try {
+    return anchoringIndex(logLines.map((line) => JSON.parse(line) as unknown));
+  } catch {
+    return -1; // verification reports the malformed line
+  }
+}
+
+/** A line's versionId as written, before verification, if it names one. */
+function versionIdOfLine(line: string): string[] {
+  try {
+    const v = (JSON.parse(line) as { versionId?: unknown }).versionId;
+    return typeof v === "string" ? [v] : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Lines of a log, each ending in its line feed: the leading lines' exact text (P14.2). */
+function serializeLines(logLines: string[]): string {
+  return logLines.map((line) => `${line}\n`).join("");
 }
 
 /** The signer identity DIDs a log names: its author and each editor of an editor entry (P7.1), before verification. */
@@ -1646,7 +1679,7 @@ export class OriginalsSDK {
    * bounded by a budget of their own (`retrievalLimits`).
    */
   async load(zip: Uint8Array, options: { bitcoin?: SatEvidence[] } = {}): Promise<LoadedEvidence> {
-    return this.loadContents(readEvidence(zip, this.options.archiveLimits), "package", [], undefined, options.bitcoin);
+    return this.loadContents(readEvidence(zip, this.options.archiveLimits), "package", [], undefined, options.bitcoin, isLocalCopy(zip));
   }
 
   private async loadContents(
@@ -1655,17 +1688,26 @@ export class OriginalsSDK {
     aliases: AliasEvidence[] = [],
     retrieval?: Retrieval,
     bitcoin?: SatEvidence[],
+    localCopy = false,
   ): Promise<LoadedEvidence> {
     const aliasEvidence = await this.aliasEvidence(contents.log, aliases);
     const comparisons = await this.comparisons(contents.log);
+    // P7.14 (and P7.1): a copy of an anchored Original's log that is not read from the anchor, a
+    // package's or a host's, is never preferred to it. Without the anchor a reader reports missing
+    // evidence and at most the entries before the first anchoring entry; that entry and every later
+    // one are not checked against the anchor. (A writer's own check of its committed log is P9.18's
+    // local copy, never this report.)
+    const all = lines(contents.log);
+    const k = localCopy || (bitcoin && bitcoin.length > 0) ? -1 : anchoringIndexOf(all);
+    const notCheckedAgainstAnchor = k > 0 ? all.slice(k).flatMap(versionIdOfLine) : [];
     const run = (authors: AuthorDidEvidence[]) =>
       verifyOriginal({
         ...(bitcoin ? { bitcoin } : {}),
         aliases: aliasEvidence,
-        log: contents.log,
+        log: k > 0 ? serializeLines(all.slice(0, k)) : contents.log,
         authors,
         bytes: contents.bytes,
-        checkpoint: contents.manifest.checkpoint,
+        ...(k > 0 ? {} : { checkpoint: contents.manifest.checkpoint }),
         now: this.clock(),
         ...comparisons,
       });
@@ -1675,6 +1717,7 @@ export class OriginalsSDK {
     const base = await this.authorEvidence(contents.log, supplied, (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])), comparisons.retained);
     const { report } = await this.withIdentities(contents.log, base, run, retrieval);
     const reasons = [...report.reasons];
+    if (k > 0 && !reasons.includes("bitcoin-evidence-missing")) reasons.push("bitcoin-evidence-missing");
     const m = contents.manifest;
     if (m.original !== report.original) reasons.push("manifest-original-mismatch");
     if (m.checkpoint !== m.head) reasons.push("package-checkpoint-is-not-its-head");
@@ -1683,7 +1726,7 @@ export class OriginalsSDK {
     const packaged = new Set(contents.authors.map((a) => a.did));
     const actuallyComplete = report.resources.missing.length === 0 && signerDidsOf(contents.log).every((d) => d.startsWith("did:btco:") || packaged.has(d));
     if ((m.completeness === "complete") !== actuallyComplete) reasons.push("manifest-completeness-mismatch");
-    return { manifest: m, report: { ...report, current: report.current && reasons.length === report.reasons.length }, reasons };
+    return { manifest: m, report: { ...report, current: report.current && reasons.length === report.reasons.length }, reasons, notCheckedAgainstAnchor };
   }
 
   /**
@@ -1800,7 +1843,9 @@ export class OriginalsSDK {
   }
 
   private async importContents(contents: EvidenceContents, expected?: string, from: "package" | "host" = "package", requireResources = false): Promise<ImportResult> {
-    const loaded = await this.loadContents(contents, from);
+    // Importing stores a copy (P7.5), checked whole like the writer's local copy (P9.18): never current
+    // without the anchor, and not a report given to a reader, which `load` makes (P7.14).
+    const loaded = await this.loadContents(contents, from, [], undefined, undefined, true);
     const r = loaded.report;
     if (!r.original || r.history.status !== "valid" || r.authorBinding.status !== "valid" || r.identityEvidence.status !== "complete") {
       sdkError("invalid-evidence", "IMPORT_REJECTED", "the package does not verify", { report: r });

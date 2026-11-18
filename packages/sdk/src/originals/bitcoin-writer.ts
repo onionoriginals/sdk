@@ -113,6 +113,7 @@ import type { InscribeOnSatResult } from "../bitcoin/inscribe-on-sat.js";
 import { readEvidence } from "./evidence.js";
 import { InscriptionClock, satEvidence } from "./bitcoin.js";
 import type { EvidencePackage, LoadedEvidence, OriginalView, OriginalsSDK } from "./sdk.js";
+import { asLocalCopy } from "./local-copy.js";
 
 /**
  * The sat builder's unchecked low-level calls, re-exported: they persist and
@@ -372,7 +373,8 @@ async function verifyThrough(sdk: OriginalsSDK, did: string, log: StoredLog, ind
     const category = report?.history.failure?.category ?? error.category;
     refuse(category, code, `${did} does not verify through ${what}; not inscribed (P9.18): ${error.message}`, { cause: error.code, ...(report ? { report } : {}) });
   }
-  const loaded: LoadedEvidence = await sdk.load(pkg.bytes);
+  // The writer's own check of its committed log: a local copy, verified whole (P9.18), never a report given to anyone.
+  const loaded: LoadedEvidence = await sdk.load(asLocalCopy(pkg.bytes));
   const r = loaded.report;
   const problems: string[] = [];
   if (r.history.status !== "valid" || r.checkpoint !== versionId) problems.push(`history-${r.history.status}`);
@@ -1074,7 +1076,8 @@ export async function transferHandoff(sdk: OriginalsSDK, did: string, options?: 
     accepted = pending.accepted;
   }
   const pkg = await sdk.package(did, checkpoint === undefined ? {} : { checkpoint });
-  const loaded = await sdk.load(pkg.bytes);
+  // The writer's local copy (P9.18): it lists what is off chain from its own committed log.
+  const loaded = await sdk.load(asLocalCopy(pkg.bytes));
   const log = await storedLog(sdk, did);
   // P9.18: a version counts as on Bitcoin only when an accepted inscription carries it. Through the
   // committed head or an exact checkpoint no sat is read, so nothing is assumed inscribed and every
