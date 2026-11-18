@@ -17,6 +17,7 @@ const additionalEntries = [
   ...vhEntries,
   'packages/auth/dist/index.js',
   'packages/auth/dist/client/index.js',
+  'packages/code/dist/index.js',
 ];
 
 function checkFixture(t, changedEntry, source) {
