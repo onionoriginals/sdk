@@ -108,7 +108,12 @@ export async function importRaw(ws: CodeWorkspace, entries: LogEntry[], signers:
     authors: signers.map((s) => identityEvidence(s)),
     bytes,
   });
-  return { zip, result: await ws.sdk.import(zip, expected ? { original: expected } : {}) };
+  try {
+    return { zip, result: await ws.sdk.import(zip, expected ? { original: expected } : {}) };
+  } catch (e) {
+    const r = (e as { details?: { report?: { history?: unknown } } }).details?.report;
+    throw Object.assign(e as Error, { message: `${(e as Error).message}: ${JSON.stringify(r?.history)}` });
+  }
 }
 
 export async function logOf(ws: CodeWorkspace, did: string): Promise<LogEntry[]> {

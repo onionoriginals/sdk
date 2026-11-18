@@ -91,7 +91,17 @@ export async function appendCommits(input: AppendCommitsInput): Promise<LogEntry
   return out;
 }
 
-/** The commits a branch's entries name, with each entry's root tree, oldest first. */
+/**
+ * The commits a branch's entries name, with each one's root tree, oldest
+ * first. An entry that repeats its parent's commit (an author entry changing
+ * only grants, say) is folded into it, as the verifier folds it.
+ */
 export function branchChain(entries: readonly LogEntry[]): Array<{ commit: string; root: string; versionId: string }> {
-  return entries.map((e) => ({ commit: metadataOf(e).commit, root: stateOf(e).asset.resource.digest, versionId: e.versionId }));
+  const out: Array<{ commit: string; root: string; versionId: string }> = [];
+  for (const e of entries) {
+    const commit = metadataOf(e).commit;
+    if (out.length > 0 && out[out.length - 1].commit === commit) continue;
+    out.push({ commit, root: stateOf(e).asset.resource.digest, versionId: e.versionId });
+  }
+  return out;
 }
