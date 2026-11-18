@@ -818,10 +818,11 @@ export class OriginalsSDK {
    * `log` names may make resolver requests (a function `authors` source,
    * `identityFetch`). Not for one first stored by importing a carried file,
    * since the import was no opt-in to resolve, unless the caller opts in for
-   * this read (`optIn`).
+   * this read (`optIn` true). `optIn` false makes no request at all: the
+   * read that ends an import of a carried file without the caller's opt-in.
    */
   private async mayResolve(log: string, optIn?: boolean): Promise<boolean> {
-    if (optIn === true) return true;
+    if (optIn !== undefined) return optIn;
     const did = originalOf(log);
     if (did === undefined) return true;
     if (this.carriedImports.has(did)) return false;
@@ -1176,8 +1177,17 @@ export class OriginalsSDK {
    * opt-in to resolve (P7.13).
    */
   async get(did: string, options: { checkpoint?: string; bitcoin?: SatEvidence[]; resolveSigners?: boolean } = {}): Promise<OriginalView> {
+    return this.read(did, options, options.resolveSigners === true ? true : undefined);
+  }
+
+  /**
+   * `get`, with `resolve` deciding resolver requests (P7.13): true, the caller opted in for this
+   * read; false, none at all (an import of a carried file without the caller's opt-in); undefined,
+   * as `mayResolve` decides for the Original.
+   */
+  private async read(did: string, options: { checkpoint?: string; bitcoin?: SatEvidence[] }, resolve?: boolean): Promise<OriginalView> {
     const log = await this.stored(did);
-    const report = await this.verify(log, options.checkpoint, undefined, options.bitcoin, options.resolveSigners);
+    const report = await this.verify(log, options.checkpoint, undefined, options.bitcoin, resolve);
     await this.retain(report);
     if (options.checkpoint && report.checkpoint !== options.checkpoint) {
       sdkError("incomplete-evidence", "CHECKPOINT_NOT_FOUND", `${options.checkpoint} is not a verified checkpoint of ${did}`, { report });
@@ -1817,7 +1827,9 @@ export class OriginalsSDK {
     // The store keeps the mark once the log is committed (a FileStore lists an Original by its directory).
     const marked = carried !== undefined && !local;
     if (marked) this.carriedImports.add(did);
-    const result = async (status: ImportResult["status"]): Promise<ImportResult> => ({ status, original: await this.get(did, carried?.resolveSigners ? { resolveSigners: true } : {}) });
+    // Importing a carried file is never an opt-in (P7.13): its own read resolves only on the caller's,
+    // whether or not the Original was already held.
+    const result = async (status: ImportResult["status"]): Promise<ImportResult> => ({ status, original: await this.read(did, {}, carried ? carried.resolveSigners : undefined) });
     if (local) {
       const have = versionIds(local);
       const sharesPrefix = (a: string[], b: string[]) => a.every((id, i) => b[i] === id);

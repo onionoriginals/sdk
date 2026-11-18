@@ -135,6 +135,37 @@ describe("P7.13: resolution only on the caller's opt-in", () => {
     expect(online.asked.length).toBe(during);
   });
 
+  test("C12-316: importing a carried file of an Original the reader already holds makes no resolver request either (P7.13)", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    const asked: string[] = [];
+    const resolver = async (did: string) => (asked.push(did), did === alice.did ? alice.evidence() : undefined);
+    // Alice's history is already held, so the imports below verify offline.
+    const store = new MemoryStore();
+    await store.putAuthorEvidence({ ...alice.evidence(), obtainedAt: "2026-10-18T11:59:00.000Z", source: "retained" });
+    const sdk = OriginalsSDK.create({ store, authors: resolver, clock: clock() });
+    const signer = alice.signer("orig", KEY);
+    const author = alice.ref("orig");
+    const created = await sdk.create({ name: "Harbor notes", resource: { mediaType: "text/markdown", bytes: MD1 }, author, signer });
+    if (created.kind !== "original") throw new Error("expected an Original");
+    const v2 = await sdk.edit(created.original.did, { parent: created.original.checkpoint, resource: { bytes: MD2 }, author, signer });
+    const disclosed = await sdk.carriedDisclosure(created.original.did, { checkpoint: created.original.checkpoint });
+    const older = await sdk.carry(created.original.did, { checkpoint: created.original.checkpoint, disclosed });
+    const head = await sdk.carry(created.original.did, { disclosed: await sdk.carriedDisclosure(created.original.did) });
+    // This Original was not first stored from a carried file, so its own reads resolve as configured...
+    asked.length = 0;
+    await sdk.get(created.original.did);
+    expect(asked).toEqual([alice.did]);
+    // ...but importing a carried file is never an opt-in, whatever the import finds locally.
+    asked.length = 0;
+    expect((await sdk.importCarried(older.bytes)).status).toBe("kept-newer-local");
+    expect((await sdk.importCarried(head.bytes)).status).toBe("already-current");
+    expect(asked).toEqual([]);
+    // With the caller's opt-in for the import, it may.
+    const result = await sdk.importCarried(head.bytes, { resolveSigners: true });
+    expect(result.original.head).toBe(v2.original.checkpoint);
+    expect(asked).toEqual([alice.did]);
+  });
+
   test("C12-344: \"Carried file read with the caller's opt-in to resolve, then read again without one\": the first read resolves; the second makes no resolver request (P7.13)", async () => {
     const env = await harbor();
     const file = await carried(env);
