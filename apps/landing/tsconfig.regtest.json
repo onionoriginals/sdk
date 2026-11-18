@@ -1,10 +1,5 @@
 {
   "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "customConditions": [
-      "originals-internal"
-    ]
-  },
   "include": [
     "scripts/sat-snapshot-no-address.ts",
     "../../scripts/regtest/*.ts",

@@ -16,7 +16,6 @@ import type { LogEntry, Specialisation, VerifiedEntry, VersionRules } from "../l
 import type { DidVhExtension } from "../didvh/index.js";
 import { parseDidWebvh } from "../webvh/index.js";
 import { authorKey, authorMethod, namedVersion, versionNumberOf, type AuthorHistory } from "./author.js";
-import type { EvmAnchorPin } from "./evm.js";
 import { ORIGINALS_METHOD, checkAuthorRef, checkEditorChange, checkEditorRef, checkEntryState, type AuthorRef, type EntryState } from "./state.js";
 
 export const ORIGINALS_1_0: VersionRules = Object.freeze({
@@ -84,23 +83,7 @@ function namedThrough(record: WeakMap<LogEntry, Named>, previous: VerifiedEntry 
  * at its inscription time (P9.15), in `assembleFromBitcoin` through the same
  * `signerOf`.
  */
-/**
- * EXPERIMENTAL (originals-spec PR 59): what the state rules need of EVM
- * anchoring. `pin` checks a token alias's contract address (P14.18, P14.21);
- * `moveTimes`, by move entry versionId, the timestamp (ms) of its departure
- * record, so the layers of a move are judged by the classes that applied then
- * (P9.28). The map may be filled while the log is assembled.
- * @internal Unreleased until the spec pins an anchor contract (P14.21): stripped from the published types.
- */
-export interface EvmRuleContext {
-  pin: EvmAnchorPin | null;
-  moveTimes?: ReadonlyMap<string, number>;
-}
-
-export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialisation, "versions" | "versionParameter">;
-/** @internal With the EVM rule context (EXPERIMENTAL, originals-spec PR 59). */
-export function originalsRules(authors: Iterable<AuthorHistory>, evm?: EvmRuleContext): Omit<Specialisation, "versions" | "versionParameter">;
-export function originalsRules(authors: Iterable<AuthorHistory>, evm?: EvmRuleContext): Omit<Specialisation, "versions" | "versionParameter"> {
+export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialisation, "versions" | "versionParameter"> {
   const byDid = histories(authors);
   const named = new WeakMap<LogEntry, Named>();
 
@@ -188,7 +171,6 @@ export function originalsRules(authors: Iterable<AuthorHistory>, evm?: EvmRuleCo
         deactivatedParameter: entry.parameters.deactivated === true,
         // The editor rules run through the engine's editor hook (`keys.editors.limit`).
         editorRules: false,
-        ...(evm ? { evm: evm.pin, ...(evm.moveTimes?.has(entry.versionId) ? { moveTime: evm.moveTimes.get(entry.versionId) } : {}) } : {}),
       });
     },
   };
@@ -293,11 +275,8 @@ function checkProofMembers(proof: unknown): void {
   }
 }
 
-export function originalsSpecialisation(authors: Iterable<AuthorHistory>): Specialisation;
-/** @internal With the EVM rule context (EXPERIMENTAL, originals-spec PR 59). */
-export function originalsSpecialisation(authors: Iterable<AuthorHistory>, evm?: EvmRuleContext): Specialisation;
-export function originalsSpecialisation(authors: Iterable<AuthorHistory>, evm?: EvmRuleContext): Specialisation {
-  return { ...originalsRules(authors, evm), versionParameter: "method", versions: { [ORIGINALS_METHOD]: ORIGINALS_1_0 } };
+export function originalsSpecialisation(authors: Iterable<AuthorHistory>): Specialisation {
+  return { ...originalsRules(authors), versionParameter: "method", versions: { [ORIGINALS_METHOD]: ORIGINALS_1_0 } };
 }
 
 /**

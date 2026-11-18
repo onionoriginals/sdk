@@ -220,8 +220,8 @@ export interface LogLimits {
   maxEntries?: number;
   /**
    * Maximum size of one entry: the UTF-8 byte length of its JCS form (P7.7;
-   * Originals P14.13 at originals-spec PR 59 a3ffdc1), in every format: a
-   * stored line, an inscription, an EVM publication or a carrier. How the
+   * Originals P14.13 at originals-spec PR 64 940c6d4), in every format: a
+   * stored line, an inscription or a carrier. How the
    * entry was written (escapes, number forms) does not count.
    */
   maxEntryBytes?: number;

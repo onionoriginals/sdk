@@ -163,7 +163,7 @@ describe("alias rules in the asset log (PROVISIONAL, plan 011 PR 7b)", () => {
   });
 });
 
-describe("originals-spec PR 59: what aliases and grants may name (P14.5, P3.9, P5.15)", () => {
+describe("what aliases and grants may name (P14.5, P3.9, P5.15)", () => {
   /** An author-signed entry after `previous` with this asset state, bypassing the writer's checks. */
   async function forged(previous: LogEntry, asset: JsonObject, sign: Parameters<typeof appendEntry>[1]["sign"]) {
     const state = { ...(previous.state as JsonObject), operation: "update", asset: { ...(previous.state.asset as JsonObject), ...asset }, transitions: [] };

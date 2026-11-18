@@ -1,6 +1,6 @@
 /**
- * Carried logs through the SDK (proposed; aviarytech/originals-spec PR 59 at
- * a3ffdc1): P7.11-P7.16. Each test cites its section 12 row by C12 id and a
+ * Carried logs through the SDK (proposed; aviarytech/originals-spec PR 64 at
+ * 940c6d4): P7.11-P7.16. Each test cites its section 12 row by C12 id and a
  * quote of the row's first column. The carrier formats themselves are tested
  * in packages/vh/tests/carried.test.ts.
  */

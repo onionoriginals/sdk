@@ -1,5 +1,5 @@
 /**
- * Carried logs (proposed; aviarytech/originals-spec PR 59 at a3ffdc1):
+ * Carried logs (proposed; aviarytech/originals-spec PR 64 at 940c6d4):
  * P7.11-P7.16, P14.14-P14.17. Each test cites its section 12 row by C12 id,
  * followed by a quote of the row's first column.
  */
@@ -140,7 +140,7 @@ describe("P14.14: the carrier for a media type", () => {
 });
 
 describe("P7.12, P7.13: reading a carried file", () => {
-  test("C12-200, C12-343: \"Carried file whose bytes, with the carrier removed, are the version its log's last entry names, signer DIDs resolved\" and \"Carried log with no `anchor` member that holds no anchoring entry\": log and version verified, a historical checkpoint valid as of its last entry, never current", async () => {
+  test("C12-200, C12-343: \"Carried file whose bytes, with the carrier removed, are the version its log's last entry names, signer DIDs resolved\" and \"Carried log that holds no anchoring entry\": log and version verified, a historical checkpoint valid as of its last entry, never current", async () => {
     // Harbor notes, carried (section 7 example): version 3, then a metadata correction as the checkpoint.
     const md2 = enc("# Harbor\n\nSecond notes.\n");
     const { alice, entries } = await original([{ data: MD1, mediaType: "text/markdown" }, { data: md2, mediaType: "text/markdown" }, { data: MD3, mediaType: "text/markdown" }], { trailingEdit: true });
@@ -341,7 +341,7 @@ describe("P14.15: trailers", () => {
     expect(text.log.status).toBe("parsed");
   });
 
-  test("C12-150: \"Entry whose JCS form is 65,536 / 65,537 UTF-8 bytes, in `did.jsonl`, an inscription, a publication or any carrier\": accepted / rejected, in a trailer", async () => {
+  test("C12-150: \"Entry whose JCS form is 65,536 / 65,537 UTF-8 bytes, in `did.jsonl`, an inscription or any carrier\": accepted / rejected, in a trailer", async () => {
     const { alice, at, ref, sign } = await original([{ data: PNG, mediaType: "image/png" }]);
     const atSize = async (target: number) => {
       let pad = 65_000;
@@ -755,7 +755,7 @@ describe("P14.17: JSON members", () => {
     }
   });
 
-  test("C12-150: \"Entry whose JCS form is 65,536 / 65,537 UTF-8 bytes, in `did.jsonl`, an inscription, a publication or any carrier\": accepted / rejected, in a JSON member", async () => {
+  test("C12-150: \"Entry whose JCS form is 65,536 / 65,537 UTF-8 bytes, in `did.jsonl`, an inscription or any carrier\": accepted / rejected, in a JSON member", async () => {
     const data = enc('{"a":1}');
     const { alice, at, ref, sign } = await original([{ data, mediaType: "application/json" }]);
     const atSize = async (target: number) => {
@@ -852,7 +852,7 @@ describe("P7.15, P7.16: writing", () => {
   test("C12-229: \"Writer about to write a carrier\": the user is told what the file discloses first; a JSON carrier says the data gains a member", async () => {
     const md = await original([{ data: MD1, mediaType: "text/markdown" }, { data: MD3, mediaType: "text/markdown" }]);
     const d = carriedDisclosure(md.entries);
-    expect(d).toMatchObject({ entries: 2, names: ["Harbor notes"], metadata: true, signers: [md.alice.did], dataGainsMember: false, anchor: null });
+    expect(d).toMatchObject({ entries: 2, names: ["Harbor notes"], metadata: true, signers: [md.alice.did], dataGainsMember: false });
     expect(d.text).toContain("whole history");
     expect(d.text).toContain(md.alice.did);
     await expect(writeCarriedFile(MD3, md.entries, undefined as never)).rejects.toMatchObject({ code: "CARRIER_DISCLOSURE_REQUIRED" });
@@ -862,17 +862,6 @@ describe("P7.15, P7.16: writing", () => {
     const jd = carriedDisclosure(json.entries);
     expect(jd.dataGainsMember).toBe(true);
     expect(jd.text).toContain("gains a member named originalLog");
-  });
-
-  test("C12-292: \"Writer about to write a carrier for a log with an `anchor` member\": the user is told the file discloses the chain and the minter's address", async () => {
-    const { entries } = await original([{ data: PNG, mediaType: "image/png" }]);
-    // No writer here may write an `anchor` member (P14.21); the disclosure is checked on a log that has one.
-    const withAnchor = structuredClone(entries) as LogEntry[];
-    (withAnchor[0].state.asset as JsonObject).anchor = { chain: "eip155:8453", minter: "0x" + "ab".repeat(20) };
-    const d = carriedDisclosure(withAnchor);
-    expect(d.anchor).toEqual({ chain: "eip155:8453", minter: "0x" + "ab".repeat(20) });
-    expect(d.text).toContain("eip155:8453");
-    expect(d.text).toContain("0x" + "ab".repeat(20));
   });
 
   test("C12-230: \"Carried file presented by an SDK or UI\": never labelled an evidence package or complete", async () => {
@@ -885,7 +874,7 @@ describe("P7.15, P7.16: writing", () => {
     expect(carriedDisclosure(entries).text).toContain("not an evidence package");
   });
 
-  test("C12-290: \"Writer asked to inscribe or publish a carried file as a body\": the carrier is removed first; the body is the version's bytes", async () => {
+  test("C12-290: \"Writer asked to inscribe a carried file as a body\": the carrier is removed first; the body is the version's bytes", async () => {
     const { entries } = await original([{ data: PNG, mediaType: "image/png" }]);
     const file = await carry(PNG, entries);
     expect(resourceDigest(file)).not.toBe(entries[0].state.asset && (entries[0].state.asset as JsonObject & { resource: ResourceDescriptor }).resource.digest);
@@ -894,7 +883,7 @@ describe("P7.15, P7.16: writing", () => {
     expect(same(removeCarrier(PNG), PNG)).toBe(true);
   });
 
-  test("C12-291: \"Writer making a carried file from an accepted publication's body and entries\": allowed, as for any accepted checkpoint", async () => {
+  test("C12-291: \"Writer making a carried file from the body and entries of an accepted inscription whose body is the full version\": allowed, as for any accepted checkpoint", async () => {
     const { alice, entries } = await original([{ data: PNG, mediaType: "image/png" }]);
     // An inscription's metadata and body are the two parts of a carried file (P7.16).
     const inscribed = carrying(entries);
@@ -989,23 +978,18 @@ describe("P7.14: anchored Originals", () => {
     }
   });
 
-  test("C12-288 (changed at 1b5c484), C12-342: \"Carried log with an `anchor` member naming a chain the reader's revision does not list, or read while P14.21 pins no contract, with or without an anchoring entry\" and \"…whose genesis entry has an `anchor` member and that holds no anchoring entry\": unsupported, not invalid, not a historical checkpoint; nothing verified", async () => {
+  test("an `anchor` member is not an asset member (P14.4, P14.5): a carried log with one does not verify and is not a historical checkpoint", async () => {
     const { alice, entries } = await original([{ data: PNG, mediaType: "image/png" }]);
-    // eip155:1 is a chain P14.22 no longer lists (ce19572), and no contract is pinned (P14.21).
     const withAnchor = structuredClone(entries) as LogEntry[];
-    (withAnchor[0].state.asset as JsonObject).anchor = { chain: "eip155:1", minter: "0x" + "cd".repeat(20) };
+    (withAnchor[0].state.asset as JsonObject).anchor = { chain: "any", minter: "any" };
     const L = enc(serializeLog(withAnchor));
     const footer = new Uint8Array(24);
     new DataView(footer.buffer).setUint32(4, L.length);
     footer.set(TRAILER_MAGIC, 8);
     const r = await readCarriedFile(concat(PNG, L, footer), { authors: [alice.evidence()], now: NOW });
-    expect(r.anchoring.status).toBe("unsupported");
-    expect(r.anchoring.chain).toBe("eip155:1");
-    expect(r.reasons).toContain("anchor-chain-unsupported");
-    expect(r.history).toBe("unchecked"); // not "invalid"
+    expect(r.chain.status).toBe("broken");
+    expect(r.chain.failure).toMatchObject({ index: 0, category: "invalid-evidence" });
     expect(r.verified).toEqual({ log: false, version: false });
-    // The log holds no anchoring entry, yet it is not read as a historical checkpoint: section 14 takes precedence (P7.14).
-    expect(r.reasons).not.toContain("historical-checkpoint");
-    expect(r.overall.status).toBe("unsupported");
+    expect(r.overall.status).toBe("failed");
   });
 });

@@ -13,80 +13,49 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "originals-internal": {
-        "types": "./internal-types/index.d.ts"
-      },
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./json": {
-      "originals-internal": {
-        "types": "./internal-types/json/index.d.ts"
-      },
       "types": "./dist/json/index.d.ts",
       "import": "./dist/json/index.js",
       "default": "./dist/json/index.js"
     },
     "./crypto": {
-      "originals-internal": {
-        "types": "./internal-types/crypto/index.d.ts"
-      },
       "types": "./dist/crypto/index.d.ts",
       "import": "./dist/crypto/index.js",
       "default": "./dist/crypto/index.js"
     },
     "./log": {
-      "originals-internal": {
-        "types": "./internal-types/log/index.d.ts"
-      },
       "types": "./dist/log/index.d.ts",
       "import": "./dist/log/index.js",
       "default": "./dist/log/index.js"
     },
     "./didvh": {
-      "originals-internal": {
-        "types": "./internal-types/didvh/index.d.ts"
-      },
       "types": "./dist/didvh/index.d.ts",
       "import": "./dist/didvh/index.js",
       "default": "./dist/didvh/index.js"
     },
     "./fetch": {
-      "originals-internal": {
-        "types": "./internal-types/fetch/index.d.ts"
-      },
       "types": "./dist/fetch/index.d.ts",
       "import": "./dist/fetch/index.js",
       "default": "./dist/fetch/index.js"
     },
     "./webvh": {
-      "originals-internal": {
-        "types": "./internal-types/webvh/index.d.ts"
-      },
       "types": "./dist/webvh/index.d.ts",
       "import": "./dist/webvh/index.js",
       "default": "./dist/webvh/index.js"
     },
     "./originals": {
-      "originals-internal": {
-        "types": "./internal-types/originals/index.d.ts"
-      },
       "types": "./dist/originals/index.d.ts",
       "import": "./dist/originals/index.js",
       "default": "./dist/originals/index.js"
     },
-    "./internal/evm": {
-      "originals-internal": {
-        "types": "./internal-types/originals/evm-internal.d.ts",
-        "import": "./dist/originals/evm-internal.js",
-        "default": "./dist/originals/evm-internal.js"
-      }
-    },
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsc && tsc -p tsconfig.internal-types.json",
+    "build": "tsc",
     "typecheck": "tsc --noEmit -p . && tsc -p tsconfig.interop.json",
     "test": "bun test tests/",
     "test:coverage": "bun test tests/ --coverage",

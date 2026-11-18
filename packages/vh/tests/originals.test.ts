@@ -709,7 +709,7 @@ describe("creating needs a well-formed entry", () => {
   });
 });
 
-describe("C12-150: \"Entry whose JCS form is 65,536 / 65,537 UTF-8 bytes, in `did.jsonl`, an inscription, a publication or any carrier\": accepted / rejected (P7.7; P14.13)", () => {
+describe("C12-150: \"Entry whose JCS form is 65,536 / 65,537 UTF-8 bytes, in `did.jsonl`, an inscription or any carrier\": accepted / rejected (P7.7; P14.13)", () => {
   /** A genesis entry whose JCS form (here also its stored line, without its line feed) is exactly `target` UTF-8 bytes, mostly two-byte characters. */
   async function genesisOf(target: number) {
     const key = seeded(21);

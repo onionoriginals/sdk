@@ -690,7 +690,7 @@ describe("did:btco author DIDs through the SDK (P5.13; plan 011 PR 9b)", () => {
     expect(c.original.report.reasons).toEqual(["not-anchored"]);
     expect(c.original.validAsOf?.checkpoint).toBe(c.original.checkpoint);
     const pkg = await sdk.package(c.original.did);
-    // P7.1 (originals-spec PR 59): a did:btco signer's history is never in a package, so it is no missing item.
+    // P7.1: a did:btco signer's history is never in a package, so it is no missing item.
     expect(pkg.manifest.missing).toEqual([]);
     expect(readEvidence(pkg.bytes).authors).toEqual([]);
   });

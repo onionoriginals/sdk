@@ -167,7 +167,7 @@ const exactly = (value: JsonObject, keys: string[]) => {
  * it; parameters exactly as P14.1 allows, with no null value; and a state
  * with exactly the defined members, whose author and editor references,
  * asset (P14.5, P14.6) and transitions (P14.4) are well formed. Rules that
- * need the parent, such as what an editor may change or how layers move, are
+ * need the parent, such as what an editor may change, are
  * the verifier's; the writer already applied them (`prepareUpdateOriginal`).
  */
 function checkWellFormed(entry: UnsignedEntry, number: number): void {

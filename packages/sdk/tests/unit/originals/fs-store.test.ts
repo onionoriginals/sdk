@@ -504,7 +504,7 @@ describe("fileRecoveryStore: the Bitcoin writer's durable pairs (#975)", () => {
   });
 });
 
-describe("FileStore: carried imports (originals-spec PR 59 P7.13, EXPERIMENTAL)", () => {
+describe("FileStore: carried imports (P7.13, PROVISIONAL)", () => {
   test("C12-316: \"Carried file imported, then read again with no separate opt-in to resolve\": the mark survives reopening, so a later read makes no resolver request", async () => {
     const dir = tempDir();
     const other = tempDir();

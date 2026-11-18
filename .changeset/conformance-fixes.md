@@ -3,14 +3,10 @@
 '@originals/sdk': patch
 ---
 
-Two fixes found while closing section 12 rows against originals-spec PR 59
-(`a3ffdc1`):
+Fixes found while closing section 12 rows:
 
-- `@originals/vh`: an editor entry that changes the `anchor` member is
-  outside every grant (`EDITOR_AUTHOR_ONLY`, `outside-grant`), as a change of
-  aliases or grants is. Before, one whose state was otherwise valid, as before
-  the anchoring entry, was rejected as `STATE_MOVE_BEFORE_ANCHOR` instead. A
-  move entry is the author's (P9.28, P5.16; C12-267).
+- `@originals/vh`: an asset state whose `aliases` list the same DID twice is
+  rejected (`STATE_ALIASES`, P14.5; C12-299).
 - `@originals/sdk`: `keySigner` refuses input that is not a well-formed
   Originals entry (P5.11; C12-302): an entry with members other than
   `versionId`, `versionTime`, `parameters` and `state`, or one that already
@@ -19,3 +15,6 @@ Two fixes found while closing section 12 rows against originals-spec PR 59
   members, a malformed author or editor reference, asset or resource
   descriptor, an alias of another DID method, or transitions that do not name
   the resource's version (P14.4–P14.6). Before, it signed such entries.
+- `@originals/sdk`: a did:btco signer's history is read from Bitcoin and is
+  never packaged, so a package no longer lists it as a missing item and can
+  be complete (P7.1, P14.10; C12-298).

@@ -1,5 +1,5 @@
 /**
- * Carried logs (proposed; aviarytech/originals-spec PR 59 at 1b5c484):
+ * Carried logs (proposed; aviarytech/originals-spec PR 64 at 940c6d4):
  * P7.11-P7.16 and P14.14-P14.17. Everything here is PROVISIONAL, as the
  * subsection itself is.
  *
@@ -30,12 +30,10 @@
 import { resourceDigestAsync, ORIGINALS_LIMITS, type AuthorRef, type EntryState, type ResourceDescriptor } from "./state.js";
 import { OriginalsError, fail, type ErrorCategory } from "../errors.js";
 import { snapshotBytes } from "../crypto/index.js";
-import { canonicalize, isJsonObject, parseJson, type JsonObject, type JsonValue } from "../json/index.js";
+import { canonicalize, isJsonObject, parseJson, type JsonValue } from "../json/index.js";
 import { compactLineError, verifyLog, type LogCopy, type LogEntry, type LogVerification } from "../log/index.js";
 import { exactNumberError, originalsSpecialisation } from "./profile.js";
 import { anchoringIndex } from "./bitcoin.js";
-import { evmSupport } from "./evm.js";
-import { tokenNamedBy, type EvmEvidence } from "./evm-anchor.js";
 import { verifyOriginal, type OriginalsReport, type RetainedVersions, type ValidAsOf } from "./verify.js";
 import type { AuthorDidEvidence } from "./author.js";
 import type { SatEvidence } from "./btco.js";
@@ -735,21 +733,12 @@ export interface CarriedDisclosure {
   signers: string[];
   /** For a JSON carrier: the document's data gains an `originalLog` member (P14.17). */
   dataGainsMember: boolean;
-  /** For a log with an `anchor` member: the chain and minter's address it ties the Original to (P14.18). */
-  anchor: { chain: string; minter: string } | null;
   text: string;
 }
 
 function entryState(entry: unknown): EntryState | undefined {
   const state = isJsonObject(entry) ? entry.state : undefined;
   return isJsonObject(state) && isJsonObject(state.asset) ? (state as unknown as EntryState) : undefined;
-}
-
-function anchorMember(entry: unknown): { chain: string; minter: string } | undefined {
-  const asset = entryState(entry)?.asset as unknown as JsonObject | undefined;
-  if (!asset || !Object.prototype.hasOwnProperty.call(asset, "anchor")) return undefined;
-  const a = asset.anchor;
-  return isJsonObject(a) && typeof a.chain === "string" && typeof a.minter === "string" ? { chain: a.chain, minter: a.minter } : { chain: "unknown", minter: "unknown" };
 }
 
 function signerDids(entries: unknown[]): string[] {
@@ -788,17 +777,15 @@ export function carriedDisclosure(entries: LogEntry[]): CarriedDisclosure {
     if (asset?.metadata !== undefined) metadata = true;
   }
   const signers = signerDids(entries);
-  const anchor = entries.map(anchorMember).find((a) => a !== undefined) ?? null;
   const dataGainsMember = carrier.kind === "json-member";
   const parts = [
     `This file will carry the whole history of ${original}: all ${entries.length} entries from its creation through ${last.versionId},`,
     `including every name it has had (${names.map((n) => JSON.stringify(n)).join(", ")})${metadata ? " and its metadata in every entry" : ""},`,
     `and the DIDs of everyone who signed it (${signers.join(", ")}). Anyone who receives the file can read all of it.`,
   ];
-  if (anchor) parts.push(`It also discloses the chain ${anchor.chain} and the minter's address ${anchor.minter}, which tie this Original to that account even before it is anchored.`);
   if (dataGainsMember) parts.push("The JSON document's data gains a member named originalLog, which programs reading the document will see.");
   parts.push("The file is not an evidence package and makes no claim to be complete.");
-  return { original, checkpoint: last.versionId, mediaType: d.mediaType, carrier, entries: entries.length, names, metadata, signers, dataGainsMember, anchor, text: parts.join(" ") };
+  return { original, checkpoint: last.versionId, mediaType: d.mediaType, carrier, entries: entries.length, names, metadata, signers, dataGainsMember, text: parts.join(" ") };
 }
 
 // ---------------------------------------------------------------------------
@@ -995,7 +982,7 @@ export async function writeCarriedFile(version: Uint8Array, entries: LogEntry[],
 }
 
 /**
- * P7.16: the version's bytes without a carrier, for inscribing or publishing
+ * P7.16: the version's bytes without a carrier, for inscribing
  * a carried file's bytes: with the carrier they do not match the descriptor.
  * A copy of the file itself when it has none.
  */
@@ -1026,14 +1013,6 @@ export interface ReadCarriedOptions {
    * (P7.14, P9.13).
    */
   bitcoin?: SatEvidence[];
-  /**
-   * EXPERIMENTAL: for a log with an `anchor` member, the anchor contract pin and
-   * what providers read from the tokens (P7.14, P9.21-P9.29). Without a pin
-   * (the spec pins none, P14.21) the Original is unsupported and nothing is
-   * verified.
-   * @internal Unreleased until the spec pins an anchor contract (P14.21): stripped from the published types.
-   */
-  evm?: EvmEvidence;
   /** The highest versionIds verified before, and other copies, as for `verifyOriginal` (P7.6, P7.8). */
   retained?: RetainedVersions;
   copies?: LogCopy[];
@@ -1056,10 +1035,9 @@ export interface CarriedFileReport {
    * `json-member-repeated`, `carried-log-invalid`, `no-carrier`, ...): proofs
    * that verified are detail (`verified.log`, `report`) and never make it a
    * pass. incomplete: nothing contradicts it, but evidence is missing
-   * (`proofs-unchecked`, `bitcoin-evidence-missing`, ...). unsupported: the
-   * log names an anchor this reader cannot support (P14.21): not invalid.
+   * (`proofs-unchecked`, `bitcoin-evidence-missing`, ...).
    */
-  overall: { status: "verified" | "failed" | "incomplete" | "unsupported"; reason: string | null };
+  overall: { status: "verified" | "failed" | "incomplete"; reason: string | null };
   /**
    * found: a carrier, the one the last entry's media type requires (comment
    * syntax included). none: no carrier. mismatch: another carrier, or one for
@@ -1098,17 +1076,13 @@ export interface CarriedFileReport {
   /**
    * P7.14. historical-checkpoint: the carried log holds no anchoring entry; it
    * is valid as of its checkpoint at most, and nothing is said about whether
-   * the Original has been anchored since, even when an `anchor` member would
-   * let the token be derived (P7.14, P7.15). bitcoin: the anchoring sat was
-   * read and decides the state. bitcoin-unread: a did:btco anchor the reader
-   * did not read: missing evidence. evm / evm-unread: likewise for a token.
-   * unsupported: an `anchor` member, on a chain this revision pins no
-   * contract for (P14.21): unsupported, not invalid. not-checked: no log.
+   * the Original has been anchored since (P7.14, P7.15). bitcoin: the
+   * anchoring sat was read and decides the state. bitcoin-unread: a did:btco
+   * anchor the reader did not read: missing evidence. not-checked: no log.
    */
   anchoring: {
-    status: "not-checked" | "historical-checkpoint" | "bitcoin" | "bitcoin-unread" | "evm" | "evm-unread" | "unsupported";
+    status: "not-checked" | "historical-checkpoint" | "bitcoin" | "bitcoin-unread";
     sat?: string;
-    chain?: string;
     /** Entries from the anchoring entry on not checked against the anchor (P7.14, P9.12, P9.15). */
     notCheckedAgainstAnchor: string[];
   };
@@ -1230,20 +1204,6 @@ export async function readCarriedFile(file: Uint8Array, options: ReadCarriedOpti
   }
   const carried = report.carrierStatus === "found";
 
-  // P14.21, P7.14: an `anchor` member names a chain this revision pins no contract for: unsupported, not invalid.
-  const evm = entries.map(anchorMember).find((a) => a !== undefined);
-  const evmSupported = evm !== undefined && evmSupport(evm.chain, options.evm?.pin ?? null).supported;
-  if (evm && !evmSupported) {
-    const why = options.evm?.pin ? "this reader's revision of P14.22 does not list it" : "no anchor contract is pinned (P14.21)";
-    report.anchoring = { status: "unsupported", chain: evm.chain, notCheckedAgainstAnchor: entries.map(versionIdOf).filter((v): v is string => v !== null) };
-    report.reasons.push("anchor-chain-unsupported");
-    report.overall = { status: "unsupported", reason: "anchor-chain-unsupported" };
-    report.statements.push(
-      `This file carries the log of an Original anchored on ${evm.chain}, which this reader does not support: ${why}. The Original is unsupported, not invalid, and nothing is verified.`,
-    );
-    return report;
-  }
-
   report.chain = await chainCheck(entries, options.now);
   if (carried && descriptor && report.version) {
     const remaining = report.version;
@@ -1269,20 +1229,16 @@ export async function readCarriedFile(file: Uint8Array, options: ReadCarriedOpti
     report.signers.unavailable = dids.filter((did) => !authors.some((a) => a.did === did));
   }
 
-  // The anchoring entry: the first that lists a did:btco alias, or for an `anchor` member, a token alias (P9.10, P9.20).
+  // The anchoring entry: the first that lists a did:btco alias (P9.10).
   // With none, the carried log is a historical checkpoint (P7.14, P7.15): no anchor evidence is used, and
   // nothing is said about whether the Original has been anchored since.
-  const k = evm ? entries.findIndex((e) => tokenNamedBy(e) !== undefined) : anchoringIndex(entries);
+  const k = anchoringIndex(entries);
   const historical = k < 0;
   const sat = k >= 0 ? (entryState(entries[k])?.asset.aliases ?? []).find((a) => typeof a === "string" && a.startsWith("did:btco:")) : undefined;
   const fromAnchor = k >= 0 ? entries.slice(k).map(versionIdOf).filter((v): v is string => v !== null) : [];
   const onBitcoin = k >= 0 && (options.bitcoin?.length ?? 0) > 0;
-  const onEvm = evm !== undefined && (options.evm?.tokens.length ?? 0) > 0;
   if (historical) {
     report.anchoring = { status: "historical-checkpoint", notCheckedAgainstAnchor: [] };
-  } else if (evm) {
-    // P7.14: the anchor is the token; without its evidence, missing evidence and at most the entries before the anchoring entry.
-    report.anchoring = onEvm ? { status: "evm", chain: evm.chain, notCheckedAgainstAnchor: [] } : { status: "evm-unread", chain: evm.chain, notCheckedAgainstAnchor: fromAnchor };
   } else {
     report.anchoring = onBitcoin
       ? { status: "bitcoin", ...(sat ? { sat } : {}), notCheckedAgainstAnchor: [] }
@@ -1301,9 +1257,8 @@ export async function readCarriedFile(file: Uint8Array, options: ReadCarriedOpti
   };
   let verified: OriginalsReport | null = null;
   if (authors.length > 0) {
-    // A historical checkpoint is verified as the prefix it is: no token or sat is read (P7.14).
-    if (historical) verified = await verifyOriginal({ ...common, log: entries, ...(evm ? { evm: { pin: options.evm!.pin, tokens: [] } } : {}) });
-    else if (evm) verified = await verifyOriginal({ ...common, log: entries, evm: options.evm!, ...(options.bitcoin ? { bitcoin: options.bitcoin } : {}) });
+    // A historical checkpoint is verified as the prefix it is: no sat is read (P7.14).
+    if (historical) verified = await verifyOriginal({ ...common, log: entries });
     else if (onBitcoin) verified = await verifyOriginal({ ...common, log: entries, bitcoin: options.bitcoin! });
     // P7.14: without the anchor, at most the entries before the anchoring entry.
     else if (k > 0) verified = await verifyOriginal({ ...common, log: entries.slice(0, k) });
@@ -1316,7 +1271,7 @@ export async function readCarriedFile(file: Uint8Array, options: ReadCarriedOpti
     report.authorBinding = verified.authorBinding.status;
     report.validAsOf = verified.validAsOf;
     // P7.14: a historical checkpoint makes no statement about anchoring, either way.
-    const anchoringReasons = ["not-anchored", "bitcoin-evidence-missing", "evm-evidence-missing", "anchor-not-found-on-evm"];
+    const anchoringReasons = ["not-anchored", "bitcoin-evidence-missing"];
     for (const r of verified.reasons) if (!report.reasons.includes(r) && !(historical && anchoringReasons.includes(r))) report.reasons.push(r);
   } else {
     report.reasons.push("proofs-unchecked");
@@ -1328,17 +1283,6 @@ export async function readCarriedFile(file: Uint8Array, options: ReadCarriedOpti
   if (historical) {
     logVerified = valid && verified!.checkpoint === report.checkpoint;
     report.reasons.push("historical-checkpoint");
-  } else if (evm) {
-    // State from the token; the carried log counts only where the anchors accepted every entry of it (P7.14, P9.13, P9.29).
-    const r = verified?.evm;
-    const accepted = new Set((r?.stretches ?? []).filter((x) => x.status === "anchored").flatMap((x) => [...x.carried, ...x.entries]));
-    const all = entries.map(versionIdOf);
-    const onAnchor = r !== undefined && r !== null && (r.status === "anchored" || r.status === "moved-to-bitcoin");
-    logVerified = valid && onAnchor && all.every((v) => v !== null && accepted.has(v));
-    if (onAnchor && !logVerified && valid) report.reasons.push("carried-log-not-accepted-on-anchor");
-    if (!onAnchor) report.anchoring.notCheckedAgainstAnchor = fromAnchor;
-    report.current = verified?.current === true;
-    if (!onEvm && !report.reasons.includes("evm-evidence-missing")) report.reasons.push("evm-evidence-missing");
   } else if (onBitcoin) {
     // State from the anchor; the carried log counts only where Bitcoin accepted every entry of it (P7.14, P9.13).
     const a = verified?.anchoring;
@@ -1376,11 +1320,6 @@ export async function readCarriedFile(file: Uint8Array, options: ReadCarriedOpti
       `This carried log holds no anchoring entry: it is a historical checkpoint, valid as of ${report.checkpoint ?? "its last entry"} at most. This reader makes no statement about whether the Original has been anchored since.`,
     );
   }
-  if (report.anchoring.status === "evm-unread") {
-    report.statements.push(
-      `This Original is anchored on ${report.anchoring.chain}, which this reader did not read: evidence is missing. At most the entries before the anchoring entry are reported; the anchoring entry and every later entry are not checked against the anchor.`,
-    );
-  }
   if (report.anchoring.status === "bitcoin-unread") {
     report.statements.push(
       `This Original is anchored on Bitcoin (${report.anchoring.sat ?? "unknown sat"}), which this reader did not read: evidence is missing. At most the entries before the anchoring entry are reported, valid as of the checkpoint before it with claimed ordering; the anchoring entry and every later entry are not checked against the anchor.`,
@@ -1406,8 +1345,7 @@ function overallResult(report: CarriedFileReport): CarriedFileReport["overall"] 
   if (report.history === "invalid" || report.history === "limit-exceeded") return failed(`log-${report.history}`);
   if (report.authorBinding === "failed") return failed("author-binding-failed");
   if (report.reasons.includes("carried-log-not-accepted-on-anchor")) return failed("carried-log-not-accepted-on-anchor");
-  if (report.history === "unsupported") return { status: "unsupported", reason: "unsupported-profile" };
   if (report.verified.version) return { status: "verified", reason: null };
-  const missing = ["proofs-unchecked", "bitcoin-evidence-missing", "evm-evidence-missing", "identity-evidence-incomplete"].find((r) => report.reasons.includes(r));
+  const missing = ["proofs-unchecked", "bitcoin-evidence-missing", "identity-evidence-incomplete"].find((r) => report.reasons.includes(r));
   return { status: "incomplete", reason: missing ?? report.reasons.find((r) => r !== "historical-checkpoint") ?? "not-verified" };
 }

@@ -34,29 +34,3 @@ for (const existing of ['matching-link', 'different-link', 'directory']) {
     });
   }
 }
-
-// EVM anchoring is unreleased until the spec pins an anchor contract (P14.21): a published entry that
-// exports an EVM name, or a published declaration that declares one, fails the check.
-for (const leak of ['runtime', 'declaration']) {
-  test(`ESM verification fails on a ${leak} EVM leak`, () => {
-    const root = mkdtempSync(join(tmpdir(), 'originals-esm-'));
-    try {
-      mkdirSync(join(root, 'scripts'));
-      copyFileSync(new URL('./verify-esm.mjs', import.meta.url), join(root, 'scripts/verify-esm.mjs'));
-      mkdirSync(join(root, 'node_modules/@originals'), { recursive: true });
-      writeFileSync(join(root, 'package.json'), JSON.stringify({ type: 'module' }));
-      for (const name of ['vh', 'sdk', 'auth']) {
-        const pkg = join(root, 'packages', name);
-        mkdirSync(join(pkg, 'dist'), { recursive: true });
-        writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: '@originals/' + name, type: 'module', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' } } }));
-        const leaks = name === 'sdk';
-        writeFileSync(join(pkg, 'dist/index.js'), leaks && leak === 'runtime' ? 'export const mintEvm = 1;' : 'export const ok = 1;');
-        writeFileSync(join(pkg, 'dist/index.d.ts'), "export * from './more.js';\n");
-        writeFileSync(join(pkg, 'dist/more.d.ts'), leaks && leak === 'declaration' ? 'export interface Options { /** fine */ evm?: unknown }\n' : 'export declare const ok: 1;\n');
-      }
-      const result = spawnSync(process.execPath, [join(root, 'scripts/verify-esm.mjs')], { encoding: 'utf8' });
-      assert.equal(result.status, 1, result.stdout);
-      assert.match(result.stderr, /unreleased EVM anchoring \(P14\.21\)/);
-    } finally { rmSync(root, { recursive: true, force: true }); }
-  });
-}

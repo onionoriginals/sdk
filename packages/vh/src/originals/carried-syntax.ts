@@ -1,5 +1,5 @@
 /**
- * P14.16 (originals-spec PR 59 at 1b5c484; owner decision, 13 November
+ * P14.16 (originals-spec PR 64 at 940c6d4; owner decision, 13 November
  * 2026): a writer places a text block only where the host format's parser
  * reads it as a comment. Parsed under the version's own syntax, the appended
  * block must be a separate comment and nothing else; the writer refuses

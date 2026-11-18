@@ -15,10 +15,6 @@ const vhEntries = Object.values(vhExports)
   .map((value) => `packages/vh/${value.import.replace(/^\.\//, '')}`);
 const additionalEntries = [
   ...vhEntries,
-  // Internal EVM anchoring modules, guarded though not exported (P14.21).
-  'packages/vh/dist/originals/evm-internal.js',
-  'packages/sdk/dist/originals/evm.js',
-  'packages/sdk/dist/originals/evm-runtime.js',
   'packages/auth/dist/index.js',
   'packages/auth/dist/client/index.js',
 ];

@@ -90,21 +90,4 @@ declare const result: InscribeOnSatResult;
 const validator = createBitcoinCoreChainValidator({ endpoint: "http://127.0.0.1:8332" });
 const fileStore: Promise<FileStore> = FileStore.open("/tmp/originals");
 
-// EVM anchoring is built but unreleased until the spec pins an anchor contract (P14.21): nothing EVM
-// is on the published types of either package, and its internal entries do not resolve.
-// @ts-expect-error mintEvm is not on the published OriginalsSDK
-const noMint = sdk.mintEvm;
-// @ts-expect-error the evm option is not on the published options
-const noEvmOption: OriginalsSDKOptions = { authors: [], evm: { pin: {} } };
-// @ts-expect-error no ./originals/evm subpath
-type NoEvmSubpath = typeof import("@originals/sdk/originals/evm");
-// @ts-expect-error the internal vh entry needs the private originals-internal condition
-type NoInternalEntry = typeof import("@originals/vh/internal/evm");
-// @ts-expect-error no EvmAnchorPin from the published vh entry
-type NoPin = import("@originals/vh/originals").EvmAnchorPin;
-declare const vhReport: import("@originals/vh/originals").OriginalsReport;
-// @ts-expect-error the report has no EVM section
-const noEvmSection = vhReport.evm;
-const viewReport = (v: OriginalView) => v.report.history.status;
-
-void [noMint, noEvmOption, noEvmSection, viewReport, hostAdapter, sameClass, sameSubpath, subpathOptions, signer, maybeView, files, head, created, updated, verified, prepared, code, vm, preimage, bytes, mk, sat, address, id, satpoint, custody, verifier, storage, provider, fees, snapshot, bitcoinSigner, result, validator, fileStore, prepareInscriptionOnSat, validateInscriptionReveal, RegtestProvider, QuickNodeProvider];
+void [hostAdapter, sameClass, sameSubpath, subpathOptions, signer, maybeView, files, head, created, updated, verified, prepared, code, vm, preimage, bytes, mk, sat, address, id, satpoint, custody, verifier, storage, provider, fees, snapshot, bitcoinSigner, result, validator, fileStore, prepareInscriptionOnSat, validateInscriptionReveal, RegtestProvider, QuickNodeProvider];
