@@ -125,13 +125,13 @@ export function inscriptionNotice(entries: readonly string[], d: ResourceDescrip
   const carried = entries.length === 1
     ? `the entry ${entries[0]}`
     : `the log from ${entries[0]} through ${entries[entries.length - 1]}`;
-  const what = body.kind === "preview"
-    ? `a preview (${body.mediaType}, ${body.size} bytes) of the resource version ${d.digest}, not the version itself,`
+  const puts = body.kind === "preview"
+    ? `This inscription puts a preview (${body.mediaType}, ${body.size} bytes) of the resource version ${d.digest}, not the version itself, and ${carried}`
     : body.kind === "full"
-      ? `the full resource version ${d.digest} (${d.mediaType}, ${d.size} bytes)`
-      : `no body, only`;
+      ? `This inscription puts the full resource version ${d.digest} (${d.mediaType}, ${d.size} bytes) and ${carried}`
+      : `This inscription has no body: it puts only ${carried}`;
   const text =
-    `This inscription puts ${what} and ${carried}, with the Original's name and metadata, on Bitcoin. They become public and permanent, ` +
+    `${puts}, with the Original's name and metadata, on Bitcoin. They become public and permanent, ` +
     "and no later entry can remove them." +
     (body.kind !== "full" ? ` The version itself (${d.mediaType}, ${d.size} bytes) is not on Bitcoin: keep it, publish it or hand it over yourself.` : "") +
     (cost ? ` At ${cost.feeRate} sat/vB it costs ${cost.total} sats in fees (commit ${cost.commitFee}, reveal ${cost.revealFee}); the sat keeps ${cost.postage} sats of postage.` : "") +

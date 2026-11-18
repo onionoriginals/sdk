@@ -24,7 +24,7 @@ import {
 import { prepareEntryInscription, readAnchored, waitForFeeRate, type EntryInscriptionParams } from "../../../src/originals/bitcoin-writer.js";
 import { firstWebpFrame, sniff } from "../../../src/originals/preview.js";
 import { Author, bytes, clock, seed } from "./helpers.js";
-import { animatedWebp, avif, busy, gif, jpeg, png, svg, webp } from "./preview-fixtures.js";
+import { animatedWebp, avif, busy, gif, grayPng, jpeg, png, svg, webp } from "./preview-fixtures.js";
 
 const KEY = seed(51);
 const SAT = "5000000000";
@@ -170,6 +170,49 @@ describe("generated previews of image versions (P9.30)", () => {
     const tight = await generateImagePreview(png(busy(300, 300, 4)), "image/png", { maxBytes: 16 });
     expect(tight).toMatchObject({ status: "failed", failure: { reason: "too-large" } });
   });
+
+  test("C12-361: an image too large to decode safely gets no preview, whatever its header hides, before it is decoded", async () => {
+    const tooLarge = { status: "failed", failure: { reason: "undecodable", message: expect.stringMatching(/too large to decode|cannot be sized/) } };
+    // A JPEG whose SOF is preceded by a fill byte (allowed by JPEG) and claims 10,000 × 10,000 pixels:
+    // a few kilobytes that mozjpeg would decode into 400 MB.
+    const small = await jpeg(busy(64, 48));
+    let sof = 2;
+    while (!(small[sof] === 0xff && small[sof + 1] >= 0xc0 && small[sof + 1] <= 0xc2)) sof++;
+    const filled = Uint8Array.from([...small.subarray(0, sof), 0xff, ...small.subarray(sof)]);
+    filled.set([0x27, 0x10, 0x27, 0x10], sof + 1 + 5);
+    expect(await generateImagePreview(filled, "image/jpeg")).toMatchObject(tooLarge);
+    // A JPEG that is still sized through its fill byte is previewed as before.
+    const fine = Uint8Array.from([...small.subarray(0, sof), 0xff, ...small.subarray(sof)]);
+    expect((await generateImagePreview(fine, "image/jpeg")).status).toBe("generated");
+    // A GIF whose 2 × 2 screen hides a 10,000 × 10,000 first frame.
+    const g = gif(2, 2);
+    const descriptor = g.indexOf(0x2c, 13);
+    g.set([0x10, 0x27, 0x10, 0x27], descriptor + 5);
+    expect(await generateImagePreview(g, "image/gif")).toMatchObject(tooLarge);
+    // An animated WebP whose 16 × 16 canvas hides a 10,000 × 10,000 first frame.
+    const frame = await webp(busy(16, 16, 1));
+    const anim = animatedWebp([frame], 16, 16);
+    const anmf = Buffer.from(anim).indexOf("ANMF");
+    anim.set([0x0f, 0x27, 0x00, 0x0f, 0x27, 0x00], anmf + 8 + 6);
+    expect(await generateImagePreview(anim, "image/webp")).toMatchObject(tooLarge);
+    // An AVIF is sized by its ispe property; one claiming 10,000 × 10,000, or with none, is not decoded.
+    const a = await avif(busy(32, 32, 3));
+    const ispe = Buffer.from(a).indexOf("ispe");
+    const huge = new Uint8Array(a);
+    huge.set([0, 0, 0x27, 0x10, 0, 0, 0x27, 0x10], ispe + 8);
+    expect(await generateImagePreview(huge, "image/avif")).toMatchObject(tooLarge);
+    const unsized = new Uint8Array(a);
+    unsized.set([0x78], ispe);
+    expect(await generateImagePreview(unsized, "image/avif")).toMatchObject(tooLarge);
+    // An SVG embedding a PNG of 8,000 × 7,000 pixels, directly or in a nested SVG, is not rasterised.
+    const bomb = grayPng(8000, 7000);
+    const embed = (href: string) => svg(`<image width="300" height="200" href="${href}"/>`);
+    const b64 = (b: Uint8Array) => Buffer.from(b).toString("base64");
+    expect(await generateImagePreview(embed(`data:image/png;base64,${b64(bomb)}`), "image/svg+xml")).toMatchObject(tooLarge);
+    expect(await generateImagePreview(embed(`data:image/svg+xml;base64,${b64(embed(`data:image/png;base64,${b64(bomb)}`))}`), "image/svg+xml")).toMatchObject(tooLarge);
+    // A small embedded image is still drawn.
+    expect((await generateImagePreview(embed(`data:image/png;base64,${b64(png(busy(30, 20, 4)))}`), "image/svg+xml")).status).toBe("generated");
+  }, 60_000);
 
   test("C12-362: a new version whose generated preview would be byte-identical to its parent's gets another one", async () => {
     const pic = busy(400, 300, 21);
@@ -325,6 +368,7 @@ describe("what the author is told, and what the package carries (P9.18, P14.10)"
     const bare = (await pairFor(text.sdk, text.did, [])).notice;
     expect(bare.body).toEqual({ kind: "none" });
     expect(bare.text).toContain("no body");
+    expect(bare.text).toMatch(/^This inscription has no body: it puts only the log from \S+ through \S+, with the Original's name and metadata, on Bitcoin\./);
   });
 
   test("C12-381: an evidence package of an anchored Original naming previews is complete without them", async () => {

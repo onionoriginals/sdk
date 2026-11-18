@@ -125,3 +125,15 @@ export function gif(width: number, height: number): Uint8Array {
 
 export const svg = (body = '<rect width="300" height="200" fill="#c33"/><circle cx="150" cy="100" r="80" fill="#36c"/>') =>
   new TextEncoder().encode(`<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200">${body}</svg>`);
+
+/** An 8-bit grayscale PNG of zeros: a few kilobytes that decode to `width × height` pixels. */
+export function grayPng(width: number, height: number): Uint8Array {
+  const ihdr = Uint8Array.from([...u32(width), ...u32(height), 8, 0, 0, 0, 0]);
+  const parts = [
+    [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+    chunk("IHDR", ihdr),
+    chunk("IDAT", zlibSync(new Uint8Array(height * (width + 1)), { level: 9 })),
+    chunk("IEND", new Uint8Array()),
+  ];
+  return Uint8Array.from(parts.flat());
+}

@@ -10,7 +10,11 @@
  *   signature, not the declared type. An animated image gets a preview of one
  *   frame (P9.30 leaves it to the writer). Text in an SVG is not drawn: no
  *   fonts are loaded. Any other image (BMP, TIFF, HEIC, ICO, ...) is
- *   undecodable here.
+ *   undecodable here. So that a small file cannot make it decode gigabytes,
+ *   every raster, the first frame of an animation and every image an SVG
+ *   embeds included, is sized from its header first: one of more than 50
+ *   million pixels, or one whose header gives no size, is not decoded and
+ *   gets no preview.
  * - scales the longest edge down through 512, 384, 256, 192, 128, 96, 64, 48
  *   and 32 pixels (never up), with an alpha-weighted box filter, and encodes
  *   at quality 80 down to 40 at each size, largest first, then at 30 down to
@@ -145,18 +149,23 @@ export async function generateImagePreview(bytes: Uint8Array, mediaType: string,
   if (!format) return fail("undecodable", `the version's bytes are no image this writer decodes (PNG, JPEG, WebP, AVIF, GIF or SVG); no preview is named (P9.30)`);
   let decoded: { image: Rgba; firstFrameOnly: boolean };
   try {
-    const dims = dimensions(bytes, format);
-    if (dims && dims.width * dims.height > MAX_PIXELS) {
-      return fail("undecodable", `the ${format.toUpperCase()} is ${dims.width}×${dims.height} pixels, too large to decode for a preview; no preview is named (P9.30)`);
-    }
+    // Every raster is sized from its header before it is decoded, so a few kilobytes that would decode
+    // to gigabytes are refused first; one that cannot be sized is not decoded at all. An SVG is
+    // rasterised at most 512 pixels on its longest edge, and its embedded images are sized the same
+    // way (`rasteriseSvg`).
+    if (format !== "svg") checkPixels(format.toUpperCase(), dimensions(bytes, format));
     decoded = await decode(bytes, format);
   } catch (error) {
+    if (error instanceof TooLarge) return fail("undecodable", `${error.message}; no preview is named (P9.30)`);
     if (error instanceof OriginalsError && error.code === "PREVIEW_CODEC_UNAVAILABLE") return fail("undecodable", error.message);
     return fail("undecodable", `the ${format.toUpperCase()} could not be decoded (${error instanceof Error ? error.message : String(error)}); no preview is named (P9.30)`);
   }
   const { image } = decoded;
   if (image.width < 1 || image.height < 1 || image.data.length !== image.width * image.height * 4) {
     return fail("undecodable", `the ${format.toUpperCase()} decoded to no pixels; no preview is named (P9.30)`);
+  }
+  if (image.width * image.height > MAX_PIXELS) {
+    return fail("undecodable", `the ${format.toUpperCase()} decoded to ${image.width}×${image.height} pixels, too large to decode for a preview; no preview is named (P9.30)`);
   }
   const avoid = new Set(options.avoid ?? []);
   const limit = Math.min(PREVIEW_MAX_BYTES, options.maxBytes ?? PREVIEW_MAX_BYTES);
@@ -227,10 +236,33 @@ const u16le = (b: Uint8Array, at: number) => b[at] | (b[at + 1] << 8);
 const u24le = (b: Uint8Array, at: number) => b[at] | (b[at + 1] << 8) | (b[at + 2] << 16);
 const u32be = (b: Uint8Array, at: number) => ((b[at] << 24) >>> 0) + (b[at + 1] << 16) + (b[at + 2] << 8) + b[at + 3];
 
-/** An image's size from its header, where that is cheap to read, so a huge one is refused before decoding. */
+/** A raster that is too large to decode, or cannot be sized before decoding. */
+class TooLarge extends Error {}
+
+/** Refuse an image of more than MAX_PIXELS pixels, or of no size its header gives, before decoding it. */
+function checkPixels(what: string, dims: { width: number; height: number } | undefined): void {
+  if (!dims) throw new TooLarge(`the ${what} cannot be sized from its header, so it is not decoded`);
+  if (dims.width * dims.height > MAX_PIXELS) throw new TooLarge(`the ${what} is ${dims.width}×${dims.height} pixels, too large to decode for a preview`);
+}
+
+/**
+ * An image's size from its header, so a huge one is refused before decoding;
+ * undefined when the header does not give it. For an AVIF, the largest of its
+ * `ispe` properties, which every image item carries.
+ */
 function dimensions(b: Uint8Array, format: ImageFormat): { width: number; height: number } | undefined {
-  if (format === "png" && b.length >= 24) return { width: u32be(b, 16), height: u32be(b, 20) };
+  if (format === "png" && b.length >= 24 && ascii(b, 12, 16) === "IHDR") return { width: u32be(b, 16), height: u32be(b, 20) };
   if (format === "gif" && b.length >= 10) return { width: u16le(b, 6), height: u16le(b, 8) };
+  if (format === "avif") {
+    let largest: { width: number; height: number } | undefined;
+    // An ispe box: size, "ispe", version and flags, then width and height (ISO/IEC 23008-12).
+    for (let at = 4; at + 16 <= b.length; at++) {
+      if (b[at] !== 0x69 || ascii(b, at, at + 4) !== "ispe") continue;
+      const dims = { width: u32be(b, at + 8), height: u32be(b, at + 12) };
+      if (!largest || dims.width * dims.height > largest.width * largest.height) largest = dims;
+    }
+    return largest;
+  }
   if (format === "webp" && b.length >= 30) {
     const kind = ascii(b, 12, 16);
     if (kind === "VP8X") return { width: u24le(b, 24) + 1, height: u24le(b, 27) + 1 };
@@ -243,13 +275,21 @@ function dimensions(b: Uint8Array, format: ImageFormat): { width: number; height
   if (format === "jpeg") {
     for (let i = 2; i + 9 < b.length; ) {
       if (b[i] !== 0xff) return undefined;
+      // Any marker may be preceded by fill bytes (0xFF) (ITU-T T.81 B.1.1.2).
+      while (b[i + 1] === 0xff && i + 10 < b.length) i++;
       const marker = b[i + 1];
-      const length = (b[i + 2] << 8) | b[i + 3];
+      // TEM, RSTn, SOI and EOI stand alone, with no length.
+      if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd9)) {
+        i += 2;
+        continue;
+      }
       // SOF0-SOF15, except DHT (C4), JPG (C8) and DAC (CC).
       if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
         return { height: (b[i + 5] << 8) | b[i + 6], width: (b[i + 7] << 8) | b[i + 8] };
       }
-      i += 2 + length;
+      // A scan before any frame header: no size to read.
+      if (marker === 0xda) return undefined;
+      i += 2 + ((b[i + 2] << 8) | b[i + 3]);
     }
   }
   return undefined;
@@ -377,6 +417,8 @@ async function decode(bytes: Uint8Array, format: ImageFormat): Promise<{ image: 
   if (format === "webp") {
     const webp = await once("webp", async () => emscripten<DecodeModule>((await import("@jsquash/webp/codec/dec/webp_dec.js")).default as unknown as EmscriptenFactory, "@jsquash/webp/codec/dec/webp_dec.wasm"));
     const frame = firstWebpFrame(copy);
+    // The first frame is sized on its own: the canvas does not bound it.
+    if (frame) checkPixels("WebP frame", dimensions(frame, "webp"));
     return { image: required(webp.decode(frame ?? copy)), firstFrameOnly: frame !== undefined };
   }
   if (format === "avif") {
@@ -396,14 +438,23 @@ async function decodeGif(bytes: Uint8Array): Promise<{ image: Rgba; firstFrameOn
   const mod = (await import("omggif")) as unknown as { GifReader?: GifReaderClass; default?: { GifReader: GifReaderClass } };
   const GifReader = mod.GifReader ?? mod.default!.GifReader;
   const reader = new GifReader(bytes);
-  if (reader.width * reader.height > MAX_PIXELS) throw new Error("too large");
+  // The first frame is decoded at its own size, which the screen does not bound.
+  const first = reader.frameInfo(0);
+  checkPixels("GIF frame", { width: first.width, height: first.height });
+  checkPixels("GIF", { width: reader.width, height: reader.height });
   const data = new Uint8ClampedArray(reader.width * reader.height * 4);
   reader.decodeAndBlitFrameRGBA(0, data);
   return { image: { data, width: reader.width, height: reader.height }, firstFrameOnly: reader.numFrames() > 1 };
 }
 
 interface GifReaderClass {
-  new (bytes: Uint8Array): { width: number; height: number; numFrames(): number; decodeAndBlitFrameRGBA(frame: number, pixels: Uint8ClampedArray): void };
+  new (bytes: Uint8Array): {
+    width: number;
+    height: number;
+    numFrames(): number;
+    frameInfo(frame: number): { width: number; height: number };
+    decodeAndBlitFrameRGBA(frame: number, pixels: Uint8ClampedArray): void;
+  };
 }
 
 let resvgReady: Promise<typeof import("@resvg/resvg-wasm")> | undefined;
@@ -421,8 +472,16 @@ async function rasteriseSvg(bytes: Uint8Array): Promise<{ image: Rgba; firstFram
   resvgReady.catch(() => { resvgReady = undefined; });
   const { Resvg } = await resvgReady;
   const probe = new Resvg(bytes, { font: { loadSystemFonts: false } });
-  const landscape = probe.width >= probe.height;
-  probe.free();
+  let landscape: boolean;
+  try {
+    landscape = probe.width >= probe.height;
+    // resvg decodes an embedded raster at its own size, whatever size it is drawn at: size each one
+    // from its header first, as a raster version is, nested SVGs included (P9.30 leaves the rest to us).
+    const embedded = embeddedPixels(Resvg, probe.toString(), 0);
+    if (embedded > MAX_PIXELS) throw new TooLarge(`the SVG embeds images of ${embedded} pixels, too large to decode for a preview`);
+  } finally {
+    probe.free();
+  }
   const edge = PREVIEW_EDGES[0];
   const svg = new Resvg(bytes, { font: { loadSystemFonts: false }, fitTo: landscape ? { mode: "width", value: edge } : { mode: "height", value: edge } });
   try {
@@ -433,6 +492,37 @@ async function rasteriseSvg(bytes: Uint8Array): Promise<{ image: Rgba; firstFram
   } finally {
     svg.free();
   }
+}
+
+/** How deep SVG images may nest in an SVG before it is refused. */
+const MAX_SVG_NESTING = 3;
+
+/**
+ * The pixels of every raster an SVG embeds, by their headers, from resvg's
+ * own normalised form of it, where every embedded image, entity references
+ * resolved, is a `data:` URL in base64. A nested SVG is counted the same way.
+ * Throws TooLarge for one that cannot be sized, or nesting too deep.
+ */
+function embeddedPixels(Resvg: typeof import("@resvg/resvg-wasm").Resvg, normalised: string, depth: number): number {
+  let total = 0;
+  for (const m of normalised.matchAll(/data:([^;"\s]*);base64,\s*([A-Za-z0-9+/=]*)/g)) {
+    const data = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0));
+    const format = sniff(data, m[1]);
+    if (format === "svg") {
+      if (depth >= MAX_SVG_NESTING) throw new TooLarge("the SVG nests SVG images too deeply");
+      const nested = new Resvg(data, { font: { loadSystemFonts: false } });
+      try {
+        total += embeddedPixels(Resvg, nested.toString(), depth + 1);
+      } finally {
+        nested.free();
+      }
+      continue;
+    }
+    const dims = format ? dimensions(data, format) : undefined;
+    if (!dims) throw new TooLarge("an image the SVG embeds cannot be sized from its header, so the SVG is not rasterised");
+    total += dims.width * dims.height;
+  }
+  return total;
 }
 
 // ------------------------------------------------------------------ scaling

@@ -1396,7 +1396,9 @@ configurePreviewCodecs({ resvgWasm: new URL("/assets/resvg.wasm", location.href)
   default, so give it with `configurePreviewCodecs({ resvgWasm })`, or an SVG
   gets no preview there. Sizes, qualities and settings are PROVISIONAL.
 - **No preview (P9.30).** An image the writer cannot decode (BMP, TIFF,
-  HEIC, ICO, damaged bytes), or cannot fit in 8,192 bytes, or whose bytes the
+  HEIC, ICO, damaged bytes, or more than 50 million pixels, counting the
+  first frame of an animation and every image an SVG embeds, or no size in
+  its header), or cannot fit in 8,192 bytes, or whose bytes the
   SDK does not hold, gets none: the commit's `preview` says so
   (`status: "none"`, `reason: "undecodable" | "too-large" |
   "version-bytes-missing"`), and the caller must tell the author. A version of
