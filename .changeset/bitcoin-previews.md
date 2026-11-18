@@ -1,6 +1,7 @@
 ---
 '@originals/vh': minor
 '@originals/sdk': minor
+'@originals/host': patch
 ---
 
 Signed Bitcoin previews, built to originals-spec PR 64 (`940c6d4`, open;
@@ -31,10 +32,18 @@ name and shape).
   `configurePreviewCodecs` for SVG in a browser). The commit reports the
   preview or why none (`CommitResult.preview`). `prepareEntryInscription`
   inscribes the preview, or with none no body (no ord body push), or the full
-  version with `body: "full"`; its notice says which and what the pair costs
-  (`notice.body`, `notice.cost`, `pair.cost`). `waitForFeeRate` is an
+  version with `body: "full"`, which an entry committed with `body: "full"`
+  keeps (`chosenBody`, the store's optional `putBodyChoice`;
+  `BODY_CHOICE_CONFLICT`); its notice says which, what the pair costs and what
+  Bitcoin will not hold (`notice.body`, `notice.cost`, `pair.cost`). `waitForFeeRate` is an
   optional, caller-driven wait for a lower fee rate. The sat reader reports an
   inscription with no body (`noBody`). Packages never carry a preview.
 - Behaviour change: an entry naming no preview is inscribed with no body
   unless `body: "full"` is passed; an entry after the anchor is no longer
   refused for a large version unless the full version is chosen.
+- `@originals/host`: the account library reads a hosted copy of an anchored
+  Original against its sat with the host's sat reader, since such a copy read
+  without Bitcoin evidence yields only the entries before its anchoring entry
+  (P7.14, C12-297); without a reader, or when the read fails, the row shows
+  the Original as it was before anchoring and says its later versions are not
+  checked, instead of listing it as needing recovery.
