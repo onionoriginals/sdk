@@ -4,6 +4,7 @@
  * Prints timings and sizes against git's own packs.
  *
  *   bun scripts/acceptance.ts [--git <repo>] [--ref refs/heads/main] [--rev origin/main] [--keep <dir>] [--json <file>]
+ *                             [--segment-entries <n>]   (K13: split the branch into segments of n entries)
  */
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -49,7 +50,8 @@ console.log(`git packs: all refs ${mib(repoPack)}; ${ref} ${mib(mainPack)}; ${re
 console.log(`workspace ${root}`);
 
 const identity = await createLocalIdentity();
-const ws = await openWorkspace(join(root, "ws"));
+const segmentEntries = opt("segment-entries") ? Number(opt("segment-entries")) : undefined;
+const ws = await openWorkspace(join(root, "ws"), segmentEntries ? { segmentEntries } : {});
 const source = new GitSource(gitDir, { revisions: { [ref]: rev } });
 let bundle: Uint8Array;
 let mirrorSeconds: number;
@@ -84,7 +86,9 @@ globalThis.fetch = (() => {
 const [report, verifySeconds] = await time(() => verifyRepository(bundle));
 globalThis.fetch = realFetch;
 
-const b = report.branches[0];
+// The listed branch (the newest segment when segmented, K13).
+const b = report.branches.find((x) => x.code?.binding.status === "confirmed") ?? report.branches[0];
+const segments = report.branches.filter((x) => x.code?.history.status === "valid" && x.report?.validAsOf).length;
 const c = report.canonical[0];
 console.log(`verify (offline, ${fetches} fetches attempted): ${verifySeconds.toFixed(1)} s`);
 console.log(`  repo: originals ${report.repo.report?.history.status}, code ${report.repo.code?.history.status}`);
@@ -92,6 +96,7 @@ console.log(`  branch: originals ${b.report?.history.status} (${b.report?.histor
 console.log(`  content ${b.code?.content.status}: ${b.code?.content.objects} objects, ${mib(b.code?.content.bytes ?? 0)}; git trees ${b.code?.gitBinding.status} (${b.code?.gitBinding.checked} checked)`);
 console.log(`  commits ${b.code?.commitBinding.status}: ${b.code?.commitBinding.checked} commit ids recomputed from commit objects, ${b.code?.commitBinding.claimed} claimed, ${b.code?.commitBinding.unchecked} unchecked`);
 console.log(`  canonical ${c?.ref}: ${c?.status} ${c?.head?.commit ?? ""} (git: ${git("rev-parse", rev)})`);
+console.log(`  segments: ${b.code?.segment.segments.length} (${segments} valid), chain ${b.code?.chain.length} commits`);
 console.log(`  current: ${report.current}`);
 
 const result = {
@@ -99,10 +104,10 @@ const result = {
   mirror: { seconds: mirrorSeconds, entries: b.report?.history.entries, trees: source.stats.trees, blobs: source.stats.blobs, blobBytes: source.stats.blobBytes, commitObjects: source.stats.commitObjects, commitBytes: source.stats.commitBytes },
   store: { objects: usage.objects, objectBytes: usage.bytes, originalsBytes },
   bundle: { bytes: bundle.length, seconds: packageSeconds },
-  verify: { seconds: verifySeconds, fetches, canonical: c?.status, head: c?.head?.commit, gitHead: git("rev-parse", rev), content: b.code?.content.status, gitTrees: b.code?.gitBinding.status, commits: b.code?.commitBinding.status, commitsChecked: b.code?.commitBinding.checked, current: report.current },
+  verify: { seconds: verifySeconds, fetches, canonical: c?.status, head: c?.head?.commit, gitHead: git("rev-parse", rev), content: b.code?.content.status, gitTrees: b.code?.gitBinding.status, commits: b.code?.commitBinding.status, commitsChecked: b.code?.commitBinding.checked, segments: b.code?.segment.segments.length, chain: b.code?.chain.length, current: report.current },
 };
 if (opt("json")) writeFileSync(opt("json")!, `${JSON.stringify(result, null, 2)}\n`);
 if (!keep) rmSync(root, { recursive: true, force: true });
-const ok = report.repo.code?.history.status === "valid" && b.code?.history.status === "valid" && b.report?.validAsOf && c?.status === "agreed" && c.head?.commit === result.verify.gitHead && b.code?.commitBinding.status === "matches" && fetches === 0;
+const ok = report.repo.code?.history.status === "valid" && b.code?.history.status === "valid" && b.report?.validAsOf && c?.status === "agreed" && c.head?.commit === result.verify.gitHead && b.code?.commitBinding.status === "matches" && b.code.chain.length === firstParent && segments === report.branches.length && fetches === 0;
 console.log(ok ? "CODE-ACC: PASS" : "CODE-ACC: FAIL");
 process.exit(ok ? 0 : 1);

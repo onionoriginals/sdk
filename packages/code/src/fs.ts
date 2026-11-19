@@ -119,7 +119,7 @@ export interface DiskWorkspace {
 const idFile = (did: string) => `${createHash("sha256").update(did).digest("hex")}.json`;
 
 /** Open (or create) a workspace directory. One process at a time holds it (the FileStore lock). */
-export async function openWorkspace(root: string, options: { clock?: () => number } = {}): Promise<DiskWorkspace> {
+export async function openWorkspace(root: string, options: { clock?: () => number; segmentEntries?: number } = {}): Promise<DiskWorkspace> {
   await mkdir(join(root, "identities"), { recursive: true });
   const originals = await FileStore.open(join(root, "originals"));
   const objects = new FsObjectStore(join(root, "objects"));
@@ -138,7 +138,7 @@ export async function openWorkspace(root: string, options: { clock?: () => numbe
   for (const f of await readdir(join(root, "identities"))) {
     if (f.endsWith(".json")) identities.push(JSON.parse(await readFile(join(root, "identities", f), "utf8")) as { did: string; log: string });
   }
-  const workspace = CodeWorkspace.create({ originals, objects, identities, ...(options.clock ? { clock: options.clock } : {}) });
+  const workspace = CodeWorkspace.create({ originals, objects, identities, ...(options.clock ? { clock: options.clock } : {}), ...(options.segmentEntries ? { segmentEntries: options.segmentEntries } : {}) });
   const disk: DiskWorkspace = {
     workspace,
     objects,

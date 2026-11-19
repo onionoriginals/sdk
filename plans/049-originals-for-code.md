@@ -124,6 +124,25 @@ with the one the entry's metadata claims (`gitBinding` report).
 - Author: the delegate (P5.2, P5.8). Contributors who are not delegates write
   to a branch as **editors** (P5.15–P5.18) with `metadata: true` and
   `resource: true`, bounded by path grants (phase 3).
+- **Segments** (K13, O1, PROVISIONAL): a branch Original holds at most
+  `ORIGINALS_LIMITS.entries` entries (P7.7). When a mirror would exceed it,
+  the writer fills the current segment and starts a new segment Original
+  whose genesis metadata carries `"previous": { "did", "versionId" }`: the
+  previous segment's did:vh and its last versionId. Only a genesis carries
+  `previous`, and only the branch's author starts a segment (an editor that
+  reaches the limit is refused, `SEGMENT_AUTHOR_ONLY`). The repo document
+  lists the **current** (newest) segment for each delegate and ref; bundles
+  carry every segment. The verifier walks the chain from the listed segment:
+  each previous segment must be in the evidence (else `incomplete`), valid
+  under both reports, by the same author, and end exactly at the named
+  versionId (a closed segment that continues is `SEGMENT_CONTINUED`,
+  invalid). Commits continue across segments: no commit repeats, the
+  genesis's commit object's first parent is the previous segment's last
+  commit (K12), path grants diff against the previous segment's last root,
+  and `repoVersion` never goes backwards. Each segment is reported with its
+  own Originals report and `segment` position; earlier segments of a
+  confirmed branch have binding `superseded`. The listed segment's `chain`
+  is the whole branch's, and is what votes for canonical heads.
 - One entry per first-parent commit, oldest first. A merge commit is one
   entry; its second parents are not mirrored. `versionTime` is the time the
   mirror signs, never the commit time (git commit times are not monotonic
@@ -310,6 +329,7 @@ too; that is open question O3. `push` maps to `mirror` plus a shared-host
 | K10 | Local did:vh identities and key files for the CLI (development only) |
 | K11 | A read-only, GitHub-like viewer (`originals-code serve`): server-rendered pages over `openRepository`, showing only verified entries with each result beside the content, separately. Commits are shown by id, signing DID and claimed versionTime; a commit whose id was recomputed from its commit object (K12) also shows its message and git author, as text |
 | K12 | Raw git commit objects mirrored verbatim as objects, named by `metadata.code.commitObject`; public by default, opt-in for a source marked private; `commitBinding` reported separately (O3) |
+| K13 | A branch longer than the entry limit is a chain of segment Originals; a segment genesis names the previous segment's did and last versionId (`metadata.code.previous`); the repo document lists the newest segment; earlier segments are `superseded` (O1) |
 
 ## 5. Acceptance tests (IDs cited by tests)
 
@@ -335,6 +355,8 @@ too; that is open question O3. `push` maps to `mirror` plus a shared-host
 | CODE-18 | The viewer: files, README, commits, line diffs, verification page; repository content never rendered as markup; unknown routes 404 |
 | CODE-19 | Commit objects: mirrored by default, the verifier recomputes commit id, tree and first parent (`commitBinding`); a private source needs opt-in; bundles without them verify with ids claimed; a missing one is unchecked |
 | CODE-20 | Commit binding failures: a commit object hashing to another id, naming another tree, or with another first parent fails the code history |
+| CODE-21 | Segments: with an injected limit the writer starts new segments, the repo lists the newest, the verifier walks the chain and the canonical head is the whole branch's; an incremental mirror crosses a boundary |
+| CODE-22 | Segment failures: a missing previous segment is incomplete; a closed segment that continues is invalid; a commit gap at a boundary is invalid; only the author starts a segment |
 | CODE-ACC | Mirror `main` of this repository and verify it with no network (script, timings, store size vs. pack) |
 
 ## 6. Phase 4 and the owner's decisions of 2026-11-19
@@ -360,7 +382,7 @@ The owner reviewed this plan in a grilling session on 2026-11-19 and decided:
 
 ## 7. Open questions
 
-- **O1 — decided 2026-11-19: a chain of segments.** A full branch Original is followed by a new one whose genesis names the previous segment's last entry. The limit stays, because it bounds a verifier's work on untrusted logs (P7.7). The original question was: **repositories over 10,000 first-parent commits** (P7.7). One branch
+- **O1 — decided 2026-11-19: a chain of segments; built (K13, CODE-21, CODE-22).** A full branch Original is followed by a new one whose genesis names the previous segment's last entry. The limit stays, because it bounds a verifier's work on untrusted logs (P7.7). The original question was: **repositories over 10,000 first-parent commits** (P7.7). One branch
   Original per ref cannot hold them. Options: segment a branch into a chain of
   Originals (each genesis naming the previous one's last entry), or a profile
   limit. Not needed for this repository (675).
@@ -410,6 +432,15 @@ and 677 of 677 **commit ids recomputed from the commit objects**
 (`commitBinding` matches, none claimed), canonical head agreed at
 `174d3144`, equal to git's. Commit objects add about 1.2 MiB to the store
 and bundle.
+
+**K13 (segments, O1), 2026-11-19**: this repository needs one segment
+(677 < 10,000), so segmenting is exercised with an injected limit
+(`bun run acceptance -- --rev origin/main --segment-entries 250`): the
+branch becomes 3 segments (250 + 250 + 177 entries), each a valid Original;
+verify 4.9 s offline walks the chain, 677 commits in the listed segment's
+chain, every git tree and commit id recomputed (the listed segment reports
+its own 177; continuity at both boundaries checked from the commit
+objects), canonical head agreed at `174d3144`, equal to git's.
 
 The store is about 1.9 times git's pack of the same objects (O6) and about
 0.6 times the whole repository's 114 MiB pack, which also holds every

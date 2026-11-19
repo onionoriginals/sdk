@@ -11,7 +11,7 @@
  * relaxed anywhere.
  */
 import { parseLog, serializeLog, type LogEntry } from "@originals/vh/log";
-import { signerOf, type AuthorDidEvidence, type EditorGrant, type EntryState } from "@originals/vh/originals";
+import { ORIGINALS_LIMITS, signerOf, type AuthorDidEvidence, type EditorGrant, type EntryState } from "@originals/vh/originals";
 import { OriginalsSDK, keySigner, writeEvidence, type OriginalsStore } from "@originals/sdk/originals";
 import { appendCommits, branchChain, metadataOf, type MirrorCommit } from "./branch.js";
 import { writeBundle } from "./bundle.js";
@@ -40,6 +40,8 @@ export interface CodeWorkspaceOptions {
   /** Public identities (DID and log) of every signer this workspace verifies. */
   identities?: Array<Pick<LocalIdentity, "did" | "log">>;
   clock?: () => number;
+  /** Entries per branch segment: `ORIGINALS_LIMITS.entries` (P7.7); lower only to test segmenting (K13). */
+  segmentEntries?: number;
 }
 
 export interface MirrorResult {
@@ -53,6 +55,10 @@ export interface MirrorResult {
    * caller did not opt in) or `omitted` (the caller opted out).
    */
   commitObjects: "included" | "omitted-private" | "omitted";
+  /** Segments of the branch after this mirror (K13, O1); the branch did is the last one's. */
+  segments: number;
+  /** Segments this mirror started, oldest first. */
+  newSegments: string[];
   /** Set when the branch is new and the signer is not the repo's author, who must list it (K5). */
   needsListing?: boolean;
 }
@@ -67,6 +73,7 @@ export class CodeWorkspace {
     readonly originals: OriginalsStore,
     readonly objects: ObjectStore,
     private readonly clock: () => number,
+    private readonly maxEntries: number,
   ) {
     this.sdk = OriginalsSDK.create({
       store: originals,
@@ -80,7 +87,7 @@ export class CodeWorkspace {
   }
 
   static create(options: CodeWorkspaceOptions): CodeWorkspace {
-    const ws = new CodeWorkspace(options.originals, options.objects, options.clock ?? Date.now);
+    const ws = new CodeWorkspace(options.originals, options.objects, options.clock ?? Date.now, Math.min(options.segmentEntries ?? ORIGINALS_LIMITS.entries, ORIGINALS_LIMITS.entries));
     for (const id of options.identities ?? []) ws.addIdentity(id);
     return ws;
   }
@@ -156,6 +163,27 @@ export class CodeWorkspace {
   }
 
   /**
+   * A branch's segments, oldest first, ending with `did` (K13, O1): each
+   * segment's genesis names the previous one. Every segment must be held.
+   */
+  async segments(did: string): Promise<LogEntry[][]> {
+    const out: LogEntry[][] = [];
+    const seen = new Set<string>();
+    for (let at: string | undefined = did; at; ) {
+      if (seen.has(at)) codeError("invalid-evidence", "SEGMENT_CYCLE", `segment ${at} is its own predecessor`);
+      seen.add(at);
+      const log = await this.entries(at);
+      if (log.length === 0) {
+        if (at === did) return [];
+        codeError("incomplete-evidence", "BRANCH_NOT_HELD", `segment ${at} is not in this workspace`);
+      }
+      out.unshift(log);
+      at = metadataOf(log[0]).previous?.did;
+    }
+    return out;
+  }
+
+  /**
    * Mirror a ref's first-parent chain into a branch Original: one entry per
    * commit after the branch's head (phase 1). `branch` names an existing
    * branch to write as its editor (phase 3); otherwise the branch is the
@@ -185,12 +213,13 @@ export class CodeWorkspace {
     const repoDoc = await this.repoDocument(repo);
     const own = repoDoc.document.refs[ref]?.branches[identity.did];
     const branch = input.branch ?? own;
-    const log = branch ? await this.entries(branch) : [];
+    const segments = branch ? await this.segments(branch) : [];
+    const log = segments.at(-1) ?? [];
     if (branch && log.length === 0) codeError("incomplete-evidence", "BRANCH_NOT_HELD", `${branch} is not in this workspace`);
-    const role: "author" | "editor" = log.length === 0 || stateOf(log[0]).author.did === identity.did ? "author" : "editor";
+    const role: "author" | "editor" = log.length === 0 || stateOf(segments[0][0]).author.did === identity.did ? "author" : "editor";
 
     let commits = await input.source.firstParent(ref);
-    const chain = branchChain(log).map((c) => c.commit);
+    const chain = segments.flatMap((seg) => branchChain(seg)).map((c) => c.commit);
     if (chain.length > 0) {
       const same = chain.length <= commits.length && chain.every((c, i) => commits[i] === c);
       if (!same) codeError("stale-parent", "MIRROR_DIVERGED", `${ref} no longer extends the branch's history at ${chain[chain.length - 1]}; nothing is rebased (P4.5)`);
@@ -202,24 +231,60 @@ export class CodeWorkspace {
     for (const c of commits) converted.push(await input.source.convert(c, this.objects, { commitObject: commitObjects === "included" }));
 
     const check = role === "editor" ? this.pathCheck(repoDoc.document, identity.did) : undefined;
-    const fresh = await appendCommits({
-      log,
-      commits: converted,
-      repo,
-      ref,
-      repoVersion: repoDoc.versionId,
-      signer: { role, ref: identityRef(identity), sign: identitySigner(identity) },
-      clock: this.clock,
-      ...(check ? { check } : {}),
-    });
-    const all = [...log, ...fresh];
-    if (fresh.length > 0) await this.importLog(all, branch);
-    const did = branch ?? (all[0].state.id as string);
-    const last = all[all.length - 1];
-    const result: MirrorResult = { branch: did, created: !branch, appended: fresh.length, head: { commit: branchChain([last])[0].commit, versionId: last.versionId }, commitObjects };
-    if (!branch) {
+    // O1, K13: fill the current segment up to the entry limit (P7.7), then start the next one.
+    let current = log;
+    let currentDid: string | undefined = branch;
+    let remaining = converted;
+    let appended = 0;
+    const created: string[] = [];
+    while (remaining.length > 0) {
+      let previous: { did: string; versionId: string } | undefined;
+      let prior: { root: string; versionTime: string } | undefined;
+      if (current.length >= this.maxEntries) {
+        if (role !== "author") codeError("outside-grant", "SEGMENT_AUTHOR_ONLY", `${currentDid} is full (${this.maxEntries} entries); only the branch's author starts its next segment (K13)`);
+        const last = current[current.length - 1];
+        previous = { did: currentDid, versionId: last.versionId };
+        prior = { root: stateOf(last).asset.resource.digest, versionTime: last.versionTime };
+        current = [];
+        currentDid = undefined;
+      }
+      const take = remaining.slice(0, this.maxEntries - current.length);
+      const fresh = await appendCommits({
+        log: current,
+        commits: take,
+        repo,
+        ref,
+        repoVersion: repoDoc.versionId,
+        signer: { role, ref: identityRef(identity), sign: identitySigner(identity) },
+        clock: this.clock,
+        maxEntries: this.maxEntries,
+        ...(previous ? { previous, prior: prior! } : {}),
+        ...(check ? { check } : {}),
+      });
+      const all = [...current, ...fresh];
+      await this.importLog(all, currentDid);
+      if (!currentDid) {
+        currentDid = all[0].state.id as string;
+        created.push(currentDid);
+      }
+      current = all;
+      remaining = remaining.slice(take.length);
+      appended += fresh.length;
+    }
+    if (!currentDid) return codeError("invalid-evidence", "MIRROR_EMPTY", `${ref} has no commits to start a branch with`);
+    const last = current[current.length - 1];
+    const result: MirrorResult = {
+      branch: currentDid,
+      created: !branch,
+      appended,
+      head: { commit: branchChain([last])[0].commit, versionId: last.versionId },
+      commitObjects,
+      segments: segments.length + created.length,
+      newSegments: created,
+    };
+    if (currentDid !== branch) {
       const repoAuthor = stateOf((await this.entries(repo))[0]).author.did;
-      if (repoAuthor === identity.did) await this.listBranch(repo, identity, { ref, delegate: identity.did, branch: did });
+      if (repoAuthor === identity.did) await this.listBranch(repo, identity, { ref, delegate: identity.did, branch: currentDid });
       else result.needsListing = true;
     }
     return result;
@@ -313,7 +378,16 @@ export class CodeWorkspace {
   async package(repo: string, options: { omitBlobs?: boolean } = {}): Promise<Uint8Array> {
     const repoPackage = await this.sdk.package(repo);
     const { document } = await this.repoDocument(repo);
-    const branches = [...new Set(Object.values(document.refs).flatMap((r) => Object.values(r.branches)))].sort();
+    const listed = [...new Set(Object.values(document.refs).flatMap((r) => Object.values(r.branches)))].sort();
+    // Every segment of each listed branch travels with it (K13).
+    const branches: string[] = [];
+    for (const b of listed) {
+      if (!(await this.originals.get(b))) {
+        branches.push(b);
+        continue;
+      }
+      for (const seg of await this.segments(b)) branches.push(seg[0].state.id as string);
+    }
     const packages = [{ original: repo, checkpoint: repoPackage.manifest.checkpoint, bytes: repoPackage.bytes }];
     const roots = new Set<string>();
     for (const b of branches) {

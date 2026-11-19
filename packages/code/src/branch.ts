@@ -41,6 +41,12 @@ export interface AppendCommitsInput {
   signer: { role: "author" | "editor"; ref: AuthorRef; sign: EntrySigner };
   /** Editor grants at genesis (P5.15). */
   editors?: EditorGrant[];
+  /** At genesis of a later segment: the previous segment's did:vh and last versionId (K13, O1). */
+  previous?: { did: string; versionId: string };
+  /** The previous segment's last root tree and versionTime: the path-grant check and the clock continue from them. */
+  prior?: { root: string; versionTime: string };
+  /** The most entries this Original may hold: `ORIGINALS_LIMITS.entries` (P7.7), lower only in tests. */
+  maxEntries?: number;
   /** Milliseconds since the epoch; entries get strictly increasing versionTimes from it. */
   clock?: () => number;
   /**
@@ -64,23 +70,25 @@ export function metadataOf(entry: UnsignedEntry | LogEntry): BranchMetadata {
  * P6.2). The entry limit is checked first (P7.7, P14.13).
  */
 export async function appendCommits(input: AppendCommitsInput): Promise<LogEntry[]> {
-  if (input.log.length + input.commits.length > ORIGINALS_LIMITS.entries) {
-    codeError("limit-exceeded", "BRANCH_TOO_LONG", `a branch Original holds at most ${ORIGINALS_LIMITS.entries} entries (P7.7); ${input.log.length + input.commits.length} needed (plan 049, O1)`);
+  const max = Math.min(input.maxEntries ?? ORIGINALS_LIMITS.entries, ORIGINALS_LIMITS.entries);
+  if (input.log.length + input.commits.length > max) {
+    codeError("limit-exceeded", "BRANCH_TOO_LONG", `a branch Original holds at most ${max} entries (P7.7); ${input.log.length + input.commits.length} needed: start a new segment (plan 049, O1, K13)`);
   }
+  if (input.previous && input.log.length > 0) codeError("invalid-evidence", "SEGMENT_PREVIOUS_LATE", "only a segment's genesis names the previous segment (K13)");
   if (input.log.length === 0 && input.signer.role !== "author") {
     codeError("outside-grant", "EDITOR_AUTHOR_ONLY", "only the branch's author starts a branch Original (P5.16)");
   }
   const clock = input.clock ?? Date.now;
   let previous: UnsignedEntry | LogEntry | undefined = input.log[input.log.length - 1];
-  let lastTime = previous ? Date.parse(previous.versionTime) : -Infinity;
+  let lastTime = previous ? Date.parse(previous.versionTime) : input.prior ? Date.parse(input.prior.versionTime) : -Infinity;
   const out: LogEntry[] = [];
   for (const c of input.commits) {
     const time = Math.max(clock(), lastTime + 1);
     lastTime = time;
     const versionTime = new Date(time).toISOString();
-    const metadata = branchMetadata({ repo: input.repo, ref: input.ref, commit: c.commit, tree: c.tree, repoVersion: input.repoVersion, ...(c.object ? { commitObject: c.object } : {}) });
+    const metadata = branchMetadata({ repo: input.repo, ref: input.ref, commit: c.commit, tree: c.tree, repoVersion: input.repoVersion, ...(c.object ? { commitObject: c.object } : {}), ...(!previous && input.previous ? { previous: input.previous } : {}) });
     const resource = { mediaType: TREE_MEDIA_TYPE, size: c.root.size, digest: c.root.digest };
-    await input.check?.(previous ? stateOf(previous).asset.resource.digest : null, c.root.digest);
+    await input.check?.(previous ? stateOf(previous).asset.resource.digest : (input.prior?.root ?? null), c.root.digest);
     const unsigned: UnsignedEntry = previous
       ? prepareUpdateOriginal(previous, {
           versionTime,
