@@ -49,6 +49,9 @@ const GUARDED_ENTRIES = [
   // how a Buffer-dependent "isomorphic" export shipped green (plan 046, item 2).
   { dist: 'packages/auth/dist', entry: 'index.js', browserFirst: true },
   { dist: 'packages/auth/dist', entry: 'client/index.js', browserFirst: true },
+  // @originals/code (plan 049): the root entry (objects, documents, verification,
+  // bundles, the workspace) runs in a browser; `fs` and `git` are Node-only subpaths.
+  { dist: 'packages/code/dist', entry: 'index.js', browserFirst: true },
 ];
 
 /**

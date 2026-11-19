@@ -79,6 +79,31 @@
         "express"
       ]
     },
+    "packages/code": {
+      "name": "@originals/code",
+      "version": "0.1.0",
+      "bin": {
+        "originals-code": "./dist/cli.js"
+      },
+      "dependencies": {
+        "@noble/hashes": "^2.0.1",
+        "@originals/sdk": "^6.1.0",
+        "@originals/vh": "^0.4.0",
+        "fflate": "^0.8.3"
+      },
+      "devDependencies": {
+        "@eslint/js": "^9.0.0",
+        "@types/bun": "^1.4.4",
+        "@types/node": "^26.6.6",
+        "@typescript-eslint/eslint-plugin": "^8.72.1",
+        "@typescript-eslint/parser": "^8.72.1",
+        "bun-types": "^1.3.1",
+        "eslint": "^10.14.0",
+        "prettier": "^3.9.10",
+        "typescript": "^6.0.3",
+        "typescript-eslint": "^8.0.0"
+      }
+    },
     "packages/host": {
       "name": "@originals/host",
       "version": "0.3.0",
@@ -382,6 +407,8 @@
     "@noble/secp256k1": ["@noble/secp256k1@3.2.0", "", {}, "sha512-Z3ZAWOTxJ0EuTuZTi7Y69iK7GgrLHh8sgm45lVDhg/b3Nk1TpAiKhick2KkZisHuupeepSkyIydN/J459SdX1w=="],
 
     "@originals/auth": ["@originals/auth@workspace:packages/auth"],
+
+    "@originals/code": ["@originals/code@workspace:packages/code"],
 
     "@originals/host": ["@originals/host@workspace:packages/host"],
 
