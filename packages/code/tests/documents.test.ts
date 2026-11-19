@@ -8,6 +8,8 @@ import {
   checkBranchMetadata,
   checkPattern,
   covers,
+  pathGrant,
+  pathGrantsOf,
   decodeRepoDocument,
   encodeRepoDocument,
   matchPattern,
@@ -50,11 +52,10 @@ describe("K7 path patterns", () => {
   });
 });
 
-describe("CODE-09 repo document", () => {
+describe("CODE-09 repo document (profile 0.2: grants are the repo's scoped editor grants, K7)", () => {
   const doc: RepoDocument = {
     delegates: [A, B],
     refs: { "refs/heads/main": { threshold: 2, branches: { [A]: BRANCH_A, [B]: BRANCH_B } } },
-    grants: [{ did: C, paths: ["packages/vh/**"] }],
   };
 
   test("round-trips as JCS bytes", () => {
@@ -88,10 +89,20 @@ describe("CODE-09 repo document", () => {
     }
   });
 
-  test("grants name unique DIDs with valid, sorted patterns", () => {
-    expect(() => encodeRepoDocument({ ...doc, grants: [{ did: C, paths: [] }] })).toThrow(expect.objectContaining({ code: "REPO_GRANTS" }));
-    expect(() => encodeRepoDocument({ ...doc, grants: [{ did: C, paths: ["/x"] }] })).toThrow(expect.objectContaining({ code: "GRANT_PATTERN" }));
-    expect(() => encodeRepoDocument({ ...doc, grants: [{ did: C, paths: ["a"] }, { did: C, paths: ["b"] }] })).toThrow(expect.objectContaining({ code: "REPO_GRANTS" }));
+  test("a path grant is a paths-scoped editor grant: metadata and resource, never the name; patterns checked and sorted (K7, P14.23)", () => {
+    expect(pathGrant(C, ["src/**", "docs/**", "src/**"])).toEqual({ did: C, name: false, metadata: true, resource: true, scope: { type: "paths", paths: ["docs/**", "src/**"] } });
+    expect(() => pathGrant(C, [])).toThrow(expect.objectContaining({ code: "GRANT_PATTERN" }));
+    expect(() => pathGrant(C, ["/x"])).toThrow(expect.objectContaining({ code: "GRANT_PATTERN" }));
+    expect(pathGrantsOf([pathGrant(C, ["a/**"]), { did: A, name: false, metadata: true, resource: true }, { did: B, name: true, metadata: false, resource: false }])).toEqual([
+      { did: C, paths: ["a/**"] },
+      { did: A, paths: ["**"] },
+    ]);
+  });
+
+  test("profile 0.1 documents are not read: no migration (nothing was published under it)", () => {
+    const old = new TextEncoder().encode(JSON.stringify({ delegates: [A], format: "originals-code-repo/0.1", grants: [], refs: {} }));
+    expect(() => decodeRepoDocument(old)).toThrow(expect.objectContaining({ code: "REPO_FORMAT", category: "unsupported-profile" }));
+    expect(() => decodeRepoDocument(new TextEncoder().encode(JSON.stringify({ delegates: [A], format: REPO_FORMAT, grants: [], refs: {} })))).toThrow(expect.objectContaining({ code: "REPO_MEMBERS" }));
   });
 
   test("non-canonical bytes and extra members are refused", () => {
@@ -104,10 +115,12 @@ describe("CODE-09 repo document", () => {
 });
 
 describe("K4 branch metadata", () => {
-  const code = { profile: "originals-code/0.1", kind: "branch", repo: "did:vh:QmRepo", ref: "refs/heads/main", commit: "a".repeat(40), tree: "b".repeat(40), repoVersion: "1-QmX" };
+  const code = { profile: "originals-code/0.2", kind: "branch", repo: "did:vh:QmRepo", ref: "refs/heads/main", commit: "a".repeat(40), tree: "b".repeat(40) };
 
-  test("is exactly { code: { profile, kind, repo, ref, commit, tree, repoVersion } }", () => {
+  test("is exactly { code: { profile, kind, repo, ref, commit, tree } }: the pin replaces repoVersion (P5.24)", () => {
     expect(checkBranchMetadata({ code })).toEqual(code);
+    expect(() => checkBranchMetadata({ code: { ...code, repoVersion: "1-QmX" } })).toThrow(expect.objectContaining({ code: "BRANCH_METADATA" }));
+    expect(() => checkBranchMetadata({ code: { ...code, profile: "originals-code/0.1" } })).toThrow(expect.objectContaining({ code: "CODE_PROFILE" }));
     expect(() => checkBranchMetadata({ code, other: 1 })).toThrow(expect.objectContaining({ code: "BRANCH_METADATA" }));
     expect(() => checkBranchMetadata({ code: { ...code, author: "x" } })).toThrow(expect.objectContaining({ code: "BRANCH_METADATA" }));
     expect(() => checkBranchMetadata({ code: { ...code, commit: "A".repeat(40) } })).toThrow(expect.objectContaining({ code: "BRANCH_METADATA" }));

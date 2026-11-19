@@ -1,18 +1,25 @@
 /**
  * Verifying a repository (plan 049 §2). The Originals reports come from the
- * SDK unchanged; the `originals-code/0.1` checks run on top of them and are
+ * SDK unchanged; the `originals-code/0.2` checks run on top of them and are
  * reported separately, never merged into one verdict (section 7). Nothing is
  * ever reported current: every Original here is unanchored (P7.10).
+ *
+ * In profile 0.2 the core decides what 0.1 decided here: the repo's signer
+ * set and threshold (P5.19–P5.23), each branch's pins into the repo
+ * (P5.24, P5.25), and every editor entry's inherited path grant and its scope
+ * (P5.24, P5.28), with revoked grants reported historically authorized only
+ * (P5.26). The code report restates those results per entry from the
+ * Originals report; it never recomputes them.
  */
 import { parseLog, type LogEntry } from "@originals/vh/log";
-import { signerOf, type EntryState, type OriginalsReport } from "@originals/vh/originals";
+import { signerOf, type AuthorSet, type EditorGrant, type EntryState, type HistoricalReason, type OriginalsReport } from "@originals/vh/originals";
 import { MemoryStore, OriginalsSDK, type ZipLimits } from "@originals/sdk/originals";
 import { readBundle, type BundleLimits, type BundleManifest } from "./bundle.js";
 import { canonicalHead, type CanonicalResult, type DelegateHead } from "./canonical.js";
-import { RELEASE_MEDIA_TYPE, REPO_MEDIA_TYPE, checkBranchMetadata, checkReleasesMetadata, checkRepoMetadata, decodeReleaseManifest, decodeRepoDocument, type ReleaseManifest, type RepoDocument } from "./documents.js";
+import { CODE_PROFILE, RELEASE_MEDIA_TYPE, REPO_MEDIA_TYPE, checkBranchMetadata, checkReleasesMetadata, checkRepoMetadata, decodeReleaseManifest, decodeRepoDocument, type PathGrant, type ReleaseManifest, type RepoDocument } from "./documents.js";
 import { StructuredError } from "@originals/vh";
 import { OriginalsError, soleAuthorDid } from "./errors.js";
-import { covers } from "./grants.js";
+import { pathGrantsOf } from "./grants.js";
 import { TREE_MEDIA_TYPE, diffTrees, gitCommitId, gitTreeIdOf, parseGitCommit, readTree, type ObjectSource } from "./objects.js";
 
 export interface CodeFailure {
@@ -35,24 +42,45 @@ export interface RepoVersion {
   versionId: string;
   index: number;
   document: RepoDocument;
+  /** The signer set at this version: the delegates and the threshold that changes the repo (P5.19, K5). */
+  authors: AuthorSet;
+  /** The repo's editor grants at this version, which every branch pinning it inherits (P5.24). */
+  editors: EditorGrant[];
+  /** The path grants among them (K7): each grant's DID and `paths` patterns. */
+  grants: PathGrant[];
 }
 
 export interface RepoCodeReport {
   original: string;
+  /** Always null in profile 0.2: the repo Original is a set Original (K5); see `authors`. */
   author: string | null;
+  /** The signer set at the checkpoint: the delegates and the threshold that changes the repo (P5.19, K5). */
+  authors: AuthorSet | null;
   history: CodeHistory;
   /** The repo document at each verified entry, oldest first. */
   versions: RepoVersion[];
   /** The repo document at the checkpoint. */
   document: RepoDocument | null;
+  /** The path grants at the checkpoint (K7). */
+  grants: PathGrant[];
 }
 
+/**
+ * An editor entry of a branch, as the Originals report judged it (K7,
+ * P5.24, P5.28): the grant that authorized it (in profile 0.2 always
+ * inherited from the repo at the entry's pin) and its scope check.
+ * `unchecked` when the Originals report holds no grant for the entry.
+ */
 export interface GrantCheck {
   versionId: string;
   signer: string;
-  status: "allowed" | "outside-grant" | "unchecked";
+  status: "allowed" | "unchecked";
+  /** The paths the entry touches, when the trees are held. */
   touched: number;
-  outside?: string[];
+  source?: "direct" | "inherited";
+  /** The repo version the inherited grant was read at (P5.24). */
+  pin?: string;
+  scope?: { type: string; status: "checked" | "not-required" };
 }
 
 export interface BranchCodeReport {
@@ -97,10 +125,16 @@ export interface BranchCodeReport {
      */
     base?: string | null;
   };
-  /** Entries by a signer other than the branch's author, checked against path grants (phase 3). */
+  /** Entries by a signer other than the branch's author: the grant the core found for each (K7, P5.24). */
   grants: GrantCheck[];
-  /** Entries allowed by the repo version they name but not by the latest one (P7.9 by analogy). */
-  historicallyAuthorizedOnly: Array<{ versionId: string; signer: string; reason: "path-grant-narrowed" }>;
+  /**
+   * Editor entries the Originals report labels historically authorized only
+   * (P5.26, P7.9): an inherited grant the repo's latest state no longer
+   * gives, a deactivated or forked repo, or a removed key. They stay valid.
+   */
+  historicallyAuthorizedOnly: Array<{ versionId: string; signer: string; reason: HistoricalReason; pin?: string }>;
+  /** The repo versions the entries pin, oldest first, distinct (P5.24). */
+  pins: string[];
   /**
    * The commits the verified entries name, oldest first, consecutive repeats
    * folded. For a later segment (K13), the whole branch's: every earlier
@@ -180,33 +214,39 @@ async function each(entries: readonly LogEntry[], f: (e: LogEntry, i: number) =>
   }
 }
 
-/** The repo Original's code checks (K5) over its verified entries. */
+/**
+ * The repo Original's code checks (K5) over its verified entries: a set
+ * Original with no parent, whose document's delegates are its signer set's
+ * members at every version (P5.19).
+ */
 export async function checkRepo(original: string, entries: readonly LogEntry[], resources: ObjectSource): Promise<RepoCodeReport> {
   const versions: RepoVersion[] = [];
-  const author = entries.length > 0 ? (soleAuthorDid(stateOf(entries[0])) ?? null) : null;
   const history = await historyOf(entries.length, () =>
     each(entries, async (e, i) => {
       const s = stateOf(e);
-      const sole = soleAuthorDid(s);
-      if (sole === undefined) throw new Stop("invalid", "SIGNER_SET_UNSUPPORTED", "code Originals are single-author until plan 050 §5, step 3");
       checkRepoMetadata(s.asset.metadata);
+      const authors = s.asset.authors;
+      if (!authors) throw new Stop("invalid", "REPO_NOT_SET", "a repo Original is a set Original whose members are its delegates (P5.19, K5)");
+      if (s.asset.parent) throw new Stop("invalid", "REPO_PARENT", "a repo Original names no parent (K5)");
       if (s.asset.resource.mediaType !== REPO_MEDIA_TYPE) throw new Stop("invalid", "REPO_RESOURCE", `the repo Original's resource is ${REPO_MEDIA_TYPE}`);
       const bytes = await resources(s.asset.resource.digest);
       if (!bytes) throw new Stop("incomplete", "REPO_DOCUMENT_MISSING", `the repo document ${s.asset.resource.digest} is not in the evidence`);
       const document = decodeRepoDocument(bytes);
-      // K5: the repo's author is a delegate at every version.
-      if (!document.delegates.includes(sole)) throw new Stop("invalid", "REPO_AUTHOR", "the repo Original's author must be one of its delegates");
-      versions.push({ versionId: e.versionId, index: i, document });
+      // K5: the document's delegates are exactly the signer set's members.
+      if (document.delegates.join("\n") !== authors.dids.join("\n")) throw new Stop("invalid", "REPO_DELEGATES_MISMATCH", "the repo document's delegates are exactly the repo Original's signer set (K5)");
+      const editors = [...(s.asset.editors ?? [])];
+      versions.push({ versionId: e.versionId, index: i, document, authors: { threshold: authors.threshold, dids: [...authors.dids] }, editors, grants: pathGrantsOf(editors) });
     }),
   );
-  return { original, author, history, versions, document: history.status === "valid" && versions.length > 0 ? versions[versions.length - 1].document : null };
+  const last = history.status === "valid" && versions.length > 0 ? versions[versions.length - 1] : null;
+  return { original, author: null, authors: last?.authors ?? null, history, versions, document: last?.document ?? null, grants: last?.grants ?? [] };
 }
 
 /** A branch Original's code checks (K4, K7) over its verified entries. */
 export async function checkBranch(
   original: string,
   entries: readonly LogEntry[],
-  context: { repo: string; versions: readonly RepoVersion[]; latest: RepoDocument | null; objects: Objects; gitMemo?: Map<string, string>; prior?: PriorSegment },
+  context: { repo: string; versions: readonly RepoVersion[]; latest: RepoDocument | null; objects: Objects; gitMemo?: Map<string, string>; prior?: PriorSegment; originals?: OriginalsReport | null },
 ): Promise<BranchCodeReport> {
   const author = entries.length > 0 ? (soleAuthorDid(stateOf(entries[0])) ?? null) : null;
   const byId = new Map(context.versions.map((v) => [v.versionId, v]));
@@ -224,6 +264,7 @@ export async function checkBranch(
     commitBinding: { status: "matches", checked: 0, unchecked: 0, claimed: 0, mismatches: [] },
     grants: [],
     historicallyAuthorizedOnly: [],
+    pins: [],
     chain: [],
     segment: { index: 0, previous: null, segments: [original] },
   };
@@ -292,16 +333,22 @@ export async function checkBranch(
   let ref: string | null = prior ? prior.report.ref : null;
   let previousRepoIndex = -1;
   if (prior) {
-    const v = byId.get(checkBranchMetadata(stateOf(prior.last).asset.metadata).repoVersion);
+    const pinned = stateOf(prior.last).asset.parent?.versionId;
+    const v = pinned ? byId.get(pinned) : undefined;
     previousRepoIndex = v ? v.index : -1;
   }
+  const coreGrants = new Map((context.originals?.grants ?? []).map((g) => [g.versionId, g]));
   const seenCommits = new Set<string>(report.chain.map((c) => c.commit));
   report.history = await historyOf(entries.length, () =>
     each(entries, async (e, i) => {
       const s = stateOf(e);
-      if (soleAuthorDid(s) === undefined) throw new Stop("invalid", "SIGNER_SET_UNSUPPORTED", "code Originals are single-author until plan 050 §5, step 3");
+      if (soleAuthorDid(s) === undefined) throw new Stop("invalid", "BRANCH_SET_AUTHOR", "a branch Original has one author; a signer set governs the repo (K4, K5)");
       const m = checkBranchMetadata(s.asset.metadata);
       if (m.repo !== context.repo) throw new Stop("invalid", "BRANCH_REPO", `the entry names repo ${m.repo}, not ${context.repo}`);
+      // K4: a branch is a child of the repo, pinning a repo version in every entry (P5.24).
+      if (s.asset.parent?.did !== context.repo) throw new Stop("invalid", "BRANCH_PARENT", `a branch Original is a child of the repo Original ${context.repo} (P5.24, K4)`);
+      // K7: grants live in the repo and are inherited; a branch grants nothing of its own.
+      if (s.asset.editors) throw new Stop("invalid", "BRANCH_EDITORS", "a branch Original has no editor grants of its own; path grants are in the repo (K7)");
       // K13: a later segment's genesis names the previous segment, which must verify and end at the named entry.
       if (m.previous && i > 0) throw new Stop("invalid", "SEGMENT_PREVIOUS_LATE", "only a segment's genesis names the previous segment (K13)");
       if (i === 0 && m.previous) {
@@ -317,10 +364,13 @@ export async function checkBranch(
       if (s.asset.resource.mediaType !== TREE_MEDIA_TYPE) throw new Stop("invalid", "BRANCH_RESOURCE", `a branch Original's resource is ${TREE_MEDIA_TYPE}`);
       const root = s.asset.resource.digest;
 
-      const version = byId.get(m.repoVersion);
-      if (!version) throw new Stop("incomplete", "REPO_VERSION_UNKNOWN", `repo version ${m.repoVersion} is not in the verified repo evidence`);
-      if (version.index < previousRepoIndex) throw new Stop("invalid", "REPO_VERSION_BACKWARDS", "repoVersion never goes backwards within a branch (as P5.8 for signer versions)");
+      const pin = s.asset.parent.versionId;
+      const version = byId.get(pin);
+      if (!version) throw new Stop("incomplete", "REPO_VERSION_UNKNOWN", `the pinned repo version ${pin} is not in the verified repo evidence`);
+      // Within a log the core refuses a pin going backwards (P5.24); across a segment boundary this does (K13).
+      if (version.index < previousRepoIndex) throw new Stop("invalid", "PIN_BACKWARDS", "a branch's pin never goes backwards, across its segments too (P5.24, K13)");
       previousRepoIndex = version.index;
+      if (report.pins.at(-1) !== pin) report.pins.push(pin);
 
       // At a later segment's genesis, the parent state is the previous segment's last entry.
       const previous = i > 0 ? stateOf(entries[i - 1]) : prior ? stateOf(prior.last) : undefined;
@@ -352,39 +402,31 @@ export async function checkBranch(
         throw new Stop("invalid", "GIT_TREE_MISMATCH", `the entry claims git tree ${m.tree}; its objects give ${computed}`);
       } else report.gitBinding.checked++;
 
-      // Path grants: an entry by anyone but the branch's author (phase 3, K7).
+      // An entry by anyone but the branch's author: the grant the core found (K7, P5.24, P5.28).
       const signer = signerOf(s).ref.did;
       if (signer !== author) {
-        const grant = version.document.grants.find((g) => g.did === signer);
-        let touched: string[];
+        let touched = 0;
         try {
-          touched = await diffTrees(previous ? previous.asset.resource.digest : null, root, get);
+          touched = (await diffTrees(previous ? previous.asset.resource.digest : null, root, get)).length;
         } catch (err) {
-          if (err instanceof OriginalsError && err.code === "OBJECT_MISSING") {
-            report.grants.push({ versionId: e.versionId, signer, status: "unchecked", touched: 0 });
-            throw new Stop("incomplete", "GRANT_UNCHECKED", "a tree the path-grant check needs is missing");
-          }
-          throw err;
+          if (!(err instanceof OriginalsError && err.code === "OBJECT_MISSING")) throw err;
         }
-        if (!grant && touched.length > 0) {
-          report.grants.push({ versionId: e.versionId, signer, status: "outside-grant", touched: touched.length, outside: touched });
-          throw new Stop("invalid", "NO_PATH_GRANT", `${signer} has no path grant in repo version ${m.repoVersion}`);
-        }
-        const outside = grant ? covers(grant.paths, touched) : [];
-        if (outside.length > 0) {
-          report.grants.push({ versionId: e.versionId, signer, status: "outside-grant", touched: touched.length, outside });
-          throw new Stop("invalid", "OUTSIDE_PATH_GRANT", `${signer} changed ${outside.length} path(s) outside its grant: ${outside.slice(0, 5).join(", ")}`);
-        }
-        report.grants.push({ versionId: e.versionId, signer, status: "allowed", touched: touched.length });
-        const latestGrant = context.latest?.grants.find((g) => g.did === signer);
-        if (touched.length > 0 && (!latestGrant || covers(latestGrant.paths, touched).length > 0)) {
-          report.historicallyAuthorizedOnly.push({ versionId: e.versionId, signer, reason: "path-grant-narrowed" });
-        }
+        const g = coreGrants.get(e.versionId);
+        report.grants.push(
+          g
+            ? { versionId: e.versionId, signer, status: "allowed", touched, source: g.source, ...(g.parent ? { pin: g.parent.versionId } : {}), ...(g.scope ? { scope: g.scope } : {}) }
+            : { versionId: e.versionId, signer, status: "unchecked", touched },
+        );
       }
     }),
   );
   const finalRef = ref;
   report.ref = finalRef;
+  // P5.26: the Originals report's labels, restated per editor entry.
+  for (const h of context.originals?.historicallyAuthorizedOnly ?? []) {
+    if (h.role !== "editor" || !entries.some((e) => e.versionId === h.versionId)) continue;
+    report.historicallyAuthorizedOnly.push({ versionId: h.versionId, signer: h.did, reason: h.reason, ...(h.parent ? { pin: h.parent.versionId } : {}) });
+  }
   if (report.content.failures.length > 0) report.content.status = "digest-failure";
   else if (report.content.missing.length > 0) report.content.status = "partial";
   report.gitBinding.status = report.gitBinding.mismatches.length > 0 ? "mismatch" : report.gitBinding.unchecked > 0 ? "unchecked" : "matches";
@@ -412,7 +454,7 @@ export interface OriginalResult {
 }
 
 export interface RepositoryReport {
-  profile: "originals-code/0.1";
+  profile: typeof CODE_PROFILE;
   manifest: BundleManifest;
   repo: OriginalResult & { code: RepoCodeReport | null };
   branches: Array<OriginalResult & { code: BranchCodeReport | null }>;
@@ -472,7 +514,10 @@ export interface ReleaseCheck {
 
 export interface ReleasesCodeReport {
   original: string;
+  /** Always null in profile 0.2: the release Original is a set Original (K17); see `authors`. */
   author: string | null;
+  /** Its signer set at the checkpoint, the repo's at the pin (K17). */
+  authors: AuthorSet | null;
   /** valid · invalid (a malformed release, a repeated tag, a commit not in the named chain) · incomplete. */
   history: CodeHistory;
   /** Bound both ways: the repo document names it, and it names the repo. */
@@ -483,19 +528,21 @@ export interface ReleasesCodeReport {
 type ReleasesReport = OriginalResult & { code: ReleasesCodeReport | null };
 
 /**
- * The release Original's code checks (K15) over its verified entries: each
- * entry names one release; its author is the repo's author; tags do not
- * repeat; each release's commit is in the named branch's chain at the named
- * entry. A branch the evidence lacks leaves the release unchecked (incomplete,
- * never a pass).
+ * The release Original's code checks (K15, K17) over its verified entries:
+ * each entry names one release; the release Original is a child of the repo
+ * whose signer set is, at every entry, the repo's signer set at the entry's
+ * pin; tags do not repeat; each release's commit is in the named branch's
+ * chain at the named entry. A branch the evidence lacks leaves the release
+ * unchecked (incomplete, never a pass).
  */
 export async function checkReleases(
   original: string,
   entries: readonly LogEntry[],
-  context: { repo: string; repoAuthor: string | null; resources: ObjectSource; branches: RepositoryReport["branches"]; codes: ReadonlyMap<string, BranchCodeReport | null> },
+  context: { repo: string; versions: readonly RepoVersion[]; resources: ObjectSource; branches: RepositoryReport["branches"]; codes: ReadonlyMap<string, BranchCodeReport | null> },
 ): Promise<ReleasesCodeReport> {
-  const author = entries.length ? (soleAuthorDid(stateOf(entries[0])) ?? null) : null;
-  const out: ReleasesCodeReport = { original, author, history: { status: "valid", entries: entries.length }, binding: "confirmed", releases: [] };
+  const last = entries.length ? stateOf(entries[entries.length - 1]).asset.authors : undefined;
+  const out: ReleasesCodeReport = { original, author: null, authors: last ? { threshold: last.threshold, dids: [...last.dids] } : null, history: { status: "valid", entries: entries.length }, binding: "confirmed", releases: [] };
+  const byId = new Map(context.versions.map((v) => [v.versionId, v]));
   const tags = new Set<string>();
   let missing = false;
   out.history = await historyOf(entries.length, () =>
@@ -506,7 +553,15 @@ export async function checkReleases(
         out.binding = "mismatch";
         throw new Stop("invalid", "RELEASES_REPO", `the release Original names repo ${repo}, not ${context.repo}`);
       }
-      if (i === 0 && author !== context.repoAuthor) throw new Stop("invalid", "RELEASES_AUTHOR", "the release Original's author is the repo's author (K15)");
+      // K17: a set Original, a child of the repo, signed under the repo's signer set at its pin.
+      const set = s.asset.authors;
+      if (!set) throw new Stop("invalid", "RELEASES_NOT_SET", "the release Original is a set Original with the repo's members (K17)");
+      if (s.asset.parent?.did !== context.repo) throw new Stop("invalid", "RELEASES_PARENT", "the release Original is a child of the repo Original (K17)");
+      const v = byId.get(s.asset.parent.versionId);
+      if (!v) throw new Stop("incomplete", "REPO_VERSION_UNKNOWN", `the pinned repo version ${s.asset.parent.versionId} is not in the verified repo evidence`);
+      if (set.threshold !== v.authors.threshold || set.dids.join("\n") !== v.authors.dids.join("\n")) {
+        throw new Stop("invalid", "RELEASES_AUTHORS", `the release Original's signer set is not the repo's at ${v.versionId} (K17)`);
+      }
       if (s.asset.resource.mediaType !== RELEASE_MEDIA_TYPE) throw new Stop("invalid", "RELEASES_RESOURCE", `a release Original's resource is ${RELEASE_MEDIA_TYPE}`);
       const bytes = await context.resources(s.asset.resource.digest);
       if (!bytes) throw new Stop("incomplete", "RELEASE_MANIFEST_MISSING", `release manifest ${s.asset.resource.digest} is not in the evidence`);
@@ -688,7 +743,7 @@ export async function openRepository(bundle: Uint8Array, options: VerifyReposito
         else prior = { status: "valid", report: pc, last };
       }
     }
-    const code = await checkBranch(did, entries, { repo: contents.manifest.repo, versions: repoCode.versions, latest: repoCode.document, objects, gitMemo, ...(prior ? { prior } : {}) });
+    const code = await checkBranch(did, entries, { repo: contents.manifest.repo, versions: repoCode.versions, latest: repoCode.document, objects, gitMemo, originals: results.get(did)?.report ?? null, ...(prior ? { prior } : {}) });
     codes.set(did, code);
     return code;
   };
@@ -748,12 +803,11 @@ export async function openRepository(bundle: Uint8Array, options: VerifyReposito
     const log = await logOf(releasesDid);
     const entries = r.report?.checkpoint && log ? entriesThrough(log, r.report.checkpoint) : [];
     if (entries.length) verified.set(releasesDid, entries);
-    const repoAuthor = repoCode?.author ?? null;
-    releases = { ...r, code: entries.length && repoCode ? await checkReleases(releasesDid, entries, { repo: contents.manifest.repo, repoAuthor, resources, branches, codes }) : null };
+    releases = { ...r, code: entries.length && repoCode ? await checkReleases(releasesDid, entries, { repo: contents.manifest.repo, versions: repoCode.versions, resources, branches, codes }) : null };
   }
 
   const report: RepositoryReport = {
-    profile: "originals-code/0.1",
+    profile: CODE_PROFILE,
     manifest: contents.manifest,
     repo: { ...repoResult, code: repoCode },
     branches,

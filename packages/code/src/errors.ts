@@ -11,17 +11,17 @@ export function codeError(category: ErrorCategory, code: string, message: string
 }
 
 /**
- * The author DID of a code Original's entry (K5), or undefined for a set
- * Original's (plan 050 W1). Code Originals are single-author until the code
- * profile moves onto signer sets (plan 050 §5, step 3).
+ * The author DID of an entry naming one author, or undefined for a set
+ * Original's entry (P5.19). In profile 0.2 the repo and release Originals
+ * are set Originals and each branch Original has one author (K5, K15, K17).
  */
 export function soleAuthorDid(state: { author: { did: string } | Array<{ did: string }> }): string | undefined {
   return Array.isArray(state.author) ? undefined : state.author.did;
 }
 
-/** `soleAuthorDid`, refusing a set Original as a profile this package does not support yet (plan 050 §5, step 3). */
+/** `soleAuthorDid`, refusing a set Original's entry where one author is required: a branch Original is one delegate's (K4). */
 export function requireSoleAuthor(state: { author: { did: string } | Array<{ did: string }> }): string {
   const did = soleAuthorDid(state);
-  if (did === undefined) codeError("unsupported-profile", "SIGNER_SET_UNSUPPORTED", "code Originals are single-author; signer sets reach the code profile in plan 050 §5, step 3");
+  if (did === undefined) codeError("invalid-evidence", "BRANCH_SET_AUTHOR", "a branch Original has one author, its delegate or contributor; a signer set governs the repo and release Originals (K4)");
   return did;
 }

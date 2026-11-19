@@ -114,8 +114,8 @@ export interface DiskWorkspace {
   /** Contributor branches (their newest segments) this workspace carries in its bundles (K14, O7). */
   contributions: string[];
   setContributions(dids: readonly string[]): Promise<void>;
-  /** Keep a signer's public identity, so later runs verify its entries. */
-  rememberIdentity(identity: LocalIdentity): Promise<void>;
+  /** Keep a signer's public identity (its DID and log), so later runs verify its entries and name it as a signer. */
+  rememberIdentity(identity: Pick<LocalIdentity, "did" | "log">): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -164,7 +164,7 @@ export async function openWorkspace(root: string, options: { clock?: () => numbe
       disk.contributions = [...new Set(dids)].sort();
       await save();
     },
-    async rememberIdentity(identity: LocalIdentity) {
+    async rememberIdentity(identity: Pick<LocalIdentity, "did" | "log">) {
       const pub = publicIdentity(identity);
       workspace.addIdentity(pub);
       await writeFile(join(root, "identities", idFile(pub.did)), `${JSON.stringify(pub)}\n`);

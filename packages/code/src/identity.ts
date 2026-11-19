@@ -92,7 +92,16 @@ export function parseIdentity(text: string): LocalIdentity {
   return { did: v.did, log: v.log, updateSecret: fromHex(v.updateSecret), signingSecret: fromHex(v.signingSecret) };
 }
 
+/** Read a public identity file (`{ did, log }`), as `identity public` writes it. */
+export function parsePublicIdentity(text: string): Pick<LocalIdentity, "did" | "log"> {
+  const v = parseJson(text);
+  if (!isJsonObject(v) || typeof v.did !== "string" || typeof v.log !== "string" || !v.did.startsWith("did:")) codeError("invalid-evidence", "IDENTITY_FILE", "a public identity is { did, log }");
+  const first = (parseLog(v.log) as unknown as LogEntry[])[0];
+  if (!first || first.state.id !== v.did) codeError("invalid-evidence", "IDENTITY_FILE", "the public identity's log is not that DID's");
+  return { did: v.did, log: v.log };
+}
+
 /** The identity's public part only: its DID and log. */
-export function publicIdentity(identity: LocalIdentity): Pick<LocalIdentity, "did" | "log"> {
+export function publicIdentity(identity: Pick<LocalIdentity, "did" | "log">): Pick<LocalIdentity, "did" | "log"> {
   return { did: identity.did, log: identity.log };
 }

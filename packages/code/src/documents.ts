@@ -1,17 +1,24 @@
 /**
- * The repo document and branch metadata of `originals-code/0.1` (plan 049
- * §1.2, §1.3). Every member name and rule here is PROVISIONAL (K4, K5): the
- * code profile is layered on `originals:1.0` and changes none of its rules.
+ * The repo document and branch metadata of `originals-code/0.2` (plan 049
+ * §1.2, §1.3, revised for plan 050 §5 step 3). Every member name and rule here
+ * is PROVISIONAL (K4, K5): the code profile is layered on `originals:1.0` and
+ * changes none of its rules. Profile 0.1 is not read: nothing was published
+ * under it, so there is no migration (as plan 011 dropped earlier formats).
+ *
+ * In 0.2 the core carries what 0.1 kept in the document: the repo Original is
+ * a set Original whose `authors` are the delegates (P5.19–P5.23), path grants
+ * are `paths`-scoped grants in its `editors` (P5.28, P5.29), and each branch
+ * Original is a child of the repo that pins a repo version in every entry
+ * (P5.24–P5.27), replacing `metadata.code.repoVersion`.
  */
 import { canonicalize, isJsonObject, parseJson, type JsonObject } from "@originals/vh/json";
 import { checkDigest } from "@originals/vh/originals";
-import { checkPattern } from "./grants.js";
 import { codeError } from "./errors.js";
 
 /** PROVISIONAL (K1): the code profile, layered on `originals:1.0`. */
-export const CODE_PROFILE = "originals-code/0.1";
+export const CODE_PROFILE = "originals-code/0.2";
 /** PROVISIONAL (K5): the repo document format. */
-export const REPO_FORMAT = "originals-code-repo/0.1";
+export const REPO_FORMAT = "originals-code-repo/0.2";
 /** PROVISIONAL (K3): the repo document's media type, the repo Original's resource. */
 export const REPO_MEDIA_TYPE = "application/vnd.originals.code-repo+json";
 
@@ -22,19 +29,29 @@ export interface RefRule {
   branches: Record<string, string>;
 }
 
+/**
+ * A path grant (K7, revised): an editor grant in the repo Original's
+ * `editors` with a `paths` scope (P5.28, P14.23), inherited by every branch
+ * (P5.24). Derived from the repo state; not a member of the repo document.
+ */
 export interface PathGrant {
   did: string;
   paths: string[];
 }
 
 export interface RepoDocument {
+  /**
+   * The delegates: exactly the repo Original's signer set, `authors.dids`
+   * (P5.19), sorted. Kept in the document so a reader of the document alone
+   * sees them; the verifier refuses a document that differs from the set
+   * (`REPO_DELEGATES_MISMATCH`, K5).
+   */
   delegates: string[];
   refs: Record<string, RefRule>;
-  grants: PathGrant[];
   /**
-   * PROVISIONAL (K15): the release Original's did:vh, once the repo has one.
-   * Its entries each name a release; its author is the repo's author for now
-   * (plan 050 W1 makes it the delegate set later).
+   * PROVISIONAL (K15): the release Original's did:vh, once the repo has one:
+   * a set Original with the repo's members and threshold, and a child of the
+   * repo (K17).
    */
   releases?: string;
 }
@@ -52,8 +69,6 @@ export interface BranchMetadata {
   commit: string;
   /** The git tree id of the commit, recomputable from the objects (`gitBinding`). */
   tree: string;
-  /** The repo Original's version this entry was made under; path grants are judged against it. */
-  repoVersion: string;
   /**
    * PROVISIONAL (K12, plan 049 O3): the digest of the raw git commit object,
    * byte for byte, held as a content-addressed object. Absent when the commit
@@ -100,9 +115,10 @@ export function checkRef(ref: unknown): string {
 }
 
 function checkRepo(value: unknown): RepoDocument {
-  const members = ["delegates", "format", "grants", "refs"];
+  if (isJsonObject(value) && value.format !== REPO_FORMAT) codeError("unsupported-profile", "REPO_FORMAT", `unsupported repo document format ${JSON.stringify(value.format)}; only ${REPO_FORMAT} is read`);
+  const members = ["delegates", "format", "refs"];
   if (isJsonObject(value) && "releases" in value) members.push("releases");
-  if (!exactly(value, members)) codeError("invalid-evidence", "REPO_MEMBERS", "a repo document is exactly { format, delegates, refs, grants, releases? }");
+  if (!exactly(value, members)) codeError("invalid-evidence", "REPO_MEMBERS", "a repo document is exactly { format, delegates, refs, releases? }");
   if (value.format !== REPO_FORMAT) codeError("unsupported-profile", "REPO_FORMAT", `unsupported repo document format ${JSON.stringify(value.format)}`);
 
   const delegates = value.delegates;
@@ -133,25 +149,14 @@ function checkRepo(value: unknown): RepoDocument {
     refs[ref] = { threshold: t, branches };
   }
 
-  if (!Array.isArray(value.grants)) codeError("invalid-evidence", "REPO_GRANTS", "grants must be an array");
-  const grants: PathGrant[] = [];
-  for (const g of value.grants) {
-    if (!exactly(g, ["did", "paths"]) || typeof g.did !== "string" || !DID.test(g.did)) codeError("invalid-evidence", "REPO_GRANTS", "a grant is exactly { did, paths }");
-    const paths = g.paths;
-    if (!Array.isArray(paths) || paths.length === 0 || !paths.every((p) => typeof p === "string")) codeError("invalid-evidence", "REPO_GRANTS", `${g.did}: paths are one or more patterns`);
-    for (const p of paths) checkPattern(p);
-    if (!sorted(paths)) codeError("invalid-evidence", "REPO_GRANTS", `${g.did}: paths are unique and sorted`);
-    grants.push({ did: g.did, paths: paths });
-  }
-  if (!sorted(grants.map((g) => g.did))) codeError("invalid-evidence", "REPO_GRANTS", "grants name unique DIDs, sorted by DID");
   if ("releases" in value && (typeof value.releases !== "string" || !BRANCH_DID.test(value.releases) || seenBranches.has(value.releases))) {
     codeError("invalid-evidence", "REPO_RELEASES", "releases is the release Original's did:vh, not a branch (K15)");
   }
-  return { delegates: delegates as string[], refs, grants, ...(typeof value.releases === "string" ? { releases: value.releases } : {}) };
+  return { delegates: delegates as string[], refs, ...(typeof value.releases === "string" ? { releases: value.releases } : {}) };
 }
 
 const jcs = (doc: RepoDocument) =>
-  canonicalize({ format: REPO_FORMAT, delegates: doc.delegates, refs: doc.refs, grants: doc.grants, ...(doc.releases !== undefined ? { releases: doc.releases } : {}) } as unknown as JsonObject);
+  canonicalize({ format: REPO_FORMAT, delegates: doc.delegates, refs: doc.refs, ...(doc.releases !== undefined ? { releases: doc.releases } : {}) } as unknown as JsonObject);
 
 /** The canonical bytes of a repo document (JCS), after checking it. */
 export function encodeRepoDocument(doc: RepoDocument): Uint8Array {
@@ -180,17 +185,16 @@ export function checkBranchMetadata(metadata: unknown): BranchMetadata {
   if (!exactly(metadata, ["code"])) badMetadata("a branch entry's metadata is exactly { code }");
   const code = metadata.code;
   if (isJsonObject(code) && code.profile !== CODE_PROFILE) codeError("unsupported-profile", "CODE_PROFILE", `unsupported code profile ${JSON.stringify(code.profile)}`);
-  const members = ["commit", "kind", "profile", "ref", "repo", "repoVersion", "tree"];
+  const members = ["commit", "kind", "profile", "ref", "repo", "tree"];
   if (isJsonObject(code) && "commitObject" in code) members.push("commitObject");
   if (isJsonObject(code) && "previous" in code) members.push("previous");
   if (!exactly(code, members) || code.kind !== "branch") {
-    badMetadata("metadata.code is exactly { profile, kind: \"branch\", repo, ref, commit, tree, repoVersion, commitObject?, previous? }");
+    badMetadata("metadata.code is exactly { profile, kind: \"branch\", repo, ref, commit, tree, commitObject?, previous? }");
   }
   if (typeof code.repo !== "string" || !BRANCH_DID.test(code.repo)) badMetadata("metadata.code.repo is the repo Original's did:vh");
   checkRef(code.ref);
   if (typeof code.commit !== "string" || !HEX40.test(code.commit)) badMetadata("metadata.code.commit is a 40-hex git commit id");
   if (typeof code.tree !== "string" || !HEX40.test(code.tree)) badMetadata("metadata.code.tree is a 40-hex git tree id");
-  if (typeof code.repoVersion !== "string" || !VERSION_ID.test(code.repoVersion)) badMetadata("metadata.code.repoVersion is a versionId");
   if ("commitObject" in code) {
     try {
       checkDigest(code.commitObject, "metadata.code.commitObject");
@@ -229,7 +233,6 @@ export function branchMetadata(m: Omit<BranchMetadata, "profile" | "kind">): Jso
       ref: m.ref,
       commit: m.commit,
       tree: m.tree,
-      repoVersion: m.repoVersion,
       ...(m.commitObject !== undefined ? { commitObject: m.commitObject } : {}),
       ...(m.previous !== undefined ? { previous: { did: m.previous.did, versionId: m.previous.versionId } } : {}),
     },

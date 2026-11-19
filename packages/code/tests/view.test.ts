@@ -140,3 +140,40 @@ describe("renderDiff and markdown", () => {
     expect(html).toContain("<pre><code>&lt;tag&gt;</code></pre>");
   });
 });
+
+describe("CODE-18 the viewer shows profile 0.2's governance (K5, K7, P5.24)", () => {
+  test("the signer set and threshold, the repo's path grants, each entry's pin and an inherited grant", async () => {
+    const alice = await identity(1);
+    const bob = await identity(2);
+    const carol = await identity(3);
+    const ws = workspace();
+    ws.addIdentity(carol);
+    const up = new FixtureRepo();
+    cleanup.push(() => up.remove());
+    up.commit({ "packages/vh/a.ts": "1" });
+    const s = new GitSource(up.dir);
+    cleanup.push(() => s.close());
+    const repo = await ws.initRepo({ name: "gov", identity: alice, delegates: [bob], threshold: 2 });
+    const m = await ws.mirror({ repo, ref: MAIN, identity: alice, source: s });
+    await ws.listBranch(repo, [alice, bob], { ref: MAIN, delegate: alice.did, branch: m.branch });
+    const grantVersion = await ws.grantPaths(repo, [alice, bob], carol.did, ["packages/vh/**"]);
+    up.commit({ "packages/vh/a.ts": "2" });
+    const r = await ws.mirror({ repo, ref: MAIN, identity: carol, source: s, branch: m.branch });
+    const view = createRepositoryView(await openRepository(await ws.package(repo), { now: NOW + 3_600_000 }));
+    const html = async (url: string) => {
+      const res = await view.handle(url);
+      return typeof res.body === "string" ? res.body : new TextDecoder().decode(res.body);
+    };
+    const home = await html("/");
+    expect(home).toContain("2 of 2 sign each change to the repo");
+    expect(home).toContain("<code>packages/vh/**</code>");
+    expect(home).toContain("every branch inherits them");
+    expect(await html("/b/0/commits")).toContain("inherited path grant");
+    const commit = await html(`/b/0/v/${encodeURIComponent(r.head.versionId)}`);
+    expect(commit).toContain("Pins repo version");
+    expect(commit).toContain(`inherited grant at repo version <code>${grantVersion}</code>, paths scope checked`);
+    const verify = await html("/verify");
+    expect(verify).toContain("2 of 2 delegates sign each repo change");
+    expect(verify).toContain("parent evidence");
+  });
+});

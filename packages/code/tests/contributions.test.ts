@@ -29,7 +29,7 @@ function repoWith(from?: FixtureRepo) {
 }
 
 /** Alice (the delegate) mirrors main; Bob takes her bundle and contributes one commit on top. */
-async function scenario(options: { document?: (alice: string, dave: string) => object } = {}) {
+async function scenario(options: { withDave?: boolean } = {}) {
   const alice = await identity(1);
   const bob = await identity(2);
   const dave = await identity(4);
@@ -37,7 +37,7 @@ async function scenario(options: { document?: (alice: string, dave: string) => o
   const c1 = upstream.commit({ "a.txt": "1\n" });
   const c2 = upstream.commit({ "a.txt": "2\n" });
   const aliceWs = workspace();
-  const repoDid = await aliceWs.initRepo({ name: "contrib", identity: alice, ...(options.document ? { document: options.document(alice.did, dave.did) } : {}) });
+  const repoDid = await aliceWs.initRepo({ name: "contrib", identity: alice, ...(options.withDave ? { delegates: [dave] } : {}) });
   const a = await aliceWs.mirror({ repo: repoDid, ref: MAIN, identity: alice, source: source(upstream) });
 
   const bobWs = workspace();
@@ -70,7 +70,7 @@ describe("CODE-23 a contributor's own branch", () => {
 
   test("a contribution does not make up a missing quorum", async () => {
     // Two delegates, threshold 2; only Alice has a branch. Bob's contribution holds the same commits and more.
-    const { alice, bob, aliceWs, repoDid, fork, commits } = await scenario({ document: (a, d) => ({ delegates: [a, d].sort(), refs: {}, grants: [] }) });
+    const { alice, bob, aliceWs, repoDid, fork, commits } = await scenario({ withDave: true });
     await aliceWs.updateRepo(repoDid, alice, (doc) => ({ ...doc, refs: { [MAIN]: { ...doc.refs[MAIN], threshold: 2 } } }));
     const bobWs = workspace();
     await bobWs.importBundle(await aliceWs.package(repoDid));
@@ -112,7 +112,7 @@ describe("CODE-24 contributions stay outside the vote", () => {
     const bundle = await aliceWs.package(repoDid);
     const bad = bundle.slice();
     // Corrupt the repo document bytes inside its package: the repo Original no longer verifies.
-    const at = new TextDecoder("latin1").decode(bad).indexOf("originals-code-repo/0.1");
+    const at = new TextDecoder("latin1").decode(bad).indexOf("originals-code-repo/0.2");
     bad[at] = "X".charCodeAt(0);
     await expect(ws.importBundle(bad)).rejects.toThrow();
   });

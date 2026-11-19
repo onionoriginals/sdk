@@ -146,8 +146,8 @@ describe("CODE-22 segment continuity failures", () => {
     const { repo, commits } = fixture(2);
     const repoDid = await ws.initRepo({ name: "seg", identity: alice });
     const r = await ws.mirror({ repo: repoDid, ref: MAIN, identity: alice, source: source(repo) });
-    await ws.updateRepo(repoDid, alice, (d) => ({ ...d, grants: [{ did: bob.did, paths: ["**"] }] }));
-    await ws.grantEditors(r.branch, alice, [{ did: bob.did, name: false, metadata: true, resource: true }]);
+    ws.addIdentity(bob);
+    await ws.grantPaths(repoDid, alice, bob.did, ["**"]);
     commits.push(repo.commit({ "b.txt": "b" }));
     await expect(ws.mirror({ repo: repoDid, ref: MAIN, identity: bob, source: source(repo), branch: r.branch })).rejects.toMatchObject({ code: "SEGMENT_AUTHOR_ONLY" });
   });

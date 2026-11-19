@@ -29,7 +29,7 @@ function source(repo: FixtureRepo) {
   return s;
 }
 
-/** Alice (repo author) and Bob are delegates of main; each mirrors their own clone. */
+/** Alice and Bob are the repo's delegates (its signer set, threshold 1); each mirrors their own clone and lists it. */
 async function twoDelegates(threshold: number) {
   const alice = await identity(1);
   const bob = await identity(2);
@@ -39,12 +39,13 @@ async function twoDelegates(threshold: number) {
   const c1 = upstream.commit({ "a.txt": "1" });
   const c2 = upstream.commit({ "a.txt": "2" });
   const bobRepo = fixture(upstream);
-  const repo = await ws.initRepo({ name: "two", identity: alice, document: { delegates: [alice.did, bob.did].sort() } });
+  // Both sign the repo's genesis (P5.19); either changes the repo alone at threshold 1 (P5.20).
+  const repo = await ws.initRepo({ name: "two", identity: alice, delegates: [bob] });
   const a = await ws.mirror({ repo, ref: MAIN, identity: alice, source: source(upstream) });
   const b = await ws.mirror({ repo, ref: MAIN, identity: bob, source: source(bobRepo) });
   expect(a.needsListing).toBeUndefined();
-  expect(b.needsListing).toBe(true); // only the repo's author changes the repo document (P5.2; phase 4)
-  await ws.listBranch(repo, alice, { ref: MAIN, delegate: bob.did, branch: b.branch, threshold });
+  expect(b.needsListing).toBeUndefined(); // a delegate lists its own branch when it alone meets the repo's threshold
+  if (threshold !== 1) await ws.listBranch(repo, alice, { ref: MAIN, delegate: bob.did, branch: b.branch, threshold });
   return { alice, bob, ws, upstream, bobRepo, repo, aliceBranch: a.branch, bobBranch: b.branch, c1, c2 };
 }
 
@@ -123,12 +124,13 @@ describe("CODE-11 a fork inside one delegate's branch", () => {
     const alt = other.commit({ "a.txt": "alternative" });
     const s = source(other);
     const converted = await s.convert(alt, t.ws.objects);
-    const { versionId: repoVersion } = await t.ws.repoDocument(t.repo);
-    const fork = [log[0], ...(await appendCommits({ log: [log[0]], commits: [converted], repo: t.repo, ref: MAIN, repoVersion, signer: { role: "author", ref: identityRef(t.bob), sign: identitySigner(t.bob) }, clock: () => LATER - 1000 }))];
+    const { versionId: pin } = await t.ws.repoDocument(t.repo);
+    const fork = [log[0], ...(await appendCommits({ log: [log[0]], commits: [converted], repo: t.repo, ref: MAIN, pin, signer: { role: "author", ref: identityRef(t.bob), sign: identitySigner(t.bob) }, clock: () => LATER - 1000 }))];
     const forkZip = writeEvidence({
       manifest: { format: "originals-evidence/0.1", profile: "originals:1.0", original: t.bobBranch, checkpoint: fork[1].versionId, head: fork[1].versionId, completeness: "complete", missing: [] },
       log: serializeLog(fork),
-      authors: [identityEvidence(t.bob)],
+      authors: [identityEvidence(t.bob), identityEvidence(t.alice)],
+      parents: [{ did: t.repo, log: (await t.ws.originals.get(t.repo))!.log }],
       bytes: Object.fromEntries(await Promise.all(fork.map(async (e) => {
         const d = (e.state as { asset: { resource: { digest: string } } }).asset.resource.digest;
         return [d, (await t.ws.objects.get(d)) ?? (await t.ws.sdk.resourceBytes(d))!] as const;
@@ -182,20 +184,24 @@ describe("CODE-09 binding both ways", () => {
     expect(report.canonical[0]).toMatchObject({ status: "no-quorum", delegates: [{ status: "invalid" }] });
   });
 
-  test("the repo author must stay a delegate: the writer refuses, the verifier rejects", async () => {
+  test("the document's delegates are the signer set: a change of one is a change of the other, and a mismatch is rejected (K5)", async () => {
     const t = await twoDelegates(1);
-    await expect(t.ws.updateRepo(t.repo, t.alice, (doc) => ({ ...doc, delegates: [t.bob.did], refs: {} }))).rejects.toMatchObject({ code: "REPO_AUTHOR" });
-    // A writer that skips the check: still a valid Original, refused by the code profile.
+    // The writer moves both: Alice leaves, with the threshold of the set before (P5.20).
+    await t.ws.updateRepo(t.repo, t.alice, (doc) => ({ ...doc, delegates: [t.bob.did], refs: { [MAIN]: { threshold: 1, branches: { [t.bob.did]: t.bobBranch } } } }));
+    const left = await verifyRepository(await t.ws.package(t.repo), { now: LATER });
+    expect(left.repo.code?.history.status).toBe("valid");
+    expect(left.repo.code?.authors).toEqual({ threshold: 1, dids: [t.bob.did] });
+    // A writer that skips the rule: a valid Original whose document names delegates the set does not hold.
     const { versionId } = await t.ws.repoDocument(t.repo);
     await t.ws.sdk.edit(t.repo, {
       parent: versionId,
-      resource: { bytes: encodeRepoDocument({ delegates: [t.bob.did], refs: {}, grants: [] }), mediaType: REPO_MEDIA_TYPE },
-      author: identityRef(t.alice),
-      signer: keySigner({ keyType: "Ed25519", secretKey: t.alice.signingSecret, verificationMethod: identityRef(t.alice).verificationMethod }),
+      resource: { bytes: encodeRepoDocument({ delegates: [t.alice.did, t.bob.did].sort(), refs: {} }), mediaType: REPO_MEDIA_TYPE },
+      author: [identityRef(t.bob)],
+      signers: [keySigner({ keyType: "Ed25519", secretKey: t.bob.signingSecret, verificationMethod: identityRef(t.bob).verificationMethod })],
     });
     const r = await verifyRepository(await t.ws.package(t.repo), { now: LATER });
     expect(r.repo.report?.validAsOf).not.toBeNull();
-    expect(r.repo.code?.history).toMatchObject({ status: "invalid", failure: { code: "REPO_AUTHOR" } });
+    expect(r.repo.code?.history).toMatchObject({ status: "invalid", failure: { code: "REPO_DELEGATES_MISMATCH" } });
     expect(r.canonicalStatus).toBe("invalid");
     expect(r.canonical).toEqual([]);
   });
