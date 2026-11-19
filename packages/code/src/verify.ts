@@ -9,7 +9,7 @@ import { signerOf, type EntryState, type OriginalsReport } from "@originals/vh/o
 import { MemoryStore, OriginalsSDK, type ZipLimits } from "@originals/sdk/originals";
 import { readBundle, type BundleLimits, type BundleManifest } from "./bundle.js";
 import { canonicalHead, type CanonicalResult, type DelegateHead } from "./canonical.js";
-import { REPO_MEDIA_TYPE, checkBranchMetadata, checkRepoMetadata, decodeRepoDocument, type RepoDocument } from "./documents.js";
+import { RELEASE_MEDIA_TYPE, REPO_MEDIA_TYPE, checkBranchMetadata, checkReleasesMetadata, checkRepoMetadata, decodeReleaseManifest, decodeRepoDocument, type ReleaseManifest, type RepoDocument } from "./documents.js";
 import { StructuredError } from "@originals/vh";
 import { OriginalsError } from "./errors.js";
 import { covers } from "./grants.js";
@@ -106,7 +106,7 @@ export interface BranchCodeReport {
    * folded. For a later segment (K13), the whole branch's: every earlier
    * segment's chain, then this one's.
    */
-  chain: Array<{ commit: string; root: string; versionId: string }>;
+  chain: Array<{ commit: string; root: string; versionId: string; original: string }>;
   /**
    * Where this Original sits in its branch's chain of segments (K13, O1):
    * index 0 is the first segment; `previous` is what its genesis names;
@@ -331,7 +331,7 @@ export async function checkBranch(
         seenCommits.add(m.commit);
         const before = report.chain.length > 0 ? report.chain[report.chain.length - 1].commit : undefined;
         await checkCommitObject(e.versionId, m, before);
-        report.chain.push({ commit: m.commit, root, versionId: e.versionId });
+        report.chain.push({ commit: m.commit, root, versionId: e.versionId, original });
       }
 
       // Content and the git tree claim.
@@ -427,6 +427,12 @@ export interface RepositoryReport {
    * and code history, in `branches`) and never votes for a canonical head.
    */
   contributions: Contribution[];
+  /**
+   * The release Original the repo document names (K15), with its Originals
+   * report unchanged (anchored or not) and the code checks on its entries;
+   * null when the repo names none.
+   */
+  releases: (OriginalResult & { code: ReleasesCodeReport | null }) | null;
   /** Each Original the results rely on, as of its checkpoint. Never current: nothing here is anchored (P7.10). */
   validAsOf: { repo: string | null; branches: Array<{ original: string; checkpoint: string }> };
   current: false;
@@ -441,6 +447,93 @@ export interface Contribution {
   status: "valid" | "invalid" | "incomplete" | "forked";
   head: string | null;
   segments: number;
+}
+
+/** One release entry, checked (K15). */
+export interface ReleaseCheck {
+  versionId: string;
+  tag: string;
+  ref: string;
+  commit: string;
+  branch: string;
+  branchVersion: string;
+  /** The canonical result the releaser recorded: a claim about that time, reported as given. */
+  canonicalAtRelease: ReleaseManifest["canonical"];
+  /**
+   * in-chain: the named branch verifies and its chain holds the commit at the
+   * named entry. branch-missing: the branch is not in the evidence (incomplete).
+   * branch-invalid: the branch does not verify, so nothing is checked.
+   */
+  chain: "in-chain" | "branch-missing" | "branch-invalid";
+}
+
+export interface ReleasesCodeReport {
+  original: string;
+  author: string | null;
+  /** valid · invalid (a malformed release, a repeated tag, a commit not in the named chain) · incomplete. */
+  history: CodeHistory;
+  /** Bound both ways: the repo document names it, and it names the repo. */
+  binding: "confirmed" | "mismatch";
+  releases: ReleaseCheck[];
+}
+
+type ReleasesReport = OriginalResult & { code: ReleasesCodeReport | null };
+
+/**
+ * The release Original's code checks (K15) over its verified entries: each
+ * entry names one release; its author is the repo's author; tags do not
+ * repeat; each release's commit is in the named branch's chain at the named
+ * entry. A branch the evidence lacks leaves the release unchecked (incomplete,
+ * never a pass).
+ */
+export async function checkReleases(
+  original: string,
+  entries: readonly LogEntry[],
+  context: { repo: string; repoAuthor: string | null; resources: ObjectSource; branches: RepositoryReport["branches"]; codes: ReadonlyMap<string, BranchCodeReport | null> },
+): Promise<ReleasesCodeReport> {
+  const author = entries.length ? stateOf(entries[0]).author.did : null;
+  const out: ReleasesCodeReport = { original, author, history: { status: "valid", entries: entries.length }, binding: "confirmed", releases: [] };
+  const tags = new Set<string>();
+  let missing = false;
+  out.history = await historyOf(entries.length, () =>
+    each(entries, async (e, i) => {
+      const s = stateOf(e);
+      const { repo } = checkReleasesMetadata(s.asset.metadata);
+      if (repo !== context.repo) {
+        out.binding = "mismatch";
+        throw new Stop("invalid", "RELEASES_REPO", `the release Original names repo ${repo}, not ${context.repo}`);
+      }
+      if (i === 0 && author !== context.repoAuthor) throw new Stop("invalid", "RELEASES_AUTHOR", "the release Original's author is the repo's author (K15)");
+      if (s.asset.resource.mediaType !== RELEASE_MEDIA_TYPE) throw new Stop("invalid", "RELEASES_RESOURCE", `a release Original's resource is ${RELEASE_MEDIA_TYPE}`);
+      const bytes = await context.resources(s.asset.resource.digest);
+      if (!bytes) throw new Stop("incomplete", "RELEASE_MANIFEST_MISSING", `release manifest ${s.asset.resource.digest} is not in the evidence`);
+      const m = decodeReleaseManifest(bytes);
+      const previous = i > 0 ? stateOf(entries[i - 1]).asset.resource.digest : null;
+      if (previous === s.asset.resource.digest) return; // an entry changing only grants or the name repeats the release
+      if (tags.has(m.tag)) throw new Stop("invalid", "RELEASE_TAG_REPEATED", `tag ${m.tag} is released twice`);
+      tags.add(m.tag);
+      const check: ReleaseCheck = { versionId: e.versionId, tag: m.tag, ref: m.ref, commit: m.commit, branch: m.branch, branchVersion: m.versionId, canonicalAtRelease: m.canonical, chain: "in-chain" };
+      out.releases.push(check);
+      const b = context.branches.find((x) => x.original === m.branch);
+      const code = context.codes.get(m.branch);
+      if (!b || !b.report) {
+        check.chain = "branch-missing";
+        missing = true;
+        return;
+      }
+      if (!b.report.validAsOf || b.report.fork || !code || code.history.status !== "valid") {
+        check.chain = "branch-invalid";
+        return;
+      }
+      if (code.ref !== m.ref) throw new Stop("invalid", "RELEASE_REF", `${m.branch} is a branch of ${code.ref}, not ${m.ref}`);
+      const link = code.chain.find((c) => c.commit === m.commit);
+      if (!link || link.versionId !== m.versionId || link.original !== m.branch) {
+        throw new Stop("invalid", "RELEASE_NOT_IN_CHAIN", `release ${m.tag}: commit ${m.commit} is not at entry ${m.versionId} of ${m.branch}'s chain`);
+      }
+    }),
+  );
+  if (out.history.status === "valid" && missing) out.history = { status: "incomplete", entries: entries.length, failure: { index: -1, versionId: "", code: "RELEASE_BRANCH_MISSING", message: "a branch a release names is not in the evidence" } };
+  return out;
 }
 
 export interface VerifyRepositoryOptions {
@@ -544,11 +637,13 @@ export async function openRepository(bundle: Uint8Array, options: VerifyReposito
   }
   const repoUsable = repoResult.report?.validAsOf != null && repoCode?.history.status === "valid";
 
+  // K15: the release Original the repo document names is checked on its own, not as a branch.
+  const releasesDid = repoCode?.document?.releases;
   const gitMemo = new Map<string, string>();
   const codes = new Map<string, BranchCodeReport | null>();
   const branchEntries = new Map<string, LogEntry[]>();
   for (const r of results.values()) {
-    if (r.original === contents.manifest.repo) continue;
+    if (r.original === contents.manifest.repo || r.original === releasesDid) continue;
     const log = await logOf(r.original);
     const entries = r.report?.checkpoint && log ? entriesThrough(log, r.report.checkpoint) : [];
     if (entries.length) verified.set(r.original, entries);
@@ -596,7 +691,7 @@ export async function openRepository(bundle: Uint8Array, options: VerifyReposito
   };
   const branches: RepositoryReport["branches"] = [];
   for (const r of results.values()) {
-    if (r.original === contents.manifest.repo) continue;
+    if (r.original === contents.manifest.repo || r.original === releasesDid) continue;
     branches.push({ ...r, code: await codeOf(r.original, new Set()) });
   }
   // Earlier segments of a branch are reached through its newest segment, not listed (K13).
@@ -644,6 +739,16 @@ export async function openRepository(bundle: Uint8Array, options: VerifyReposito
     }
   }
 
+  let releases: ReleasesReport | null = null;
+  if (releasesDid) {
+    const r = results.get(releasesDid) ?? { original: releasesDid, report: null, packages: [], error: { category: "incomplete-evidence", code: "RELEASES_MISSING", message: "the bundle carries no evidence for the release Original the repo names" } };
+    const log = await logOf(releasesDid);
+    const entries = r.report?.checkpoint && log ? entriesThrough(log, r.report.checkpoint) : [];
+    if (entries.length) verified.set(releasesDid, entries);
+    const repoAuthor = repoCode?.author ?? null;
+    releases = { ...r, code: entries.length && repoCode ? await checkReleases(releasesDid, entries, { repo: contents.manifest.repo, repoAuthor, resources, branches, codes }) : null };
+  }
+
   const report: RepositoryReport = {
     profile: "originals-code/0.1",
     manifest: contents.manifest,
@@ -652,6 +757,7 @@ export async function openRepository(bundle: Uint8Array, options: VerifyReposito
     canonicalStatus: repoUsable && repoCode?.document ? "computed" : repoIncomplete(repoResult.report, repoCode) ? "incomplete" : "invalid",
     canonical,
     contributions,
+    releases,
     validAsOf: {
       repo: repoUsable ? repoResult.report!.validAsOf!.checkpoint : null,
       branches: branches.filter((b) => b.report?.validAsOf && b.code?.history.status === "valid").map((b) => ({ original: b.original, checkpoint: b.report!.validAsOf!.checkpoint })),

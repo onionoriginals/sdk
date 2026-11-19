@@ -40,7 +40,8 @@
     "test:coverage": "bun test tests/ --coverage",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\"",
-    "acceptance": "bun scripts/acceptance.ts"
+    "acceptance": "bun scripts/acceptance.ts",
+    "release:regtest": "bun scripts/release-regtest.ts"
   },
   "keywords": [
     "originals",

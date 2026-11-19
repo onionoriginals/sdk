@@ -16,7 +16,20 @@ import { OriginalsSDK, keySigner, writeEvidence, type OriginalsStore } from "@or
 import { appendCommits, branchChain, metadataOf, type MirrorCommit } from "./branch.js";
 import { readBundle, writeBundle } from "./bundle.js";
 import { verifyRepository, type RepositoryReport } from "./verify.js";
-import { REPO_MEDIA_TYPE, decodeRepoDocument, encodeRepoDocument, repoMetadata, type RepoDocument } from "./documents.js";
+import {
+  RELEASE_MEDIA_TYPE,
+  REPO_MEDIA_TYPE,
+  checkRef,
+  checkTag,
+  decodeReleaseManifest,
+  decodeRepoDocument,
+  encodeReleaseManifest,
+  encodeRepoDocument,
+  releasesMetadata,
+  repoMetadata,
+  type ReleaseManifest,
+  type RepoDocument,
+} from "./documents.js";
 import { codeError } from "./errors.js";
 import { covers } from "./grants.js";
 import { diffTrees, readTree } from "./objects.js";
@@ -329,6 +342,70 @@ export class CodeWorkspace {
     return { repo: report.repo.original, report, contributions: report.contributions.map((c) => c.original) };
   }
 
+  /**
+   * Record a release (K15) in the repo's release Original, creating it (and
+   * naming it in the repo document) on the first release. Signed by the
+   * repo's author (plan 050 W1 makes this the delegate set later).
+   *
+   * The canonical head of `ref` is computed now, by verifying this
+   * workspace's own bundle offline, and recorded with the release. The
+   * released commit is that head unless `commit` names another; either way it
+   * must be in a listed, verified branch's chain, and the release names that
+   * branch (its segment) and entry. A tag is released once.
+   */
+  async release(repo: string, identity: LocalIdentity, input: { tag: string; ref?: string; commit?: string }): Promise<{ releases: string; versionId: string; manifest: ReleaseManifest; created: boolean }> {
+    const ref = checkRef(input.ref ?? "refs/heads/main");
+    const tag = checkTag(input.tag);
+    const repoAuthor = stateOf((await this.entries(repo))[0]).author.did;
+    if (identity.did !== repoAuthor) codeError("outside-grant", "RELEASE_AUTHOR", "the repo's author signs releases (K15)");
+    // Trees and commit objects suffice for the canonical head; blobs are not needed to compute it.
+    const report = await verifyRepository(await this.package(repo, { omitBlobs: true }));
+    const canonical = report.canonical.find((c) => c.ref === ref);
+    if (!canonical) return codeError("invalid-evidence", "RELEASE_REF", `${ref} is not a ref of this repo`);
+    const commit = input.commit ?? canonical.head?.commit;
+    if (!commit) return codeError("fork", "RELEASE_NO_HEAD", `${ref} has no agreed canonical head (${canonical.status}); name a commit to release`);
+    const listed = canonical.delegates.map((d) => d.branch);
+    const order = [...canonical.delegates.filter((d) => d.delegate === identity.did), ...canonical.delegates.filter((d) => d.delegate !== identity.did)];
+    let link: { original: string; versionId: string } | undefined;
+    for (const d of order) {
+      const b = report.branches.find((x) => x.original === d.branch);
+      if (!b?.code || b.code.history.status !== "valid" || !b.report?.validAsOf || !listed.includes(b.original)) continue;
+      link = b.code.chain.find((c) => c.commit === commit);
+      if (link) break;
+    }
+    if (!link) return codeError("invalid-evidence", "RELEASE_NOT_IN_CHAIN", `${commit} is not in a listed, verified branch of ${ref}`);
+    const manifest: ReleaseManifest = {
+      tag,
+      ref,
+      commit,
+      branch: link.original,
+      versionId: link.versionId,
+      canonical: { status: canonical.status, head: canonical.head?.commit ?? null, threshold: canonical.threshold, votes: canonical.head ? [...canonical.head.votes].sort() : [] },
+    };
+    const bytes = encodeReleaseManifest(manifest);
+    const { document } = await this.repoDocument(repo);
+    if (document.releases) {
+      const view = await this.sdk.get(document.releases);
+      for (const v of view.resources) {
+        const b = await this.sdk.resourceBytes(v.digest);
+        if (b && decodeReleaseManifest(b).tag === tag) codeError("invalid-evidence", "RELEASE_TAG_EXISTS", `tag ${tag} is already released`);
+      }
+      const edited = await this.sdk.edit(document.releases, { parent: view.checkpoint, resource: { mediaType: RELEASE_MEDIA_TYPE, bytes }, author: identityRef(identity), signer: this.signer(identity) });
+      return { releases: document.releases, versionId: edited.original.checkpoint, manifest, created: false };
+    }
+    const repoName = (await this.sdk.get(repo)).state.name;
+    const created = await this.sdk.create({
+      name: `${repoName} releases`,
+      metadata: releasesMetadata(repo),
+      resource: { mediaType: RELEASE_MEDIA_TYPE, bytes },
+      author: identityRef(identity),
+      signer: this.signer(identity),
+    });
+    if (created.kind !== "original") return codeError("invalid-evidence", "RELEASES_NOT_CREATED", "the release Original was not created");
+    await this.updateRepo(repo, identity, (doc) => ({ ...doc, releases: created.original.did }));
+    return { releases: created.original.did, versionId: created.original.checkpoint, manifest, created: true };
+  }
+
   /** Among `branches` (newest segments), the one `author` writes for `ref`, if held (K14). */
   async findBranch(branches: readonly string[], author: string, ref: string): Promise<string | undefined> {
     for (const did of branches) {
@@ -439,6 +516,11 @@ export class CodeWorkspace {
       for (const seg of await this.segments(b)) branches.push(seg[0].state.id as string);
     }
     const packages = [{ original: repo, checkpoint: repoPackage.manifest.checkpoint, bytes: repoPackage.bytes }];
+    // K15: the release Original the repo names travels with it.
+    if (document.releases && (await this.originals.get(document.releases))) {
+      const p = await this.sdk.package(document.releases);
+      packages.push({ original: document.releases, checkpoint: p.manifest.checkpoint, bytes: p.bytes });
+    }
     const roots = new Set<string>();
     for (const b of branches) {
       if (!(await this.originals.get(b))) continue;

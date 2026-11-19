@@ -12,6 +12,8 @@
  * carry author and committer emails, so in a workspace marked `--private`
  * they are mirrored only with `--include-commits` (P8.2: no confidentiality).
  *                          [--contribute]   (K14: your own branch for the ref, never listed, never voting)
+ *   originals-code release <tag> --dir <workspace> --identity <file> [--ref refs/heads/main] [--commit <id>]
+ *                          (K15: record a release in the repo's release Original; the repo's author signs)
  *   originals-code import  <bundle.zip> --dir <workspace>   (verify a repo bundle offline, then take it in)
  *   originals-code package --dir <workspace> --out <bundle.zip> [--omit-blobs]
  *   originals-code verify  <bundle.zip> [--json] [--now <time>]
@@ -72,6 +74,13 @@ function summary(r: RepositoryReport): string {
     }
   }
   for (const c of r.contributions) lines.push(`contribution ${c.original} ${c.ref ?? ""} by ${c.author ?? "?"}: ${c.status}${c.head ? ` at ${c.head}` : ""} (verified, never voting)`);
+  if (r.releases) {
+    const rel = r.releases;
+    lines.push(`releases ${rel.original}`);
+    lines.push(`  originals: history ${rel.report?.history.status ?? "unread"}, valid as of ${rel.report?.validAsOf?.checkpoint ?? "nothing"}${rel.report?.current ? ", current (anchored)" : ""}${rel.error ? ` (${rel.error.code}: ${rel.error.message})` : ""}`);
+    lines.push(`  code:      ${rel.code?.history.status ?? "not checked"}${rel.code?.history.failure ? ` (${rel.code.history.failure.code}: ${rel.code.history.failure.message})` : ""}`);
+    for (const x of rel.code?.releases ?? []) lines.push(`  ${x.tag} = ${x.commit} (${x.chain}; canonical at release: ${x.canonicalAtRelease.status})`);
+  }
   if (r.canonicalStatus === "incomplete") lines.push("canonical: incomplete — the repo Original or its document did not verify");
   for (const c of r.canonical) {
     lines.push(`canonical ${c.ref} (threshold ${c.threshold}): ${c.status}${c.head ? ` ${c.head.commit} (votes: ${c.head.votes.length})` : ""}${c.reason ? ` — ${c.reason}` : ""}`);
@@ -143,6 +152,22 @@ async function main(argv: string[]): Promise<number> {
       }
       return 0;
     }
+    case "release": {
+      if (!positional[0]) throw new Error("usage: originals-code release <tag> --dir <workspace> --identity <file> [--ref refs/heads/main] [--commit <id>]");
+      const ws = await openWorkspace(resolve(need(opts, "dir")));
+      try {
+        if (!ws.repo) throw new Error("run init first");
+        const identity = parseIdentity(await readFile(need(opts, "identity"), "utf8"));
+        await ws.rememberIdentity(identity);
+        const r = await ws.workspace.release(ws.repo, identity, { tag: positional[0], ...(typeof opts.ref === "string" ? { ref: opts.ref } : {}), ...(typeof opts.commit === "string" ? { commit: opts.commit } : {}) });
+        const m = r.manifest;
+        console.log(`${r.created ? "created release Original" : "released in"} ${r.releases} (${r.versionId}): ${m.tag} = ${m.commit}`);
+        console.log(`  from ${m.branch} at ${m.versionId}; canonical ${m.ref} was ${m.canonical.status}${m.canonical.head ? ` at ${m.canonical.head}` : ""} (threshold ${m.canonical.threshold})`);
+      } finally {
+        await ws.close();
+      }
+      return 0;
+    }
     case "import": {
       if (!positional[0]) throw new Error("usage: originals-code import <bundle.zip> --dir <workspace>");
       const ws = await openWorkspace(resolve(need(opts, "dir")));
@@ -177,7 +202,7 @@ async function main(argv: string[]): Promise<number> {
       console.log(opts.json === true ? JSON.stringify(report, null, 2) : summary(report));
       // A contribution that fails is reported, but does not fail the repository: anyone may publish one (K14).
       const contributed = new Set(report.contributions.map((c) => c.original));
-      const ok = report.repo.code?.history.status === "valid" && report.branches.every((b) => contributed.has(b.original) || (b.code?.history.status === "valid" && b.report?.validAsOf));
+      const ok = report.repo.code?.history.status === "valid" && (!report.releases || report.releases.code?.history.status === "valid") && report.branches.every((b) => contributed.has(b.original) || (b.code?.history.status === "valid" && b.report?.validAsOf));
       return ok ? 0 : 1;
     }
     case "serve": {
@@ -215,7 +240,7 @@ async function main(argv: string[]): Promise<number> {
       return new Promise<number>(() => {});
     }
     default:
-      console.error("usage: originals-code identity new <file> | init | mirror | import <bundle.zip> | package | verify <bundle.zip> | serve <bundle.zip>");
+      console.error("usage: originals-code identity new <file> | init | mirror | release <tag> | import <bundle.zip> | package | verify <bundle.zip> | serve <bundle.zip>");
       return 2;
   }
 }
