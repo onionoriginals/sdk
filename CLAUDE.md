@@ -47,6 +47,11 @@ terminology. Cite spec rules by ID (P5.3, D4) in code comments, tests and PRs.
   its inscription (P5.23). A single author is fixed at genesis; a set changes
   only under its own threshold. Rotation happens only in the signer DIDs, never in
   the asset log (P5.8–P5.10).
+- **A parent gives grants only.** A child Original names a parent and pins a
+  version of its log in every entry; the pin never goes backwards. An editor
+  may rely on a grant in the parent's `editors` at the pin, and nothing else
+  of the parent has authority over the child (P5.24). Without the parent's
+  log the child is incomplete, never a pass (P5.25).
 - **Forks stay unresolved off-chain.** Divergent valid branches are reported as
   a conflict with no current branch. Only anchoring on Bitcoin settles a fork
   (owner decision S1, P9.16).

@@ -557,6 +557,68 @@ await sdk.commitDraft(draft);                 // or sdk.finalizeDraft(draft) for
 - Shared hosts check every signer of a set entry, and a caller whose landing
   DID is a member may save.
 
+## Parent Originals (P5.24–P5.27)
+
+A child Original names a parent Original and pins a version of the parent's
+log (originals-spec #66, owner decision of 19 November 2026). An editor of
+the child may rely on a grant in the parent's `editors` at the version the
+entry pins, an *inherited grant*. That is all a parent gives: its author,
+signer set, editors and sat holder have no authority over the child, which
+keeps its own author or signer set (P5.24). The member names stay
+PROVISIONAL (P14.5, D4).
+
+```ts
+// A branch of a repository, pinning the repository version that grants Dana.
+const branch = await sdk.create({ name, resource, author: bobRef, signer: bobSigner, parent: { did: repo, versionId: pin } });
+// Dana edits it with the grant she holds in the repository. Nothing in the branch names her.
+await sdk.edit(branch.original.did, { parent, resource: { bytes }, editor: danaRef, signer: danaSigner });
+// The pin advances by default to the newest repository version this store holds; `pin` names one.
+await sdk.edit(did, { parent, name: "Renamed", author: bobRef, signer: bobSigner });          // advances
+await sdk.edit(did, { parent, name: "Renamed", pin, author: bobRef, signer: bobSigner });     // exactly this pin
+```
+
+- State: `asset.parent` is `{did, versionId}`, set only at genesis. No entry
+  removes it or changes `parent.did`, and a child never names itself
+  (`STATE_PARENT`). The pin never goes backwards or to another branch of the
+  parent's log (`PARENT_PIN_BACKWARDS`, `PARENT_PIN_OTHER_BRANCH`). Author and
+  editor entries both may advance it, and an editor needs no grant to do so
+  (P5.16).
+- Inherited grants: one grant, direct or inherited, must allow the whole
+  change. A direct grant that allows it is the one reported. Only the
+  parent's own `editors` are inherited, never what the parent inherits
+  itself. A grant naming the child's author, a member of its set, the child
+  itself or its anchoring sat authorizes nothing. A pin at the parent's
+  deactivation grants nothing (`PARENT_DEACTIVATED_AT_PIN`).
+- Evidence (P5.25): `verifyOriginal({ parents: [{ did, log, copies?, bitcoin? }] })`
+  takes each parent's log (and its own parent's), with their signers'
+  histories in `authors`. Without them the child is incomplete, never a pass:
+  `PARENT_EVIDENCE_MISSING`, or `PARENT_VERSION_MISSING` when the held log
+  lacks the pinned version. Against an anchored parent, a pin outside its
+  accepted history is rejected (`PARENT_PIN_NOT_ACCEPTED`). Nesting is
+  limited to 8 parents (`ORIGINALS_LIMITS.parents`, P14.13).
+- Revocation (P5.26): an entry that only an inherited grant authorizes is
+  historically authorized only once the parent's latest verified state no
+  longer grants the change (`inherited-grant-revoked`), is deactivated
+  (`parent-deactivated`) or is forked (`parent-forked`). It stays valid.
+- Bitcoin (P5.27): a child entry inscribed while the parent is anchored must
+  pin at least the parent's accepted head at that inscription. An older pin
+  is ignored as `parent-pin-behind-parent-head`. While the parent's sat cannot
+  be read, the entry is unverifiable.
+- Reports: `grants` lists, for each editor entry, `source` (`direct` or
+  `inherited`) and, for an inherited grant, the parent version it relied on.
+  `parentAuthority` gives the parent's DID, the evidence `status`, the
+  prefix's `pins`, whether the parent is anchored or forked, its latest
+  version, and whether P5.27 was `checked`.
+- Packages (P7.1, P14.10): `package` adds
+  `parents/<sha256(did) hex>/did.jsonl`, the parent's log through the highest
+  pin (and its own parent's in turn), with the parents' signers under
+  `signers/`. A package without it is partial, with a
+  `{ kind: "parent", did, versionId }` missing item. `load` and `import` use
+  it, and `import` keeps a parent log this store does not hold. The SDK
+  verifies a child against the parents it holds.
+- Not yet: shared-host saves (`submit`) do not carry parent evidence, so a
+  host cannot accept a child Original's entries yet.
+
 ## Custody roles: devices and agents under one author
 
 Key custody is outside the protocol (originals-spec #46), but a consumer

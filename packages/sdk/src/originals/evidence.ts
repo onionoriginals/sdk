@@ -9,6 +9,10 @@
  *   signers/<sha256(did) hex>/did-witness.json
  *                                         that DID's witness file, where its method
  *                                         has witnesses
+ *   parents/<sha256(did) hex>/did.jsonl   the asset log of a child Original's parent, and of its
+ *                                         own parent in turn, through the highest pin the packaged
+ *                                         entries depend on (P5.25, P14.10); their signers are under
+ *                                         `signers/` with the child's
  *   resources/<digest>                    the bytes of each version of the resource included, named by digest
  *
  * PROVISIONAL (P14.10, section 14): the `signers/` layout. Signer histories are
@@ -32,7 +36,9 @@ export type MissingItem =
   /** A version of the Original's one resource whose bytes are not packaged (P14.10; originals-spec #53). */
   | { kind: "resource"; version: number; digest: string; versionId: string }
   /** A signer DID history the package lacks (P7.1, P7.4): the author's, or an editor's. */
-  | { kind: "identity"; did: string; role: "author" | "editor" };
+  | { kind: "identity"; did: string; role: "author" | "editor" }
+  /** A parent Original whose log through that pin the package lacks (P5.25, P14.10). */
+  | { kind: "parent"; did: string; versionId: string };
 
 /** P14.10: one missing item, with exactly the members of its kind. */
 function checkMissingItem(item: JsonValue): void {
@@ -40,8 +46,10 @@ function checkMissingItem(item: JsonValue): void {
   const ok = isJsonObject(item) && (item.kind === "resource"
     ? exactly(["kind", "version", "digest", "versionId"]) && Number.isSafeInteger(item.version) && (item.version as number) >= 1 &&
       typeof item.digest === "string" && typeof item.versionId === "string"
-    : item.kind === "identity" && exactly(["kind", "did", "role"]) && typeof item.did === "string" && (item.role === "author" || item.role === "editor"));
-  if (!ok) evidenceError("EVIDENCE_MANIFEST", "a missing item is exactly { kind: \"resource\", version, digest, versionId } or { kind: \"identity\", did, role: \"author\" | \"editor\" } (P14.10)");
+    : item.kind === "parent"
+      ? exactly(["kind", "did", "versionId"]) && typeof item.did === "string" && typeof item.versionId === "string"
+      : item.kind === "identity" && exactly(["kind", "did", "role"]) && typeof item.did === "string" && (item.role === "author" || item.role === "editor"));
+  if (!ok) evidenceError("EVIDENCE_MANIFEST", "a missing item is exactly { kind: \"resource\", version, digest, versionId }, { kind: \"identity\", did, role: \"author\" | \"editor\" } or { kind: \"parent\", did, versionId } (P14.10)");
 }
 
 export interface EvidenceManifest {
@@ -59,9 +67,11 @@ export interface EvidenceManifest {
 export interface EvidenceContents {
   manifest: EvidenceManifest;
   log: string;
-  /** Each signer DID's history (the author's and each editor's). */
+  /** Each signer DID's history (the author's and each editor's), the parents' signers included. */
   authors: AuthorDidEvidence[];
   bytes: Record<string, Uint8Array>;
+  /** The parent Originals' asset logs, nearest first (P5.25); none for an Original with no parent. */
+  parents?: Array<{ did: string; log: string }>;
 }
 
 const encoder = new TextEncoder();
@@ -69,6 +79,22 @@ const decoder = new TextDecoder("utf-8", { fatal: true });
 
 function evidenceError(code: string, message: string): never {
   throw new OriginalsError("invalid-evidence", code, message);
+}
+
+/** The directory of a parent Original's log in a package: `parents/<hex sha256 of its did:vh>` (P14.10). */
+export function parentPath(did: string): string {
+  return `parents/${hex.encode(sha256(encoder.encode(did)))}`;
+}
+
+/** The did:vh a log's genesis names as its parent, if any (unverified: verification checks it). */
+export function parentDidOf(log: string): string | undefined {
+  try {
+    const first = JSON.parse(log.slice(0, log.indexOf("\n") < 0 ? undefined : log.indexOf("\n"))) as { state?: { asset?: { parent?: { did?: unknown } } } };
+    const did = first.state?.asset?.parent?.did;
+    return typeof did === "string" ? did : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The directory of a signer DID's history in a package or hosted layout: `signers/<hex sha256 of the DID>` (P14.10, PROVISIONAL, section 14). */
@@ -86,11 +112,12 @@ export function writeEvidence(contents: EvidenceContents): Uint8Array {
     files.set(`${base}/did.jsonl`, encoder.encode(typeof author.log === "string" ? author.log : author.log.map((e) => `${JSON.stringify(e)}\n`).join("")));
     if (author.witness !== undefined) files.set(`${base}/did-witness.json`, encoder.encode(JSON.stringify(author.witness)));
   }
+  for (const parent of contents.parents ?? []) files.set(`${parentPath(parent.did)}/did.jsonl`, encoder.encode(parent.log));
   for (const [digest, bytes] of Object.entries(contents.bytes)) files.set(`resources/${digest}`, bytes);
   return writeZip(files);
 }
 
-const LAYOUT = /^(?:originals-evidence\.json|asset\/did\.jsonl|signers\/[0-9a-f]{64}\/(?:did\.jsonl|did-witness\.json)|resources\/z[1-9A-HJ-NP-Za-km-z]{1,120})$/;
+const LAYOUT = /^(?:originals-evidence\.json|asset\/did\.jsonl|signers\/[0-9a-f]{64}\/(?:did\.jsonl|did-witness\.json)|parents\/[0-9a-f]{64}\/did\.jsonl|resources\/z[1-9A-HJ-NP-Za-km-z]{1,120})$/;
 
 function text(bytes: Uint8Array, name: string): string {
   try {
@@ -136,10 +163,24 @@ export function readEvidenceFiles(files: ReadonlyMap<string, Uint8Array>): Evide
   const manifest = readManifest(manifestBytes);
 
   const authors = new Map<string, AuthorDidEvidence>();
-  // Every signer identity the log names: the author, each signer of a set Original (P5.19)
-  // and each editor of an editor entry (P7.1).
+  // The parent Originals the log names, nearest first, each through its own genesis (P5.25).
+  const parents: Array<{ did: string; log: string }> = [];
+  for (let did = parentDidOf(text(logBytes, "asset/did.jsonl")); did !== undefined && !parents.some((p) => p.did === did);) {
+    const bytes = files.get(`${parentPath(did)}/did.jsonl`);
+    if (!bytes) break;
+    const log = text(bytes, `${parentPath(did)}/did.jsonl`);
+    parents.push({ did, log });
+    did = parentDidOf(log);
+  }
+  for (const name of files.keys()) {
+    if (name.startsWith("parents/") && !parents.some((p) => name === `${parentPath(p.did)}/did.jsonl`)) {
+      evidenceError("EVIDENCE_LAYOUT", `${name} belongs to no parent Original the log names`);
+    }
+  }
+  // Every signer identity the logs name: the author, each signer of a set Original (P5.19)
+  // and each editor of an editor entry (P7.1), the parents' signers included (P5.25).
   const authorDids = new Set<string>();
-  for (const line of text(logBytes, "asset/did.jsonl").trimEnd().split("\n")) {
+  for (const line of [text(logBytes, "asset/did.jsonl"), ...parents.map((p) => p.log)].join("\n").trimEnd().split("\n")) {
     try {
       const entry = JSON.parse(line) as { state?: { author?: { did?: unknown } | Array<{ did?: unknown }>; editor?: { did?: unknown } } };
       const author = entry.state?.author;
@@ -173,5 +214,6 @@ export function readEvidenceFiles(files: ReadonlyMap<string, Uint8Array>): Evide
     log: text(logBytes, "asset/did.jsonl"),
     authors: [...authors.values()],
     bytes,
+    ...(parents.length > 0 ? { parents } : {}),
   };
 }

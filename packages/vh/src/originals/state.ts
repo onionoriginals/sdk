@@ -34,6 +34,8 @@ export const ORIGINALS_LIMITS = Object.freeze({
    * P14.13).
    */
   authors: 32,
+  /** Nested parent Originals, from a child to its furthest ancestor (P5.25, P7.7, P14.13; provisional). */
+  parents: 8,
 });
 
 export type Operation = "create" | "update" | "deactivate";
@@ -64,6 +66,16 @@ export interface EditorGrant {
   name: boolean;
   metadata: boolean;
   resource: boolean;
+}
+
+/**
+ * A parent Original (P5.24, P14.5): its did:vh, set at genesis and never
+ * changed, and the pin, a versionId of the parent's asset log that each entry
+ * names and that never goes backwards. PROVISIONAL member names (D4).
+ */
+export interface ParentRef {
+  did: string;
+  versionId: string;
 }
 
 /**
@@ -107,6 +119,8 @@ export interface AssetState {
    * author entry changes it (P5.16, P5.20; PROVISIONAL).
    */
   authors?: AuthorSet;
+  /** The parent Original and the pin (P5.24); set only at genesis, and only the pin changes. */
+  parent?: ParentRef;
 }
 
 /** The author DID, its verification method and its exact versionId (P5.1). */
@@ -391,12 +405,32 @@ export function checkAuthors(value: unknown): AuthorSet {
   return a as unknown as AuthorSet;
 }
 
+const VERSION_ID = /^[1-9]\d*-Qm[1-9A-HJ-NP-Za-km-z]{44}$/;
+
+/**
+ * P14.5: a `parent` member, exactly `{did, versionId}`: the parent Original's
+ * did:vh and a versionId of its asset log, `<number>-<entry hash>` (P5.24).
+ */
+export function checkParent(value: unknown): ParentRef {
+  const bad: (message: string) => never = (message) => invalid("STATE_PARENT", message);
+  let p: JsonObject;
+  try {
+    p = members(value, ["did", "versionId"], [], "state.asset.parent");
+  } catch (error) {
+    if (error instanceof OriginalsError) bad(`${error.message}: a parent is exactly {did, versionId} (P14.5)`);
+    throw error;
+  }
+  if (typeof p.did !== "string" || !DID_VH.test(p.did)) bad("state.asset.parent.did is the parent Original's did:vh (P5.24, P14.5)");
+  if (typeof p.versionId !== "string" || !VERSION_ID.test(p.versionId)) bad("state.asset.parent.versionId is a versionId of the parent's asset log (P5.24, P14.5)");
+  return p as unknown as ParentRef;
+}
+
 /**
  * Check an asset state. `authorDid` enables the grant rules that depend on it
  * (P5.15); for a set Original the members in `authors` are used instead.
  */
 export function checkAsset(value: unknown, authorDid?: string | readonly string[]): AssetState {
-  const a = members(value, ["name", "status", "resource", "aliases"], ["metadata", "editors", "preview", "authors"], "state.asset");
+  const a = members(value, ["name", "status", "resource", "aliases"], ["metadata", "editors", "preview", "authors", "parent"], "state.asset");
   if (typeof a.name !== "string" || a.name.length === 0 || a.name.length > ORIGINALS_LIMITS.nameLength) {
     invalid("STATE_NAME", `the name must be a string of 1 to ${ORIGINALS_LIMITS.nameLength} UTF-16 code units (P14.5)`);
   }
@@ -429,6 +463,7 @@ export function checkAsset(value: unknown, authorDid?: string | readonly string[
   const given = authorDid === undefined ? [] : typeof authorDid === "string" ? [authorDid] : [...authorDid];
   if (a.editors !== undefined) checkEditors(a.editors, set ? [...set.dids, ...given] : given, set !== undefined);
   if (a.preview !== undefined) checkPreview(a.preview, a.resource as unknown as ResourceDescriptor, btco > 0);
+  if (a.parent !== undefined) checkParent(a.parent);
   return a as unknown as AssetState;
 }
 
@@ -473,18 +508,45 @@ export function checkPreview(value: unknown, resource: ResourceDescriptor, prepa
 
 const same = (a: JsonValue | undefined, b: JsonValue | undefined) => canonicalize(a ?? null) === canonicalize(b ?? null);
 
+/** Which grant authorized an editor entry (P5.24): one in its parent entry's state, or one inherited from the parent Original at its pin. */
+export type GrantSource = "direct" | "inherited";
+
 /**
- * P5.16, P5.17: an editor entry, checked against its parent. The grant is
- * the parent's; the author reference is the parent's; the operation is
- * update; and only the name, metadata and resource descriptor the grant
- * allows change. Grants, aliases and lifecycle are the author's.
+ * What `grant` does not allow in an editor's change from `before` to `asset`,
+ * or null when it allows all of it (P5.16): the name, the metadata, the
+ * resource, and the preview that goes with a new version under a grant that
+ * allows the resource (P9.30).
  */
-export function checkEditorEntry(editor: EditorRef, operation: string, author: AuthorRef | AuthorRef[], asset: AssetState, previous: EntryState | undefined): void {
+export function outsideGrant(grant: EditorGrant, asset: AssetState, before: AssetState): string | null {
+  if (asset.name !== before.name && !grant.name) return "is not granted the name";
+  if (!same(asset.metadata, before.metadata) && !grant.metadata) return "is not granted the metadata";
+  if (!same(asset.resource as unknown as JsonValue, before.resource as unknown as JsonValue) && !grant.resource) return "is not granted the resource";
+  // P5.16, P9.30: naming the preview of a new version is part of the change to the resource its grant
+  // allows; an editor entry that does not change the resource carries its parent's preview unchanged.
+  if (!same(asset.preview as unknown as JsonValue, before.preview as unknown as JsonValue)) {
+    if (asset.resource.digest === before.resource.digest) return "may change or remove the preview only with a new version of the resource (P9.30)";
+    if (!grant.resource) return "is not granted the resource, so not its preview";
+  }
+  return null;
+}
+
+/**
+ * P5.16, P5.17, P5.24: an editor entry, checked against its parent. The
+ * author reference is the parent's; the operation is update; grants, aliases,
+ * the signer set and lifecycle are the author's; and only the name, metadata
+ * and resource descriptor that one grant allows change, never a combination
+ * of grants. The grant is the parent entry's (`direct`), or `inherited`, the
+ * grant the parent Original's state at the entry's pin holds for this editor
+ * (P5.24); a direct grant that allows the change is the one reported.
+ * Advancing the pin is not a change a grant must allow (P5.16); the pin rules
+ * are `checkEntryState`'s.
+ */
+export function checkEditorEntry(editor: EditorRef, operation: string, author: AuthorRef | AuthorRef[], asset: AssetState, previous: EntryState | undefined, inherited?: EditorGrant): GrantSource {
   const authorOnly: (message: string) => never = (message) => fail("outside-grant", "EDITOR_AUTHOR_ONLY", `${message}; only an author entry may (P5.16)`);
   if (!previous) authorOnly("an editor entry cannot be the genesis entry");
   if (operation !== "update") authorOnly("an editor entry is an update; it cannot deactivate");
-  const grant = previous.asset.editors?.find((g) => g.did === editor.did);
-  if (!grant) fail("unauthorized-key", "EDITOR_NOT_GRANTED", `${editor.did} has no grant in the parent's state (P5.16, P5.17)`);
+  const direct = previous.asset.editors?.find((g) => g.did === editor.did);
+  if (!direct && !inherited) fail("unauthorized-key", "EDITOR_NOT_GRANTED", `${editor.did} has no grant in the parent's state, nor one inherited from a parent Original (P5.16, P5.17, P5.24)`);
   if (!same(author as unknown as JsonValue, previous.author as unknown as JsonValue)) {
     invalid("EDITOR_AUTHOR_CHANGED", "an editor entry's author reference must equal its parent's (P5.16)");
   }
@@ -493,18 +555,11 @@ export function checkEditorEntry(editor: EditorRef, operation: string, author: A
   if (!same(asset.aliases, before.aliases)) authorOnly("an editor entry cannot change aliases");
   if (!same(asset.authors as unknown as JsonValue, before.authors as unknown as JsonValue)) authorOnly("an editor entry cannot change the signer set");
   if (asset.status !== before.status) authorOnly("an editor entry cannot change the lifecycle status");
-  const outside: (what: string) => never = (what) => fail("outside-grant", "EDITOR_OUTSIDE_GRANT", `${editor.did} is not granted ${what} (P5.16)`);
-  if (asset.name !== before.name && !grant.name) outside("the name");
-  if (!same(asset.metadata, before.metadata) && !grant.metadata) outside("the metadata");
-  if (!same(asset.resource as unknown as JsonValue, before.resource as unknown as JsonValue) && !grant.resource) outside("the resource");
-  // P5.16, P9.30: naming the preview of a new version is part of the change to the resource its grant
-  // allows; an editor entry that does not change the resource carries its parent's preview unchanged.
-  if (!same(asset.preview as unknown as JsonValue, before.preview as unknown as JsonValue)) {
-    if (asset.resource.digest === before.resource.digest) {
-      fail("outside-grant", "EDITOR_OUTSIDE_GRANT", `${editor.did} may change or remove the preview only with a new version of the resource (P5.16, P9.30)`);
-    }
-    if (!grant.resource) outside("the resource, so not its preview");
-  }
+  const byDirect = direct ? outsideGrant(direct, asset, before) : "has no direct grant";
+  if (byDirect === null) return "direct";
+  const byInherited = inherited ? outsideGrant(inherited, asset, before) : undefined;
+  if (byInherited === null) return "inherited";
+  fail("outside-grant", "EDITOR_OUTSIDE_GRANT", `${editor.did} ${direct ? byDirect : byInherited} (P5.16${inherited ? ", P5.24: one grant, direct or inherited, must allow the whole change" : ""})`);
 }
 
 /**
@@ -617,6 +672,8 @@ export interface EntryStateContext {
    * (`checkEditorChange`; VH-Log PR 11, "Editors from a Controller" [S25]).
    */
   editorRules?: boolean;
+  /** The grant for this entry's editor in the parent Original's state at the entry's pin, if any (P5.24). */
+  inherited?: EditorGrant;
 }
 
 /** The members, id, operation, author reference and asset of an entry's state: what every later rule reads. */
@@ -644,9 +701,9 @@ function entryHead(state: JsonObject, ctx: EntryStateContext): { s: JsonObject; 
  * that (outside-grant), whatever else it breaks. The Originals profile's
  * VH-Log PR 11 editor limit [S25].
  */
-export function checkEditorChange(state: JsonObject, ctx: EntryStateContext): void {
+export function checkEditorChange(state: JsonObject, ctx: EntryStateContext): GrantSource | undefined {
   const { s, operation, author, asset } = entryHead(state, ctx);
-  if (s.editor !== undefined) checkEditorEntry(checkEditorRef(s.editor), operation, author, asset, ctx.previous);
+  return s.editor === undefined ? undefined : checkEditorEntry(checkEditorRef(s.editor), operation, author, asset, ctx.previous, ctx.inherited);
 }
 
 /** Validate an entry's state against the Originals rules and its predecessor. */
@@ -654,13 +711,22 @@ export function checkEntryState(state: JsonObject, ctx: EntryStateContext): Entr
   const { s, operation, author, asset } = entryHead(state, ctx);
   if (s.editor !== undefined) {
     const editor = checkEditorRef(s.editor);
-    if (ctx.editorRules !== false) checkEditorEntry(editor, operation, author, asset, ctx.previous);
+    if (ctx.editorRules !== false) checkEditorEntry(editor, operation, author, asset, ctx.previous, ctx.inherited);
   }
   // P5.15: no grant names the Original itself, its did:vh or any of its aliases (whose did:btco is the
   // anchoring sat), before or after anchoring, so holding the sat confers no edit authority (P9.12).
   for (const g of asset.editors ?? []) {
     if (g.did === s.id || asset.aliases.includes(g.did)) invalid("STATE_EDITORS", `editor DID ${g.did} names this Original itself (P5.15, P9.12)`);
   }
+  // P5.24 (C12-405): only the genesis entry sets `parent`, never to the Original itself, and no
+  // entry adds, removes or retargets it; only the pin moves, which `checkPin` judges against the
+  // parent's log. P5.15, P5.19: the parent's did:vh is never an editor or a member.
+  const parent = asset.parent;
+  if (parent && parent.did === s.id) invalid("STATE_PARENT", "an Original cannot name itself as its parent (P5.24)");
+  if (ctx.previous && (ctx.previous.asset.parent === undefined) !== (parent === undefined)) invalid("STATE_PARENT", "only the genesis entry sets `parent`, and no entry removes it (P5.24)");
+  if (ctx.previous?.asset.parent && parent && parent.did !== ctx.previous.asset.parent.did) invalid("STATE_PARENT", "no entry changes `parent.did` (P5.24)");
+  if (parent && (asset.editors ?? []).some((g) => g.did === parent.did)) invalid("STATE_EDITORS", "the parent Original's did:vh is never an editor (P5.15)");
+  if (parent && (asset.authors?.dids ?? []).includes(parent.did)) invalid("STATE_AUTHORS", "the parent Original's did:vh is never a member (P5.19)");
   // P5.19 (C12-393): no member of the signer set is the Original's did:vh or any of its aliases; a
   // did:btco member whose sat is the anchoring sat is refused below with the author DIDs (P5.13).
   for (const did of asset.authors?.dids ?? []) {

@@ -81,6 +81,8 @@ import {
   type EditorRef,
   type EntryState,
   type OriginalsReport,
+  type ParentEvidence,
+  type ParentRef,
   type PreviewDescriptor,
   type ResourceDescriptor,
   type ResourceVersion,
@@ -92,7 +94,7 @@ import {
 import { didWebvhFilesUrl, didWebvhLogUrl, parseDidWebvh } from "@originals/vh/webvh";
 import { inscriptionMetadata } from "./inscription.js";
 import { isLocalCopy } from "./local-copy.js";
-import { MANIFEST, signerPath, readEvidence, readEvidenceFiles, readManifest, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
+import { MANIFEST, parentDidOf, signerPath, readEvidence, readEvidenceFiles, readManifest, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
 import { HOSTED_PREFIX, assertHostable, type HostedFetch, type RetrievalLimits } from "./hosting.js";
 import { Retrieval, retrievalPlan } from "./retrieval.js";
 import { describeEntry, summarize, type EntrySummary, type OriginalsSigner } from "./signer.js";
@@ -182,6 +184,12 @@ export interface CreateInput {
   authors?: { threshold: number; members: AuthorRef[] };
   /** Editor grants (P5.15; PROVISIONAL member names, D4). */
   editors?: EditorGrant[];
+  /**
+   * A parent Original whose editor grants this one inherits, and the pin: a
+   * versionId of the parent's log (P5.24). Set only now; later entries may
+   * only advance the pin. The parent's author has no authority here.
+   */
+  parent?: ParentRef;
 }
 
 /** Who signs: one signer, or each signer of a set Original's author entry (P5.19). */
@@ -224,6 +232,13 @@ export interface EditInput {
    */
   body?: PreviewChoice["body"];
   preview?: PreviewChoice["preview"];
+  /**
+   * For a child Original, the version of its parent's log this entry pins
+   * (P5.24): the same as, or later than, its parent entry's. By default the
+   * newest version of the parent this store holds that follows the current
+   * pin. An editor relying on an inherited grant is judged at this pin.
+   */
+  pin?: string;
 }
 
 /**
@@ -675,6 +690,17 @@ function lines(log: string): string[] {
 
 function versionIds(log: string): string[] {
   return lines(log).map((line) => (parseJson(line) as { versionId: string }).versionId);
+}
+
+/** The pin a log's last entry names (P5.24), unverified; undefined when it names none. */
+function lastPin(log: string): string | undefined {
+  const all = lines(log);
+  try {
+    const pin = (JSON.parse(all[all.length - 1]) as { state?: { asset?: { parent?: { versionId?: unknown } } } }).state?.asset?.parent?.versionId;
+    return typeof pin === "string" ? pin : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The index of a log's anchoring entry, its first naming a did:btco alias (P9.10), before verification; -1 with none or an unreadable line. */
@@ -1325,13 +1351,41 @@ export class OriginalsSDK {
     return out;
   }
 
+  /**
+   * The parent Originals this store holds for `log`, nearest first (P5.25):
+   * each one's held log, and its own parent's in turn, within the limit on
+   * nested parents (P14.13). A parent not held ends the chain; verification
+   * then reports the parent evidence missing.
+   */
+  private async heldParents(log: string, supplied: ParentEvidence[] = []): Promise<ParentEvidence[]> {
+    const out: ParentEvidence[] = [...supplied];
+    for (let did = parentDidOf(log); did !== undefined && out.length <= ORIGINALS_LIMITS.parents;) {
+      const known = out.find((p) => p.did === did);
+      let held: string | undefined;
+      try {
+        held = known ? undefined : (await this.store.get(did))?.log;
+      } catch (error) {
+        if (!(error instanceof OriginalsError)) throw error;
+      }
+      if (!known && held === undefined) break;
+      if (!known) out.push({ did, log: held! });
+      const text = known ? (typeof known.log === "string" ? known.log : undefined) : held!;
+      const next = text === undefined ? undefined : parentDidOf(text);
+      if (next === undefined || next === did) break;
+      did = next;
+    }
+    return out;
+  }
+
   private async verify(log: string, checkpoint?: string, extra?: ReadonlyMap<string, Uint8Array>, bitcoin?: SatEvidence[], optIn?: boolean): Promise<OriginalsReport> {
     const aliases = await this.aliasEvidence(log);
     const { bytes, checked } = await this.storedBytes(log, extra);
     const comparisons = await this.comparisons(log);
+    const parents = await this.heldParents(log);
     const run = (authors: AuthorDidEvidence[]) =>
       verifyOriginal({
         log,
+        ...(parents.length > 0 ? { parents } : {}),
         ...(bitcoin ? { bitcoin } : {}),
         aliases,
         authors,
@@ -1341,7 +1395,8 @@ export class OriginalsSDK {
         ...comparisons,
         ...(checkpoint ? { checkpoint } : {}),
       });
-    const base = await this.authorEvidence(log, [], (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])), comparisons.retained, optIn);
+    const others = [...(comparisons.copies ?? []), ...parents].flatMap((c) => (typeof c.log === "string" ? [c.log] : []));
+    const base = await this.authorEvidence(log, [], others, comparisons.retained, optIn);
     return (await this.withIdentities(log, base, run, undefined, optIn)).report;
   }
 
@@ -1434,7 +1489,7 @@ export class OriginalsSDK {
   }
 
   async prepareCreate(input: CreateInput): Promise<Draft> {
-    exactKeys(input, ["name", "metadata", "resource", "author", "authors", "signer", "signers", "editors"], "create input");
+    exactKeys(input, ["name", "metadata", "resource", "author", "authors", "signer", "signers", "editors", "parent"], "create input");
     const set = signerSetOf(input);
     const bytes = new Map<string, Uint8Array>();
     const r = input.resource;
@@ -1455,6 +1510,7 @@ export class OriginalsSDK {
       versionTime: this.versionTime(), name: input.name, ...(input.metadata !== undefined ? { metadata: input.metadata } : {}), resource,
       author: set ? set.author : input.author!, ...(set ? { authors: set.authors } : {}),
       ...(input.editors !== undefined ? { editors: input.editors } : {}),
+      ...(input.parent !== undefined ? { parent: input.parent } : {}),
     });
     const summary = summarize(entry);
     return Promise.resolve({ kind: "draft", signed: false, original: entry.state.id as string, parent: null, entry, summary, display: describeEntry(summary), bytes, proofs: [] });
@@ -1483,8 +1539,43 @@ export class OriginalsSDK {
     return { log, head: parseJson(all[all.length - 1]) as unknown as LogEntry, view };
   }
 
+  /**
+   * P5.24: the pin an edit of a child Original names, and for an editor the
+   * grant it inherits there. Given, the pin is used as is (the verifier
+   * refuses one that goes backwards). Omitted, it advances to the newest
+   * version of the parent this store holds, when that log holds the current
+   * pin; otherwise it stays. An editor's inherited grant is the one the
+   * parent's state at the pin holds for it, unless the parent is deactivated
+   * there (P5.25).
+   */
+  private async pinFor(head: LogEntry, given: string | undefined, editor: EditorRef | undefined): Promise<{ pin?: string; inherited?: EditorGrant }> {
+    const parent = (head.state as unknown as EntryState).asset.parent;
+    if (given !== undefined && typeof given !== "string") sdkError("invalid-evidence", "INPUT_INVALID", "pin is a versionId of the parent Original's log (P5.24)");
+    if (!parent) {
+      if (given !== undefined) sdkError("invalid-evidence", "STATE_PARENT", "only an Original that names a parent pins a version of it (P5.24)");
+      return {};
+    }
+    let held: string | undefined;
+    try {
+      held = (await this.store.get(parent.did))?.log;
+    } catch (error) {
+      if (!(error instanceof OriginalsError)) throw error;
+    }
+    const ids = held ? versionIds(held) : [];
+    const pin = given ?? (ids.includes(parent.versionId) ? ids[ids.length - 1] : parent.versionId);
+    // Refused before anyone signs, as the verifier would (P5.24).
+    if (ids.includes(pin) && ids.includes(parent.versionId) && ids.indexOf(pin) < ids.indexOf(parent.versionId)) {
+      sdkError("invalid-evidence", "PARENT_PIN_BACKWARDS", `the pin ${pin} is older than the current pin ${parent.versionId} (P5.24)`);
+    }
+    if (!editor || !held) return pin !== parent.versionId ? { pin } : {};
+    const at = ids.indexOf(pin);
+    const state = at >= 0 ? (parseJson(lines(held)[at]) as unknown as LogEntry).state as unknown as EntryState : undefined;
+    const grant = state && state.asset.status !== "deactivated" ? state.asset.editors?.find((g) => g.did === editor.did) : undefined;
+    return { ...(pin !== parent.versionId ? { pin } : {}), ...(grant ? { inherited: grant } : {}) };
+  }
+
   async prepareEdit(did: string, input: EditInput): Promise<Draft> {
-    exactKeys(input, ["parent", "name", "metadata", "resource", "author", "authors", "editor", "editors", "signer", "signers", "body", "preview"], "edit input");
+    exactKeys(input, ["parent", "name", "metadata", "resource", "author", "authors", "editor", "editors", "signer", "signers", "body", "preview", "pin"], "edit input");
     return this.prepareUpdate(did, input);
   }
 
@@ -1511,8 +1602,11 @@ export class OriginalsSDK {
       // Read as often and in the order as before (instanceof, digest, copy, mediaType, size); the size is the view's.
       resource = { mediaType: r.mediaType ?? current.mediaType, size: (void r.bytes, read.length), digest };
     }
+    const { pin, inherited } = await this.pinFor(head, input.pin, input.editor);
     const built = prepareUpdateOriginal(head, {
       versionTime: this.versionTime(head.versionTime),
+      ...(pin !== undefined ? { pin } : {}),
+      ...(inherited !== undefined ? { inherited } : {}),
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
       ...(resource !== undefined ? { resource } : {}),
@@ -1526,7 +1620,7 @@ export class OriginalsSDK {
     const entry = parseJson(JSON.stringify(built)) as unknown as UnsignedEntry;
     const parentState = head.state as unknown as EntryState;
     const choice: PreviewChoice = { ...(input.body !== undefined ? { body: input.body } : {}), ...(input.preview !== undefined ? { preview: input.preview } : {}) };
-    const chosen = await this.previewEntry(head, entry, bytes, choice, input.editor !== undefined);
+    const chosen = await this.previewEntry(head, entry, bytes, choice, input.editor !== undefined, inherited);
     const summary = summarize(chosen.entry, parentState);
     return { kind: "draft", signed: false, original: did, parent: input.parent, entry: chosen.entry, summary, display: describeEntry(summary), bytes, ...(chosen.report ? { preview: chosen.report } : {}), proofs: [] };
   }
@@ -1538,7 +1632,7 @@ export class OriginalsSDK {
    * from that copy with the preview chosen. An entry not prepared for Bitcoin
    * names none, and a choice for it is refused.
    */
-  private async previewEntry(head: LogEntry, entry: UnsignedEntry, bytes: Map<string, Uint8Array>, choice: PreviewChoice, editor: boolean): Promise<{ entry: UnsignedEntry; report?: PreviewReport }> {
+  private async previewEntry(head: LogEntry, entry: UnsignedEntry, bytes: Map<string, Uint8Array>, choice: PreviewChoice, editor: boolean, inherited?: EditorGrant): Promise<{ entry: UnsignedEntry; report?: PreviewReport }> {
     const parent = (head.state as unknown as EntryState).asset;
     const next = (entry.state as unknown as EntryState).asset;
     if (!next.aliases.some((a) => a.startsWith("did:btco:"))) {
@@ -1556,7 +1650,8 @@ export class OriginalsSDK {
       ? prepareDeactivateOriginal(head, { versionTime: snapshot.versionTime, author: s.author, preview: null })
       : prepareUpdateOriginal(head, {
           versionTime: snapshot.versionTime, name: s.asset.name, metadata: s.asset.metadata ?? null, resource: s.asset.resource,
-          ...(s.editor ? { editor: s.editor } : { author: s.author, aliases: s.asset.aliases, editors: s.asset.editors ?? null, ...(s.asset.authors ? { authors: s.asset.authors } : {}) }),
+          ...(s.editor ? { editor: s.editor, ...(inherited ? { inherited } : {}) } : { author: s.author, aliases: s.asset.aliases, editors: s.asset.editors ?? null, ...(s.asset.authors ? { authors: s.asset.authors } : {}) }),
+          ...(s.asset.parent ? { pin: s.asset.parent.versionId } : {}),
           preview: plan.preview,
         });
     return { entry: rebuilt, report: plan.report };
@@ -2054,6 +2149,35 @@ export class OriginalsSDK {
       const role = single !== null ? (did === single ? "author" : "editor") : (roles.get(did) ?? "author");
       missing.push({ kind: "identity", did, role });
     }
+    // P5.25, P7.1: a child's parent Original through the highest pin the packaged entries name, and
+    // its own parent through the highest pin of that, with their signers; one not held is missing.
+    const parents: Array<{ did: string; log: string }> = [];
+    for (let did = parentDidOf(prefix), pin = lastPin(prefix); did !== undefined && pin !== undefined && parents.length < ORIGINALS_LIMITS.parents;) {
+      let held: string | undefined;
+      try {
+        held = (await this.store.get(did))?.log;
+      } catch (error) {
+        if (!(error instanceof OriginalsError)) throw error;
+      }
+      const at = held ? versionIds(held).indexOf(pin) : -1;
+      if (!held || at < 0) {
+        missing.push({ kind: "parent", did, versionId: pin });
+        break;
+      }
+      const through = `${lines(held).slice(0, at + 1).join("\n")}\n`;
+      parents.push({ did, log: through });
+      for (const a of await this.authorEvidence(through)) {
+        if (a.log !== undefined && !authors.some((b) => b.did === a.did)) authors.push({ did: a.did, log: a.log, ...(a.witness !== undefined ? { witness: a.witness } : {}) });
+      }
+      for (const [signer, role] of signerRolesOf(through)) {
+        if (signer.startsWith("did:btco:") || authors.some((a) => a.did === signer) || missing.some((m) => m.kind === "identity" && m.did === signer)) continue;
+        missing.push({ kind: "identity", did: signer, role });
+      }
+      const next = parentDidOf(through);
+      if (next === did) break;
+      did = next;
+      pin = lastPin(through);
+    }
     const bytes: Record<string, Uint8Array> = {};
     const versions = view.report.resources.versions;
     // Bytes are packaged by digest: a version is left out only when no packaged version names the same bytes.
@@ -2080,7 +2204,7 @@ export class OriginalsSDK {
       completeness: missing.length === 0 ? "complete" : "partial",
       missing,
     };
-    return { bytes: writeEvidence({ manifest, log: prefix, authors, bytes }), manifest };
+    return { bytes: writeEvidence({ manifest, log: prefix, authors, bytes, ...(parents.length > 0 ? { parents } : {}) }), manifest };
   }
 
   /**
@@ -2110,8 +2234,11 @@ export class OriginalsSDK {
     const all = lines(contents.log);
     const k = localCopy || (bitcoin && bitcoin.length > 0) ? -1 : anchoringIndexOf(all);
     const notCheckedAgainstAnchor = k > 0 ? all.slice(k).flatMap(versionIdOfLine) : [];
+    // P5.25: the package's parent logs, then any this store holds.
+    const parents = await this.heldParents(contents.log, contents.parents ?? []);
     const run = (authors: AuthorDidEvidence[]) =>
       verifyOriginal({
+        ...(parents.length > 0 ? { parents } : {}),
         ...(bitcoin ? { bitcoin } : {}),
         aliases: aliasEvidence,
         log: k > 0 ? serializeLines(all.slice(0, k)) : contents.log,
@@ -2124,7 +2251,8 @@ export class OriginalsSDK {
     // A host's snapshot is a copy, like a package: no fetch location, so the location rule does not
     // apply to its signer logs (P7.8; owner decision on #993's review).
     const supplied = contents.authors.map(({ did, log, witness }) => this.obtained({ did, log, ...(witness !== undefined ? { witness } : {}) }, from));
-    const base = await this.authorEvidence(contents.log, supplied, (comparisons.copies ?? []).flatMap((c) => (typeof c.log === "string" ? [c.log] : [])), comparisons.retained);
+    const others = [...(comparisons.copies ?? []), ...parents].flatMap((c) => (typeof c.log === "string" ? [c.log] : []));
+    const base = await this.authorEvidence(contents.log, supplied, others, comparisons.retained);
     const { report } = await this.withIdentities(contents.log, base, run, retrieval);
     const reasons = [...report.reasons];
     if (k > 0 && !reasons.includes("bitcoin-evidence-missing")) reasons.push("bitcoin-evidence-missing");
@@ -2134,7 +2262,11 @@ export class OriginalsSDK {
     // P7.1: complete means the package holds every item a package can hold: the bytes, and each signer's
     // history except a did:btco signer's, which is read from Bitcoin and never packaged (C12-298).
     const packaged = new Set(contents.authors.map((a) => a.did));
-    const actuallyComplete = report.resources.missing.length === 0 && signerDidsOf(contents.log).every((d) => d.startsWith("did:btco:") || packaged.has(d));
+    // P7.1, P5.25: and a child's parent logs through its pins, with their signers.
+    const packagedParents = contents.parents ?? [];
+    const actuallyComplete = report.resources.missing.length === 0 &&
+      [contents.log, ...packagedParents.map((p) => p.log)].flatMap(signerDidsOf).every((d) => d.startsWith("did:btco:") || packaged.has(d)) &&
+      (parentDidOf(contents.log) === undefined || packagedParents.some((p) => p.did === parentDidOf(contents.log)));
     if ((m.completeness === "complete") !== actuallyComplete) reasons.push("manifest-completeness-mismatch");
     return { manifest: m, report: { ...report, current: report.current && reasons.length === report.reasons.length }, reasons, notCheckedAgainstAnchor };
   }
@@ -2269,6 +2401,11 @@ export class OriginalsSDK {
       sdkError("invalid-evidence", "IMPORT_REJECTED", "the package's log does not verify to its last entry", { report: r });
     }
     if (requireResources) await this.requireHeld(contents, r);
+    // P5.25: the parent logs the child verified against are kept, where this store holds none.
+    for (const parent of contents.parents ?? []) {
+      if (!r.parentAuthority || r.parentAuthority.status !== "verified") break;
+      if (!(await this.store.get(parent.did))) await this.store.commit(parent.did, { expectedHead: null, log: parent.log });
+    }
     return this.storeImport(contents, r, from);
   }
 
