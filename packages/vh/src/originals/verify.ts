@@ -45,7 +45,7 @@ import { authorKey, stillAuthorized, verifyAuthorHistory, versionNumberOf, type 
 import { didWebvhLogUrl } from "../webvh/index.js";
 import { NATIVE_SHA256_MIN_BYTES, bytesView } from "../crypto/index.js";
 import { deriveDocument, exactNumberError, originalsSpecialisation } from "./profile.js";
-import { ORIGINALS_LIMITS, ORIGINALS_METHOD, resourceDigest, resourceDigestAsync, signerOf, type AssetState, type EntryState } from "./state.js";
+import { ORIGINALS_LIMITS, ORIGINALS_METHOD, authorRefsOf, governingSet, resourceDigest, resourceDigestAsync, signersOf, type AssetState, type EntryState } from "./state.js";
 
 export interface VerifyOriginalOptions {
   /**
@@ -174,10 +174,27 @@ export interface ValidAsOf {
  */
 export interface HistoricalAuthorization {
   versionId: string;
-  /** The signer DID: the author, or the editor of an editor entry. */
+  /** The signer DID: the author, or the editor of an editor entry; for a set Original's author entry, the first signer that is no longer current. */
   did: string;
   role: "author" | "editor";
-  reason: "key-not-in-latest-signer-document" | "author-did-deactivated" | "signer-did-deactivated";
+  reason: HistoricalReason;
+  /**
+   * A set Original's author entry (plan 050 §1, P5.23; PROVISIONAL): the
+   * parent's threshold, which too few of its signers still meet, and each
+   * signer that no longer does, with why.
+   */
+  threshold?: number;
+  signers?: Array<{ did: string; reason: HistoricalReason }>;
+}
+
+export type HistoricalReason = "key-not-in-latest-signer-document" | "author-did-deactivated" | "signer-did-deactivated";
+
+/** Who signed an entry (plan 050 §1): its author, each signer of a set Original's author entry, or its editor. */
+export interface SignedBy {
+  versionId: string;
+  role: "author" | "editor";
+  /** The signer DIDs, in proof order. */
+  dids: string[];
 }
 
 /** Divergent valid histories of one Original. No branch is current (Q5). */
@@ -251,7 +268,17 @@ export interface OriginalsReport {
      * `status` is incomplete when the author's or any editor's evidence is.
      */
     editors: SignerEvidence[];
+    /**
+     * Each author DID that signed a verified entry, or whose missing history
+     * stopped verification: the one author, or each member of a set Original
+     * that signed (plan 050 §1; P7.1). For a set Original the single-author
+     * fields above are null, and `status` is incomplete when any member's
+     * evidence is.
+     */
+    authors: SignerEvidence[];
   };
+  /** Who signed each verified entry through the checkpoint, oldest first (plan 050 §1). */
+  signedBy: SignedBy[];
   /**
    * Content availability, reported separately (P7.4): `partial` lists the missing resource
    * versions and is not a verification failure (P7.3, P9.18); `digest-failure` is.
@@ -562,7 +589,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   const anchorLog = onBitcoin ? assembly!.entries.slice(0, anchoringIndex(assembly!.entries) + 1) : Array.isArray(input) ? input : raw ?? [];
   const signedBy = (did: string) => anchorLog.some((e) => {
     const state = (e as { state?: unknown } | null)?.state;
-    return isJsonObject(state) && signerOf(state as unknown as EntryState)?.ref?.did === did;
+    return isJsonObject(state) && state.author !== undefined && signersOf(state as unknown as EntryState).refs.some((r) => isJsonObject(r) && r.did === did);
   });
   for (const held of heldBack) {
     const at = onBitcoin ? assembly?.anchorPosition : undefined;
@@ -599,7 +626,10 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   // Anchored ordering only for what Bitcoin accepted: the anchor and the inscriptions after it.
   const inscribed = new Set(onBitcoin ? [onBitcoin.anchor!.versionId, ...onBitcoin.accepted.map((a) => a.versionId)] : []);
   const anchored = (v: VerifiedEntry | undefined) => v !== undefined && inscribed.has(v.entry.versionId);
-  const authorDid = head ? (head.entry.state as unknown as EntryState).author.did : null;
+  // A set Original has no one author: its members' evidence is in `identityEvidence.authors` (plan 050 §1).
+  const headState = head ? (head.entry.state as unknown as EntryState) : undefined;
+  const signerSet = headState !== undefined && Array.isArray(headState.author);
+  const authorDid = headState && !signerSet ? (headState.author as { did: string }).did : null;
   const history = authorDid ? histories.find((h) => h.did === authorDid) : undefined;
   const latest = history?.versions[history.versions.length - 1];
   const obtainedOf = (did: string | null): IdentityObtained => obtained(did, options.authors, histories);
@@ -635,7 +665,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   if (log.failure?.error.category === "incomplete-evidence" && typeof stoppedAt === "string" && log.failure.error.details?.role === "editor" && !editorDids.includes(stoppedAt)) {
     editorDids.push(stoppedAt);
   }
-  const editors: SignerEvidence[] = editorDids.map((did) => {
+  const evidenceOf = (did: string): SignerEvidence => {
     const h = histories.find((x) => x.did === did);
     const last = h?.versions[h.versions.length - 1];
     const stopped = stoppedAt === did ? { code: log.failure!.error.code, message: log.failure!.error.message } : undefined;
@@ -650,7 +680,22 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
       deactivated: last?.deactivated ?? false,
       ...(failure ? { failure } : {}),
     };
-  });
+  };
+  const editors: SignerEvidence[] = editorDids.map(evidenceOf);
+  // The author DIDs relied on (plan 050 §1): the one author, or each member that signed a verified
+  // entry of a set Original, and one whose missing history stopped verification.
+  const authorDids: string[] = [];
+  if (signerSet) {
+    for (const v of log.entries) {
+      const state = v.entry.state as unknown as EntryState;
+      if (state.editor) continue;
+      for (const r of authorRefsOf(state)) if (!authorDids.includes(r.did)) authorDids.push(r.did);
+    }
+  }
+  if (log.failure?.error.category === "incomplete-evidence" && typeof stoppedAt === "string" && log.failure.error.details?.role === "author" && (signerSet || head === undefined) && !authorDids.includes(stoppedAt)) {
+    authorDids.push(stoppedAt);
+  }
+  const authors: SignerEvidence[] = signerSet || authorDids.length > 0 ? authorDids.map(evidenceOf) : authorDid ? [evidenceOf(authorDid)] : [];
 
   let selected: VerifiedEntry | undefined = head;
   if (options.checkpoint !== undefined) {
@@ -672,7 +717,8 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   // the verifier has no verified copy of, or none at or after, is incomplete identity evidence (P5.6).
   const versionUnavailable = assembly?.report.ignored.some((i) => i.reason === "author-version-unavailable" || i.code === "AUTHOR_VERSION_UNAVAILABLE") ?? false;
   const identityIncomplete =
-    failure?.category === "incomplete-evidence" || identityFailures.length > 0 || !history || editors.some((e) => e.status === "incomplete") || versionUnavailable;
+    failure?.category === "incomplete-evidence" || identityFailures.length > 0 || (signerSet ? authors.length === 0 || authors.some((a) => a.status === "incomplete") : !history) ||
+    editors.some((e) => e.status === "incomplete") || versionUnavailable;
   // With the anchor, the inscriptions reported unverifiable: one accepted later is a reported change of head (P9.15).
   const unverifiableNow = onBitcoin?.unverifiable.map((u) => u.inscription) ?? [];
   const acceptedNow = onBitcoin?.accepted.map((a) => a.inscription) ?? [];
@@ -692,6 +738,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     deactivated: latest?.deactivated ?? false,
     ...(identityFailures[0] ? { failure: identityFailures[0] } : {}),
     editors,
+    authors,
   };
   const retainedVersionId = options.retained?.original ?? null;
   const aliasChecks = Promise.all((state?.asset.aliases ?? []).map((did) => checkAlias(`did:vh:${log.scid}`, options.aliases?.find((a) => a.did === did), did, options.now)));
@@ -730,6 +777,10 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     // P7.9 is for entries not inscribed on an anchoring sat; those are checked at their inscription
     // time instead, and entries the anchoring inscription carries against the version they name (P9.15).
     historicallyAuthorizedOnly: onBitcoin === null ? historicallyAuthorizedOnly(prefix, histories, authorDid) : [],
+    signedBy: prefix.map((v) => {
+      const { role, refs } = signersOf(v.entry.state as unknown as EntryState);
+      return { versionId: v.entry.versionId, role, dids: refs.map((r) => r.did) };
+    }),
     current: false,
     notices: [],
     reasons,
@@ -754,11 +805,11 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   if (report.identityEvidence.status === "incomplete") reasons.push("identity-evidence-incomplete");
   if (fork) reasons.push("fork-unresolved");
   if (report.assetFreshness.status === "stale") reasons.push("asset-log-older-than-retained");
-  if (report.identityEvidence.freshness === "stale") reasons.push("author-history-older-than-retained");
+  if (report.identityEvidence.freshness === "stale" || (signerSet && authors.some((a) => a.freshness === "stale"))) reasons.push("author-history-older-than-retained");
   if (editors.some((e) => e.freshness === "stale")) reasons.push("editor-history-older-than-retained");
   // P6.5: the author DID's deactivation is reported with an unanchored result. An anchored
   // Original's accepted state stays current after it (P9.15).
-  if (report.identityEvidence.deactivated && !anchored(head)) reasons.push("author-did-deactivated");
+  if ((report.identityEvidence.deactivated || (signerSet && setDeactivated(headState, histories))) && !anchored(head)) reasons.push("author-did-deactivated");
   // P7.9: any result that includes a historically authorized entry says so.
   if (report.historicallyAuthorizedOnly.length > 0) reasons.push("historically-authorized-only");
   if (assembly?.report.status === "unverified") reasons.push("bitcoin-evidence-missing");
@@ -801,34 +852,70 @@ function latestOf(histories: AuthorHistory[], did: string) {
   return h?.versions[h.versions.length - 1];
 }
 
+/**
+ * PROVISIONAL (plan 050 §1): a set Original's members can no longer act together once fewer than
+ * its threshold of them are not deactivated in their latest verified state, as a single author's
+ * deactivation (P6.5, P5.18).
+ */
+function setDeactivated(state: EntryState, histories: AuthorHistory[]): boolean {
+  const set = governingSet(state);
+  const active = set.dids.filter((did) => latestOf(histories, did)?.deactivated !== true).length;
+  return active < set.threshold;
+}
+
+/** Why one signer's reference is no longer current in its signer's latest verified DID state (P7.9), or null; undefined when its history is missing. */
+function notCurrent(ref: { did: string; verificationMethod: string; versionId: string }, role: "author" | "editor", histories: AuthorHistory[]): HistoricalReason | null | undefined {
+  const h = histories.find((x) => x.did === ref.did);
+  const latest = h?.versions[h.versions.length - 1];
+  if (!h || !latest) return undefined; // missing identity evidence is reported as incomplete, not here
+  // A signer whose DID is deactivated authorizes nothing further, even if its document still lists the key.
+  if (latest.deactivated) return "signer-did-deactivated";
+  const signedWith = h.versions.find((x) => x.versionId === ref.versionId);
+  let key: string | undefined;
+  try {
+    key = signedWith ? authorKey(signedWith, ref) : undefined;
+  } catch (error) {
+    if (!(error instanceof OriginalsError)) throw error;
+  }
+  return typeof key !== "string" || !stillAuthorized(latest, ref, key) ? "key-not-in-latest-signer-document" : null;
+}
+
 /** P7.9, P6.5, P5.18: each entry of `prefix` its signer's latest verified DID state no longer authorizes. */
 function historicallyAuthorizedOnly(prefix: VerifiedEntry[], histories: AuthorHistory[], authorDid: string | null): HistoricalAuthorization[] {
   const out: HistoricalAuthorization[] = [];
   const authorDeactivated = authorDid !== null && latestOf(histories, authorDid)?.deactivated === true;
-  for (const v of prefix) {
-    const { role, ref } = signerOf(v.entry.state as unknown as EntryState);
+  for (const [i, v] of prefix.entries()) {
+    const state = v.entry.state as unknown as EntryState;
+    const { role, refs } = signersOf(state);
+    const ref = refs[0];
     const entry = { versionId: v.entry.versionId, did: ref.did, role };
     // An editor entry is subject to the author DID's deactivation exactly as an author entry is (P5.18).
     if (authorDeactivated) {
       out.push({ ...entry, reason: "author-did-deactivated" });
       continue;
     }
-    const h = histories.find((x) => x.did === ref.did);
-    const latest = h?.versions[h.versions.length - 1];
-    if (!h || !latest) continue; // missing identity evidence is reported as incomplete, not here
-    // An editor whose DID is deactivated authorizes nothing further, even if its document still lists the key.
-    if (role === "editor" && latest.deactivated) {
-      out.push({ ...entry, reason: "signer-did-deactivated" });
-      continue;
+    if (Array.isArray(state.author)) {
+      // PROVISIONAL (plan 050): a set Original whose members can no longer act together, as a deactivated author.
+      if (setDeactivated(state, histories)) {
+        out.push({ ...entry, reason: "author-did-deactivated" });
+        continue;
+      }
+      if (role === "author") {
+        // Plan 050 §1, P5.23: current while at least the parent's threshold of the parent's members
+        // that signed still meet P7.9; genesis, signed by every member, against its own threshold.
+        const parent = i > 0 ? (prefix[i - 1].entry.state as unknown as EntryState) : state;
+        const set = governingSet(parent);
+        const verdicts = refs.map((r) => ({ did: r.did, reason: notCurrent(r, "author", histories) }));
+        if (verdicts.some((x) => x.reason === undefined)) continue;
+        const current = verdicts.filter((x) => x.reason === null && set.dids.includes(x.did)).length;
+        if (current >= set.threshold) continue;
+        const stale = verdicts.filter((x): x is { did: string; reason: HistoricalReason } => typeof x.reason === "string");
+        out.push({ ...entry, did: stale[0]?.did ?? ref.did, reason: stale[0]?.reason ?? "key-not-in-latest-signer-document", threshold: set.threshold, signers: stale });
+        continue;
+      }
     }
-    const signedWith = h.versions.find((x) => x.versionId === ref.versionId);
-    let key: string | undefined;
-    try {
-      key = signedWith ? authorKey(signedWith, ref) : undefined;
-    } catch (error) {
-      if (!(error instanceof OriginalsError)) throw error;
-    }
-    if (typeof key !== "string" || !stillAuthorized(latest, ref, key)) out.push({ ...entry, reason: "key-not-in-latest-signer-document" });
+    const reason = notCurrent(ref, role, histories);
+    if (reason) out.push({ ...entry, reason });
   }
   return out;
 }
@@ -837,19 +924,21 @@ function historicallyAuthorizedOnly(prefix: VerifiedEntry[], histories: AuthorHi
 function reliedOn(prefix: VerifiedEntry[], histories: AuthorHistory[], evidence: AuthorDidEvidence[]): SignerReliance[] {
   const out: SignerReliance[] = [];
   for (const v of prefix) {
-    const { role, ref } = signerOf(v.entry.state as unknown as EntryState);
-    if (out.some((s) => s.did === ref.did)) continue;
-    const supplied = evidence.find((e) => e.did === ref.did);
-    out.push({
-      did: ref.did,
-      role,
-      versionId: latestOf(histories, ref.did)?.versionId ?? null,
-      obtainedAt: supplied?.obtainedAt ?? null,
-      source: supplied?.source ?? null,
-      location: supplied?.retrievedFrom ?? null,
-    });
+    const { role, refs } = signersOf(v.entry.state as unknown as EntryState);
+    for (const ref of refs) {
+      if (out.some((s) => s.did === ref.did)) continue;
+      const supplied = evidence.find((e) => e.did === ref.did);
+      out.push({
+        did: ref.did,
+        role,
+        versionId: latestOf(histories, ref.did)?.versionId ?? null,
+        obtainedAt: supplied?.obtainedAt ?? null,
+        source: supplied?.source ?? null,
+        location: supplied?.retrievedFrom ?? null,
+      });
+    }
   }
-  // The author signs the genesis entry, so it comes first.
+  // The author signs the genesis entry, so it comes first; every member signs a set Original's genesis.
   return out;
 }
 

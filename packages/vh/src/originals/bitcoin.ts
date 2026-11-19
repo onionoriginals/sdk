@@ -59,7 +59,7 @@ import type { LogEntry, LogVerification } from "../log/index.js";
 import { authorKey, stillAuthorized, versionNumberOf, type AuthorHistory, type AuthorVersion } from "./author.js";
 import { btcoAliasOf, chainOrder, parseBtcoAlias, readSat, type ChainPosition, type PlacementReason, type SatEvidence, type SatInscription, type SatRead } from "./btco.js";
 import { decodeCbor } from "./cbor.js";
-import { ORIGINALS_LIMITS, checkDescriptor, resourceDigest, signerOf, type AuthorRef, type EntryState, type PreviewDescriptor, type ResourceDescriptor } from "./state.js";
+import { ORIGINALS_LIMITS, checkDescriptor, governingSet, resourceDigest, signersOf, type AuthorRef, type EntryState, type PreviewDescriptor, type ResourceDescriptor } from "./state.js";
 
 /**
  * The largest inscription, its metadata and body together, in bytes (P9.17,
@@ -308,13 +308,17 @@ export function anchoringIndex(entries: unknown[]): number {
 }
 
 /**
- * The reference of the DID that signs an entry (P5.14, P5.16): the editor's
- * for an editor entry, otherwise the author's, through `signerOf`.
+ * The references of the DIDs that sign an entry (P5.14, P5.16): the editor's
+ * for an editor entry, otherwise the author's, or each signer of a set
+ * Original's author entry (plan 050, P5.22), through `signersOf`.
  */
-function signerRefOf(entry: unknown): AuthorRef | undefined {
+function signerRefsOf(entry: unknown): AuthorRef[] {
   const state = stateOf(entry);
-  return state.author ? signerOf(state as EntryState).ref : undefined;
+  if (!state.author) return [];
+  const refs = signersOf(state as EntryState).refs;
+  return refs.filter((r) => isJsonObject(r) && typeof r.did === "string" && typeof r.versionId === "string");
 }
+
 
 /**
  * A DID's state at an inscription (P9.15, P5.13): for did:btco, the latest
@@ -352,16 +356,94 @@ function stateAt(history: AuthorHistory, named: AuthorVersion | undefined, inscr
  *   time, so a named later version can list a removed key again (C12-98,
  *   C12-44).
  *
- * The signer is the entry's, through `signerOf`: the editor DID for an editor
+ * The signer is the entry's, through `signersOf`: the editor DID for an editor
  * entry, so these rules apply to editor DIDs as they do to the author DID
  * (P5.18), and the `author-*` reasons name the signer DID's state. An editor
  * entry is also refused when the author DID's state at the inscription is
  * deactivated (P5.18, P9.15): `author-deactivated-at-inscription-time`.
+ *
+ * A set Original's author entry has several signers, each checked so, and
+ * holds when the parent's threshold of them do (`parent`, the entry before
+ * it; plan 050 §1, P5.23; PROVISIONAL).
  */
-export function checkAtInscriptionTime(entry: LogEntry, inscription: SatInscription, histories: AuthorHistory[]): IgnoredReason | null {
-  const found = signerVersion(entry, histories);
+export function checkAtInscriptionTime(entry: LogEntry, inscription: SatInscription, histories: AuthorHistory[], parent?: LogEntry): IgnoredReason | null {
+  const state = stateOf(entry);
+  const refs = signerRefsOf(entry);
+  if (refs.length === 0) return "author-version-unavailable";
+  // An editor entry is also refused once the author DID's state at the inscription is deactivated
+  // (P5.18), or, for a set Original, once fewer than its threshold of members are not (plan 050).
+  const author = state.editor && state.author ? () => authorsDeactivatedAt(state as EntryState, inscription, histories) : undefined;
+  const results = refs.map((ref) => refAtInscription(ref, inscription, histories, author));
+  if (!Array.isArray(state.author) || state.editor) return results[0];
+  return thresholdOf(results, refs, state as EntryState, parent ? stateOf(parent) as EntryState : undefined);
+}
+
+/**
+ * Plan 050 §1 (P5.23 at an inscription, PROVISIONAL): a set Original's author entry holds at an
+ * inscription when at least the parent's threshold of the parent's members that sign it meet
+ * P9.15 there, and so does every member it adds. When too few do, the reason is unavailable
+ * evidence if the signers not yet verified could make up the difference, and otherwise the first
+ * signer's reason.
+ */
+function thresholdOf(results: Array<IgnoredReason | null>, refs: AuthorRef[], state: EntryState, parent: EntryState | undefined): IgnoredReason | null {
+  const set = parent ? governingSet(parent) : governingSet(state);
+  const added = (state.asset?.authors?.dids ?? []).filter((d) => !set.dids.includes(d));
+  let held = 0;
+  let pending = 0;
+  let failed: IgnoredReason | null = null;
+  let addedFailed = false;
+  let addedPending = false;
+  refs.forEach((ref, i) => {
+    const r = results[i];
+    const member = set.dids.includes(ref.did);
+    const isAdded = added.includes(ref.did);
+    if (r === null) {
+      if (member) held++;
+    } else if (r === "author-version-unavailable") {
+      if (member) pending++;
+      if (isAdded) addedPending = true;
+    } else {
+      failed ??= r;
+      if (isAdded) addedFailed = true;
+    }
+  });
+  // An added member's consent is required, whatever the threshold (plan 050, P5.20).
+  if (addedFailed) return failed;
+  if (held >= set.threshold && !addedPending) return null;
+  if (held + pending >= set.threshold) return "author-version-unavailable";
+  return failed ?? "author-version-unavailable";
+}
+
+/** Whether the author DID, or too many of a set Original's members, are deactivated at an inscription (P5.18, P9.15). */
+function authorsDeactivatedAt(state: EntryState, inscription: SatInscription, histories: AuthorHistory[]): IgnoredReason | null {
+  if (!Array.isArray(state.author)) {
+    const author = state.author;
+    const authorHistory = histories.find((h) => h.did === author.did);
+    if (!authorHistory) return "author-version-unavailable";
+    const authorState = stateAt(authorHistory, authorHistory.versions.find((v) => v.versionId === author.versionId), inscription);
+    if (typeof authorState === "string") return authorState;
+    return authorState.deactivated ? "author-deactivated-at-inscription-time" : null;
+  }
+  // PROVISIONAL (plan 050): the set can still act while at least its threshold of members are not deactivated.
+  const set = governingSet(state);
+  let active = 0;
+  let unknown = 0;
+  for (const did of set.dids) {
+    const h = histories.find((x) => x.did === did);
+    const named = state.author.find((r) => r.did === did);
+    const at = h ? stateAt(h, named ? h.versions.find((v) => v.versionId === named.versionId) : undefined, inscription) : "author-version-unavailable";
+    if (typeof at === "string") unknown++;
+    else if (!at.deactivated) active++;
+  }
+  if (active >= set.threshold) return null;
+  return active + unknown >= set.threshold ? "author-version-unavailable" : "author-deactivated-at-inscription-time";
+}
+
+/** One signer's key at an inscription (P9.15, P5.13), as `checkAtInscriptionTime` describes. */
+function refAtInscription(ref: AuthorRef, inscription: SatInscription, histories: AuthorHistory[], authorState?: () => IgnoredReason | null): IgnoredReason | null {
+  const found = refVersion(ref, histories);
   if (typeof found === "string") return found;
-  const { ref, history, named } = found;
+  const { history, named } = found;
   if (history.method === "did:btco") {
     if (!named.position) return "author-version-unavailable";
     if (chainOrder(named.position, inscription) >= 0) return "author-version-not-yet-in-effect";
@@ -369,15 +451,8 @@ export function checkAtInscriptionTime(entry: LogEntry, inscription: SatInscript
   const state = stateAt(history, named, inscription);
   if (typeof state === "string") return state;
   if (state.deactivated) return "author-deactivated-at-inscription-time";
-  const editorEntry = stateOf(entry);
-  if (editorEntry.editor && editorEntry.author) {
-    const author = editorEntry.author;
-    const authorHistory = histories.find((h) => h.did === author.did);
-    if (!authorHistory) return "author-version-unavailable";
-    const authorState = stateAt(authorHistory, authorHistory.versions.find((v) => v.versionId === author.versionId), inscription);
-    if (typeof authorState === "string") return authorState;
-    if (authorState.deactivated) return "author-deactivated-at-inscription-time";
-  }
+  const author = authorState?.();
+  if (author) return author;
   let key: string;
   try {
     key = authorKey(named, ref);
@@ -392,23 +467,28 @@ export function checkAtInscriptionTime(entry: LogEntry, inscription: SatInscript
  * An entry before the anchoring entry has claimed ordering and is checked
  * against the version it names (P9.15); that check is the log's. But a
  * did:btco version must precede the anchoring inscription that carries the
- * entry, so one mined at or after it is not yet in effect (P5.13).
+ * entry, so one mined at or after it is not yet in effect (P5.13). Every
+ * signer of a set Original's entry is checked so (plan 050, P5.22).
  */
 export function checkBeforeAnchor(entry: LogEntry, anchoring: SatInscription, histories: AuthorHistory[]): IgnoredReason | null {
-  const found = signerVersion(entry, histories);
-  if (typeof found === "string") return found;
-  const { history, named } = found;
-  if (history.method !== "did:btco") return null;
-  if (!named.position) return "author-version-unavailable";
-  return chainOrder(named.position, anchoring) >= 0 ? "author-version-not-yet-in-effect" : null;
+  const refs = signerRefsOf(entry);
+  if (refs.length === 0) return "author-version-unavailable";
+  for (const ref of refs) {
+    const found = refVersion(ref, histories);
+    if (typeof found === "string") return found;
+    const { history, named } = found;
+    if (history.method !== "did:btco") continue;
+    if (!named.position) return "author-version-unavailable";
+    if (chainOrder(named.position, anchoring) >= 0) return "author-version-not-yet-in-effect";
+  }
+  return null;
 }
 
-function signerVersion(entry: LogEntry, histories: AuthorHistory[]): { ref: AuthorRef; history: AuthorHistory; named: AuthorVersion } | IgnoredReason {
-  const ref = signerRefOf(entry);
-  const history = ref ? histories.find((h) => h.did === ref.did) : undefined;
-  if (!ref || !history) return "author-version-unavailable";
+function refVersion(ref: AuthorRef, histories: AuthorHistory[]): { history: AuthorHistory; named: AuthorVersion } | IgnoredReason {
+  const history = histories.find((h) => h.did === ref.did);
+  if (!history) return "author-version-unavailable";
   const named = history.versions.find((v) => v.versionId === ref.versionId);
-  return named ? { ref, history, named } : "author-version-unavailable";
+  return named ? { history, named } : "author-version-unavailable";
 }
 
 /**
@@ -439,7 +519,9 @@ function btcoReadThrough(history: AuthorHistory, inscription: SatInscription): b
 function unverifiedLater(entry: LogEntry, inscription: SatInscription, histories: AuthorHistory[]): { reason: IgnoredReason; code?: string; ref?: AuthorRef } {
   if (impossibleVersion(entry, histories)) return { reason: "invalid-entry", code: "AUTHOR_VERSION_IMPOSSIBLE" };
   if (notInHistory(entry, inscription, histories)) return { reason: "invalid-entry", code: "AUTHOR_VERSION_NOT_IN_HISTORY" };
-  const ref = signerRefOf(entry);
+  // The signer named for an unverifiable entry: the first whose version is not verified here.
+  const refs = signerRefsOf(entry);
+  const ref = refs.find((r) => typeof refVersion(r, histories) === "string") ?? refs[0];
   return { reason: "later-inscription-unverifiable", ...(ref ? { ref } : {}) };
 }
 
@@ -450,7 +532,10 @@ function unverifiedLater(entry: LogEntry, inscription: SatInscription, histories
  * P7.7), or after a deactivated version the verifier holds, which is terminal (P9.15; originals-spec #51, merged).
  */
 function impossibleVersion(entry: LogEntry, histories: AuthorHistory[]): boolean {
-  const ref = signerRefOf(entry);
+  return signerRefsOf(entry).some((ref) => impossibleRefVersion(ref, histories));
+}
+
+function impossibleRefVersion(ref: AuthorRef, histories: AuthorHistory[]): boolean {
   // The method from the DID itself: the form and the limit need no history of it.
   if (!ref || !(ref.did.startsWith("did:vh:") || ref.did.startsWith("did:webvh:"))) return false;
   // `<number>-<entry hash>`, numbered from 1: anything else is no version of a did:vh or did:webvh.
@@ -471,8 +556,11 @@ function impossibleVersion(entry: LogEntry, histories: AuthorHistory[]): boolean
  * was read in full through the inscription, not among its versions.
  */
 function notInHistory(entry: LogEntry, inscription: SatInscription, histories: AuthorHistory[]): boolean {
-  const ref = signerRefOf(entry);
-  const history = ref ? histories.find((h) => h.did === ref.did) : undefined;
+  return signerRefsOf(entry).some((ref) => refNotInHistory(ref, inscription, histories));
+}
+
+function refNotInHistory(ref: AuthorRef, inscription: SatInscription, histories: AuthorHistory[]): boolean {
+  const history = histories.find((h) => h.did === ref.did);
   const newest = history?.versions[history.versions.length - 1];
   if (!ref || !history || !newest || history.versions.some((v) => v.versionId === ref.versionId)) return false;
   return history.method === "did:btco" ? btcoReadThrough(history, inscription) : versionNumberOf(ref.versionId) <= newest.versionNumber;
@@ -623,7 +711,7 @@ export async function assembleFromBitcoin(
       const before = checkBeforeAnchor(e, i, histories);
       if (before) return [before];
     }
-    const author = checkAtInscriptionTime(last, i, histories);
+    const author = checkAtInscriptionTime(last, i, histories, entries[entries.length - 2]);
     return author ? [author] : entries;
   };
 
@@ -765,7 +853,7 @@ export async function assembleFromBitcoin(
       }
       return asUnverified(entry, i, "invalid-entry", code);
     }
-    const author = checkAtInscriptionTime(entry, i, histories);
+    const author = checkAtInscriptionTime(entry, i, histories, base[base.length - 1]);
     return author ? asUnverified(entry, i, author) : { kind: "valid" };
   };
   const listUnverifiable = (i: SatInscription, entry: LogEntry, ref?: AuthorRef) =>
