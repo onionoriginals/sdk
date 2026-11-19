@@ -17,6 +17,7 @@ import { resourceDigest, verifyOriginal, type AuthorDidEvidence, type AuthorRef 
 import { MemoryStore, OriginalsSDK, keySigner, readEvidence, writeEvidence, type OriginalsSigner, type Submission } from '@originals/sdk/originals';
 import { BrowserWebVHSigner, buildUserWebVHDid, ed25519PublicKeyMultibase, userWebvhSlug } from '../auth/webvh';
 import { publishOriginal } from './publish';
+import { SUBMISSION_LIMITS } from '@originals/host';
 import { DOMAIN, SUB, cookieFor, host } from './publish.fixture';
 import { encodeSubmission, landingSharedHost, siteKeyOf } from './shared-host';
 
@@ -540,7 +541,8 @@ describe('review of the shared-host route (C1, C4, C6, C7, R4, P1, P4)', () => {
     const env = await shared();
     const cand = await env.edit(env.a, THEIRS);
     const body = { original: env.did, entry: cand.line, resources: { [resourceDigest(THEIRS)]: THEIRS } };
-    const many = Array.from({ length: 40 }, () => env.author.evidence);
+    // Every member and editor a state can name, for the Original and its parents (P5.19, P5.25), and one more.
+    const many = Array.from({ length: SUBMISSION_LIMITS.identities + 1 }, () => env.author.evidence);
     const tooMany = await env.post({ ...body, identities: many });
     expect(tooMany.status).toBe(400);
     expect(await tooMany.json()).toMatchObject({ error: 'too_many_identities' });
@@ -868,5 +870,37 @@ describe('who may submit: the namespace owner, or an account whose landing DID t
     }
     expect(namesAccount(did, 'other.example.com', slug)).toBe(false);
     expect(namesAccount(did, DOMAIN, userWebvhSlug(SUB))).toBe(false);
+  });
+});
+
+describe('a child Original on the landing\'s shared host (P5.24, P5.25, P7.1)', () => {
+  test('C12-398, C12-411: published with its parent log; an editor\'s inherited-grant save carries the parent evidence, is accepted, and another device reads it back', async () => {
+    const h = host();
+    const [alice, bob, dana] = await Promise.all([twoKeyAuthor(new Date(START)), twoKeyAuthor(new Date(START)), twoKeyAuthor(new Date(START))]);
+    let t = START + 1000;
+    const evidence = [alice.evidence, bob.evidence, dana.evidence];
+    const a = OriginalsSDK.create({ store: new MemoryStore(), authors: evidence, clock: () => (t += 250) });
+    const repo = await a.create({ name: 'Repository', resource: { mediaType: 'image/svg+xml', bytes: SVG }, author: alice.ref, signer: alice.signer, editors: [{ did: dana.ref.did, name: false, metadata: false, resource: true }] });
+    if (repo.kind !== 'original') throw new Error('expected an Original');
+    const branch = await a.create({ name: 'Branch', resource: { mediaType: 'image/svg+xml', bytes: THEIRS }, author: bob.ref, signer: bob.signer, parent: { did: repo.original.did, versionId: repo.original.checkpoint } });
+    if (branch.kind !== 'original') throw new Error('expected an Original');
+    const did = branch.original.did;
+    const secret = ed.utils.randomSecretKey();
+    const aliasSigner = new BrowserWebVHSigner(secret, ed25519PublicKeyMultibase(await ed.getPublicKeyAsync(secret)));
+    // Publishing uploads the package unpacked, the parent's log under parents/ included (P14.10, P14.11).
+    const published = await publishOriginal({ sdk: a, did, parent: branch.original.checkpoint, author: bob.ref, signer: bob.signer, aliasSigner, domain: DOMAIN, slug: userWebvhSlug(SUB), hosting: h.upload });
+    const sharedA = landingSharedHost({ sdk: a, aliasDid: published.alias.did, transport: h.adapterFor(SUB), read: h.read });
+    const candidate = await a.sign(await a.prepareEdit(did, { parent: (await a.get(did)).checkpoint, resource: { bytes: MINE }, editor: dana.ref }), dana.signer);
+    const saved = await a.submit(candidate, sharedA);
+    expect(saved.status).toBe('accepted');
+    expect(saved.original.report.grants).toEqual([{ versionId: candidate.versionId, editor: dana.ref.did, source: 'inherited', parent: { did: repo.original.did, versionId: repo.original.checkpoint } }]);
+    // A stranger's device reads the host's accepted log with the parent evidence it serves, and verifies it.
+    const b = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: () => LATER });
+    const contents = await b.retrieveHosted(published.alias.did, h.read);
+    expect(contents.parents?.map((p) => p.did)).toEqual([repo.original.did]);
+    const loaded = await b.loadPublished(published.alias.did, h.read);
+    expect(loaded.report.head).toBe(candidate.versionId);
+    expect(loaded.report.parentAuthority).toMatchObject({ did: repo.original.did, status: 'verified' });
+    expect(loaded.verified).toBe(true);
   });
 });

@@ -264,6 +264,14 @@ describe("the shared-host transport (P6.7, P6.8)", () => {
     });
   });
 
+  test("encodeSubmission: a child Original's parent logs, nearest first, only when there are any (P5.25, P7.1)", () => {
+    const base = { original: "did:vh:zA", entry: '{"versionId":"2-x"}', resources: {}, identities: [] };
+    const parents = [{ did: "did:vh:zParent", log: "p1\np2\n" }, { did: "did:vh:zGrand", log: "g1\n" }];
+    expect(JSON.parse(encodeSubmission({ ...base, parents })).parents).toEqual(parents);
+    expect(JSON.parse(encodeSubmission({ ...base, parents: [] }))).not.toHaveProperty("parents");
+    expect(JSON.parse(encodeSubmission(base))).not.toHaveProperty("parents");
+  });
+
   test("readHostAnswer: 200 accepted or already accepted, 409 stale parent, anything else refused", () => {
     expect(readHostAnswer(200, { status: "accepted", checkpoint: "2-a", head: "2-a" })).toEqual({ status: "accepted", checkpoint: "2-a", head: "2-a" });
     expect(readHostAnswer(200, { status: "already-accepted", checkpoint: "2-a", head: "3-b" }).status).toBe("already-accepted");

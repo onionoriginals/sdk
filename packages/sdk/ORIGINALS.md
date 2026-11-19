@@ -616,8 +616,15 @@ await sdk.edit(did, { parent, name: "Renamed", pin, author: bobRef, signer: bobS
   `{ kind: "parent", did, versionId }` missing item. `load` and `import` use
   it, and `import` keeps a parent log this store does not hold. The SDK
   verifies a child against the parents it holds.
-- Not yet: shared-host saves (`submit`) do not carry parent evidence, so a
-  host cannot accept a child Original's entries yet.
+- Shared hosts (P5.25, P7.1): `submit` sends a child's parent logs through
+  the highest pin, nearest first, as `Submission.parents`, and the parents'
+  signers' histories in `identities`, the same evidence a package carries.
+  The host verifies the entry with them and refuses it as incomplete without
+  them (`PARENT_EVIDENCE_MISSING`, `PARENT_VERSION_MISSING`); an entry
+  relying on an inherited grant that the parent log the host holds has since
+  revoked is refused as historically authorized only (P5.26). `retrieveHosted`
+  and `loadPublished` read a hosted child's `parents/` files. See
+  [Shared-host saves](#shared-host-saves-implemented-p64-p67-p68).
 
 ## Scoped grants (P5.28, P5.29)
 
@@ -954,7 +961,7 @@ within the `loadPublished` bounds, for a host's `accepted`.
 
 The landing host (`packages/host/src/shared-saves.ts`, PROVISIONAL wire
 format) takes `POST /api/originals/submit/<domain>/<user-slug>/o-<name>` with
-`{ original, entry, resources: { digest: base64 }, identities }` and answers
+`{ original, entry, resources: { digest: base64 }, identities, parents? }` and answers
 `200 { status: "accepted" | "already-accepted", checkpoint, head }` or
 `409 { status: "stale-parent", head }`; anything else is an error. It checks
 byte-identical retries first, then that the entry chains to its head, then
@@ -963,15 +970,33 @@ key at the named version verifies the proof), then that it verifies under the
 profile against the head, using the submitted signer DID log where it extends
 the one it holds, and that the new entry is not historically authorized only
 (`422 { error: "entry_historically_authorized_only", reason }`: no removed
-key, no deactivated editor DID, no deactivated author DID; P7.9, P6.5,
-P5.18). It never asks that the head be current, which no unanchored Original
+key, no deactivated editor DID, no deactivated author DID, no inherited
+grant the parent has since revoked; P7.9, P6.5, P5.18, P5.26). For a child
+Original (P5.24, P5.25) `parents` is `[{ did, log }]`, each parent's log
+through the highest pin, nearest first, with the parents' signers in
+`identities`. The host verifies with the parent log it holds under
+`originals/parents/<sha256(did) hex>/did.jsonl`, or a submitted one that
+extends it line by line, which it then stores; a submitted log that the held
+one extends leaves the held one in use, and one that diverges from it is
+refused (`422 parent_evidence_conflict`), never chosen silently. A parent
+the child does not name is refused (`422 parent_not_named`). With no parent
+log through the pin, the entry is incomplete and refused
+(`422 entry_invalid` with `failure.code` `PARENT_EVIDENCE_MISSING` or
+`PARENT_VERSION_MISSING`). An editor holding only an inherited grant may
+call when the parent log the host holds names it (PROVISIONAL: a grant only
+in a parent version the host does not yet hold needs the namespace owner to
+relay the first save that pins it). A hosted parent log only grows: an
+owner's upload must keep every stored line (`409 parent_log_not_extending`). It never asks that the head be current, which no unanchored Original
 is (P7.10). It writes new bytes and DID logs, then the asset log (the commit
 point: the save is accepted from then on), then the manifest, which the next
 request repairs if its write failed, and stores the exact submitted line.
 Resource bytes are served only once the accepted log lists them, with the
-media type it declares. The body is read with a byte counter, and identities,
-their size, resources and queued submissions per Original are bounded
-(PROVISIONAL). Submissions for one Original run one at a time in-process and
+media type it declares. The body is read with a byte counter, and identities
+(128), their size (2 MiB each), resources (one), parents (8, the nesting
+limit, 8 MiB each) and queued submissions per Original are bounded
+(PROVISIONAL, `SUBMISSION_LIMITS`). Objects a scope check needs (P5.28) are
+not part of a submission yet: an editor entry whose scope check needs a code
+tree's subtrees the host does not hold is refused as unchecked. Submissions for one Original run one at a time in-process and
 the head comparison and log replace are one synchronous step, which assumes
 one server process per data directory (the landing's instance lock enforces
 it); several instances would need a shared compare-and-swap on the head. The

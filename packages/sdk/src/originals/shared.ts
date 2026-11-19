@@ -30,8 +30,20 @@ export interface Submission {
   entry: string;
   /** Bytes for each resource digest the entry introduces. */
   resources: Record<string, Uint8Array>;
-  /** The DID histories of the entry's signer, as the SDK holds them. */
+  /**
+   * The DID histories of the entry's signers, as the SDK holds them, and for
+   * a child Original those of its parents' signers too (P5.25, P7.1).
+   */
   identities: AuthorDidEvidence[];
+  /**
+   * For a child Original (P5.24, P5.25): each parent Original's asset log
+   * through the highest pin the Original's log and this entry name, and its
+   * own parent's in turn, nearest first, as an evidence package carries them
+   * (`parents/<sha256(did)>/did.jsonl`, P14.10). Absent for an Original with
+   * no parent. Without it a host cannot check the entry and refuses it as
+   * incomplete, never accepts it.
+   */
+  parents?: Array<{ did: string; log: string }>;
 }
 
 /** What a shared host answers. Any other outcome (an invalid entry, an outage) is an error the transport throws. */

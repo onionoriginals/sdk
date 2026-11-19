@@ -30,7 +30,7 @@
 import { json, type Handler } from './router.js';
 import { createRateLimiter } from './rate-limit.js';
 import { storeFullBody, type OriginalsStore, type OriginalInscription } from './originals-store.js';
-import { bytesMatchDigest, classifyHostedKey, hostedContentType, parseWitnessFile, signedMediaType, signerLogVerdict, signerWitnessVerdict } from './hosted-layout.js';
+import { bytesMatchDigest, classifyHostedKey, hostedContentType, parentLogVerdict, parseWitnessFile, signedMediaType, signerLogVerdict, signerWitnessVerdict } from './hosted-layout.js';
 import { readBodyCapped } from './body.js';
 import { createSharedSaves, parseSubmission } from './shared-saves.js';
 
@@ -206,6 +206,10 @@ export function createOriginalsRoutes(deps: {
         if (sameBytes(store.readHosted(key), stored) && sameBytes(store.readHosted(witnessKey), witnessBytes)) break;
         if (attempt >= 2) return json({ error: 'identity_log_contended' }, 409);
       }
+    } else if (hosted.kind === 'evidence' && hosted.parentHex !== undefined) {
+      // A parent log only grows (P5.25, P5.26): never a rollback of what a save stored.
+      const verdict = parentLogVerdict(store.readHosted(key), bytes, hosted.parentHex);
+      if (verdict) return json({ error: verdict }, verdict === 'parent_log_invalid' ? 422 : 409);
     } else if (hosted.kind === 'evidence' && hosted.signer === 'witness') {
       // Judged by the proofs it carries and by the stored log it must never
       // weaken (#965 review r4, finding 3), with the same re-read as a log.

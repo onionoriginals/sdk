@@ -264,8 +264,9 @@ const logText = (log: AuthorDidEvidence["log"]): string | undefined =>
 /**
  * A `Submission` as the JSON body `@originals/host`'s submit route parses
  * (PROVISIONAL wire format): `{ original, entry, resources: { <digest>: <base64> },
- * identities: [{ did, log, witness? }] }`. A did:btco identity has no log to
- * send: its history is read from Bitcoin (P5.13).
+ * identities: [{ did, log, witness? }], parents?: [{ did, log }] }`. A did:btco
+ * identity has no log to send: its history is read from Bitcoin (P5.13).
+ * `parents` is present only for a child Original (P5.25).
  */
 export function encodeSubmission(submission: Submission): string {
   return JSON.stringify({
@@ -276,6 +277,7 @@ export function encodeSubmission(submission: Submission): string {
       const log = logText(i.log);
       return log === undefined ? [] : [{ did: i.did, log, ...(i.witness !== undefined ? { witness: i.witness } : {}) }];
     }),
+    ...(submission.parents && submission.parents.length > 0 ? { parents: submission.parents.map((p) => ({ did: p.did, log: p.log })) } : {}),
   });
 }
 
