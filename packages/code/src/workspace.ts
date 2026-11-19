@@ -30,7 +30,7 @@ import {
   type ReleaseManifest,
   type RepoDocument,
 } from "./documents.js";
-import { codeError } from "./errors.js";
+import { codeError, requireSoleAuthor } from "./errors.js";
 import { covers } from "./grants.js";
 import { diffTrees, readTree } from "./objects.js";
 import { identityEvidence, identityRef, identitySigner, SIGNING_FRAGMENT, type LocalIdentity } from "./identity.js";
@@ -242,7 +242,7 @@ export class CodeWorkspace {
     const segments = branch ? await this.segments(branch) : [];
     const log = segments.at(-1) ?? [];
     if (branch && log.length === 0) codeError("incomplete-evidence", "BRANCH_NOT_HELD", `${branch} is not in this workspace`);
-    const role: "author" | "editor" = log.length === 0 || stateOf(segments[0][0]).author.did === identity.did ? "author" : "editor";
+    const role: "author" | "editor" = log.length === 0 || requireSoleAuthor(stateOf(segments[0][0])) === identity.did ? "author" : "editor";
 
     let commits = await input.source.firstParent(ref);
     const chain = segments.flatMap((seg) => branchChain(seg)).map((c) => c.commit);
@@ -313,7 +313,7 @@ export class CodeWorkspace {
       if (role !== "author") codeError("outside-grant", "CONTRIBUTION_NOT_OWN", "a contribution is written by its own author (K14)");
       result.contribution = true;
     } else if (currentDid !== branch) {
-      const repoAuthor = stateOf((await this.entries(repo))[0]).author.did;
+      const repoAuthor = requireSoleAuthor(stateOf((await this.entries(repo))[0]));
       if (repoAuthor === identity.did) await this.listBranch(repo, identity, { ref, delegate: identity.did, branch: currentDid });
       else result.needsListing = true;
     }

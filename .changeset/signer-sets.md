@@ -2,6 +2,7 @@
 '@originals/vh': minor
 '@originals/sdk': minor
 '@originals/host': patch
+'@originals/code': patch
 ---
 
 Signer sets (plan 050 W1; owner decision of 19 November 2026, reversing S8).
@@ -33,3 +34,6 @@ request assigns them.
   Evidence packages carry every signing member's DID history.
 - `@originals/host`: shared-host saves check every signer of a set entry, and
   a member's account may save.
+- `@originals/code`: code Originals stay single-author until the code profile
+  moves onto signer sets (plan 050 §5, step 3): a set Original as a repo or
+  branch is refused (`SIGNER_SET_UNSUPPORTED`), never read as one author.

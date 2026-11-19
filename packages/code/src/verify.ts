@@ -11,7 +11,7 @@ import { readBundle, type BundleLimits, type BundleManifest } from "./bundle.js"
 import { canonicalHead, type CanonicalResult, type DelegateHead } from "./canonical.js";
 import { RELEASE_MEDIA_TYPE, REPO_MEDIA_TYPE, checkBranchMetadata, checkReleasesMetadata, checkRepoMetadata, decodeReleaseManifest, decodeRepoDocument, type ReleaseManifest, type RepoDocument } from "./documents.js";
 import { StructuredError } from "@originals/vh";
-import { OriginalsError } from "./errors.js";
+import { OriginalsError, soleAuthorDid } from "./errors.js";
 import { covers } from "./grants.js";
 import { TREE_MEDIA_TYPE, diffTrees, gitCommitId, gitTreeIdOf, parseGitCommit, readTree, type ObjectSource } from "./objects.js";
 
@@ -183,17 +183,19 @@ async function each(entries: readonly LogEntry[], f: (e: LogEntry, i: number) =>
 /** The repo Original's code checks (K5) over its verified entries. */
 export async function checkRepo(original: string, entries: readonly LogEntry[], resources: ObjectSource): Promise<RepoCodeReport> {
   const versions: RepoVersion[] = [];
-  const author = entries.length > 0 ? stateOf(entries[0]).author.did : null;
+  const author = entries.length > 0 ? (soleAuthorDid(stateOf(entries[0])) ?? null) : null;
   const history = await historyOf(entries.length, () =>
     each(entries, async (e, i) => {
       const s = stateOf(e);
+      const sole = soleAuthorDid(s);
+      if (sole === undefined) throw new Stop("invalid", "SIGNER_SET_UNSUPPORTED", "code Originals are single-author until plan 050 §5, step 3");
       checkRepoMetadata(s.asset.metadata);
       if (s.asset.resource.mediaType !== REPO_MEDIA_TYPE) throw new Stop("invalid", "REPO_RESOURCE", `the repo Original's resource is ${REPO_MEDIA_TYPE}`);
       const bytes = await resources(s.asset.resource.digest);
       if (!bytes) throw new Stop("incomplete", "REPO_DOCUMENT_MISSING", `the repo document ${s.asset.resource.digest} is not in the evidence`);
       const document = decodeRepoDocument(bytes);
       // K5: the repo's author is a delegate at every version.
-      if (!document.delegates.includes(s.author.did)) throw new Stop("invalid", "REPO_AUTHOR", "the repo Original's author must be one of its delegates");
+      if (!document.delegates.includes(sole)) throw new Stop("invalid", "REPO_AUTHOR", "the repo Original's author must be one of its delegates");
       versions.push({ versionId: e.versionId, index: i, document });
     }),
   );
@@ -206,7 +208,7 @@ export async function checkBranch(
   entries: readonly LogEntry[],
   context: { repo: string; versions: readonly RepoVersion[]; latest: RepoDocument | null; objects: Objects; gitMemo?: Map<string, string>; prior?: PriorSegment },
 ): Promise<BranchCodeReport> {
-  const author = entries.length > 0 ? stateOf(entries[0]).author.did : null;
+  const author = entries.length > 0 ? (soleAuthorDid(stateOf(entries[0])) ?? null) : null;
   const byId = new Map(context.versions.map((v) => [v.versionId, v]));
   const get = context.objects.get;
   const failedSet = context.objects.failed ?? new Set<string>();
@@ -297,6 +299,7 @@ export async function checkBranch(
   report.history = await historyOf(entries.length, () =>
     each(entries, async (e, i) => {
       const s = stateOf(e);
+      if (soleAuthorDid(s) === undefined) throw new Stop("invalid", "SIGNER_SET_UNSUPPORTED", "code Originals are single-author until plan 050 §5, step 3");
       const m = checkBranchMetadata(s.asset.metadata);
       if (m.repo !== context.repo) throw new Stop("invalid", "BRANCH_REPO", `the entry names repo ${m.repo}, not ${context.repo}`);
       // K13: a later segment's genesis names the previous segment, which must verify and end at the named entry.
@@ -306,7 +309,7 @@ export async function checkBranch(
         if (!p) throw new Stop("incomplete", "SEGMENT_PREVIOUS_MISSING", `the previous segment ${m.previous.did} is not in the evidence`);
         if (p.status !== "valid") throw new Stop(p.status, p.code, p.message);
         if (p.last.state.id !== m.previous.did || p.last.versionId !== m.previous.versionId) throw new Stop("invalid", "SEGMENT_PREVIOUS", "the previous segment does not end at the entry this genesis names");
-        if (stateOf(p.last).author.did !== author) throw new Stop("invalid", "SEGMENT_AUTHOR", "every segment of a branch has the same author (P5.8, K13)");
+        if (soleAuthorDid(stateOf(p.last)) !== author) throw new Stop("invalid", "SEGMENT_AUTHOR", "every segment of a branch has the same author (P5.8, K13)");
         report.segment.previous = { did: m.previous.did, versionId: m.previous.versionId };
       }
       if (i === 0 && !prior) ref = m.ref;
