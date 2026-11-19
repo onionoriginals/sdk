@@ -78,6 +78,33 @@ export interface WriteBundleInput {
   missing?: string[];
 }
 
+/**
+ * An object pack: each object deflate-raw compressed (K8), concatenated in
+ * digest order, with its index rows `[digest, offset, length, size]`.
+ */
+export function writeObjectPack(objects: ReadonlyMap<string, Uint8Array>): { index: Array<[string, number, number, number]>; pack: Uint8Array; bytes: number } {
+  const digests = [...objects.keys()].sort();
+  const index: Array<[string, number, number, number]> = [];
+  const chunks: Uint8Array[] = [];
+  let offset = 0;
+  let bytes = 0;
+  for (const d of digests) {
+    const raw = objects.get(d)!;
+    const z = deflateSync(raw, { level: 6 });
+    index.push([d, offset, z.length, raw.length]);
+    chunks.push(z);
+    offset += z.length;
+    bytes += raw.length;
+  }
+  const pack = new Uint8Array(offset);
+  let at = 0;
+  for (const c of chunks) {
+    pack.set(c, at);
+    at += c.length;
+  }
+  return { index, pack, bytes };
+}
+
 /** Write a bundle. Objects are deduplicated by digest and sorted. */
 export function writeBundle(input: WriteBundleInput): Uint8Array {
   const files = new Map<string, Uint8Array>();
@@ -93,25 +120,8 @@ export function writeBundle(input: WriteBundleInput): Uint8Array {
   }
   const objects = new Map<string, Uint8Array>();
   for (const [d, b] of input.objects) objects.set(d, b);
-  const digests = [...objects.keys()].sort();
-  const index: Array<[string, number, number, number]> = [];
-  const chunks: Uint8Array[] = [];
-  let offset = 0;
-  let total = 0;
-  for (const d of digests) {
-    const raw = objects.get(d)!;
-    const z = deflateSync(raw, { level: 6 });
-    index.push([d, offset, z.length, raw.length]);
-    chunks.push(z);
-    offset += z.length;
-    total += raw.length;
-  }
-  const pack = new Uint8Array(offset);
-  let at = 0;
-  for (const c of chunks) {
-    pack.set(c, at);
-    at += c.length;
-  }
+  const { index, pack, bytes: total } = writeObjectPack(objects);
+  const digests = index.map((row) => row[0]);
   const missing = [...new Set(input.missing ?? [])].sort();
   const manifest: BundleManifest = {
     format: BUNDLE_FORMAT,
@@ -157,32 +167,52 @@ function checkManifest(value: unknown): BundleManifest {
   return value as unknown as BundleManifest;
 }
 
-/** Read a bundle: its manifest, packages and objects. Verification is separate (`verifyRepository`). */
-export async function readBundle(zip: Uint8Array, limits: BundleLimits = {}): Promise<BundleContents> {
+/** Parse and check a bundle manifest (`originals-code.json`). Shared by the zip and split layouts. */
+export function parseBundleManifest(bytes: Uint8Array): BundleManifest {
+  const manifest = checkManifest(parseJson(text(bytes, BUNDLE_MANIFEST)));
+  if (new Set(manifest.originals.map((o) => o.file)).size !== manifest.originals.length) bad("BUNDLE_MANIFEST", "a package file is listed twice");
+  return manifest;
+}
+
+/** Whether `name` is an evidence package path of the bundle layout (`originals/<scid>[.<n>].zip`). */
+export function isPackageFile(name: string): boolean {
+  return PACKAGE_FILE.test(name);
+}
+
+/** Whether `digest` has the shape of an object digest (multibase base58btc). */
+export function isObjectDigest(digest: unknown): digest is string {
+  return typeof digest === "string" && DIGEST.test(digest);
+}
+
+/**
+ * Inflate one deflate-raw object to at most its declared `size` and check it
+ * against `digest` (P4.3). Undefined when it does not inflate to exactly
+ * `size` bytes or does not hash to `digest`: such bytes are never used.
+ */
+export async function inflateObject(digest: string, compressed: Uint8Array, size: number): Promise<Uint8Array | undefined> {
+  let raw: Uint8Array;
+  try {
+    // One byte more than declared: a stream that inflates further is caught without inflating it all.
+    raw = inflateSync(compressed, { out: new Uint8Array(size + 1) });
+  } catch {
+    return undefined;
+  }
+  if (raw.length !== size || (await objectDigestAsync(raw)) !== digest) return undefined;
+  return raw.slice();
+}
+
+/**
+ * Read an object pack (`objects/index.json` and `objects/pack`). The index is
+ * untrusted: it is checked whole, against the limits, before anything is
+ * inflated; each object is inflated to at most its declared size and checked
+ * against its digest.
+ */
+export async function readObjectPack(indexBytes: Uint8Array, pack: Uint8Array, limits: BundleLimits = {}): Promise<{ objects: Map<string, Uint8Array>; failed: Set<string> }> {
   const maxObjects = limits.maxObjects ?? BUNDLE_LIMITS.maxObjects;
   const maxObjectBytes = limits.maxObjectBytes ?? BUNDLE_LIMITS.maxObjectBytes;
   const maxInflated = limits.maxInflatedBytes ?? BUNDLE_LIMITS.maxInflatedBytes;
-  const files = readZip(zip, limits.zip);
-  for (const name of files.keys()) {
-    if (name !== BUNDLE_MANIFEST && name !== "objects/index.json" && name !== "objects/pack" && !PACKAGE_FILE.test(name)) bad("BUNDLE_LAYOUT", `${name} is not part of the bundle layout`);
-  }
-  const m = files.get(BUNDLE_MANIFEST);
-  if (!m) bad("BUNDLE_LAYOUT", `${BUNDLE_MANIFEST} is required`);
-  const manifest = checkManifest(parseJson(text(m, BUNDLE_MANIFEST)));
-  const listed = new Set(manifest.originals.map((o) => o.file));
-  if (listed.size !== manifest.originals.length) bad("BUNDLE_MANIFEST", "a package file is listed twice");
-  for (const name of files.keys()) if (PACKAGE_FILE.test(name) && !listed.has(name)) bad("BUNDLE_LAYOUT", `${name} is not listed in the manifest`);
-  const packages = manifest.originals.map((o) => {
-    const bytes = files.get(o.file);
-    if (!bytes) return bad("BUNDLE_LAYOUT", `${o.file} is listed but absent`);
-    return { ...o, bytes };
-  });
-
   const objects = new Map<string, Uint8Array>();
   const failed = new Set<string>();
-  const indexBytes = files.get("objects/index.json");
-  const pack = files.get("objects/pack");
-  if (!indexBytes || !pack) bad("BUNDLE_LAYOUT", "objects/index.json and objects/pack are required");
   const index = parseJson(text(indexBytes, "objects/index.json"));
   if (!Array.isArray(index)) bad("BUNDLE_INDEX", "the object index is an array");
   if (index.length > maxObjects) codeError("limit-exceeded", "BUNDLE_TOO_MANY_OBJECTS", `the bundle lists ${index.length} objects; the limit is ${maxObjects}`);
@@ -206,19 +236,32 @@ export async function readBundle(zip: Uint8Array, limits: BundleLimits = {}): Pr
   }
   if (expected !== pack.length) bad("BUNDLE_INDEX", "the index does not cover the pack exactly");
   for (const [digest, offset, length, size] of rows) {
-    let raw: Uint8Array;
-    try {
-      // One byte more than declared: a stream that inflates further is caught without inflating it all.
-      raw = inflateSync(pack.subarray(offset, offset + length), { out: new Uint8Array(size + 1) });
-    } catch {
-      failed.add(digest);
-      continue;
-    }
-    if (raw.length !== size || (await objectDigestAsync(raw)) !== digest) {
-      failed.add(digest);
-      continue;
-    }
-    objects.set(digest, raw.slice());
+    const raw = await inflateObject(digest, pack.subarray(offset, offset + length), size);
+    if (raw) objects.set(digest, raw);
+    else failed.add(digest);
   }
+  return { objects, failed };
+}
+
+/** Read a bundle: its manifest, packages and objects. Verification is separate (`verifyRepository`). */
+export async function readBundle(zip: Uint8Array, limits: BundleLimits = {}): Promise<BundleContents> {
+  const files = readZip(zip, limits.zip);
+  for (const name of files.keys()) {
+    if (name !== BUNDLE_MANIFEST && name !== "objects/index.json" && name !== "objects/pack" && !PACKAGE_FILE.test(name)) bad("BUNDLE_LAYOUT", `${name} is not part of the bundle layout`);
+  }
+  const m = files.get(BUNDLE_MANIFEST);
+  if (!m) bad("BUNDLE_LAYOUT", `${BUNDLE_MANIFEST} is required`);
+  const manifest = parseBundleManifest(m);
+  const listed = new Set(manifest.originals.map((o) => o.file));
+  for (const name of files.keys()) if (PACKAGE_FILE.test(name) && !listed.has(name)) bad("BUNDLE_LAYOUT", `${name} is not listed in the manifest`);
+  const packages = manifest.originals.map((o) => {
+    const bytes = files.get(o.file);
+    if (!bytes) return bad("BUNDLE_LAYOUT", `${o.file} is listed but absent`);
+    return { ...o, bytes };
+  });
+  const indexBytes = files.get("objects/index.json");
+  const pack = files.get("objects/pack");
+  if (!indexBytes || !pack) bad("BUNDLE_LAYOUT", "objects/index.json and objects/pack are required");
+  const { objects, failed } = await readObjectPack(indexBytes, pack, limits);
   return { manifest, packages, objects, failed };
 }

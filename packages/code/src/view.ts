@@ -151,7 +151,7 @@ export function createRepositoryView(repo: OpenedRepository): { handle(url: stri
     const tabs = branch
       ? `<nav class="tabs"><a href="/b/${branch.index}">Code</a><a href="/b/${branch.index}/commits">Commits <span class="count">${branch.entries.length}</span></a><a href="/verify">Verification</a></nav>`
       : `<nav class="tabs"><a href="/">Code</a><a href="/verify">Verification</a></nav>`;
-    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} · ${esc(repoName)}</title><style>${CSS}</style></head><body>
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} · ${esc(repoName)}</title><style>${VIEW_CSS}</style></head><body>
 <header class="top"><a class="logo" href="/">◈ originals<span>code</span></a><span class="repo-did" title="${esc(report.manifest.repo)}">${esc(shortDid(report.manifest.repo))}</span></header>
 <div class="repohead"><div class="wrap"><h1><a href="/">${esc(repoName)}</a> ${repoBadge()}</h1>${tabs}</div></div>
 <main class="wrap">${body}</main>
@@ -664,7 +664,8 @@ export function markdown(src: string, link: (href: string) => string | null): st
   return out.join("\n");
 }
 
-const CSS = `
+/** The viewer's stylesheet, also served as a file by the static viewer (whose CSP allows no inline style). */
+export const VIEW_CSS = `
 :root{--fg:#1f2328;--muted:#59636e;--border:#d1d9e0;--bg:#fff;--subtle:#f6f8fa;--accent:#0969da;--good:#1a7f37;--bad:#d1242f;--warn:#9a6700;--addbg:#dafbe1;--delbg:#ffebe9;--hunk:#ddf4ff}
 @media (prefers-color-scheme:dark){:root{--fg:#e6edf3;--muted:#9198a1;--border:#3d444d;--bg:#0d1117;--subtle:#151b23;--accent:#4493f8;--good:#3fb950;--bad:#f85149;--warn:#d29922;--addbg:#12261e;--delbg:#25171c;--hunk:#121d2f}}
 *{box-sizing:border-box}body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;color:var(--fg);background:var(--bg)}

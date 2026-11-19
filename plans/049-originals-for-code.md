@@ -469,6 +469,8 @@ URL of a repo bundle> <dir>` works.
 | K16 | `git-remote-originals`: verify the bundle offline first, list only agreed and completely verified refs, rebuild commits byte for byte from commit objects; second parents stated in `info/grafts`, a mid-history start in `shallow`; no push |
 | K17 | The release Original is a set Original with the repo's members and threshold and a W2 child of the repo: at every entry its `authors` equal the repo's at the pin (`RELEASES_AUTHORS`); every delegate signs its creation (P5.19), a threshold each release, and a delegate change reaches it with the next release (P5.20) |
 | K18 | Proposal files (`originals-code-proposal/0.1`): an unsigned or partly signed draft as JSON (entry, summary, display, bytes, proofs), cosigned in turn and committed once every named signer has signed; the SDK rechecks it at each step, and a moved repo makes it stale, never rebased |
+| K19 | The split bundle (`package --split`): the zip bundle's manifest and evidence packages as static files, plus one pack of every tree and commit object (`objects/index.json`, `objects/pack`) and each other object deflate-raw under `objects/<digest>`, listed in `objects/loose.json`. A reader verifies with the zip's code over what it holds; a loose object is fetched when asked and checked on arrival; one not loaded is missing, never verified |
+| K20 | The static viewer (`packages/code/viewer`): `createRepositoryView`'s pages rendered in a Web Worker in the visitor's browser, routed in the location hash so it works under any path prefix; the page parses each page inert, drops scripts, styles, frames, forms and event attributes, and rewrites links; CSP `default-src 'none'` with scripts, workers and styles from the site only, `connect-src 'self' https:` |
 
 ## 5. Acceptance tests (IDs cited by tests)
 
@@ -506,6 +508,11 @@ URL of a repo bundle> <dir>` works.
 | CODE-30 | Proposal files: propose, cosign in turn, commit; commit before the last signature, and a signer the proposal does not name, are refused; a proposal whose repo moved is stale |
 | CODE-31 | The release Original's set: creation needs every delegate, a release the threshold; a delegate change reaches it with the next release; a release set that differs from the repo's at the pin fails the release history |
 | CODE-32 | One repo grant lets an editor write into two delegates' branches with no grant in either; a grant naming a delegate is refused (P5.15) |
+| CODE-33 | The split layout verifies as the zip does: before any blob is fetched, Originals reports, code history (an editor's `**` grant checked over trees alone) and canonical heads equal the zip's, content `partial` and git trees `unchecked`; once every object is loaded, the report equals the zip's |
+| CODE-34 | Objects fetched by digest, once, and checked on arrival: a tampered, unserved or wrong-length object is refused and reported failed; a network error leaves it not loaded; an unlisted digest is never fetched |
+| CODE-35 | The split reader's bounds: required files, the loose index (sorted, unique, not in the pack, sizes and counts bounded), an inflate bomb; a bundle with a failing object is not split |
+| CODE-36 | The static viewer's router: routes in the hash; view links resolved against the current route; anchors, raw bytes and web links; other schemes and authorities dropped; the bundle URL from `?bundle=` |
+| CODE-VIEW | `bun run smoke:viewer` (CI): the built viewer under a path prefix in Chromium verifies a split bundle, opens files by digest, shows signer set, pins, inherited grants and commit messages, never runs repository markup, with no CSP violation |
 | CODE-ACC | Mirror `main` of this repository and verify it with no network (script, timings, store size vs. pack) |
 
 ## 6. Phase 4 and the owner's decisions of 2026-11-19
@@ -528,6 +535,11 @@ The owner reviewed this plan in a grilling session on 2026-11-19 and decided:
   - The owner signs release entries.
   - Each GitHub release attaches the bundle.
   - A static GitHub Pages viewer verifies in the visitor's browser. It loads the logs first and fetches files by digest on demand.
+
+**Milestone 1 status.**
+
+- *Static viewer: built* (K19, K20; CODE-33 to CODE-36, CODE-VIEW). `originals-code package --split <dir>` writes the split bundle; `packages/code/viewer` is the static viewer, deployed by `.github/workflows/pages.yml` at `/code/` of the repository's Pages site, beside the API reference at `/`. On this repository (`main` at `174d3144`, 677 entries) the split bundle is 9,121 files: 3.2 MiB of evidence packages and 4.1 MiB of trees load first; 9,115 blobs (66 MiB compressed) load one by one when opened. Before any blob is fetched the viewer reports content `partial` and git trees `unchecked`, never a pass; "Fetch and check every file" loads them all and verifies again.
+- *Dogfood CI: in progress* (the Turnkey signer and the mirror workflow).
 
 ## 7. Open questions
 

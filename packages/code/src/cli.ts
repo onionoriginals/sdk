@@ -27,16 +27,16 @@
  *                          (K15, K17: record a release in the release Original, signed by the repo's threshold of
  *                          delegates; the first release creates it, which every delegate signs)
  *   originals-code import  <bundle.zip> --dir <workspace>   (verify a repo bundle offline, then take it in)
- *   originals-code package --dir <workspace> --out <bundle.zip> [--omit-blobs]
+ *   originals-code package --dir <workspace> [--out <bundle.zip>] [--split <dir>] [--omit-blobs]
  *   originals-code verify  <bundle.zip> [--json] [--now <time>]
  *   originals-code serve   <bundle.zip> [--port 4173] [--host 127.0.0.1] [--now <time>]
  *
  * `verify` needs no key and makes no network request (P7.3). It never
  * reports anything current: nothing here is anchored (P7.10).
  */
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { OriginalsError } from "./errors.js";
 import { openWorkspace } from "./fs.js";
 import { pathGrant } from "./grants.js";
@@ -44,6 +44,7 @@ import { GitSource } from "./git.js";
 import { createLocalIdentity, parseIdentity, parsePublicIdentity, publicIdentity, serializeIdentity, type LocalIdentity } from "./identity.js";
 import { parseProposal, serializeProposal } from "./workspace.js";
 import type { RepoDocument } from "./documents.js";
+import { splitBundle } from "./split.js";
 import { openRepository, verifyRepository, type RepositoryReport } from "./verify.js";
 import { createRepositoryView } from "./view.js";
 
@@ -279,9 +280,24 @@ async function main(argv: string[]): Promise<number> {
       const ws = await openWorkspace(resolve(need(opts, "dir")));
       try {
         if (!ws.repo) throw new Error("run init first");
+        if (typeof opts.out !== "string" && typeof opts.split !== "string") throw new Error("--out <bundle.zip> or --split <dir> is required");
         const bytes = await ws.workspace.package(ws.repo, { omitBlobs: opts["omit-blobs"] === true, contributions: ws.contributions });
-        await writeFile(need(opts, "out"), bytes);
-        console.log(`${need(opts, "out")}: ${bytes.length} bytes`);
+        if (typeof opts.out === "string") {
+          await writeFile(opts.out, bytes);
+          console.log(`${opts.out}: ${bytes.length} bytes`);
+        }
+        if (typeof opts.split === "string") {
+          // The split layout (K19): static files, logs, trees and commit objects first, each other object by digest.
+          const files = await splitBundle(bytes);
+          let total = 0;
+          for (const [name, data] of files) {
+            const path = join(resolve(opts.split), ...name.split("/"));
+            await mkdir(dirname(path), { recursive: true });
+            await writeFile(path, data);
+            total += data.length;
+          }
+          console.log(`${opts.split}: ${files.size} files, ${total} bytes`);
+        }
       } finally {
         await ws.close();
       }

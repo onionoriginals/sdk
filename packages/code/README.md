@@ -58,7 +58,7 @@ originals-code repo cosign p.json --dir ws --identity alice.json   # each signer
 originals-code repo cosign p.json --dir ws --identity bob.json
 originals-code repo commit p.json --dir ws
 originals-code mirror  --dir ws --identity me.json --git . --ref refs/heads/main
-originals-code package --dir ws --out repo.zip
+originals-code package --dir ws --out repo.zip   # --split <dir>: the static layout (K19)
 # a contributor: take the bundle, mirror your own branch, package with it
 originals-code import  repo.zip --dir mine
 originals-code mirror  --dir mine --identity bob.json --git ../fork --contribute
@@ -89,6 +89,44 @@ History is first-parent only: each merge's second parent is listed in
 ```sh
 git clone originals::repo.zip my-clone      # or originals::https://…/repo.zip
 git -C my-clone log --first-parent          # the original commit ids
+```
+
+## The static viewer (verifies in your browser)
+
+`packages/code/viewer` is a static, GitHub-like viewer: the same pages as
+`originals-code serve`, but the bundle is downloaded and verified in a Web
+Worker in the visitor's browser (every Original through the SDK, then the code
+checks). The host only serves bytes. It is deployed at
+<https://onionoriginals.github.io/sdk/code/> by `.github/workflows/pages.yml`
+(the API reference stays at `/`).
+
+```sh
+originals-code package --dir ws --out repo.zip --split site/bundle   # both layouts
+bun run build:viewer -- --out site      # index.html, main.js, worker.js, style.css
+# serve `site/` from any static host, under any path prefix:
+#   https://host/prefix/                      opens bundle/ beside the page
+#   https://host/prefix/?bundle=<dir or .zip> another split bundle or a repo.zip
+bun run smoke:viewer                    # Chromium check under a path prefix (CI)
+```
+
+The **split bundle** (K19) is the zip bundle's evidence as static files: the
+manifest and evidence packages, one pack of every tree and commit object, and
+each other object under `objects/<digest>`. The viewer verifies the logs and
+trees first, then fetches a file by digest when it is opened and checks its
+hash on arrival. A file not yet fetched is shown as **not loaded** and counts
+as missing in the content report: never verified, never a pass. "Fetch and
+check every file" loads them all and verifies again, which gives the zip's
+report. Routes live in the URL hash (`#/b/0/commits`); the page has a strict
+Content Security Policy (no inline script or style, nothing from elsewhere),
+and repository content is always escaped.
+
+```ts
+import { openSplitRepository } from "@originals/code";
+const opened = await openSplitRepository((path) => fetchBytesOrUndefined(base + path));
+opened.report;              // as verifyRepository, over the objects held so far
+await opened.objects(d);    // fetched by digest and checked on arrival
+opened.split.counts();      // trees, loose, loaded, notLoaded, failed
+await opened.split.loadAll(); await opened.reverify();  // the full content check
 ```
 
 Entry points: `@originals/code` (browser-safe), `@originals/code/fs` (a
