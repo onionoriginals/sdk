@@ -150,14 +150,45 @@ on; it never reports an unanchored Original as current (P7.10). The
   preparation step.
 - **Entry size (P7.7; P14.13).** An entry is at most
   `ORIGINALS_LIMITS.entryBytes` (65,536) bytes, measured as the UTF-8 byte
-  length of its stored line without the line feed (previously UTF-16 code
-  units of the re-serialized entry), measured before the line is parsed and
-  never again after. Entries parsed with `parseLog` carry their stored line's
-  size, and `verifyLog` takes the sizes (`lineBytes`) from a caller that has
-  the lines; an entry with no stored line is measured as its JCS
-  serialization (PROVISIONAL). A commit of a larger entry fails with
-  `limit-exceeded` (`COMMIT_VERIFICATION_FAILED`), and a verifier reports the
-  log `limit-exceeded` at that entry (`ENTRY_TOO_LARGE`).
+  length of its JCS form, in every format: `did.jsonl`, an inscription and
+  every carrier (originals-spec PR 64 at 940c6d4; previously the stored
+  line, and before that UTF-16 code units). How the
+  entry is written (string escapes, number forms) does not count: a line
+  longer than the limit whose JCS form is within it is accepted, and a
+  shorter line whose JCS form is over it is rejected. `verifyLog` no longer
+  takes stored sizes (`lineBytes`), and `parseLog` keeps none. The SDK
+  refuses to sign a larger entry (P14.13): one over the limit even with the
+  shortest proof a 64-byte signature encodes to fails with `limit-exceeded`
+  (`ENTRY_TOO_LARGE`) before the signer is asked; one that only its actual
+  proof takes over fails after signing (`COMMIT_VERIFICATION_FAILED`,
+  `limit-exceeded`) and is never committed. A verifier reports the log
+  `limit-exceeded` at that entry (`ENTRY_TOO_LARGE`).
+- **Carried files (P7.11-P7.16, P14.14-P14.17; PROVISIONAL,
+  originals-spec PR 64 at 940c6d4).** `readCarried` reports an `overall`
+  result for the file: `failed` with an explicit reason whenever the file is
+  not a carried version (`file-digest-mismatch`,
+  `carrier-not-for-media-type`, `json-member-not-last`,
+  `json-member-repeated`, ...), even when the log's proofs verify, which stay
+  detail (P7.12). Every carrier is tried; `hint` (a file name or declared
+  type) only orders them (P14.14). A root object with two `originalLog`
+  members is `rejected` and neither is read; a member that is not last is
+  verified as a log but never as a version (P14.17). A carried log with no
+  anchoring entry is a `historical-checkpoint`: valid as of it, with no
+  statement about anchoring since, and an anchored Original's pre-anchor
+  checkpoint may be carried without anchor evidence (P7.14, P7.15).
+  An opt-in to resolve applies to a single read: there is no standing or
+  default opt-in, and each read that may resolve passes its own
+  `resolveSigners: true` (P7.13; owner decision, 13 November 2026).
+  Importing never counts as one: an Original first stored by
+  `importCarried` is marked (`OriginalsStore.putCarriedImport`, optional;
+  `MemoryStore` and `FileStore` keep it), and later reads of it ask a
+  function `authors` source or `identityFetch` only with
+  `get(did, { resolveSigners: true })`. The writer places a text block only where the version's own
+  parser reads it as a comment, and refuses (`CARRIER_CANNOT_ADD`, with
+  `details.reason`) otherwise, including `no-parser` for a syntax it has no
+  parser for (P14.16); the per-type refusals are the spec's examples. After
+  anchoring, `carry` writes a checkpoint from the anchoring entry on only
+  once Bitcoin accepted it on the anchoring sat (P7.15, P9.12).
 - **One resource (P4.1, P4.4, P14.4–P14.6; originals-spec #53).** `create`
   takes `resource: { mediaType, bytes }`, its version 1. `edit` takes
   `resource: { bytes, mediaType?, expectedDigest? }`, the next version:
@@ -287,6 +318,20 @@ review). The writer's sort, date, UTF-8 flag and mode rules bind it only; the
 reader ignores them otherwise. It never replaces a
 newer local history with an older prefix (P7.5). Loading a package never
 confers signing authority (P8.4).
+
+A package is one more copy of the log, not read from the anchor (P7.1,
+P7.14). `load` of an anchored Original's package without `bitcoin` evidence
+reports `bitcoin-evidence-missing` and verifies at most the entries before
+the first anchoring entry; the anchoring entry and every later one are listed
+in `LoadedEvidence.notCheckedAgainstAnchor`, not checked against the anchor
+(C12-297). With `bitcoin` the state is the anchor's, and the package is
+never preferred to it: a package checkpoint the anchor does not hold is
+`checkpoint-not-found`. The Bitcoin writer's own check of its committed log
+before inscribing is P9.18's local copy, verified whole and never current;
+it is not a report given to anyone. `import` stores a package's log whole
+(P7.5) after checking it the same way, never current without the anchor. `get` without Bitcoin evidence still
+reports a stored anchored log whole, unverified and never current (C12-333
+stays partial).
 
 The SDK and resolvers do not encrypt. Plaintext metadata and base64 are not
 confidentiality (P8.2).

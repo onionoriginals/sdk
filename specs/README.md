@@ -14,7 +14,7 @@ The CEL 3 code and documents were deleted in its PR 5.
 
 | Document | Pin | Governs |
 | --- | --- | --- |
-| [Originals Protocol](https://github.com/aviarytech/originals-spec/tree/45ed1dc/spec) ([rendered](https://aviarytech.github.io/originals-spec/)) | `aviarytech/originals-spec@45ed1dc` (`master`), Editor's Draft 0.1 | Asset state, author binding, editors, identity continuity, operations, evidence packages, hosting, anchoring and ownership. Rules are cited by ID (for example P5.3). `master` includes #34–#36 (with #42 and #43), #45 (editors, shared-host saves and identity continuity recorded as owner decisions), #46 (an unanchored Original is never current; key custody is out of scope), #47 (for an anchored Original a did:vh or did:webvh signer is checked against the newest version of its DID the verifier knows of; anchoring does not require did:btco), #48 (section 14, the provisional wire format P14.1–P14.13) and #49 (the author can add and remove resources; editors cannot; a resourceID is never reused; P4.1, P4.4, P5.15, P5.16, P14.4, P14.5), #50 (the Bitcoin values and the section 14 limits are decided, with up to 256 resources; P9.5, P9.10, P9.17, P14.13) and #51 (the SDK's open questions of 23 October 2026, as owner decisions: after the anchor chain order decides, so a publication waits while an earlier inscription extending the same head is unverifiable, and every head change is reported; an identity gap affects only the entries that depend on it; freshness is established only by the signer DID's own witnesses or watchers, reported plainly; submitted, not observed, is never pending; the section 14 wire rules P14.2, P14.3, P14.5 and P14.8 and the ZIP writer binding of P14.10 are decided; P5.13, P5.14, P5.15, P7.8, P9.15, P9.18), #52 (section 14's intro says exactly which of its values are decided; no rule or row changes) and #53 (owner decision, 1 November 2026: an Original is exactly one resource, which can have many versions, replacing #49's resource sets; grants are `{did, name, metadata, resource}` and an entry has at most one transition; each inscription's body is the resource version its last entry names, under that version's media type, and its metadata carries the entries as a CBOR array, with metadata and body together at most 350,000 bytes; the SDK tells the author before inscribing what becomes public and permanent; no resource limit; P4.1, P4.4, P5.15, P9.17, P9.18, P14.4–P14.6, P14.9, P14.10, P14.12, P14.13). Originals written under the earlier encoding, including the mainnet acceptance Original of 1 November 2026, are not converted and no longer verify (D1, D7). And #54: inscription metadata carries a non-integer number as the narrowest exact CBOR float, as ord writes it, and a reader accepts any of the three widths, rejecting NaN, infinities, negative zero and magnitudes above 2^53 − 1 (P14.12). |
+| [Originals Protocol](https://github.com/aviarytech/originals-spec/tree/940c6d4/spec) ([rendered](https://aviarytech.github.io/originals-spec/)) | `aviarytech/originals-spec@940c6d4`, the head of open [PR 64](https://github.com/aviarytech/originals-spec/pull/64) (`bitcoin-previews-remove-evm`, not merged) on `master` `5c42958`, Editor's Draft 0.1 | Asset state, author binding, editors, identity continuity, operations, evidence packages, hosting, anchoring and ownership. Rules are cited by ID (for example P5.3). `master` includes #34–#36 (with #42 and #43), #45 (editors, shared-host saves and identity continuity recorded as owner decisions), #46 (an unanchored Original is never current; key custody is out of scope), #47 (for an anchored Original a did:vh or did:webvh signer is checked against the newest version of its DID the verifier knows of; anchoring does not require did:btco), #48 (section 14, the provisional wire format P14.1–P14.13) and #49 (the author can add and remove resources; editors cannot; a resourceID is never reused; P4.1, P4.4, P5.15, P5.16, P14.4, P14.5), #50 (the Bitcoin values and the section 14 limits are decided, with up to 256 resources; P9.5, P9.10, P9.17, P14.13) and #51 (the SDK's open questions of 23 October 2026, as owner decisions: after the anchor chain order decides, so a publication waits while an earlier inscription extending the same head is unverifiable, and every head change is reported; an identity gap affects only the entries that depend on it; freshness is established only by the signer DID's own witnesses or watchers, reported plainly; submitted, not observed, is never pending; the section 14 wire rules P14.2, P14.3, P14.5 and P14.8 and the ZIP writer binding of P14.10 are decided; P5.13, P5.14, P5.15, P7.8, P9.15, P9.18), #52 (section 14's intro says exactly which of its values are decided; no rule or row changes) and #53 (owner decision, 1 November 2026: an Original is exactly one resource, which can have many versions, replacing #49's resource sets; grants are `{did, name, metadata, resource}` and an entry has at most one transition; each inscription's body is the resource version its last entry names, under that version's media type, and its metadata carries the entries as a CBOR array, with metadata and body together at most 350,000 bytes; the SDK tells the author before inscribing what becomes public and permanent; no resource limit; P4.1, P4.4, P5.15, P9.17, P9.18, P14.4–P14.6, P14.9, P14.10, P14.12, P14.13). Originals written under the earlier encoding, including the mainnet acceptance Original of 1 November 2026, are not converted and no longer verify (D1, D7). And #54: inscription metadata carries a non-integer number as the narrowest exact CBOR float, as ord writes it, and a reader accepts any of the three widths, rejecting NaN, infinities, negative zero and magnitudes above 2^53 − 1 (P14.12). `master` `915b726` adds #58: carried logs, a file that carries its Original's log in a trailer, text block or JSON member (P7.11–P7.16, P14.14–P14.17), and EVM anchoring on an anchor contract's token, with did:evm token aliases, trust classes, and move entries up a layer (P3.9, P9.19–P9.29, P14.18–P14.22). #59 (merged as `a378b3b`) carries both through the older sections and qualifies an EVM anchor's settlement of a fork by the chain's finality and trust class (P6.6, P9.24, P9.27). At `a3ffdc1` it added the triage of the experimental SDK build: the entry limit is measured over the JCS form everywhere (P14.13, P14.14); a carried file's digest mismatch fails the file overall, importing is not an opt-in to resolve, and a pre-anchor checkpoint may be carried as historical (P7.12–P7.15); media-type parameters are rejected (P14.6); the text-block writer's refusal is a parse test and a non-last JSON member is found but not verified as a version (P14.16, P14.17); providers serve state at the finalized block, with no record cap and resumption from a checkpoint (P9.22, P9.25); `approve` may publish and minting is open (P9.23, P14.20); moves with an unreadable chain, the `UploadBegun` event and the did:evm candidate (P9.29, P14.20, P3.9). At `1b5c484` it added the owner decisions of 13 November 2026 on that build's open questions: one usable provider is enough, an unusable provider is dropped and the others' reads stand, two usable providers that disagree are missing evidence, and every report names its providers and marks a single-provider read uncorroborated (P9.22, P9.27); a checkpoint is the head entry's versionId with the chain, token, accepting record index, finalized block and trust class, holds no log, resumes only with a log reaching exactly that versionId, and is not made while a publication waits (P9.25); a writer checks its unpublished log as a local copy, never in a report given to others (P9.18), and before a Bitcoin arrival requires a final departure (P9.29); a final departure with an unreadable destination reports at most the entries before the first anchoring entry (P9.29); a carried log with an `anchor` member is unsupported even with no anchoring entry (P7.14); an opt-in to resolve applies to a single read (P7.13); a text block goes only where the host format's parser reads it as a comment, and a writer with no parser refuses (P14.16); and after a finality failure uniqueness is not established for every class (P9.24). Its head `ce19572` (owner decision, 14 November 2026) lists one EVM chain, Base (`eip155:8453`, `exit-protected`, proven), and removes Ethereum, Monad, Arbitrum One, Arc, Tempo, Robinhood Chain and Elysium: an `anchor` member naming one is unsupported, not invalid, and a writer refuses it; an Original on Base moves only to Bitcoin, a move naming Base again is a same-layer move and one naming an unlisted EVM chain is unsupported; the trust classes, layers and moves between EVM chains stay for a later revision (P9.19, P9.28, P14.22). #63 (merged as `5c42958`) adds the owner decisions of 13 November 2026 on the questions the experimental SDK build raised (P7.13, P7.14, P9.18, P9.22, P9.24, P9.25, P9.29, P14.16) and of 14 November 2026: P14.22 lists Base alone, and proof of a departure is deferred (D6). PR 64 (open; its head `940c6d4` is pinned here, as earlier pins took the head of open PR 59) withdraws EVM anchoring (owner decision, 18 November 2026): Bitcoin is the only anchor (D6), P9.19–P9.29 and P14.18–P14.22 become "Removed" stubs whose numbers are not reused, P3.9 drops did:evm, and carried logs stay without EVM (P7.11–P7.16, P14.14–P14.17), with P9.18's local copy kept for Bitcoin. It adds signed previews: an inscription's body is a WebP preview of at most 8,192 bytes that the entry names, the full version or none (P9.17, P9.30, P14.5 `asset.preview`, P14.10, P14.12, P14.13). This repository's EVM build is archived at the tag `archive/evm-anchoring-experimental`; previews follow in a later PR (plan 011 phase 12b). |
 | [VH-Log](https://github.com/swcurran/VH-Log/tree/f2f9fda2d8dae26b717ab54163169350c7182233/spec) | `swcurran/VH-Log@f2f9fda2d8dae26b717ab54163169350c7182233` | Log entries, SCID, entry hashes, parameters, proofs, witnesses, watchers, resolution and retrieval. |
 | VH-Log pull requests, treated as merged | [#1](https://github.com/swcurran/VH-Log/pull/1) `a3e3627e` witness verification of candidates · [#2](https://github.com/swcurran/VH-Log/pull/2) `0d5eb134` authoritative source · [#3](https://github.com/swcurran/VH-Log/pull/3) `3bcd0acb` additional cryptosuites · [#8](https://github.com/swcurran/VH-Log/pull/8) `3770b574` versionTime precision · [#9](https://github.com/swcurran/VH-Log/pull/9) `5552a668` non-HTTPS locations · [#10](https://github.com/swcurran/VH-Log/pull/10) `1867a2b1` alternative encodings · [#11](https://github.com/swcurran/VH-Log/pull/11) `2fe380dbf` keys, and editors, from a controller [S25] | The specialisation hooks the Originals extension uses, and (#1) how witnesses verify a candidate entry. #11's "Editors from a Controller" is the engine's editor hook (`ControllerKeys.editors`), which the Originals profile implements with its grants (P5.15–P5.18). |
 | [did:vh](https://github.com/swcurran/didvh/tree/e0b7cbad27d7b2274057251f85687e133329b5a9/spec) | `swcurran/didvh@e0b7cbad27d7b2274057251f85687e133329b5a9` | The `did:vh:<SCID>` identifier, `src`, DID URLs, resolution options and errors. |
@@ -43,7 +43,10 @@ D4, as #52 states), so they carry no `PROVISIONAL` marker. The entry state
 fields, the package format and its `signers/` layout, the digest encoding,
 the JSON-to-CBOR mapping of inscription metadata (ord's for `--json-metadata`,
 P14.12), the active-content media types the SDK warns about (P9.18) and the
-did:btco regex and CBOR details stay provisional. Section 2 of
+did:btco regex and CBOR details stay provisional. So does everything in
+section 14's carried-log subsection (P14.14–P14.17). An `anchor` member is
+no longer an asset member (P14.4, P14.5), so a state with one is rejected
+like any other unknown member. Section 2 of
 the plan records the provisional choices this repository makes. Code that
 depends on one is marked `PROVISIONAL` and cites the decision. A provisional
 choice is not a published test vector, and nothing built on one supports an
@@ -58,7 +61,8 @@ the pinned text.
 
 The owner decisions that departed from the earlier pin are now in the pinned
 stack, so none is a departure any more:
-- Only Bitcoin settles a fork (S1, Q5): originals-spec PR #34, P6.6 and P9.16.
+- Only anchoring on Bitcoin settles a fork (S1, Q5): originals-spec PR #34,
+  P6.6 and P9.16.
 - Author keys are ordinary `assertionMethod` keys (S8, Q6): PR #35, P5.3 and
   P5.11.
 - Asset logs use no witnesses (S9, Q14): PR #33, P9.8 and P9.9.
@@ -124,6 +128,83 @@ were mapped to the pinned table by their text:
   float of any width is accepted and checked over JCS) and C12-199 (row 121,
   a NaN, infinite, negative-zero or out-of-bound float is rejected). Rows
   after them move by two. No row was removed.
+- At `3ed0f89`, the head of open PR 59 on `master` `915b726` (#58 merged),
+  the table has 300 rows. Rows 1–192 keep their IDs and positions. PR 59
+  rewords two: C12-23 (divergent branches "not settled by an anchor", not
+  "on Bitcoin") and C12-188 (its result cites section 7 as well). Rows
+  193–285 are #58's (carried logs, EVM anchoring, moves and did:evm) and rows
+  286–300 are PR 59's; they are C12-200 to C12-307, each its position plus
+  seven. No row was removed, so none is retired. Rows tested only in Solidity
+  (`contracts/test`) or in the gated anvil integration test stay `todo`, with
+  a note naming the test, because the registry counts only the Bun unit roots.
+- At `a3ffdc1`, the new head of open PR 59 (still on `master` `915b726`), the
+  table has 324 rows. Twelve are reworded and keep their IDs: C12-150 (the
+  entry limit over the JCS form in every format), C12-201 and C12-218 (a
+  digest mismatch fails file verification), C12-210 (a trailer line whose JCS
+  form is 60,000 bytes is now within the limit), C12-222, C12-227 (the root
+  object is level 1), C12-249 (uniqueness in the terms of the chain's class),
+  C12-252 (`approve` may publish), C12-260 (an index that is not an earlier
+  record of the selected token), C12-273 and C12-289 (an unreadable chain in
+  a move) and C12-278 (staged transactions disclosed). C12-222's row is split
+  in three: its first case, a JSON member that is not the root's last, keeps
+  the ID with its result reversed (found, its log verified, the file not
+  verified as a version), because it is the same input under a changed rule,
+  as C12-210 is; the two cases it no longer covers become new rows, C12-308
+  (two root members named `originalLog`, rejected) and C12-309 (a member
+  nested below the root, not a JSON member). The 24 new rows are C12-308 to
+  C12-331 in table order: rows 216–217, 256–257 (C12-310, C12-311),
+  271–273 (C12-312 to C12-314), 290 (C12-315) and 308–323 (C12-316 to
+  C12-331); C12-307 moves to row 324. No row was removed, so none is retired.
+- At `1b5c484`, the new head of open PR 59 (still on `master` `915b726`), the
+  table has 344 rows, after the owner decisions of 13 November 2026. Six are
+  reworded and keep their IDs: C12-245 (two usable providers that disagree;
+  neither dropped), C12-279 (the report names the providers its read came
+  from, uncorroborated when one answered), C12-288 (with or without an
+  anchoring entry), C12-312 (a final departure with an unreadable destination
+  reports at most the entries before the first anchoring entry), C12-325 (an
+  unusable provider is dropped; missing evidence only when none remains) and
+  C12-328 (resuming needs a supplied log whose entry N is the checkpoint's
+  versionId, and reads the records after its record index). The 20 new rows
+  are C12-332 to C12-351 in table order: rows 102–103 (the writer's local
+  copy, C12-332, C12-333), 244–246 (usable providers, C12-334 to C12-336),
+  250 (C12-337), 277 and 279 (C12-338, C12-339), 286–287 (the Bitcoin
+  arrival, C12-340, C12-341), 299–300 (C12-342, C12-343), 321–322 (the
+  single-read opt-in, C12-344, C12-345), 329–331 (the text-block rule,
+  C12-346 to C12-348) and 338–340 (checkpoints, C12-349 to C12-351). No row
+  was removed, so none is retired.
+- At `ce19572`, the new head of open PR 59 (still on `master` `915b726`), the
+  table has 347 rows, after the owner decision of 14 November 2026 that
+  P14.22 lists Base alone. Three are reworded and keep their IDs: C12-265
+  (a move from Base to Bitcoin; from an attested chain only under a revision
+  that lists one), C12-275 and C12-276 (both only under a revision that lists
+  an attested chain). The three new rows are C12-352 to C12-354 in table
+  order: row 236 (a genesis `anchor` naming a chain other than Base,
+  C12-352) and rows 273–274 (a move from Base naming Base again, C12-353,
+  or an unlisted EVM chain, C12-354). No row was removed, so none is
+  retired.
+- At `5c42958`, `master` after #59 and #63 merged, the table is the same as
+  at `ce19572` (#63's last commit, `42d6d12`, changes only D6), so the
+  registry is unchanged apart from its pin.
+- At `940c6d4`, the head of open PR 64 on `master` `5c42958` (EVM anchoring
+  withdrawn, owner decision of 18 November 2026; Bitcoin previews added),
+  the table has 284 rows. The 90 EVM rows are gone, and their IDs are
+  retired under `retired`, never reused: C12-235 to C12-289, C12-292 to
+  C12-296, C12-301, C12-310 to C12-315, C12-323 to C12-330, C12-334 to
+  C12-342 and C12-349 to C12-354. Fifteen rows are reworded and keep their
+  IDs: C12-23 (back to "not settled on Bitcoin"), C12-97, C12-190, C12-112,
+  C12-191, C12-192 and C12-193 (previews), C12-332 (the local copy, now on
+  Bitcoin), C12-150 (no publication), C12-343 (a carried log that holds no
+  anchoring entry), C12-290 and C12-291 (inscriptions only), C12-300 (no
+  token alias) and C12-331 (a signed anchoring entry not inscribed on its
+  sat: its first case under Bitcoin). C12-194's row is split by whether the
+  parent names a preview: the case with none keeps the ID, as C12-222's did.
+  The 27 preview rows are new, C12-355 to C12-381 in table order (rows 120
+  and 122–147), and stay `todo` until plan 011 phase 12b, a stacked PR.
+  C12-192, C12-193 and C12-194 are `partial` until then. C12-297 (an
+  evidence package read without the anchor) is covered for Bitcoin: such a
+  package reports missing evidence and at most the entries before the first
+  anchoring entry, while the writer's own check of its committed log stays
+  P9.18's local copy, verified whole.
 
 Positive checkpoints come with positive and negative fixtures, pinned
 decisions and a dependency inventory. Fixtures, dry runs and disposable regtest

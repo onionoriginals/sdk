@@ -23,7 +23,8 @@ function testFiles(dir: string): string[] {
   });
 }
 
-// Test roots that may cite rows, relative to the repository root.
+// Test roots that may cite rows, relative to the repository root. A row tested only elsewhere (a
+// regtest journey) is not counted as coverage here: it stays todo with a note naming the test.
 const repo = new URL("../../../../", import.meta.url).pathname;
 const roots = ["packages/vh/tests", "packages/sdk/tests/unit/originals"];
 const cited = new Map<string, Set<string>>();
@@ -39,22 +40,29 @@ for (const root of roots) {
 }
 
 describe("section 12 conformance registry", () => {
-  // The pinned table (originals-spec master 45ed1dc, with #53 merged: one resource per Original, and
-  // #54: non-integer metadata numbers as CBOR floats) has 192 rows. Ids are stable across re-pins, so they need not equal table positions; each row records
-  // its position in the pinned table. A row from an open spec pull request would carry `proposal`.
-  test("registers all 192 pinned rows with unique ids, in table order", () => {
-    expect(registry.rows.length).toBe(192);
+  // The pinned table has 284 rows. It is originals-spec 940c6d4, the head of open PR 64 on master
+  // 5c42958: EVM anchoring is withdrawn (owner decision, 18 November 2026) and its 90 rows retired,
+  // carried logs stay, 15 rows are reworded, and the 27 Bitcoin preview rows are new, C12-355 to
+  // C12-381 (todo until plan 011 phase 12b). Ids are stable across re-pins, so they need not equal
+  // table positions; each row records its position in the pinned table. A row from an open spec pull
+  // request would carry `proposal`.
+  test("registers all 284 pinned rows with unique ids, in table order", () => {
+    expect(registry.rows.length).toBe(284);
     const pinned = registry.rows.filter((r) => r.proposal === undefined);
-    expect(pinned.length).toBe(192);
+    expect(pinned.length).toBe(284);
     expect(registry.rows.map((r) => r.position)).toEqual(registry.rows.map((_, i) => i + 1));
-    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(192);
+    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(284);
     for (const r of registry.rows) expect(r.id).toMatch(/^C12-\d{2,3}$/);
   });
 
   // #53 removed the rows about adding, removing and reusing resources and the 256-resource limit.
+  // PR 64 at 940c6d4 removed the 90 EVM anchoring rows (owner decision, 18 November 2026).
   test("a retired id names its commit and reason, is never reused, and no test cites it", () => {
     const live = new Set(registry.rows.map((r) => r.id));
-    expect(registry.retired.map((r) => r.id).sort()).toEqual(["C12-154", "C12-155", "C12-156", "C12-157", "C12-158", "C12-160", "C12-171"]);
+    const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => `C12-${from + i}`);
+    const evm = [...range(235, 289), ...range(292, 296), "C12-301", ...range(310, 315), ...range(323, 330), ...range(334, 342), ...range(349, 354)];
+    expect(evm.length).toBe(90);
+    expect(registry.retired.map((r) => r.id).sort()).toEqual(["C12-154", "C12-155", "C12-156", "C12-157", "C12-158", "C12-160", "C12-171", ...evm].sort());
     for (const r of registry.retired) {
       expect(live.has(r.id), `${r.id} is retired but registered`).toBe(false);
       expect(r.at, r.id).toMatch(/^[0-9a-f]{7,9}$/);

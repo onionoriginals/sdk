@@ -126,6 +126,31 @@ describe("the anchoring entry (P9.10; plan 012 §3.1, S10)", () => {
     expect(r.reasons).toContain("bitcoin-evidence-missing");
   });
 
+  test("C12-332, C12-333: a writer's committed log checked before inscribing its next entry is verified whole as a local copy: unverified on Bitcoin, never anchored or current (P9.18)", async () => {
+    const { alice, copy, ref, sign, anchor } = await anchored();
+    const next = await updateOriginal(anchor, { versionTime: time(20), name: "Not yet inscribed", author: ref, sign });
+    // No Bitcoin evidence: the writer's own check of its committed log, from genesis through the entry it inscribes next.
+    const r = await verify([...copy, next], alice);
+    expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
+    expect(r.head).toBe(next.versionId);
+    expect(r.anchoring?.status).toBe("unverified");
+    expect(r.reasons).toContain("bitcoin-evidence-missing");
+    // Never presented as anchored or current (C12-333).
+    expect(r.ordering).toBe("claimed");
+    expect(r.ownership).toBeNull();
+    expect(r.current).toBe(false);
+  });
+
+  test("C12-331: a signed anchoring entry not inscribed on the sat it names is not anchored (P9.10, P9.12)", async () => {
+    const { alice, copy } = await anchored();
+    // The sat is read, and carries nothing.
+    const r = await verify(copy, alice, [sat([])]);
+    expect(r.anchoring?.status).toBe("not-anchored");
+    expect(r.ordering).toBe("claimed");
+    expect(r.ownership).toBeNull();
+    expect(r.current).toBe(false);
+  });
+
   test("C12-38, C12-25 and C12-33: an anchoring entry inscribed on a sat other than the one it names is not an anchor, is reported, and confers nothing", async () => {
     const { alice, copy, anchor, anchoring } = await anchored();
     const r = await verify(copy, alice, [sat([anchoring(10)], OTHER_SAT)]);
@@ -962,6 +987,28 @@ describe("placement rests on the index (P9.10, P9.11)", () => {
     expect(r.reasons).toContain("ownership-indexes-disagree");
   });
 
+  test("C12-304: a report for an anchored Original states the confirmation depth relied on and whether more than one independent index agreed (P9.5, P9.11)", async () => {
+    const { alice, copy, anchor, ref, sign, anchoring } = await anchored();
+    const next = await updateOriginal(anchor, { versionTime: time(20), name: "Later", author: ref, sign });
+    const a = anchoring(10);
+    const n = inscribe(next, 20);
+    // One index: the depth of each inscription relied on and of the holder's output, and that index alone.
+    const one = await verify(copy, alice, [sat([a, n])]);
+    expect(one.anchoring?.anchor).toMatchObject({ versionId: anchor.versionId, confirmations: a.confirmations });
+    expect(one.anchoring?.accepted.map((p) => [p.versionId, p.confirmations])).toEqual([[next.versionId, n.confirmations]]);
+    expect(one.ownership).toMatchObject({ confirmations: 3, indexes: ["ord-a"] });
+    expect(one.anchoring?.indexes).toEqual(["ord-a"]);
+    // Two indexes that agree, one a block behind: the lower depth is the one relied on, and both are named.
+    const behind = (i: Inscribed) => ({ ...i, confirmations: i.confirmations - 1 });
+    const two = await verify(copy, alice, [sat([a, n]), sat([behind(a), behind(n)], SAT, { output: "aa".repeat(32) + ":0", confirmations: 2 }, "ord-b")]);
+    expect(two.anchoring?.disputed).toEqual([]);
+    expect(two.anchoring?.anchor?.confirmations).toBe(a.confirmations - 1);
+    expect(two.anchoring?.accepted.map((p) => p.confirmations)).toEqual([n.confirmations - 1]);
+    expect(two.ownership).toMatchObject({ confirmations: 2, indexes: ["ord-a", "ord-b"] });
+    expect(two.anchoring?.indexes).toEqual(["ord-a", "ord-b"]);
+    expect(two.current, JSON.stringify(two.reasons)).toBe(true);
+  });
+
   test("C12-108: did:btco aliases follow the strict grammar", () => {
     for (const ok of ["did:btco:0", "did:btco:1", "did:btco:sig:1", "did:btco:test:1", "did:btco:reg:5000000000", "did:btco:2099999997689999"]) {
       expect(parseBtcoAlias(ok).did).toBe(ok);
@@ -1133,8 +1180,8 @@ describe("the sat's holder cannot make an anchored Original incomplete (P9.12, P
   });
 });
 
-describe("C12-150 on Bitcoin: an inscribed entry's size is its stored line (P14.13)", () => {
-  /** An anchored log whose genesis line, as stored, is exactly 65,536 bytes and re-serializes longer. */
+describe("C12-150 on Bitcoin: \"Entry whose JCS form is 65,536 / 65,537 UTF-8 bytes, in `did.jsonl`, an inscription or any carrier\" (P14.13)", () => {
+  /** An anchored log whose genesis line, as stored, is exactly 65,536 bytes and whose JCS form is longer. */
   async function storedAtLimit() {
     const alice = await VhAuthor.create([{ fragment: "orig", signer: KEY }]);
     const sign = alice.signer(KEY, "orig");
@@ -1179,12 +1226,11 @@ describe("C12-150 on Bitcoin: an inscribed entry's size is its stored line (P14.
     expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ reason: "invalid-entry", code: "ENTRY_TOO_LARGE" })]);
   });
 
-  test("an anchored copy given as text is measured as stored too", async () => {
-    const { alice, anchor, text } = await storedAtLimit();
+  test("an anchored copy given as text is measured as its JCS form too, not as stored (P14.13 at a3ffdc1)", async () => {
+    const { alice, text } = await storedAtLimit();
     const r = await verifyOriginal({ log: text, authors: [alice.evidence()], now: NOW, bytes: allBytes });
-    expect(r.history.status, JSON.stringify(r.history.failure)).toBe("valid");
-    expect(r.head).toBe(anchor.versionId);
-    expect(r.anchoring?.status).toBe("unverified");
+    expect(r.history.failure).toMatchObject({ index: 0, category: "limit-exceeded", code: "ENTRY_TOO_LARGE" });
+    expect(r.head).toBeNull();
   });
 });
 

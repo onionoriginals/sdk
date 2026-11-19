@@ -556,6 +556,53 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
     expect(loaded.report.current, JSON.stringify(loaded.report.reasons)).toBe(true);
   });
 
+  test("C12-297: \"Complete evidence package of an anchored Original, read without access to the anchor\": missing evidence; at most the entries before the first anchoring entry; the package not preferred to the anchor (P7.1, P7.14)", async () => {
+    const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
+    let t = Date.parse("2026-10-18T11:00:00Z");
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => (t += 1000) });
+    const signer = alice.signer("orig", KEY);
+    const author = alice.ref("orig");
+    const c = await sdk.create({ name: "Harbor", resource: { mediaType: "image/jpeg", bytes: bytes("one") }, author, signer });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    const renamed = await sdk.edit(c.original.did, { parent: c.original.checkpoint, name: "Harbor at dawn", author, signer });
+    const anchored = await sdk.anchor(c.original.did, { parent: renamed.original.checkpoint, author, signer, sat: btcoAlias("regtest", SAT) });
+    const later = await sdk.edit(c.original.did, { parent: anchored.original.checkpoint, name: "Harbor at noon", author, signer });
+    const pkg = await sdk.package(c.original.did);
+    expect(pkg.manifest.completeness).toBe("complete");
+    const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: () => t });
+
+    // Without the anchor: missing evidence, and at most the entries before the anchoring entry.
+    const offline = await reader.load(pkg.bytes);
+    expect(offline.reasons).toContain("bitcoin-evidence-missing");
+    expect(offline.report.head).toBe(renamed.original.checkpoint);
+    expect(offline.report.validAsOf?.checkpoint).toBe(renamed.original.checkpoint);
+    expect(offline.report.state?.name).toBe("Harbor at dawn");
+    expect(offline.report.ordering).toBe("claimed");
+    expect(offline.report.current).toBe(false);
+    expect(offline.notCheckedAgainstAnchor).toEqual([anchored.original.checkpoint, later.original.checkpoint]);
+    // That is not a contradiction of the manifest's claims about what the package holds.
+    expect(offline.reasons).not.toContain("manifest-completeness-mismatch");
+
+    // With the anchor, which shows only the log through the anchoring entry: the state is the anchor's, not the package's.
+    const log = new TextDecoder().decode(readZip(pkg.bytes).get("asset/did.jsonl")!);
+    const throughAnchor = linesOf(log).slice(0, 3);
+    const evidence = await satEvidence(snapshot([{ id: `${"e".repeat(64)}i0`, height: 4, entries: throughAnchor }]), { clock: clockOver(HEADERS), ownerConfirmations: 1, index: "ord-a" });
+    const online = await reader.load(pkg.bytes, { bitcoin: [evidence] });
+    expect(online.report.anchoring?.status).toBe("anchored");
+    expect(online.report.head).toBe(anchored.original.checkpoint);
+    // The package's checkpoint is not on the anchor, so it is not found there, never taken from the package.
+    expect(online.reasons).toContain("checkpoint-not-found");
+    expect(online.report.validAsOf).toBeNull();
+    expect(online.report.current).toBe(false);
+    expect(online.notCheckedAgainstAnchor).toEqual([]);
+
+    // Importing stores the copy whole (P7.5), as the writer keeps its own: unverified on Bitcoin, never current.
+    const imported = await reader.import(pkg.bytes);
+    expect(imported.status).toBe("imported");
+    expect(imported.original.head).toBe(later.original.checkpoint);
+    expect(imported.original.current).toBe(false);
+  });
+
   test("C12-64: a verifier that knows a newer signer DID version than the package supplies uses the newer one, and says when and where it got it (P7.8; originals-spec #47)", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
     let t = Date.parse("2026-10-18T11:00:00Z");
@@ -669,7 +716,7 @@ describe("an anchored Original through the SDK (P9.10, P9.12)", () => {
 });
 
 describe("did:btco author DIDs through the SDK (P5.13; plan 011 PR 9b)", () => {
-  test("an Original by a did:btco author verifies from the author's sat; its package lists that identity as missing", async () => {
+  test("an Original by a did:btco author verifies from the author's sat; its package holds no history for it and does not list it as missing (P7.1, C12-298)", async () => {
     const AUTHOR_SAT = "9000000000";
     const author = btcoAlias("regtest", AUTHOR_SAT);
     const key = localSigner("Ed25519", KEY);
@@ -690,8 +737,54 @@ describe("did:btco author DIDs through the SDK (P5.13; plan 011 PR 9b)", () => {
     expect(c.original.report.reasons).toEqual(["not-anchored"]);
     expect(c.original.validAsOf?.checkpoint).toBe(c.original.checkpoint);
     const pkg = await sdk.package(c.original.did);
-    expect(pkg.manifest.missing).toEqual([{ kind: "identity", did: author, role: "author" }]);
+    // P7.1: a did:btco signer's history is never in a package, so it is no missing item.
+    expect(pkg.manifest.missing).toEqual([]);
     expect(readEvidence(pkg.bytes).authors).toEqual([]);
+  });
+
+  test("C12-298: an evidence package of an Original with a did:btco signer, read offline: that history is not in it; identity evidence incomplete until read from Bitcoin (P7.1, P14.10, P5.6)", async () => {
+    const AUTHOR_SAT = "9000000001";
+    const author = btcoAlias("regtest", AUTHOR_SAT);
+    const key = localSigner("Ed25519", KEY);
+    const doc = {
+      "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/multikey/v1"],
+      id: author,
+      verificationMethod: [{ id: `${author}#orig`, type: "Multikey", controller: author, publicKeyMultibase: key.publicKeyMultibase }],
+      assertionMethod: [`${author}#orig`],
+    };
+    const docId = `${"e".repeat(64)}i0`;
+    const read = await satEvidence(snapshot([{ id: docId, height: 2, content: "art", mediaType: "image/png", metadata: encodeCbor(doc) }], 10, AUTHOR_SAT), { clock: clockOver(HEADERS), ownerConfirmations: 4, index: "ord-a" });
+    let t = Date.parse("2026-10-18T13:00:00Z");
+    const writer = OriginalsSDK.create({ store: new MemoryStore(), authors: async (did) => (did === author ? { did, bitcoin: read } : undefined), clock: () => (t += 1000) });
+    const ref = { did: author, verificationMethod: `${author}#orig`, versionId: docId };
+    const c = await writer.create({ name: "By a did:btco author", resource: { mediaType: "image/jpeg", bytes: bytes("one") }, author: ref, signer: keySigner({ keyType: "Ed25519", secretKey: KEY, verificationMethod: ref.verificationMethod }) });
+    if (c.kind !== "original") throw new Error("expected an Original");
+    const pkg = await writer.package(c.original.did);
+    const contents = readEvidence(pkg.bytes);
+    // The signer's history is never in the package, complete or not (P7.1, P14.10): no signers/ entry for it.
+    expect(contents.authors).toEqual([]);
+    expect([...readZip(pkg.bytes).keys()].some((name) => name.startsWith(signerPath(author)))).toBe(false);
+    expect(contents.log).toContain(author);
+    // ...and so it is not a missing item: with every other item in it, the package is complete (P7.1, P14.10).
+    expect(pkg.manifest.missing).toEqual([]);
+    expect(pkg.manifest.completeness).toBe("complete");
+    // Offline: no Bitcoin read of the signer's sat. Identity evidence is incomplete, never trusted from the key alone (P5.6).
+    const offline = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => undefined, clock: () => (t += 1000) });
+    const r = await offline.load(pkg.bytes);
+    expect(r.report.history.status).not.toBe("valid");
+    expect(r.report.identityEvidence.status).toBe("incomplete");
+    expect(r.report.authorBinding.status).not.toBe("valid");
+    expect(r.report.validAsOf).toBeNull();
+    expect(r.report.current).toBe(false);
+    // The manifest's claim is about what the package holds, so it is not contradicted offline.
+    expect(r.reasons).not.toContain("manifest-completeness-mismatch");
+    // Read from Bitcoin, the same package verifies.
+    const online = OriginalsSDK.create({ store: new MemoryStore(), authors: async (did) => (did === author ? { did, bitcoin: read } : undefined), clock: () => (t += 1000) });
+    const ok = await online.load(pkg.bytes);
+    expect(ok.report.history.status).toBe("valid");
+    expect(ok.report.identityEvidence.status).toBe("complete");
+    expect(ok.report.validAsOf?.checkpoint).toBe(c.original.checkpoint);
+    expect(ok.reasons).not.toContain("manifest-completeness-mismatch");
   });
 });
 

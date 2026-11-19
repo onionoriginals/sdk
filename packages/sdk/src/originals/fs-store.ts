@@ -8,6 +8,9 @@
  *                                       refused candidates, never history (P6.8)
  *   <root>/originals/<scid>/pending.json
  *                                       the candidate being sent to a shared host (P6.4)
+ *   <root>/originals/<scid>/carried-import.json
+ *                                       present when the Original was first stored by
+ *                                       importing a carried file (P7.13)
  *   <root>/resources/<digest>           content-addressed bytes
  *   <root>/authors/<sha256(did)>.json   author DID evidence from imports
  *   <root>/retained/<sha256(did)>.json  the highest versionId verified per DID
@@ -669,6 +672,20 @@ export class FileStore implements OriginalsStore {
 
   async putRetainedAnchor(did: string, anchor: RetainedAnchor): Promise<void> {
     return this.track(() => this.writeAtomically(join(this.root, "anchors"), this.didFile(did), JSON.stringify({ did, anchor })));
+  }
+
+  async putCarriedImport(did: string): Promise<void> {
+    return this.track(async () => {
+      const dir = this.dirOf(did);
+      await fs.mkdir(dir, { recursive: true });
+      await this.writeAtomically(dir, "carried-import.json", JSON.stringify({ did }));
+    });
+  }
+
+  async getCarriedImport(did: string): Promise<boolean> {
+    const text = await this.readText(join(this.dirOf(did), "carried-import.json"));
+    if (text === undefined) return false;
+    return (JSON.parse(text) as { did?: unknown }).did === did;
   }
 
   async putBranch(did: string, log: string): Promise<void> {

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { OriginalsError } from "@originals/vh";
+import { canonicalize, type JsonValue } from "@originals/vh/json";
 import { resourceDigest } from "@originals/vh/originals";
 import { MemoryStore, OriginalsSDK, keySigner, type OriginalsSigner, type SigningRequest } from "../../../src/originals/index.js";
 import { Author, bytes, clock, seed } from "./helpers.js";
@@ -199,5 +200,38 @@ describe("C12-150: the SDK never commits an entry over 65,536 UTF-8 bytes (P7.7;
     const sdk = OriginalsSDK.create({ store, authors: [alice.evidence()], clock: clock() });
     const created = sdk.create({ name: "Harbor", metadata: { wide: "é".repeat(33_000) }, resource: { mediaType: "image/jpeg", bytes: B1 }, author: alice.ref("orig"), signer: alice.signer("orig", KEY) });
     await expect(created).rejects.toMatchObject({ category: "limit-exceeded" });
+  });
+
+  test("an entry over the limit is refused before the signer is asked: the SDK never signs one (P14.13)", async () => {
+    const { store, sdk, author, signer: key, original } = await harbor();
+    const asked: SigningRequest[] = [];
+    const signer: OriginalsSigner = { verificationMethod: key.verificationMethod, cryptosuite: key.cryptosuite, sign: (r) => (asked.push(r), key.sign(r)) };
+    // Measured as the entry's JCS form in UTF-8: even with the shortest proof it is over 65,536 bytes.
+    const over = { wide: "é".repeat(33_000) };
+    const before = (await store.get(original.did))?.log;
+    await expect(sdk.create({ name: "Harbor", metadata: over, resource: { mediaType: "image/jpeg", bytes: B1 }, author, signer }))
+      .rejects.toMatchObject({ category: "limit-exceeded", code: "ENTRY_TOO_LARGE" });
+    await expect(sdk.edit(original.did, { parent: original.checkpoint, metadata: over, author, signer }))
+      .rejects.toMatchObject({ category: "limit-exceeded", code: "ENTRY_TOO_LARGE" });
+    expect(asked).toEqual([]);
+    expect((await store.get(original.did))?.log).toBe(before);
+  });
+
+  test("an entry whose signed JCS form is exactly 65,536 bytes is committed (P14.13)", async () => {
+    const { alice, author, signer } = await setup();
+    // The proof's length moves with the signature, so each name gives another signature to try.
+    for (let variant = 0; variant < 20; variant++) {
+      let pad = 64_000; // under the limit: each committed entry measures how far it is off
+      for (let i = 0; i < 4; i++) {
+        const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], clock: clock() });
+        const created = await sdk.create({ name: `Harbor ${variant}`, metadata: { pad: "a".repeat(pad) }, resource: { mediaType: "image/jpeg", bytes: B1 }, author, signer }).catch(() => undefined);
+        if (created?.kind !== "original") break;
+        const line = (await sdk.committedLog(created.original.did)).trimEnd();
+        const size = new TextEncoder().encode(canonicalize(JSON.parse(line) as JsonValue)).length;
+        if (size === 65_536) return;
+        pad += 65_536 - size;
+      }
+    }
+    throw new Error("no committed entry of 65,536 bytes");
   });
 });

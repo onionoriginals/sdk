@@ -276,6 +276,7 @@ export function checkAsset(value: unknown, authorDid?: string): AssetState {
   // PROVISIONAL (plan 011 PR 7b, plan 012 §3.1): at most one did:webvh alias and one did:btco alias.
   let webvh = 0;
   let btco = 0;
+  if (new Set(a.aliases).size !== a.aliases.length) invalid("STATE_ALIASES", "aliases lists no DID twice (P14.5)");
   for (const alias of a.aliases) {
     if (alias.startsWith("did:btco:")) {
       parseBtcoAlias(alias);
