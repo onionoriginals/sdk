@@ -377,7 +377,7 @@ export async function checkBranch(
       }
     }),
   );
-  const finalRef = ref as string | null;
+  const finalRef = ref;
   report.ref = finalRef;
   if (report.content.failures.length > 0) report.content.status = "digest-failure";
   else if (report.content.missing.length > 0) report.content.status = "partial";

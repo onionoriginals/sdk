@@ -243,7 +243,7 @@ export class CodeWorkspace {
       if (current.length >= this.maxEntries) {
         if (role !== "author") codeError("outside-grant", "SEGMENT_AUTHOR_ONLY", `${currentDid} is full (${this.maxEntries} entries); only the branch's author starts its next segment (K13)`);
         const last = current[current.length - 1];
-        previous = { did: currentDid!, versionId: last.versionId };
+        previous = { did: currentDid, versionId: last.versionId };
         prior = { root: stateOf(last).asset.resource.digest, versionTime: last.versionTime };
         current = [];
         currentDid = undefined;
