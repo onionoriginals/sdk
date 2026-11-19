@@ -1,7 +1,6 @@
 # 049 — Originals for code: signed, offline-verifiable version control on Originals
 
-Status: **phases 0–3 implemented on `feat/originals-for-code` (§8 has the
-results); phase 4 was decided on 2026-11-19 as a core spec change (§6, plan 050); phase 5 is a plan item, not built.** Written 2026-11-18 against `main` at `e5a3e3d4`. Rule IDs refer to
+Status: **phases 0–3 merged (#1064); the owner's 2026-11-19 follow-ups built: O3 commit objects (K12), O1 segments (K13), O7 contributions (K14), the release Original (K15) and phase 5, `git-remote-originals` (K16); §8 has the results. Phase 4 was decided on 2026-11-19 as a core spec change (§6, plan 050); moving the code profile onto it waits for W1–W3.** Written 2026-11-18 against `main` at `e5a3e3d4`. Rule IDs refer to
 the pinned Originals Protocol (`aviarytech/originals-spec@45ed1dc`, see
 [`specs/README.md`](../specs/README.md)); terms follow
 [`CONTEXT.md`](../CONTEXT.md) and the consumer contract
@@ -340,20 +339,50 @@ Threshold 1 with one delegate needs no protocol change.
 
 See §6. Waits for the owner's decision.
 
-### Phase 5 — `git-remote-originals` (plan item)
+### Phase 5 — `git-remote-originals` (built, K16)
 
-Not built in this pass: phases 0–3 already make a large PR, and the helper
-depends on O3 (whether commit objects are mirrored), which is the owner's
-call. The design:
+A git remote helper (`git-remote-originals`, gitremote-helpers(7), a bin of
+`@originals/code`) so that `git clone originals::<path, file:// or https://
+URL of a repo bundle> <dir>` works.
 
-A git remote helper (`git-remote-originals`, gitremote-helpers(7)) so that
-`git clone originals::<bundle or host URL>` works: `capabilities`, `list`
-(the canonical heads and each delegate's head, verified), `import` through
-`git fast-import` rebuilding trees and blobs from objects. The commits cannot
-be rebuilt byte for byte (messages, authors and second parents are not
-mirrored), so a clone gets new commit ids unless commit objects are mirrored
-too; that is open question O3. `push` maps to `mirror` plus a shared-host
-`submit` (P6.7). Not built in this pass.
+- **Verify first.** On `list`, the helper reads the bundle and verifies it
+  offline with no key (P7.3), exactly as `originals-code verify` does. It
+  lists only refs whose canonical head is `agreed` (K6) and whose voting
+  branch verifies completely: both reports valid, content complete, every
+  git tree id (`gitBinding`) and every commit id (`commitBinding`, K12)
+  recomputed. Anything else is refused with the reason on stderr, and with
+  no clonable ref the clone fails. Nothing is rebuilt approximately: a bundle
+  without commit objects (a private repo without opt-in) cannot be cloned.
+- **Rebuild git's objects.** `fetch` writes one pack (no deltas) for
+  `git index-pack`: the raw commit objects byte for byte (K12), git tree
+  objects rebuilt from the mirrored trees (K2), and blobs. Every id is
+  recomputed before writing and again by `index-pack`. Commit ids are
+  therefore the original repository's, and `HEAD` points at the canonical
+  head of `refs/heads/main`.
+- **First-parent only, stated in the open (K16).** Second parents are not
+  mirrored (K9). Git cannot express "this merge's second parent is absent"
+  in `.git/shallow`: a shallow entry cuts *all* of a commit's parents (so
+  `git log --first-parent` would stop at the first merge), and listing the
+  absent parents there does not help, because git still has to read them.
+  A promisor (partial clone) setup tolerates the absence but makes plain
+  `git log` and `git checkout` fail on lazy fetches. `git replace --graft`
+  writes new, different commit objects. The helper therefore writes
+  `$GIT_DIR/info/grafts` with one line per merge commit, `<merge> <first
+  parent>`: every object stays byte-identical (`git cat-file -p <merge>`
+  still shows both parents), the file lists exactly what is missing, and
+  `git log`, `git log --first-parent`, `git fsck` and the connectivity check
+  all work. Git marks the grafts file deprecated; the helper turns that
+  hint off for the cloned repository only (`advice.graftFileDeprecated`).
+  Fetching the full history from another remote and deleting the file
+  restores normal history; `git replace --convert-graft-file` converts it if
+  a future git drops grafts. A chain whose first commit has a parent (a
+  mirror that started mid-history) would be marked in `$GIT_DIR/shallow`
+  at that commit, which is what shallow means; the writer always starts at
+  the root, so this does not happen today.
+- `git fetch` from the same remote takes a later bundle the same way.
+- **Push is not supported** (`list for-push` is refused). Later item: `push`
+  as a mirror plus a shared-host `submit` (P6.7), and fetching from a
+  hosted repo by digest (§6, reads) instead of a whole bundle.
 
 ## 4. PROVISIONAL choices (marked in code)
 
@@ -374,6 +403,7 @@ too; that is open question O3. `push` maps to `mirror` plus a shared-host
 | K13 | A branch longer than the entry limit is a chain of segment Originals; a segment genesis names the previous segment's did and last versionId (`metadata.code.previous`); the repo document lists the newest segment; earlier segments are `superseded` (O1) |
 | K14 | Contributor branches: a branch Original naming the repo but not listed is a `contribution`, verified and never voting; bundles carry the contributions a workspace holds; `import` verifies a bundle before taking it in (O7) |
 | K15 | Release Original: named by the repo document (`releases`), authored by the repo's author, one release manifest per entry (tag, ref, commit, branch and entry, canonical result at the time); its commit must be in the named chain |
+| K16 | `git-remote-originals`: verify the bundle offline first, list only agreed and completely verified refs, rebuild commits byte for byte from commit objects; second parents stated in `info/grafts`, a mid-history start in `shallow`; no push |
 
 ## 5. Acceptance tests (IDs cited by tests)
 
@@ -405,6 +435,8 @@ too; that is open question O3. `push` maps to `mirror` plus a shared-host
 | CODE-24 | Contributions stay outside the vote: no quorum from a contribution; an invalid contribution leaves the head alone; no contribution into a listed branch; a bundle whose repo fails is not imported |
 | CODE-25 | Releases: created on the first release and named by the repo; later releases, an older commit by name, a release in an earlier segment; only the repo's author; a repeated tag refused; manifests strict JCS |
 | CODE-26 | Release failures: a commit not at the named entry and a repeated tag fail the release history; a missing branch is incomplete. `bun run release:regtest`: anchoring and reinscribing the release Original on disposable regtest |
+| CODE-27 | `git clone originals::<bundle>`: first-parent ids equal git's, trees and messages identical, the merge's second parent in `info/grafts`, `fsck` clean, `git fetch` takes a later bundle |
+| CODE-28 | The helper refuses what it cannot rebuild exactly: no commit objects, no agreed head |
 | CODE-ACC | Mirror `main` of this repository and verify it with no network (script, timings, store size vs. pack) |
 
 ## 6. Phase 4 and the owner's decisions of 2026-11-19
@@ -501,6 +533,17 @@ then verifies offline: release history valid, both releases in-chain,
 canonical head agreed; the release Original's offline report is
 `anchoring: unverified` (no Bitcoin read offline), and branches stay
 unanchored (`current: false`). No mainnet or testnet.
+
+**K16 (`git-remote-originals`), 2026-11-19**
+(`bun run acceptance -- --rev origin/main --clone`, `main` at `fd15702f`,
+1,544 commits, 680 first-parent, Apple Silicon laptop): mirror 680 entries in
+10.7 s (680 commit objects, 1.4 MiB); bundle 72.2 MiB; verify 4.5 s offline,
+680 of 680 tree ids and commit ids recomputed, canonical head agreed at
+`fd15702f`. Then `git clone originals::<bundle>` in 11.2 s (verifying the
+bundle again, rebuilding and indexing 16,499 objects): **the clone's 680
+`git log --first-parent` ids equal `origin/main`'s**, its `HEAD` tree is
+git's, `git fsck` is clean, and 199 merge commits keep only their first
+parent through `info/grafts`.
 
 The store is about 1.9 times git's pack of the same objects (O6) and about
 0.6 times the whole repository's 114 MiB pack, which also holds every

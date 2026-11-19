@@ -14,3 +14,4 @@ export * from "./canonical.js";
 export * from "./bundle.js";
 export * from "./verify.js";
 export * from "./workspace.js";
+export * from "./clone.js";

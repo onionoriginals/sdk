@@ -55,6 +55,18 @@ report.releases;    // the release Original: SDK report + each release checked a
 report.current;     // always false: nothing here is anchored (P7.10)
 ```
 
+Clone a verified bundle with git (`git-remote-originals`, a bin of this
+package): it verifies the bundle offline first and refuses unless the
+canonical head is agreed and every commit id is recomputed from its commit
+object. Commits are byte-identical, so ids match the original repository.
+History is first-parent only: each merge's second parent is listed in
+`.git/info/grafts`, never rewritten. Push is not supported.
+
+```sh
+git clone originals::repo.zip my-clone      # or originals::https://…/repo.zip
+git -C my-clone log --first-parent          # the original commit ids
+```
+
 Entry points: `@originals/code` (browser-safe), `@originals/code/fs` (a
 workspace on disk), `@originals/code/git` (reads a git repository).
 

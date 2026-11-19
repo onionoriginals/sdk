@@ -5,9 +5,10 @@
  *
  *   bun scripts/acceptance.ts [--git <repo>] [--ref refs/heads/main] [--rev origin/main] [--keep <dir>] [--json <file>]
  *                             [--segment-entries <n>]   (K13: split the branch into segments of n entries)
+ *                             [--clone]                 (K16: git clone originals::<bundle> and compare first-parent ids)
  */
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { openWorkspace } from "../src/fs.js";
@@ -99,15 +100,44 @@ console.log(`  canonical ${c?.ref}: ${c?.status} ${c?.head?.commit ?? ""} (git: 
 console.log(`  segments: ${b.code?.segment.segments.length} (${segments} valid), chain ${b.code?.chain.length} commits`);
 console.log(`  current: ${report.current}`);
 
-const result = {
+const result: Record<string, unknown> = {
   repository: { commits, firstParent, files, packs: { allRefs: repoPack, ref: mainPack, firstParentOnly: firstParentPack } },
   mirror: { seconds: mirrorSeconds, entries: b.report?.history.entries, trees: source.stats.trees, blobs: source.stats.blobs, blobBytes: source.stats.blobBytes, commitObjects: source.stats.commitObjects, commitBytes: source.stats.commitBytes },
   store: { objects: usage.objects, objectBytes: usage.bytes, originalsBytes },
   bundle: { bytes: bundle.length, seconds: packageSeconds },
   verify: { seconds: verifySeconds, fetches, canonical: c?.status, head: c?.head?.commit, gitHead: git("rev-parse", rev), content: b.code?.content.status, gitTrees: b.code?.gitBinding.status, commits: b.code?.commitBinding.status, commitsChecked: b.code?.commitBinding.checked, segments: b.code?.segment.segments.length, chain: b.code?.chain.length, current: report.current },
 };
+// K16: clone the bundle through git-remote-originals and compare with git.
+let cloneResult: { seconds: number; commits: number; idsMatch: boolean; tree: boolean; fsck: boolean; grafts: number } | undefined;
+if (args.includes("--clone")) {
+  const helperDir = join(root, "bin");
+  mkdirSync(helperDir, { recursive: true });
+  writeFileSync(join(helperDir, "git-remote-originals"), `#!/bin/sh\nexec "${process.execPath}" "${join(import.meta.dir, "../src/remote-helper.ts")}" "$@"\n`, { mode: 0o755 });
+  const file = join(root, "repo.zip");
+  writeFileSync(file, bundle);
+  const target = join(root, "clone");
+  const env = { ...process.env, PATH: `${helperDir}:${process.env.PATH ?? ""}` };
+  const started = performance.now();
+  const r = spawnSync("git", ["clone", "-q", `originals::${file}`, target], { env, encoding: "utf8" });
+  const seconds = (performance.now() - started) / 1000;
+  if (r.status !== 0) console.log(r.stderr);
+  const ids = r.status === 0 ? execFileSync("git", ["-C", target, "log", "--first-parent", "--format=%H"], { encoding: "utf8", maxBuffer: 1 << 28 }) : "";
+  const want = git("log", "--first-parent", "--format=%H", rev);
+  const tree = r.status === 0 && execFileSync("git", ["-C", target, "rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).trim() === git("rev-parse", `${rev}^{tree}`);
+  const fsck = r.status === 0 && spawnSync("git", ["-C", target, "fsck", "--no-progress"], { encoding: "utf8" }).status === 0;
+  let grafts = 0;
+  try {
+    grafts = readFileSync(join(target, ".git", "info", "grafts"), "utf8").split("\n").filter(Boolean).length;
+  } catch {
+    grafts = 0;
+  }
+  cloneResult = { seconds, commits: ids.trim().split("\n").filter(Boolean).length, idsMatch: ids.trim() === want, tree, fsck, grafts };
+  console.log(`clone: git clone originals::<bundle> in ${seconds.toFixed(1)} s; ${cloneResult.commits} first-parent commits, ids ${cloneResult.idsMatch ? "match" : "DIFFER from"} git's; tree ${tree ? "matches" : "DIFFERS"}; fsck ${fsck ? "clean" : "FAILED"}; ${grafts} merge commits grafted to their first parent`);
+}
+
+if (cloneResult) result.clone = cloneResult;
 if (opt("json")) writeFileSync(opt("json")!, `${JSON.stringify(result, null, 2)}\n`);
 if (!keep) rmSync(root, { recursive: true, force: true });
-const ok = report.repo.code?.history.status === "valid" && b.code?.history.status === "valid" && b.report?.validAsOf && c?.status === "agreed" && c.head?.commit === result.verify.gitHead && b.code?.commitBinding.status === "matches" && b.code.chain.length === firstParent && segments === report.branches.length && fetches === 0;
+const ok = report.repo.code?.history.status === "valid" && b.code?.history.status === "valid" && b.report?.validAsOf && c?.status === "agreed" && c.head?.commit === git("rev-parse", rev) && b.code?.commitBinding.status === "matches" && b.code.chain.length === firstParent && segments === report.branches.length && fetches === 0 && (!cloneResult || (cloneResult.idsMatch && cloneResult.tree && cloneResult.fsck));
 console.log(ok ? "CODE-ACC: PASS" : "CODE-ACC: FAIL");
 process.exit(ok ? 0 : 1);
