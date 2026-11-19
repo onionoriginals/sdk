@@ -15,7 +15,7 @@
  * refuses a summary that differs (editors PR review A3). Without a parent it
  * cannot tell what changed, so it shows the name, metadata and every grant.
  *
- * Signer sets (plan 050 §1, W1; PROVISIONAL): an author entry of a set
+ * Signer sets (P5.19–P5.23): an author entry of a set
  * Original names several signers. Each signs the same entry with its own key
  * and is asked separately; its request's summary names it as `signer`, and
  * lists every signer and the signer set after the entry, so each member sees
@@ -51,16 +51,16 @@ export interface EntrySummary {
   name: string;
   /**
    * The Original's author, which every entry names (P5.8); for a set
-   * Original, the entry's signer references (plan 050 §1).
+   * Original, the entry's signer references (P5.19).
    */
   author: AuthorRef | AuthorRef[];
   /** The identity whose key signs this entry (P5.11): the author, the editor of an editor entry, or this member of a set Original's signers. */
   signer: SignerIdentity;
-  /** Every identity that signs this entry, in proof order (plan 050 §1): one, except a set Original's author entry. */
+  /** Every identity that signs this entry, in proof order (P5.19): one, except a set Original's author entry. */
   signers?: AuthorRef[];
-  /** The signer set after this entry, for a set Original (plan 050 §1). */
+  /** The signer set after this entry, for a set Original (P5.19). */
   authors?: AuthorSet;
-  /** The signer set changes, or is introduced (author entries only; plan 050 §1). */
+  /** The signer set changes, or is introduced (author entries only; P5.16, P5.20). */
   authorsChanged?: boolean;
   /**
    * The resource change, as the entry's transitions: at most one, the prior
@@ -152,7 +152,7 @@ export function describeEntry(summary: EntrySummary): string {
     `Original: ${summary.original} "${summary.name}"`,
     `Operation: ${summary.operation}`,
   ];
-  // A set Original (plan 050 §1): who signs this entry, and the set it governs by.
+  // A set Original (P5.19): who signs this entry, and the set it governs by.
   if (Array.isArray(summary.author)) {
     const signers = summary.author.map((r) => r.did).join(", ");
     lines.push(s.role === "editor" ? `Authors: ${signers} (unchanged; an editor entry carries its parent's signers)` : `Signers: ${signers}`);
@@ -260,8 +260,8 @@ function checkWellFormed(entry: UnsignedEntry, number: number): void {
     const author = checkAuthorMember(state.author);
     if (state.editor !== undefined) checkEditorRef(state.editor);
     const asset = checkAsset(state.asset, Array.isArray(author) ? undefined : author.did);
-    // A set Original names its signers as an array exactly when its asset has `authors` (plan 050 §1).
-    if (Array.isArray(author) !== (asset.authors !== undefined)) refuse("the author member does not fit the asset's signer set (plan 050)");
+    // A set Original names its signers as an array exactly when its asset has `authors` (P5.19).
+    if (Array.isArray(author) !== (asset.authors !== undefined)) refuse("the author member does not fit the asset's signer set (P5.19)");
     if (genesis && asset.aliases.length > 0) refuse("a genesis entry lists no alias");
     if (!Array.isArray(state.transitions) || state.transitions.length > 1) refuse("an entry lists at most one resource transition (P14.4)");
     for (const t of state.transitions) {
@@ -295,7 +295,7 @@ function checkRequest(request: SigningRequest, verificationMethod: string, crypt
   if (typeof state?.id !== "string" || !state.id.startsWith("did:vh:") || !["create", "update", "deactivate"].includes(state.operation as string)) {
     refuse("not an Originals asset state");
   }
-  // P5.2: the key signs as the identity the entry names for its signer; one of a set Original's signers (plan 050, P5.22).
+  // P5.2: the key signs as the identity the entry names for its signer; one of a set Original's signers (P5.22).
   const signer = editor ?? (Array.isArray(author) ? author.find((r) => isJsonObject(r) && r.verificationMethod === verificationMethod) : author);
   if (signer?.verificationMethod !== verificationMethod) refuse(`the entry names another ${editor ? "editor" : "author"} key`);
   const summary = request.summary as Partial<EntrySummary> | undefined;

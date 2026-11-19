@@ -40,18 +40,18 @@ for (const root of roots) {
 }
 
 describe("section 12 conformance registry", () => {
-  // The pinned table has 284 rows. It is originals-spec 940c6d4, the head of open PR 64 on master
-  // 5c42958: EVM anchoring is withdrawn (owner decision, 18 November 2026) and its 90 rows retired,
-  // carried logs stay, 15 rows are reworded, and the 27 Bitcoin preview rows are new, C12-355 to
-  // C12-381, covered in plan 011 phase 12b. Ids are stable across re-pins, so they need not equal
-  // table positions; each row records its position in the pinned table. A row from an open spec pull
+  // The pinned table has 324 rows. It is originals-spec a2b5013, master after #64 (EVM anchoring
+  // withdrawn, its 90 rows retired; Bitcoin previews, C12-355 to C12-381) and #66 (owner decisions of
+  // 19 November 2026: signer sets, parent Originals and scoped grants), whose 40 rows are new, C12-382
+  // to C12-421 at positions 285 to 324. Ids are stable across re-pins, so they need not equal table
+  // positions; each row records its position in the pinned table. A row from an open spec pull
   // request would carry `proposal`.
-  test("registers all 284 pinned rows with unique ids, in table order", () => {
-    expect(registry.rows.length).toBe(284);
+  test("registers all 324 pinned rows with unique ids, in table order", () => {
+    expect(registry.rows.length).toBe(324);
     const pinned = registry.rows.filter((r) => r.proposal === undefined);
-    expect(pinned.length).toBe(284);
+    expect(pinned.length).toBe(324);
     expect(registry.rows.map((r) => r.position)).toEqual(registry.rows.map((_, i) => i + 1));
-    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(284);
+    expect(new Set(registry.rows.map((r) => r.id)).size).toBe(324);
     for (const r of registry.rows) expect(r.id).toMatch(/^C12-\d{2,3}$/);
   });
 

@@ -30,7 +30,7 @@ import {
   type ReleaseManifest,
   type RepoDocument,
 } from "./documents.js";
-import { codeError, requireSoleAuthor } from "./errors.js";
+import { codeError, requireSoleAuthor, soleAuthorDid } from "./errors.js";
 import { covers } from "./grants.js";
 import { diffTrees, readTree } from "./objects.js";
 import { identityEvidence, identityRef, identitySigner, SIGNING_FRAGMENT, type LocalIdentity } from "./identity.js";
@@ -356,7 +356,7 @@ export class CodeWorkspace {
   async release(repo: string, identity: LocalIdentity, input: { tag: string; ref?: string; commit?: string }): Promise<{ releases: string; versionId: string; manifest: ReleaseManifest; created: boolean }> {
     const ref = checkRef(input.ref ?? "refs/heads/main");
     const tag = checkTag(input.tag);
-    const repoAuthor = stateOf((await this.entries(repo))[0]).author.did;
+    const repoAuthor = requireSoleAuthor(stateOf((await this.entries(repo))[0]));
     if (identity.did !== repoAuthor) codeError("outside-grant", "RELEASE_AUTHOR", "the repo's author signs releases (K15)");
     // Trees and commit objects suffice for the canonical head; blobs are not needed to compute it.
     const report = await verifyRepository(await this.package(repo, { omitBlobs: true }));
@@ -410,7 +410,7 @@ export class CodeWorkspace {
   async findBranch(branches: readonly string[], author: string, ref: string): Promise<string | undefined> {
     for (const did of branches) {
       const log = await this.entries(did);
-      if (log.length && stateOf(log[0]).author.did === author && metadataOf(log[0]).ref === ref) return did;
+      if (log.length && soleAuthorDid(stateOf(log[0])) === author && metadataOf(log[0]).ref === ref) return did;
     }
     return undefined;
   }

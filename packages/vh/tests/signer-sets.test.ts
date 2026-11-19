@@ -1,14 +1,13 @@
 /**
- * Signer sets (plan 050 §1, W1; owner decision of 19 November 2026, reversing
- * S8). An Original may be governed by a set of DIDs with a threshold instead of
+ * Signer sets (P5.19–P5.23, P5.30; owner decision of 19 November 2026, D8,
+ * reversing S8). An Original may be governed by a set of DIDs with a threshold instead of
  * one author: the asset's `authors` member, `{threshold, dids}`, and an entry
  * `author` that is an array of signer references exactly when its asset has
  * `authors`. Extra signatures go in VH-Log's `proof` array, one per signer, in
  * signer order (W1a).
  *
- * PROVISIONAL: the rule IDs P5.19-P5.23 and the section 14 members are plan
- * 050's proposals; the originals-spec pull request assigns the final IDs and
- * the C12 rows, and this file is updated to cite them.
+ * Section 12 rows C12-382 to C12-397 (originals-spec #66, table rows
+ * 285–300). The section 14 member names stay PROVISIONAL (P14.5, D4).
  */
 import { describe, expect, test } from "bun:test";
 import { canonicalize, type JsonObject } from "../src/json/index.js";
@@ -20,6 +19,7 @@ import {
   ORIGINALS_METHOD,
   authorRefsOf,
   checkAsset,
+  checkEntryState,
   cosignEntry,
   createOriginal,
   deactivateOriginal,
@@ -35,6 +35,7 @@ import {
   type AuthorRef,
   type AuthorSet,
   type EditorGrant,
+  type EntryState,
   type OriginalsReport,
   type SatEvidence,
   type SatInscription,
@@ -121,7 +122,7 @@ const forgeGenesis = (state: JsonObject, sign: EntrySigner) =>
 /** A well-formed did:vh that names no one: `Qm` and 44 base58 characters. */
 const fakeVh = (n: number) => `did:vh:Qm${base58btcEncode(sha256(bytes(String(n)))).slice(0, 44).padEnd(44, "1")}`;
 
-describe("state: the asset's `authors` member (plan 050 §1; P14.4, P14.5, P7.7; PROVISIONAL)", () => {
+describe("C12-393: the asset's `authors` member (P5.19; P14.4, P14.5, P7.7)", () => {
   const base = { name: "Harbor", status: "active", resource: photo(B1), aliases: [] };
   const dids = [fakeVh(1), fakeVh(2), fakeVh(3)].sort();
 
@@ -168,13 +169,16 @@ describe("state: the asset's `authors` member (plan 050 §1; P14.4, P14.5, P7.7;
     await rejects(() => checkAsset({ ...base, authors: { threshold: 1, dids: many } }), "STATE_TOO_MANY_AUTHORS", "limit-exceeded");
   });
 
-  test("an editor grant naming a member is rejected: an editor is not a member at the same entry (P5.15)", async () => {
+  test("C12-387: an editor grant naming a member, or a did:webvh with a member's SCID, is rejected (P5.15)", async () => {
     await rejects(() => checkAsset({ ...base, authors: { threshold: 1, dids }, editors: [grant(dids[1])] }), "STATE_EDITORS");
+    const web = "did:webvh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ:example.com";
+    const moved = "did:webvh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ:moved.example";
+    await rejects(() => checkAsset({ ...base, authors: { threshold: 1, dids: [...dids, web].sort() }, editors: [grant(moved)] }), "STATE_EDITORS");
     expect(checkAsset({ ...base, authors: { threshold: 1, dids }, editors: [grant(fakeVh(9))] }).editors?.length).toBe(1);
   });
 });
 
-describe("P5.19 (PROVISIONAL): the genesis of a set Original is signed by every member", () => {
+describe("C12-382, C12-391, C12-394 (P5.19): the genesis of a set Original is signed by every member", () => {
   test("a two-of-three set signed by all three verifies; the report lists each signer and the document's controller is the member array", async () => {
     const { members, authors, genesis } = await harbor();
     expect(genesis.state.asset).toMatchObject({ authors });
@@ -223,7 +227,7 @@ describe("P5.19 (PROVISIONAL): the genesis of a set Original is signed by every 
   });
 });
 
-describe("P5.20 (PROVISIONAL): author entries are signed by the parent's threshold of the parent's members", () => {
+describe("C12-383, C12-384, C12-385 (P5.20): author entries are signed by the parent's threshold of the parent's members", () => {
   test("two of three meet the threshold; one is short of it and is rejected", async () => {
     const { alice, bob, carol, at, genesis, signedBy } = await harbor();
     const renamed = await updateOriginal(genesis, { versionTime: at(), name: "Harbor, renamed", ...signedBy(alice, carol) });
@@ -275,7 +279,7 @@ describe("P5.20 (PROVISIONAL): author entries are signed by the parent's thresho
     expect(r.document?.controller).toEqual([bob.did.did]);
   });
 
-  test("`authors` is never removed, and is changed only by an author entry", async () => {
+  test("C12-393, C12-395: `authors` is never removed, and is changed only by an author entry", async () => {
     const { alice, bob, carol, erin, at, genesis, signedBy } = await harbor();
     const { authors: _gone, ...without } = genesis.state.asset as JsonObject;
     const { author, sign } = signedBy(alice, bob);
@@ -292,11 +296,13 @@ describe("P5.20 (PROVISIONAL): author entries are signed by the parent's thresho
     valid(r);
     expect(r.signedBy[2]).toEqual({ versionId: byErin.versionId, role: "editor", dids: [erin.did.did] });
     await rejects(() => prepareUpdateOriginal(granted, { versionTime: at(), resource: photo(B2), editor: erin.ref(), author: [alice.ref()] }), "EDITOR_AUTHOR_CHANGED");
+    const otherAuthor = await forge(granted, { ...byErin.state, author: signedBy(alice, carol).author as unknown as JsonObject[] }, erin.sign);
+    failedWith(await verify([genesis, granted, otherAuthor], histories(alice, bob, carol, erin)), 2, "EDITOR_AUTHOR_CHANGED");
     const changing = await forge(granted, { ...byErin.state, asset: { ...(byErin.state.asset as JsonObject), authors: set(1, alice.did, bob.did, carol.did) as unknown as JsonObject } }, erin.sign);
     failedWith(await verify([genesis, granted, changing], histories(alice, bob, carol, erin)), 2, "EDITOR_AUTHOR_ONLY", "outside-grant");
   });
 
-  test("an editor who is also a member is rejected: granted to a member, or added as a member while granted", async () => {
+  test("C12-387: an editor who is also a member is rejected: granted to a member, or added as a member while granted", async () => {
     const { alice, bob, carol, erin, at, genesis, signedBy } = await harbor();
     await rejects(() => prepareUpdateOriginal(genesis, { versionTime: at(), editors: [grant(bob.did.did)], ...signedBy(alice, bob) }), "STATE_EDITORS");
     const granted = await updateOriginal(genesis, { versionTime: at(), editors: [grant(erin.did.did)], ...signedBy(alice, bob) });
@@ -306,7 +312,7 @@ describe("P5.20 (PROVISIONAL): author entries are signed by the parent's thresho
     failedWith(await verify([genesis, granted, forged], histories(alice, bob, carol, erin)), 2, "STATE_EDITORS");
   });
 
-  test("deactivation is an author entry: a threshold signs it", async () => {
+  test("C12-383: deactivation is an author entry: a threshold signs it", async () => {
     const { alice, bob, carol, at, genesis, signedBy } = await harbor();
     await rejects(() => deactivateOriginal(genesis, { versionTime: at(), ...signedBy(alice) }), "AUTHORS_THRESHOLD_NOT_MET");
     const end = await deactivateOriginal(genesis, { versionTime: at(), ...signedBy(bob, carol) });
@@ -316,7 +322,7 @@ describe("P5.20 (PROVISIONAL): author entries are signed by the parent's thresho
   });
 });
 
-describe("P5.22 (PROVISIONAL): one proof per signer reference, in the same order", () => {
+describe("C12-386 (P5.22, P14.8): one proof per signer reference, in the same order", () => {
   test("a missing, extra or reordered proof is rejected; each verificationMethod is byte-identical to its reference", async () => {
     const { alice, bob, carol, genesis, signedBy } = await harbor();
     const { author, sign } = signedBy(alice, bob);
@@ -335,7 +341,7 @@ describe("P5.22 (PROVISIONAL): one proof per signer reference, in the same order
     failedWith(await verify([genesis, relative], histories(alice, bob, carol)), 1, "AUTHOR_VM_MISMATCH");
   });
 
-  test("a single-author entry still carries exactly one proof (two are rejected, as before)", async () => {
+  test("C12-63, C12-392: a single-author entry still carries exactly one proof (two are rejected, as before)", async () => {
     const alice = await VhAuthor.create([{ fragment: "orig", signer: KA }]);
     const genesis = await createOriginal({ versionTime: "2026-10-18T12:00:00.000Z", name: "Harbor", resource: photo(B1), author: alice.ref("orig"), sign: alice.signer(KA, "orig") });
     const doubled = { ...genesis, proof: [genesis.proof[0], genesis.proof[0]] };
@@ -373,7 +379,19 @@ describe("P5.22 (PROVISIONAL): one proof per signer reference, in the same order
     valid(await verify([genesis, newer, others], histories(alice, bob, carol)));
   });
 
-  test("missing history for a member that signed is incomplete evidence, never a pass", async () => {
+  test("C12-386: one invalid proof beside a threshold of valid ones is rejected; the valid ones do not rescue it", async () => {
+    const { alice, bob, carol, genesis, signedBy } = await harbor();
+    const { author, sign } = signedBy(alice, bob, carol);
+    const state = { ...genesis.state, operation: "update", author: author as unknown as JsonObject[], asset: { ...(genesis.state.asset as JsonObject), name: "Harbor, renamed" }, transitions: [] };
+    const good = await forge(genesis, state, all(...sign));
+    valid(await verify([genesis, good], histories(alice, bob, carol)));
+    // Carol's proof is replaced by Alice's signature value: two valid proofs, one invalid.
+    const broken = structuredClone(good);
+    broken.proof[2].proofValue = good.proof[0].proofValue;
+    expect((await verify([genesis, broken], histories(alice, bob, carol))).history.status).toBe("invalid");
+  });
+
+  test("C12-382: missing history for a member that signed is incomplete evidence, never a pass", async () => {
     const { alice, bob, carol, genesis } = await harbor();
     const r = await verify([genesis], histories(alice, bob));
     expect(r.history.status).toBe("incomplete");
@@ -383,7 +401,7 @@ describe("P5.22 (PROVISIONAL): one proof per signer reference, in the same order
   });
 });
 
-describe("P5.21 (PROVISIONAL): converting a single-author Original into a set Original", () => {
+describe("C12-388 (P5.21): converting a single-author Original into a set Original", () => {
   async function single() {
     const h = await harbor();
     const genesis = await createOriginal({ versionTime: h.at(), name: "Harbor", resource: photo(B1), author: h.alice.ref(), sign: h.alice.sign });
@@ -414,6 +432,21 @@ describe("P5.21 (PROVISIONAL): converting a single-author Original into a set Or
     expect((await verify([genesis, forged], histories(alice, bob))).history.status).toBe("invalid");
   });
 
+  test("C12-393: a member naming the Original's own did:vh is rejected; so is the anchoring sat as a member", async () => {
+    const { alice, bob, carol, at, genesis, signedBy } = await harbor();
+    const self = genesis.state.id as string;
+    const { author, sign } = signedBy(alice, bob);
+    const asSelf = await forge(genesis, { ...genesis.state, operation: "update", author: author as unknown as JsonObject[], asset: { ...(genesis.state.asset as JsonObject), authors: { threshold: 2, dids: [alice.did.did, bob.did.did, carol.did.did, self].sort() } as unknown as JsonObject }, transitions: [] }, all(...sign));
+    // P5.19 is checked on the state, before who signed it: the Original's own did:vh is never a member.
+    const ctx = { scid: self.slice("did:vh:".length), index: 1, previous: genesis.state as unknown as EntryState, deactivatedParameter: false };
+    await rejects(() => checkEntryState(asSelf.state, ctx), "STATE_AUTHORS");
+    expect((await verify([genesis, asSelf], histories(alice, bob, carol))).history.status).toBe("invalid");
+    const anchored = await updateOriginal(genesis, { versionTime: at(), aliases: [SAT], ...signedBy(alice, bob) });
+    const withSat = await forge(anchored, { ...anchored.state, operation: "update", author: author as unknown as JsonObject[], asset: { ...(anchored.state.asset as JsonObject), authors: { threshold: 2, dids: [alice.did.did, bob.did.did, carol.did.did, SAT].sort() } as unknown as JsonObject }, transitions: [] }, all(...sign));
+    await rejects(() => checkEntryState(withSat.state, { ...ctx, index: 2, previous: anchored.state as unknown as EntryState }), "STATE_AUTHORS");
+    expect((await verify([genesis, anchored, withSat], histories(alice, bob, carol))).history.status).toBe("invalid");
+  });
+
   test("an editor entry cannot convert", async () => {
     const { alice, bob, erin, at, genesis } = await single();
     const granted = await updateOriginal(genesis, { versionTime: at(), editors: [grant(erin.did.did)], author: alice.ref(), sign: alice.sign });
@@ -424,7 +457,7 @@ describe("P5.21 (PROVISIONAL): converting a single-author Original into a set Or
   });
 });
 
-describe("P5.23 (PROVISIONAL): currency by threshold (P7.9)", () => {
+describe("C12-389, C12-397 (P5.23): currency by threshold (P7.9)", () => {
   test("a removed key makes an entry historically authorized only below the parent's threshold, and current at or above it", async () => {
     const { alice, bob, carol, at, genesis, signedBy } = await harbor();
     const byTwo = await updateOriginal(genesis, { versionTime: at(), name: "Harbor, two", ...signedBy(alice, bob) });
@@ -439,6 +472,20 @@ describe("P5.23 (PROVISIONAL): currency by threshold (P7.9)", () => {
     ]);
     expect(r.reasons).toContain("historically-authorized-only");
     expect(r.validAsOf).not.toBeNull();
+  });
+
+  test("C12-397: an editor entry when fewer than the threshold of members' DIDs are not deactivated is historically authorized only", async () => {
+    const { alice, bob, carol, erin, at, genesis, signedBy } = await harbor();
+    const granted = await updateOriginal(genesis, { versionTime: at(), editors: [grant(erin.did.did)], ...signedBy(alice, bob) });
+    const byErin = await updateOriginal(granted, { versionTime: at(), resource: photo(B2), editor: erin.ref(), sign: erin.sign });
+    await bob.did.deactivate();
+    const one = await verify([genesis, granted, byErin], histories(alice, bob, carol, erin));
+    // Two of three are still active, the threshold: Erin's entry is not labelled for Bob's deactivation.
+    expect(one.historicallyAuthorizedOnly.find((h) => h.versionId === byErin.versionId)).toBeUndefined();
+    await carol.did.deactivate();
+    const two = await verify([genesis, granted, byErin], histories(alice, bob, carol, erin));
+    valid(two);
+    expect(two.historicallyAuthorizedOnly.find((h) => h.versionId === byErin.versionId)).toMatchObject({ role: "editor", reason: "author-did-deactivated" });
   });
 
   test("a deactivated member's signature is not current", async () => {
@@ -466,7 +513,7 @@ function satRead(inscriptions: Inscribed[]): SatEvidence {
   return { sat: SAT, index: "ord-a", tip: { height: 119, hash: "bb".repeat(32) }, inscriptions: inscriptions.map((i) => ({ sat, network, ...i })), owner: { output: `${"cc".repeat(32)}:1`, confirmations: 3 } };
 }
 
-describe("W1b, P9.10, P9.15 (PROVISIONAL): anchoring and inscriptions need the threshold", () => {
+describe("C12-390, C12-396 (P5.20, P5.23, P9.10, P9.15): anchoring and inscriptions", () => {
   async function anchored() {
     const h = await harbor();
     const genesis = await createOriginal({
@@ -494,7 +541,7 @@ describe("W1b, P9.10, P9.15 (PROVISIONAL): anchoring and inscriptions need the t
     expect(s.current).toBe(false);
   });
 
-  test("an inscribed entry is checked per signer at its inscription: below the threshold of valid keys it is ignored, at it accepted", async () => {
+  test("C12-396: an inscribed entry is checked per signer at its inscription, and every signer must pass, even beyond the threshold", async () => {
     const { alice, bob, carol, anchor, genesis, signedBy } = await anchored();
     const byTwo = await updateOriginal(anchor, { versionTime: time(20), name: "Harbor, two", ...signedBy(alice, bob) });
     const byThree = await updateOriginal(anchor, { versionTime: time(20), name: "Harbor, three", ...signedBy(alice, bob, carol) });
@@ -504,14 +551,48 @@ describe("W1b, P9.10, P9.15 (PROVISIONAL): anchoring and inscriptions need the t
     const two = await read([genesis, anchor], histories(alice, bob, carol), [anchoring, inscribe(byTwo, 20)]);
     expect(two.anchoring?.ignored).toEqual([expect.objectContaining({ versionId: byTwo.versionId, reason: "author-key-not-valid-at-inscription-time" })]);
     expect(two.head).toBe(anchor.versionId);
+    // Bob and Carol meet the threshold, but Alice's key fails at the inscription: rejected (P5.23).
     const three = await read([genesis, anchor], histories(alice, bob, carol), [anchoring, inscribe(byThree, 20)]);
-    expect(three.anchoring?.ignored).toEqual([]);
-    expect(three.head).toBe(byThree.versionId);
-    expect(three.current).toBe(true);
+    expect(three.anchoring?.ignored).toEqual([expect.objectContaining({ versionId: byThree.versionId, reason: "author-key-not-valid-at-inscription-time" })]);
+    expect(three.head).toBe(anchor.versionId);
+    // Without Alice, Bob and Carol's entry is accepted.
+    const byBobCarol = await updateOriginal(anchor, { versionTime: time(20), name: "Harbor, Bob and Carol", ...signedBy(bob, carol) });
+    const ok = await read([genesis, anchor], histories(alice, bob, carol), [anchoring, inscribe(byBobCarol, 20)]);
+    expect(ok.anchoring?.ignored).toEqual([]);
+    expect(ok.head).toBe(byBobCarol.versionId);
+    expect(ok.current).toBe(true);
+  });
+
+  test("C12-396: an inscribed entry one of whose signers' named versions cannot be verified is unverifiable", async () => {
+    const { alice, bob, carol, anchor, genesis, signedBy } = await anchored();
+    const anchoring = inscribe([genesis, anchor], 10);
+    const held = alice.did.evidence();
+    // Alice names a version of her DID that the verifier does not hold.
+    await alice.did.rotate([{ fragment: "orig", signer: KA }]);
+    const byThree = await updateOriginal(anchor, { versionTime: time(20), name: "Harbor, three", ...signedBy(alice, bob, carol) });
+    const r = await verifyOriginal({ log: [genesis, anchor], authors: [held, bob.did.evidence(), carol.did.evidence()], now: NOW, bytes: allBytes, bitcoin: [satRead([anchoring, inscribe(byThree, 20)])] });
+    expect(r.head).toBe(anchor.versionId);
+    expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ versionId: byThree.versionId, reason: "later-inscription-unverifiable" })]);
+    expect(r.anchoring?.unverifiable?.map((u) => [u.versionId, u.signer])).toEqual([[byThree.versionId, alice.did.did]]);
+    expect(r.notices).toContain("unverifiable-inscriptions");
+  });
+
+  test("C12-397: an inscribed editor entry when fewer than the threshold of members' DIDs are not deactivated at its inscription is rejected", async () => {
+    const { alice, bob, carol, erin, anchor, genesis, signedBy } = await anchored();
+    const granted = await updateOriginal(anchor, { versionTime: time(12), editors: [grant(erin.did.did)], ...signedBy(bob, carol) });
+    const byErin = await updateOriginal(granted, { versionTime: time(20), resource: photo(B2), editor: erin.ref(), sign: erin.sign });
+    // Bob and Carol deactivate after the grant is inscribed and before Erin's entry is.
+    bob.did.timeOverride = time(15);
+    await bob.did.deactivate();
+    carol.did.timeOverride = time(15);
+    await carol.did.deactivate();
+    const r = await read([genesis, anchor], histories(alice, bob, carol, erin), [inscribe([genesis, anchor], 10), inscribe(granted, 12), inscribe(byErin, 20)]);
+    expect(r.head).toBe(granted.versionId);
+    expect(r.anchoring?.ignored).toEqual([expect.objectContaining({ versionId: byErin.versionId, reason: "author-deactivated-at-inscription-time" })]);
   });
 });
 
-describe("single-author Originals are byte-identical (plan 050 §4 W1)", () => {
+describe("C12-392: single-author Originals are byte-identical (P5.2, P14.4, P14.8, P14.9)", () => {
   test("the builders' bytes and the derived document are those of the code before signer sets", async () => {
     // Pinned on main 874555b0, before W1: a genesis with an editor grant, an editor entry and a deactivation.
     const key = seeded(21);

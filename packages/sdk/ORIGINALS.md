@@ -25,7 +25,7 @@ This contract replaces the CEL 3 guide, deleted with the CEL 3 code in plan
   never added, removed or replaced by another: new bytes are its next
   version. Descriptive values such as a title or style belong in `metadata`.
 - The author is a DID fixed at genesis, or a signer set: several DIDs with a
-  threshold (plan 050 §1, W1; see [Signer sets](#signer-sets-plan-050-w1-provisional)).
+  threshold (P5.19–P5.23, P5.30; see [Signer sets](#signer-sets-p519p523)).
   The baseline profile lists did:vh, did:webvh and did:btco. A single-author
   entry carries exactly one proof, by an `assertionMethod` key of the author
   DID at the author DID version the entry names; a set Original's author
@@ -264,7 +264,7 @@ so the bytes hashed, sized and kept are always the same bytes.
 |---|---|
 | `history` | valid · invalid (with the first failing entry) · limit-exceeded |
 | `authorBinding` | valid · failed (per entry) |
-| `identityEvidence` | complete · incomplete, with the latest author DID versionId used, whether it is deactivated (P6.5), and its freshness: established (the log was obtained at the DID's location and its own witnesses approve its latest version) · not-established · stale against the retained versionId (P7.8), with `obtained`: where (`location`, the URL it was retrieved from, or null), when (`obtainedAt`), from what `source`, as of which `latestVersionId`, and whether that version is `witnessed`. `editors` lists the same for each editor DID relied on (P7.8, P5.18), and `authors` for each author DID that signed: the one author, or each member of a set Original, whose single-author fields above are then null (plan 050 §1); `status` is incomplete when any signer's evidence is |
+| `identityEvidence` | complete · incomplete, with the latest author DID versionId used, whether it is deactivated (P6.5), and its freshness: established (the log was obtained at the DID's location and its own witnesses approve its latest version) · not-established · stale against the retained versionId (P7.8), with `obtained`: where (`location`, the URL it was retrieved from, or null), when (`obtainedAt`), from what `source`, as of which `latestVersionId`, and whether that version is `witnessed`. `editors` lists the same for each editor DID relied on (P7.8, P5.18), and `authors` for each author DID that signed: the one author, or each member of a set Original, whose single-author fields above are then null (P5.19); `status` is incomplete when any signer's evidence is |
 | `assetFreshness` | not-established · stale against the retained versionId · anchored (the sat's log, as of the read's tip, P9.13), with every compared copy of the asset log (P7.6) |
 | `resources` | available · partial (the resource version and checkpoint missing) · digest failure, over every version of the Original's one resource. Content availability is reported here and nowhere else: missing bytes, current or historical, leave the log verified and are never a verification failure (P7.3, P7.4, P9.18); bytes that are supplied, or read from an accepted inscription's body, are always checked, and a mismatch fails |
 | `ordering` | claimed · anchored (P7.6). Asset logs have no witnesses (Q14), so an unanchored Original's ordering is claimed only |
@@ -272,8 +272,8 @@ so the bytes hashed, sized and kept are always the same bytes.
 | `anchors` | every anchoring entry (phase 4) |
 | `ownership` | none · provisional, with confirmation depth and index agreement (P9.11, P9.16): no index lists every sat, so ownership is never more than provisional |
 | `validAsOf` | for a valid result, anchored or not, `{ checkpoint, signers: [{ did, role, versionId, obtainedAt, source, location }] }`: the checkpoint the result is valid as of, and for the author and each editor that signed through it, the latest DID versionId relied on and when and where that history was obtained (P7.8, P7.10). Null when the checkpoint does not verify (failed or limit-exceeded history, failed binding, incomplete identity evidence, a failed digest) or the Original is forked. A stale prefix is still valid as of its own checkpoint |
-| `historicallyAuthorizedOnly` | each entry through the checkpoint whose key the latest verified state of its signer's DID no longer lists (`key-not-in-latest-signer-document`), whose editor DID is deactivated (`signer-did-deactivated`), or any entry once the author DID is deactivated (`author-did-deactivated`) (P7.9, P6.5, P5.18). For a set Original's author entry, when fewer than the parent's threshold of its signers are still current, with `threshold` and the `signers` that are not (plan 050, P5.23). It does not invalidate the checkpoint; any result including such an entry lists it |
-| `signedBy` | each verified entry through the checkpoint with its `role` and signer `dids`, in proof order: the author, the editor, or each signer of a set Original (plan 050 §1) |
+| `historicallyAuthorizedOnly` | each entry through the checkpoint whose key the latest verified state of its signer's DID no longer lists (`key-not-in-latest-signer-document`), whose editor DID is deactivated (`signer-did-deactivated`), or any entry once the author DID is deactivated (`author-did-deactivated`) (P7.9, P6.5, P5.18). For a set Original's author entry, when fewer than the parent's threshold of its signers are still current, with `threshold` and the `signers` that are not (P5.23). It does not invalidate the checkpoint; any result including such an entry lists it |
+| `signedBy` | each verified entry through the checkpoint with its `role` and signer `dids`, in proof order: the author, the editor, or each signer of a set Original (P5.19) |
 | `current` | never true for an Original that is not anchored, however fresh the evidence (P7.10): off Bitcoin nothing shows that a newer entry or another branch does not exist. Only an anchored Original's state from its sat can be current |
 | `reasons`, `retain` | why the result is not current (`not-anchored` for every unanchored Original, then anything else that applies); the highest versionIds to keep for the Original and each author DID, never lower than those supplied |
 
@@ -476,14 +476,13 @@ await sdk.edit(did, { parent, resource: { bytes }, editor: bobRef, signer: bobSi
   supplies the grants, the `editor` reference, the editor key rules and the
   grant's scope. No signer is required to use did:btco.
 
-## Signer sets (plan 050 W1, PROVISIONAL)
+## Signer sets (P5.19–P5.23)
 
 An Original can be governed by a set of DIDs with a threshold instead of one
 author (owner decision of 19 November 2026, reversing S8). It is part of
 `originals:1.0` itself: a single-author Original is unchanged, byte for byte,
-and a set of one behaves like one author. The rule IDs below (P5.19–P5.23)
-are plan 050's proposals; the originals-spec pull request assigns the final
-ones, and the member names are PROVISIONAL (P14.5).
+and a set of one behaves like one author (originals-spec #66, P5.19–P5.23,
+P5.30, D8). The member names stay PROVISIONAL (P14.5, D4).
 
 ```ts
 // Genesis: every member signs (P5.19).
@@ -533,14 +532,15 @@ await sdk.commitDraft(draft);                 // or sdk.finalizeDraft(draft) for
   when fewer than the parent's threshold of the parent's members that signed
   it still meet P7.9 (`historicallyAuthorizedOnly[].threshold` and
   `.signers` say which no longer do and why). Genesis is judged against its
-  own threshold. PROVISIONAL: a set whose non-deactivated members fall below
-  its threshold is treated like a deactivated author (`author-did-deactivated`).
-- Bitcoin (P9.15): an inscribed set entry is checked per signer at its
-  inscription; it holds when at least the parent's threshold of the parent's
-  members, and every added member, meet P9.15 there. Too few is
-  `author-key-not-valid-at-inscription-time` (or the first signer's reason);
-  signers whose versions are not verified here that could make up the
-  difference make it `author-version-unavailable`.
+  own threshold. A set whose non-deactivated members fall below the
+  threshold of the parent entry's set is treated like a deactivated author
+  (`author-did-deactivated`, P5.23).
+- Bitcoin (P5.23, P9.15): an inscribed set entry is checked per signer at
+  its inscription, and every signer must pass there. One that fails refuses
+  the entry for its reason (for example
+  `author-key-not-valid-at-inscription-time`), even when the others meet the
+  threshold; otherwise a signer whose named version is not verified here
+  makes it `author-version-unavailable` (unverifiable; PROVISIONAL in P5.23).
 - Reports: `signedBy` lists the signer DIDs of each entry through the
   checkpoint; `identityEvidence.authors` gives each author DID that signed
   (one for a single-author Original). For a set Original the single-author

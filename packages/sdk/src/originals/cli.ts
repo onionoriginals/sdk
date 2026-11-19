@@ -72,7 +72,7 @@ async function main(argv: string[]): Promise<number> {
       // P7.8: plainly, where and when each signer DID's history was obtained, and whether it may be newer.
       const author = report.identityEvidence.author;
       if (author) process.stdout.write(`  ${describeFreshness(author, report.identityEvidence)}\n`);
-      // A set Original (plan 050 §1): each member that signed.
+      // A set Original (P5.19): each member that signed.
       else for (const a of report.identityEvidence.authors) process.stdout.write(`  ${describeFreshness(a.did, a)}\n`);
       for (const e of report.identityEvidence.editors) process.stdout.write(`  ${describeFreshness(e.did, e)}\n`);
       for (const h of report.historicallyAuthorizedOnly) process.stdout.write(`  ${h.versionId}: historically authorized only (${h.reason}, P7.9)\n`);

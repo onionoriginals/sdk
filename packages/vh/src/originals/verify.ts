@@ -179,7 +179,7 @@ export interface HistoricalAuthorization {
   role: "author" | "editor";
   reason: HistoricalReason;
   /**
-   * A set Original's author entry (plan 050 §1, P5.23; PROVISIONAL): the
+   * A set Original's author entry (P5.23): the
    * parent's threshold, which too few of its signers still meet, and each
    * signer that no longer does, with why.
    */
@@ -189,7 +189,7 @@ export interface HistoricalAuthorization {
 
 export type HistoricalReason = "key-not-in-latest-signer-document" | "author-did-deactivated" | "signer-did-deactivated";
 
-/** Who signed an entry (plan 050 §1): its author, each signer of a set Original's author entry, or its editor. */
+/** Who signed an entry (P5.19): its author, each signer of a set Original's author entry, or its editor. */
 export interface SignedBy {
   versionId: string;
   role: "author" | "editor";
@@ -271,13 +271,13 @@ export interface OriginalsReport {
     /**
      * Each author DID that signed a verified entry, or whose missing history
      * stopped verification: the one author, or each member of a set Original
-     * that signed (plan 050 §1; P7.1). For a set Original the single-author
+     * that signed (P5.19; P7.1). For a set Original the single-author
      * fields above are null, and `status` is incomplete when any member's
      * evidence is.
      */
     authors: SignerEvidence[];
   };
-  /** Who signed each verified entry through the checkpoint, oldest first (plan 050 §1). */
+  /** Who signed each verified entry through the checkpoint, oldest first (P5.19). */
   signedBy: SignedBy[];
   /**
    * Content availability, reported separately (P7.4): `partial` lists the missing resource
@@ -626,7 +626,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   // Anchored ordering only for what Bitcoin accepted: the anchor and the inscriptions after it.
   const inscribed = new Set(onBitcoin ? [onBitcoin.anchor!.versionId, ...onBitcoin.accepted.map((a) => a.versionId)] : []);
   const anchored = (v: VerifiedEntry | undefined) => v !== undefined && inscribed.has(v.entry.versionId);
-  // A set Original has no one author: its members' evidence is in `identityEvidence.authors` (plan 050 §1).
+  // A set Original has no one author: its members' evidence is in `identityEvidence.authors` (P5.19).
   const headState = head ? (head.entry.state as unknown as EntryState) : undefined;
   const signerSet = headState !== undefined && Array.isArray(headState.author);
   const authorDid = headState && !signerSet ? (headState.author as { did: string }).did : null;
@@ -682,7 +682,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     };
   };
   const editors: SignerEvidence[] = editorDids.map(evidenceOf);
-  // The author DIDs relied on (plan 050 §1): the one author, or each member that signed a verified
+  // The author DIDs relied on (P5.19): the one author, or each member that signed a verified
   // entry of a set Original, and one whose missing history stopped verification.
   const authorDids: string[] = [];
   if (signerSet) {
@@ -853,9 +853,10 @@ function latestOf(histories: AuthorHistory[], did: string) {
 }
 
 /**
- * PROVISIONAL (plan 050 §1): a set Original's members can no longer act together once fewer than
- * its threshold of them are not deactivated in their latest verified state, as a single author's
- * deactivation (P6.5, P5.18).
+ * P5.23: a set Original's members can no longer act together once fewer than its threshold of them
+ * are not deactivated in their latest verified state, as a single author's deactivation (P6.5,
+ * P5.18). `state` is the entry's parent entry's, which for an editor entry is also its own
+ * (PROVISIONAL in P5.23).
  */
 function setDeactivated(state: EntryState, histories: AuthorHistory[]): boolean {
   const set = governingSet(state);
@@ -895,16 +896,16 @@ function historicallyAuthorizedOnly(prefix: VerifiedEntry[], histories: AuthorHi
       continue;
     }
     if (Array.isArray(state.author)) {
-      // PROVISIONAL (plan 050): a set Original whose members can no longer act together, as a deactivated author.
-      if (setDeactivated(state, histories)) {
+      // P5.23 (C12-397): a set Original whose members can no longer act together, as a deactivated author.
+      const before = i > 0 ? (prefix[i - 1].entry.state as unknown as EntryState) : state;
+      if (setDeactivated(before, histories)) {
         out.push({ ...entry, reason: "author-did-deactivated" });
         continue;
       }
       if (role === "author") {
-        // Plan 050 §1, P5.23: current while at least the parent's threshold of the parent's members
-        // that signed still meet P7.9; genesis, signed by every member, against its own threshold.
-        const parent = i > 0 ? (prefix[i - 1].entry.state as unknown as EntryState) : state;
-        const set = governingSet(parent);
+        // P5.23 (C12-389): current while at least the authorizing set's threshold of its members that
+        // signed still meet P7.9; genesis, signed by every member, against its own threshold.
+        const set = governingSet(before);
         const verdicts = refs.map((r) => ({ did: r.did, reason: notCurrent(r, "author", histories) }));
         if (verdicts.some((x) => x.reason === undefined)) continue;
         const current = verdicts.filter((x) => x.reason === null && set.dids.includes(x.did)).length;

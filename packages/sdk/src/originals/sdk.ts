@@ -37,7 +37,7 @@
  *   fetches and verifies the host's new head and has the caller's signer sign
  *   the caller's reconciled change against it; the SDK never merges or signs
  *   on its own.
- * - Signer sets (plan 050 §1, W1; PROVISIONAL): `create` with `authors:
+ * - Signer sets (P5.19–P5.23): `create` with `authors:
  *   {threshold, members}` and every member's signer, and `edit` (or
  *   `deactivate`, `publish`, `anchor`) with the signer references of an
  *   author entry and their `signers`. When the signers are not all present,
@@ -175,7 +175,7 @@ export interface CreateInput {
   /** The author: give this, or `authors` for a signer set. */
   author?: AuthorRef;
   /**
-   * A signer set instead of one author (plan 050 §1, W1; PROVISIONAL): every
+   * A signer set instead of one author (P5.19–P5.23): every
    * member's reference, since every member signs genesis (P5.19), and the
    * threshold of members that signs each later author entry (P5.20).
    */
@@ -184,10 +184,10 @@ export interface CreateInput {
   editors?: EditorGrant[];
 }
 
-/** Who signs: one signer, or each signer of a set Original's author entry (plan 050 §1). */
+/** Who signs: one signer, or each signer of a set Original's author entry (P5.19). */
 export interface SignersInput {
   signer?: OriginalsSigner;
-  /** A set Original's author entry: one signer per signer reference, in any order (plan 050, P5.22). */
+  /** A set Original's author entry: one signer per signer reference, in any order (P5.22). */
   signers?: OriginalsSigner[];
 }
 
@@ -201,12 +201,12 @@ export interface EditInput {
   /**
    * The author reference: required for an author's edit; an editor's edit
    * carries its parent's (P5.16). For a set Original, the references of the
-   * members that sign it: at least the parent's threshold (plan 050, P5.20).
+   * members that sign it: at least the parent's threshold (P5.20).
    */
   author?: AuthorRef | AuthorRef[];
   /**
    * Replace the signer set, or introduce one in a single-author Original
-   * (plan 050, P5.20, P5.21): every added member signs. Author only.
+   * (P5.20, P5.21): every added member signs. Author only.
    */
   authors?: AuthorSet;
   /**
@@ -271,8 +271,7 @@ export interface Draft {
   /** For an entry prepared for Bitcoin: the preview it names, or why none, to tell the author (P9.30). */
   readonly preview?: PreviewReport;
   /**
-   * The proofs collected so far by `cosign`, in the order they came (plan 050
-   * §1). `commitDraft` orders them by signer once every signer has signed.
+   * The proofs collected so far by `cosign`, in the order they came (P5.22). `commitDraft` orders them by signer once every signer has signed.
    */
   readonly proofs?: readonly DataIntegrityProof[];
 }
@@ -335,11 +334,11 @@ export interface ReconcileInput {
   host: SharedHost;
   /** The refused candidate this reconciles, if any; it is forgotten once the reconciled one is accepted. */
   refused?: string;
-  /** The author reference, or a set Original's signer references (plan 050 §1). */
+  /** The author reference, or a set Original's signer references (P5.19). */
   author: AuthorRef | AuthorRef[];
   /** An authorized signer: the SDK never signs on anyone's behalf (P6.8). */
   signer?: OriginalsSigner;
-  /** A set Original's signers, one per signer reference (plan 050 §1). */
+  /** A set Original's signers, one per signer reference (P5.19). */
   signers?: OriginalsSigner[];
   /**
    * The reconciled change, or a function that returns it from the new head
@@ -619,7 +618,7 @@ function checkInscribable(e: LogEntry, preview: PreviewReport | undefined): void
   }
 }
 
-/** The references whose proofs an entry needs, in proof order: its editor, its author, or a set Original's signers (P5.2, P5.16; plan 050, P5.22). */
+/** The references whose proofs an entry needs, in proof order: its editor, its author, or a set Original's signers (P5.2, P5.16, P5.22). */
 function namedSigners(entry: UnsignedEntry): AuthorRef[] {
   const state = entry.state as unknown as EntryState;
   return state.editor ? [state.editor] : authorRefsOf(state);
@@ -627,22 +626,22 @@ function namedSigners(entry: UnsignedEntry): AuthorRef[] {
 
 /**
  * The signers given, with the proofs already collected, are exactly the signers the entry names
- * (plan 050 §1), checked before anyone is asked to sign: none outside it, none twice, none left out.
+ * (P5.19), checked before anyone is asked to sign: none outside it, none twice, none left out.
  */
 function checkCoverage(named: AuthorRef[], had: readonly DataIntegrityProof[], signers: OriginalsSigner[]): void {
   const vms = [...had.map((p) => p.verificationMethod), ...signers.map((s) => s.verificationMethod)];
   for (const vm of vms) {
-    if (!named.some((r) => r.verificationMethod === vm)) sdkError("invalid-evidence", "SIGNER_NOT_NAMED", `${vm} is not a signer this entry names (plan 050, P5.22)`);
+    if (!named.some((r) => r.verificationMethod === vm)) sdkError("invalid-evidence", "SIGNER_NOT_NAMED", `${vm} is not a signer this entry names (P5.22)`);
   }
   if (new Set(vms).size !== vms.length) sdkError("invalid-evidence", "PROOF_DUPLICATE", "a signer is given twice, or has already signed this draft");
   const missing = named.filter((r) => !vms.includes(r.verificationMethod));
   if (missing.length > 0) {
     const code = signers.length === 0 ? "PROOF_MISSING" : "SIGNER_MISSING";
-    sdkError("unauthorized-key", code, `the entry names ${missing.map((r) => r.did).join(", ")} as signers; ${signers.length === 0 ? "they have not cosigned" : "no signer was given for them"} (plan 050, P5.22)`);
+    sdkError("unauthorized-key", code, `the entry names ${missing.map((r) => r.did).join(", ")} as signers; ${signers.length === 0 ? "they have not cosigned" : "no signer was given for them"} (P5.22)`);
   }
 }
 
-/** The proofs in the order of the signer references (plan 050, P5.22). */
+/** The proofs in the order of the signer references (P5.22). */
 function ordered(named: AuthorRef[], proofs: DataIntegrityProof[]): DataIntegrityProof[] {
   return named.map((r) => proofs.find((p) => p.verificationMethod === r.verificationMethod)!);
 }
@@ -654,12 +653,12 @@ function signersOf(input: SignersInput): OriginalsSigner | OriginalsSigner[] | u
   return input.signers ?? input.signer;
 }
 
-/** A create's signer set (plan 050 §1): the members as signer references and the set they form, or undefined for one author. */
+/** A create's signer set (P5.19): the members as signer references and the set they form, or undefined for one author. */
 function signerSetOf(input: CreateInput): { author: AuthorRef[]; authors: AuthorSet } | undefined {
   if (input.authors === undefined) return undefined;
-  if (input.author !== undefined) sdkError("invalid-evidence", "INPUT_INVALID", "give `author`, or `authors` for a signer set (plan 050), not both");
+  if (input.author !== undefined) sdkError("invalid-evidence", "INPUT_INVALID", "give `author`, or `authors` for a signer set (P5.19), not both");
   const a = input.authors;
-  if (typeof a !== "object" || a === null || !Array.isArray(a.members)) sdkError("invalid-evidence", "INPUT_INVALID", "authors is {threshold, members}: the members' author references (plan 050)");
+  if (typeof a !== "object" || a === null || !Array.isArray(a.members)) sdkError("invalid-evidence", "INPUT_INVALID", "authors is {threshold, members}: the members' author references (P5.19)");
   exactKeys(a, ["threshold", "members"], "authors");
   return { author: a.members, authors: { threshold: a.threshold, dids: a.members.map((m) => m?.did) } };
 }
@@ -709,7 +708,7 @@ function signerDidsOf(log: string): string[] {
 
 /**
  * Each signer identity DID a log names, with its role: the author, each signer of a set Original
- * (plan 050 §1), and each editor of an editor entry (P7.1), before verification. A DID named as an
+ * (P5.19), and each editor of an editor entry (P7.1), before verification. A DID named as an
  * author anywhere is an author.
  */
 function signerRolesOf(log: string): Map<string, "author" | "editor"> {
@@ -767,14 +766,14 @@ function chainedEntries(log: string): ChainedEntry[] {
  */
 function retrievableIdentities(chained: ChainedEntry[], verified: number): string[] {
   const out = new Set<string>();
-  // The author, or every member of a set Original's genesis set, who all sign it (plan 050, P5.19).
+  // The author, or every member of a set Original's genesis set, who all sign it (P5.19).
   const genesis = isJsonObject(chained[0]?.state) ? chained[0].state.author : undefined;
   for (const author of Array.isArray(genesis) ? genesis : [genesis]) if (isJsonObject(author) && typeof author.did === "string") out.add(author.did);
   for (const entry of chained.slice(0, verified)) {
     const asset = isJsonObject(entry.state) ? entry.state.asset : undefined;
     const editors = isJsonObject(asset) && Array.isArray(asset.editors) ? asset.editors : [];
     for (const grant of editors) if (isJsonObject(grant) && typeof grant.did === "string") out.add(grant.did);
-    // A member a verified entry adds to the signer set (plan 050, P5.20).
+    // A member a verified entry adds to the signer set (P5.20).
     const set = isJsonObject(asset) && isJsonObject(asset.authors) && Array.isArray(asset.authors.dids) ? asset.authors.dids : [];
     for (const did of set) if (typeof did === "string") out.add(did);
   }
@@ -805,7 +804,7 @@ function retrievableIdentities(chained: ChainedEntry[], verified: number): strin
 function identityLocations(chained: ChainedEntry[], did: string, verified: number): string[] {
   const signedBy = (i: number) => {
     const state = chained[i].state;
-    // An editor entry is signed by its editor; an author entry by its author, or by each signer of a set Original (plan 050 §1).
+    // An editor entry is signed by its editor; an author entry by its author, or by each signer of a set Original (P5.19).
     const author = isJsonObject(state) ? state.author : undefined;
     const signer = isJsonObject(state) ? (isJsonObject(state.editor) ? state.editor : Array.isArray(author) ? author.find((r) => isJsonObject(r) && r.did === did) : author) : undefined;
     return isJsonObject(signer) && signer.did === did && typeof signer.verificationMethod === "string" ? signerLocation(signer as unknown as AuthorRef) : undefined;
@@ -1463,7 +1462,7 @@ export class OriginalsSDK {
 
   /**
    * Create an Original, or return an unsigned draft when no signer is given.
-   * A set Original's genesis needs every member's signer (plan 050, P5.19).
+   * A set Original's genesis needs every member's signer (P5.19).
    */
   async create(input: CreateInput & SignersInput): Promise<{ kind: "draft"; draft: Draft } | { kind: "original"; original: OriginalView }> {
     const draft = await this.prepareCreate(input);
@@ -1630,14 +1629,14 @@ export class OriginalsSDK {
     return none("not-an-image", `No preview was supplied for this ${what} version, which is not an image: the inscription has no body unless the full version is chosen (P9.30).`);
   }
 
-  /** Edit and commit. A set Original's author entry takes one signer per signer reference (plan 050 §1). */
+  /** Edit and commit. A set Original's author entry takes one signer per signer reference (P5.19). */
   async edit(did: string, input: EditInput & SignersInput): Promise<CommitResult> {
     return this.commit(await this.prepareEdit(did, input), signersOf(input) as OriginalsSigner);
   }
 
   /**
    * Only the author, or a threshold of a set Original's members, deactivates
-   * (P5.16, P6.5; plan 050). For an anchored Original the deactivation keeps
+   * (P5.16, P6.5). For an anchored Original the deactivation keeps
    * its parent's preview, or with `body: "full"` names none (P9.30).
    */
   async prepareDeactivate(did: string, input: { parent: string; author: AuthorRef | AuthorRef[]; body?: PreviewChoice["body"] }): Promise<Draft> {
@@ -1769,7 +1768,7 @@ export class OriginalsSDK {
    * parent, without committing anything (P6.1, P6.4). The result is a
    * candidate for `submit` to a shared host, or for `commit` locally. A set
    * Original's author entry takes one signer per signer reference not yet
-   * cosigned (plan 050 §1): each is checked against the entry before anyone
+   * cosigned (P5.19): each is checked against the entry before anyone
    * is asked to sign, and each is shown the entry as itself (P5.11).
    */
   async sign(draft: Draft, signer: OriginalsSigner | OriginalsSigner[]): Promise<SignedCandidate> {
@@ -1819,7 +1818,7 @@ export class OriginalsSDK {
   }
 
   /**
-   * Add one signer's proof to a draft (plan 050 §1): for a set Original's
+   * Add one signer's proof to a draft (P5.19): for a set Original's
    * author entry whose signers are not all present. The signer must be one the
    * entry names and has not signed yet; it is shown the entry as itself
    * (P5.11). Returns a new draft; the one given is unchanged. Nothing is
@@ -1832,7 +1831,7 @@ export class OriginalsSDK {
     const had = draft.proofs ?? [];
     const named = namedSigners(draft.entry);
     if (!named.some((r) => r.verificationMethod === signer.verificationMethod)) {
-      sdkError("invalid-evidence", "SIGNER_NOT_NAMED", `${signer.verificationMethod} is not a signer this entry names (plan 050, P5.22)`);
+      sdkError("invalid-evidence", "SIGNER_NOT_NAMED", `${signer.verificationMethod} is not a signer this entry names (P5.22)`);
     }
     if (had.some((p) => p.verificationMethod === signer.verificationMethod)) sdkError("invalid-evidence", "PROOF_DUPLICATE", `${signer.verificationMethod} has already signed this draft`);
     const options = (vm: string) => ({ type: "DataIntegrityProof" as const, cryptosuite: vm === signer.verificationMethod ? signer.cryptosuite : "eddsa-jcs-2022" as const, verificationMethod: vm, proofPurpose: "assertionMethod" });
@@ -1844,7 +1843,7 @@ export class OriginalsSDK {
 
   /**
    * The verified candidate of a cosigned draft, once every signer it names has
-   * signed (plan 050 §1), with its proofs ordered by signer; for `submit`.
+   * signed (P5.19), with its proofs ordered by signer; for `submit`.
    */
   async finalizeDraft(draft: Draft): Promise<SignedCandidate> {
     await this.notRefused(draft.original, draft.entry.versionId);
@@ -1854,7 +1853,7 @@ export class OriginalsSDK {
     return this.candidate(draft, ordered(named, [...(draft.proofs ?? [])]), context);
   }
 
-  /** Verify and durably commit a cosigned draft once every signer it names has signed (plan 050 §1; P6.1, P6.2, P6.4). */
+  /** Verify and durably commit a cosigned draft once every signer it names has signed (P5.19; P6.1, P6.2, P6.4). */
   async commitDraft(draft: Draft): Promise<CommitResult> {
     const stored = (await this.store.get(draft.original))?.log ?? "";
     if (versionIds(stored).includes(draft.entry.versionId)) {
@@ -2047,7 +2046,7 @@ export class OriginalsSDK {
       .filter((a) => a.log !== undefined)
       .map(({ did, log, witness }) => ({ did, log, ...(witness !== undefined ? { witness } : {}) }));
     const missing: MissingItem[] = [];
-    // A set Original has several author DIDs (plan 050 §1); a single-author one names its author.
+    // A set Original has several author DIDs (P5.19); a single-author one names its author.
     const roles = signerRolesOf(prefix);
     const single = view.report.identityEvidence.author;
     for (const did of roles.keys()) {

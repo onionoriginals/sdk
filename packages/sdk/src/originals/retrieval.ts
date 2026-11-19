@@ -54,7 +54,7 @@ export function retrievalPlan(log: string): { authors: string[]; digests: string
       // P7.7; P14.13: an entry is at most this many UTF-8 bytes as its JCS form, however it is written.
       if (utf8Length(canonicalize(entry)) > ORIGINALS_LIMITS.entryBytes) unplannable("limit-exceeded", i, "ENTRY_TOO_LARGE", `entry exceeds ${ORIGINALS_LIMITS.entryBytes} bytes`);
       if (!isJsonObject(entry) || !isJsonObject(entry.state)) unplannable("invalid-evidence", i, "ENTRY_STATE", "an entry is an object with a state object");
-      // One author, or each signer of a set Original (plan 050 §1).
+      // One author, or each signer of a set Original (P5.19).
       const author = checkAuthorMember(entry.state.author);
       for (const ref of Array.isArray(author) ? author : [author]) {
         if (!DID.test(ref.did)) unplannable("invalid-evidence", i, "STATE_AUTHOR", "state.author.did is not a DID");

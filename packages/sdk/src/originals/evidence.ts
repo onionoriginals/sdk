@@ -136,7 +136,7 @@ export function readEvidenceFiles(files: ReadonlyMap<string, Uint8Array>): Evide
   const manifest = readManifest(manifestBytes);
 
   const authors = new Map<string, AuthorDidEvidence>();
-  // Every signer identity the log names: the author, each signer of a set Original (plan 050 §1)
+  // Every signer identity the log names: the author, each signer of a set Original (P5.19)
   // and each editor of an editor entry (P7.1).
   const authorDids = new Set<string>();
   for (const line of text(logBytes, "asset/did.jsonl").trimEnd().split("\n")) {

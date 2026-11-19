@@ -5,11 +5,12 @@
 '@originals/code': patch
 ---
 
-Signer sets (plan 050 W1; owner decision of 19 November 2026, reversing S8).
-An Original can be governed by a set of DIDs with a threshold instead of one
-author. Single-author Originals are unchanged, byte for byte. The rule IDs
-(P5.19–P5.23) and member names are PROVISIONAL until the originals-spec pull
-request assigns them.
+Signer sets (originals-spec #66, `a2b5013`: P5.19–P5.23, P5.30, D8; owner
+decision of 19 November 2026, reversing S8). An Original can be governed by a
+set of DIDs with a threshold instead of one author. Single-author Originals
+are unchanged, byte for byte. The member names stay PROVISIONAL (P14.5, D4).
+The conformance registry is re-pinned to `a2b5013`, with its 40 new rows
+registered as C12-382 to C12-421.
 
 - `@originals/vh`: the asset's optional `authors: {threshold, dids}`
   (`checkAuthors`, `ORIGINALS_LIMITS.authors` = 32). An entry's `author` is an
@@ -17,8 +18,10 @@ request assigns them.
   proof per signer in the same order. Genesis is signed by every member; an
   author entry by the parent's threshold of the parent's members plus every
   added member; a single-author Original converts when the author and every
-  new member sign. P5.8 holds per identity; P7.9 currency and P9.15 at an
-  inscription hold by threshold. The derived DID document's `controller` is
+  new member sign. A member is never the Original's own did:vh, an alias or
+  its anchoring sat. P5.8 holds per identity; P7.9 currency holds by
+  threshold, and every signer of an inscribed set entry must pass P9.15 at
+  its inscription (P5.23). The derived DID document's `controller` is
   the member array. Builders take `authors` and `sign: EntrySigner[]`;
   `cosignEntry` and `finalizeEntry` collect proofs in any order. The report
   adds `signedBy` and `identityEvidence.authors`; for a set Original the

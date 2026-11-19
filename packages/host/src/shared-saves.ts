@@ -219,13 +219,13 @@ export function namesAccount(did: string, host: string, slug: string): boolean {
 type Ref = { did?: unknown; verificationMethod?: unknown; versionId?: unknown };
 type StateRefs = { author?: Ref | Ref[]; editor?: Ref; asset?: { editors?: Array<{ did?: unknown }>; authors?: { dids?: unknown } } };
 
-/** The author references a state names: its one author, or each signer of a set Original (plan 050 §1). */
+/** The author references a state names: its one author, or each signer of a set Original (P5.19). */
 function authorRefs(state: StateRefs | Record<string, unknown> | undefined): Ref[] {
   const author = (state as StateRefs | undefined)?.author;
   return Array.isArray(author) ? author : author === undefined ? [] : [author];
 }
 
-/** The members of a state's signer set (plan 050 §1), or its one author. */
+/** The members of a state's signer set (P5.19), or its one author. */
 function membersOf(state: StateRefs | undefined): unknown[] {
   const dids = state?.asset?.authors?.dids;
   return Array.isArray(dids) ? dids : authorRefs(state).map((r) => r?.did);
@@ -280,7 +280,7 @@ function satOf(state: Record<string, unknown> | undefined): string | undefined {
   return Array.isArray(asset?.aliases) ? btcoAliasOf(asset.aliases.filter((a): a is string => typeof a === 'string')) : undefined;
 }
 
-/** Every DID that signs the log's entries: the author, each signer of a set Original (plan 050 §1), and an editor where an entry names one (P5.16). */
+/** Every DID that signs the log's entries: the author, each signer of a set Original (P5.19), and an editor where an entry names one (P5.16). */
 function signerDids(lines: string[]): string[] {
   const dids = new Set<string>();
   for (const line of lines) {
@@ -293,7 +293,7 @@ function signerDids(lines: string[]): string[] {
   return [...dids];
 }
 
-/** Every DID the log's entries name as an author: the author, or each signer of a set Original (plan 050 §1). */
+/** Every DID the log's entries name as an author: the author, or each signer of a set Original (P5.19). */
 function authorDids(lines: string[]): Set<string> {
   const dids = new Set<string>();
   for (const line of lines) for (const ref of authorRefs(lineState(line))) if (typeof ref?.did === 'string') dids.add(ref.did);
@@ -319,7 +319,7 @@ export function hostedMissing(lines: string[], report: OriginalsReport, hosted: 
  * The proof check that needs no history verification (C7): the signer's key
  * at the version the entry names, read from `log`, verifies the entry's
  * proof by that signer: its one proof, or for a set Original the proof at the
- * signer's position (plan 050, P5.22). Undefined when `log` does not show that
+ * signer's position (P5.22). Undefined when `log` does not show that
  * version or key, which full verification then decides; false when the key
  * is there and the proof does not verify with it, which full verification
  * would refuse too.
@@ -486,7 +486,7 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     // author or granted in the head's state, and its key at the named version, in the stored or the
     // submitted signer log read without verifying it, verifies the one proof. Full verification would
     // refuse an entry failing either, so nobody can make the host verify a log for one.
-    // A set Original's author entry has a signer, and a proof, per signer reference (plan 050 §1).
+    // A set Original's author entry has a signer, and a proof, per signer reference (P5.19).
     const headState = lineState(lines[lines.length - 1]) as StateRefs | undefined;
     const state = lineState(s.entry) as StateRefs | undefined;
     const refs = state?.editor ? [state.editor] : authorRefs(state);
@@ -496,7 +496,7 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
       if (!ref || typeof ref.did !== 'string' || typeof ref.verificationMethod !== 'string' || typeof ref.versionId !== 'string') return refuse(422, 'entry_invalid');
       signers.push({ did: ref.did, verificationMethod: ref.verificationMethod, versionId: ref.versionId });
     }
-    // An author entry's signers are the head's members, or members the entry adds (plan 050, P5.20).
+    // An author entry's signers are the head's members, or members the entry adds (P5.20).
     const members = new Set<unknown>([...membersOf(headState), ...membersOf(state?.asset?.authors ? state : undefined)]);
     for (const signer of signers) {
       const authorized = state?.editor ? (headState?.asset?.editors ?? []).some((g) => g.did === signer.did) : members.has(signer.did);

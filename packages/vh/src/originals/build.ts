@@ -5,7 +5,7 @@
  * its state. Signing is the caller's: `sign` receives the complete unsigned
  * entry (P5.11 asks the signer to show it to the author first).
  *
- * Signer sets (plan 050 §1, W1; PROVISIONAL): an Original governed by
+ * Signer sets (P5.19–P5.23): an Original governed by
  * `authors: {threshold, dids}` names its signers as an array of author
  * references, and carries one proof per signer in the same order (P5.22).
  * `sign` may then be one `EntrySigner` per signer, or the signers sign in
@@ -42,16 +42,16 @@ export interface PrepareCreateInput {
   resource: ResourceDescriptor;
   /**
    * The author reference; for a set Original, the reference of every member,
-   * since every member signs its genesis (plan 050, P5.19). Sorted by DID here.
+   * since every member signs its genesis (P5.19). Sorted by DID here.
    */
   author: AuthorRef | AuthorRef[];
-  /** A signer set instead of one author (plan 050 §1, W1). Its DIDs are sorted here. */
+  /** A signer set instead of one author (P5.19). Its DIDs are sorted here. */
   authors?: AuthorSet;
   /** Editor grants from genesis (P5.15). Genesis is always an author entry (P5.16). */
   editors?: EditorGrant[];
 }
 
-/** One signer, or one per signer reference of a set Original's author entry, in any order (plan 050, P5.22). */
+/** One signer, or one per signer reference of a set Original's author entry, in any order (P5.22). */
 export type EntrySigners = EntrySigner | EntrySigner[];
 
 export interface CreateOriginalInput extends PrepareCreateInput {
@@ -71,14 +71,14 @@ export interface PrepareUpdateInput {
    */
   resource?: ResourceDescriptor;
   /**
-   * The author reference, or a set Original's signer references (plan 050,
+   * The author reference, or a set Original's signer references (P5.19,
    * P5.20; sorted by DID here). Required for an author entry. An editor entry
    * carries its parent's unchanged (P5.16): omit it, or give exactly that.
    */
   author?: AuthorRef | AuthorRef[];
   /**
    * Replaces the signer set, or introduces one in a single-author Original
-   * (plan 050, P5.20, P5.21). Author entries only; never removed.
+   * (P5.20, P5.21). Author entries only; never removed.
    */
   authors?: AuthorSet;
   /**
@@ -114,12 +114,12 @@ function stateOf(entry: UnsignedEntry): EntryState {
 
 const byDid = <T extends { did: string }>(list: readonly T[]): T[] => [...list].sort((a, b) => (a.did < b.did ? -1 : a.did > b.did ? 1 : 0));
 
-/** A set Original's signer references are sorted by DID (plan 050, P5.22); one author is kept as given. */
+/** A set Original's signer references are sorted by DID (P5.22); one author is kept as given. */
 function authorMember(author: AuthorRef | AuthorRef[]): AuthorRef | AuthorRef[] {
   return Array.isArray(author) ? byDid(author) : author;
 }
 
-/** A signer set with its DIDs sorted by code unit order (plan 050 §1); everything else is checked as given. */
+/** A signer set with its DIDs sorted by code unit order (P5.19); everything else is checked as given. */
 function sortedSet(authors: AuthorSet): AuthorSet {
   if (authors === null || typeof authors !== "object" || !Array.isArray(authors.dids)) return checkAuthors(authors);
   return { ...authors, dids: [...authors.dids].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)) };
@@ -197,7 +197,7 @@ function next(previous: UnsignedEntry, operation: "update" | "deactivate", asset
     // grant or alias. The state rules check the rest against the grant in the parent's state.
     if (input.editors !== undefined) fail("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor entry cannot change the editor grants; only an author entry may (P5.16)");
     if (input.aliases !== undefined) fail("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor entry cannot change aliases; only an author entry may (P5.16)");
-    if (input.authors !== undefined) fail("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor entry cannot change the signer set; only an author entry may (P5.16; plan 050)");
+    if (input.authors !== undefined) fail("outside-grant", "EDITOR_AUTHOR_ONLY", "an editor entry cannot change the signer set; only an author entry may (P5.16)");
   } else if (input.author === undefined) {
     invalidInput("STATE_AUTHOR", "an author entry needs the author reference");
   }
@@ -223,7 +223,7 @@ export function prepareUpdateOriginal(previous: UnsignedEntry, input: PrepareUpd
 
 /**
  * An unsigned deactivation entry after `previous` (P6.5). Only the author, or
- * a threshold of a set's members, deactivates (P5.16; plan 050). It carries
+ * a threshold of a set's members, deactivates (P5.16). It carries
  * its parent's preview, or none with `preview: null` (P9.30).
  */
 export function prepareDeactivateOriginal(previous: UnsignedEntry, input: { versionTime: string; author: AuthorRef | AuthorRef[]; preview?: null }): UnsignedEntry {
@@ -247,7 +247,7 @@ export async function deactivateOriginal(previous: LogEntry, input: { versionTim
 
 /**
  * A prepared entry with the proofs collected so far, in the order they came
- * (plan 050 §1). Not a log entry until `finalizeEntry` orders its proofs.
+ * (P5.19). Not a log entry until `finalizeEntry` orders its proofs.
  */
 export type PartiallySignedEntry = UnsignedEntry & { proof: DataIntegrityProof[] };
 
@@ -262,7 +262,7 @@ function signingError(code: string, message: string): never {
 }
 
 /**
- * Add one signer's proof to a prepared entry (plan 050 §1): `sign` produces it
+ * Add one signer's proof to a prepared entry (P5.19): `sign` produces it
  * over the unsigned entry, exactly as for a one-signer entry. The proof must
  * be by a verification method the entry names as a signer, and not one that
  * has already signed. Signers may cosign in any order, at different times.
@@ -273,7 +273,7 @@ export async function cosignEntry(entry: UnsignedEntry | PartiallySignedEntry, s
   const added = await sign(unsigned);
   const proof = [...had];
   for (const p of added) {
-    if (!named.includes(p.verificationMethod)) signingError("SIGNER_NOT_NAMED", `${p.verificationMethod} is not a signer this entry names (plan 050, P5.22)`);
+    if (!named.includes(p.verificationMethod)) signingError("SIGNER_NOT_NAMED", `${p.verificationMethod} is not a signer this entry names (P5.22)`);
     if (proof.some((q) => q.verificationMethod === p.verificationMethod)) signingError("PROOF_DUPLICATE", `${p.verificationMethod} has already signed this entry`);
     proof.push(p);
   }
@@ -282,7 +282,7 @@ export async function cosignEntry(entry: UnsignedEntry | PartiallySignedEntry, s
 
 /**
  * The log entry, once every signer the entry names has signed: one proof per
- * signer reference, in the same order, sorted by DID (plan 050, P5.22). A
+ * signer reference, in the same order, sorted by DID (P5.22). A
  * signer still missing is refused; the threshold decides which signers an
  * entry names, never which of them may be left out.
  */
@@ -295,7 +295,7 @@ export function finalizeEntry(entry: PartiallySignedEntry): LogEntry {
     if (found.length > 1) signingError("PROOF_DUPLICATE", `${r.verificationMethod} signed this entry more than once`);
     return found[0];
   });
-  if (ordered.length !== proof.length) signingError("SIGNER_NOT_NAMED", "a proof is by a verification method this entry does not name as a signer (plan 050, P5.22)");
+  if (ordered.length !== proof.length) signingError("SIGNER_NOT_NAMED", "a proof is by a verification method this entry does not name as a signer (P5.22)");
   return { ...unsigned, proof: ordered };
 }
 

@@ -3,7 +3,7 @@
  * specialisation. Keys come from the author DID (VH-Log PR 11): one proof per
  * entry (P5.2), by the author key the entry names (P5.3), or, for a set
  * Original, one proof per signer the entry names, in the same order, each by
- * that signer's key (plan 050 §1, W1a, P5.22; PROVISIONAL). versionTime
+ * that signer's key (P5.22, P14.8). versionTime
  * carries milliseconds (VH-Log PR 8; owner decision Q8).
  *
  * No witnesses (P9.8, P9.9; owner decision Q14): an asset log never sets the
@@ -102,7 +102,7 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
 
   /**
    * The author reference `proof` is by: the author's, or for a set Original the signer reference
-   * at the proof's position (plan 050 §1, P5.22). Who may sign is judged from the state first
+   * at the proof's position (P5.22). Who may sign is judged from the state first
    * (P5.19-P5.21), before any signer evidence is looked up, so a signer outside the set is
    * rejected, never reported as missing evidence.
    */
@@ -126,7 +126,7 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
     checkEntrySigners(entry.state, parent);
     const refs = author as AuthorRef[];
     if (entry.proof.length !== refs.length) {
-      fail("invalid-evidence", "PROOF_COUNT", `a set Original's author entry carries one proof per signer reference: ${refs.length}, not ${entry.proof.length} (plan 050, P5.22)`);
+      fail("invalid-evidence", "PROOF_COUNT", `a set Original's author entry carries one proof per signer reference: ${refs.length}, not ${entry.proof.length} (P5.22)`);
     }
     const ref = refs[entry.proof.indexOf(proof)];
     authorMethod(ref.did);
@@ -175,7 +175,7 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
     // P14.2: at most three fractional digits, and UTC written as Z.
     versionTime: { fractionalDigits: 3, utc: "Z" },
     // One proof per signer: one for a single-author or editor entry (P5.2, VH-Log PR 11), one
-    // per signer reference of a set Original's author entry (plan 050, P5.22), checked by the key hook
+    // per signer reference of a set Original's author entry (P5.22), checked by the key hook
     // and again with the state.
     maxProofs: ORIGINALS_LIMITS.authors,
     keys: {
@@ -219,9 +219,9 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
         // The editor rules run through the engine's editor hook (`keys.editors.limit`).
         editorRules: false,
       });
-      // P5.2, P5.22 (plan 050): one proof per signer, also when the signers' authorization is set aside.
+      // P5.2, P5.22 (P5.19): one proof per signer, also when the signers' authorization is set aside.
       if (entry.state.editor === undefined && entry.proof.length !== authorRefsOf(entry.state as unknown as EntryState).length) {
-        fail("invalid-evidence", "PROOF_COUNT", "an author entry carries one proof per signer reference (P5.2; plan 050, P5.22)");
+        fail("invalid-evidence", "PROOF_COUNT", "an author entry carries one proof per signer reference (P5.2, P5.22)");
       }
     },
   };
@@ -345,7 +345,7 @@ export function deriveDocument(entries: VerifiedEntry[]): JsonObject {
   return {
     "@context": ["https://www.w3.org/ns/did/v1"],
     id: state.id,
-    // A set Original's controller is its member array at that version (plan 050 §1, P14.9; PROVISIONAL).
+    // A set Original's controller is its member array at that version (P14.9).
     controller: state.asset.authors ? state.asset.authors.dids : (state.author as AuthorRef).did,
     ...(state.asset.aliases.length > 0 ? { alsoKnownAs: state.asset.aliases } : {}),
     service: [service],

@@ -1,5 +1,5 @@
 /**
- * Signer sets through the SDK (plan 050 §1, W1; owner decision of 19 November
+ * Signer sets through the SDK (P5.19; owner decision of 19 November
  * 2026): `sdk.create` with `authors: {threshold, members}` and several
  * signers, `sdk.edit` with the signers of an author entry, and a draft flow
  * for signers who are not all present: `prepare*`, `cosign` per signer, then
@@ -7,8 +7,7 @@
  * packages carry every member DID that signed (P7.1), and reports list the
  * signers per entry.
  *
- * PROVISIONAL: the rule IDs P5.19-P5.23 are plan 050's proposals, pending
- * the originals-spec pull request that assigns them and the C12 rows.
+ * Rules P5.19–P5.23 (originals-spec #66): rows C12-382, C12-383 and C12-388.
  */
 import { describe, expect, test } from "bun:test";
 import { OriginalsError } from "@originals/vh";
@@ -60,7 +59,7 @@ async function harbor() {
   return { alice, bob, carol, dave, sdk, store, signer, shown, as, all, did: created.original.did, v1: created.original.checkpoint, created: created.original };
 }
 
-describe("P5.19 (PROVISIONAL): sdk.create with a signer set", () => {
+describe("C12-382 (P5.19): sdk.create with a signer set", () => {
   test("every member signs genesis; the report lists them and the document's controller is the member array", async () => {
     const { alice, bob, carol, created, shown } = await harbor();
     const dids = byDid([alice, bob, carol]).map((a) => a.did);
@@ -91,7 +90,7 @@ describe("P5.19 (PROVISIONAL): sdk.create with a signer set", () => {
   });
 });
 
-describe("P5.20 (PROVISIONAL): sdk.edit by a threshold of members", () => {
+describe("C12-383 (P5.20): sdk.edit by a threshold of members", () => {
   test("two of three sign an edit; one is refused before anyone signs; a non-member is refused", async () => {
     const { alice, bob, carol, dave, sdk, did, v1, as, shown } = await harbor();
     shown.length = 0;
@@ -125,7 +124,7 @@ describe("P5.20 (PROVISIONAL): sdk.edit by a threshold of members", () => {
   });
 });
 
-describe("plan 050 §1: the draft flow for signers who are not all present", () => {
+describe("P5.22: the draft flow for signers who are not all present", () => {
   test("prepare, cosign per signer at different times, then commitDraft", async () => {
     const { alice, carol, sdk, did, v1, signer, as, shown } = await harbor();
     shown.length = 0;
@@ -169,7 +168,7 @@ describe("plan 050 §1: the draft flow for signers who are not all present", () 
   });
 });
 
-describe("P5.21 (PROVISIONAL): converting a single-author Original through the SDK", () => {
+describe("C12-388 (P5.21): converting a single-author Original through the SDK", () => {
   test("the author and the new member sign the conversion; the new member then edits as a set of one threshold", async () => {
     const { alice, bob, sdk, signer, as } = await harbor();
     const made = await sdk.create({ name: "Solo", resource: { mediaType: "image/jpeg", bytes: B1 }, author: alice.ref("orig"), signer: signer(alice) });

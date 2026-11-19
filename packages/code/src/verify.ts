@@ -494,7 +494,7 @@ export async function checkReleases(
   entries: readonly LogEntry[],
   context: { repo: string; repoAuthor: string | null; resources: ObjectSource; branches: RepositoryReport["branches"]; codes: ReadonlyMap<string, BranchCodeReport | null> },
 ): Promise<ReleasesCodeReport> {
-  const author = entries.length ? stateOf(entries[0]).author.did : null;
+  const author = entries.length ? (soleAuthorDid(stateOf(entries[0])) ?? null) : null;
   const out: ReleasesCodeReport = { original, author, history: { status: "valid", entries: entries.length }, binding: "confirmed", releases: [] };
   const tags = new Set<string>();
   let missing = false;
