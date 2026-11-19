@@ -12,7 +12,8 @@
     "LICENSE"
   ],
   "bin": {
-    "originals-code": "./dist/cli.js"
+    "originals-code": "./dist/cli.js",
+    "git-remote-originals": "./dist/remote-helper.js"
   },
   "sideEffects": false,
   "exports": {

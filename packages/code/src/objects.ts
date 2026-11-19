@@ -206,6 +206,18 @@ function compareBytes(a: Uint8Array, b: Uint8Array): number {
 export async function gitTreeIdOf(digest: string, get: ObjectSource, memo: Map<string, string> = new Map()): Promise<string> {
   const known = memo.get(`t:${digest}`);
   if (known) return known;
+  const body = await gitTreeBody(digest, get, memo);
+  const id = hexOf(sha1(concat([encoder.encode(`tree ${body.length}\u0000`), body])));
+  memo.set(`t:${digest}`, id);
+  return id;
+}
+
+/**
+ * The bytes of git's tree object for the tree `digest` (without git's
+ * `tree <size>\0` header), rebuilt from the objects: what `git cat-file tree`
+ * prints, so a clone can write git's own tree back (plan 049 phase 5).
+ */
+export async function gitTreeBody(digest: string, get: ObjectSource, memo: Map<string, string> = new Map()): Promise<Uint8Array> {
   const tree = await readTree(digest, get);
   const rows: Array<{ key: Uint8Array; line: Uint8Array }> = [];
   for (const [name, entry] of Object.entries(tree.entries)) {
@@ -221,10 +233,12 @@ export async function gitTreeIdOf(digest: string, get: ObjectSource, memo: Map<s
     rows.push({ key, line: concat([encoder.encode(`${entry.mode} `), nameBytes, new Uint8Array([0]), idBytes]) });
   }
   rows.sort((a, b) => compareBytes(a.key, b.key));
-  const body = concat(rows.map((r) => r.line));
-  const id = hexOf(sha1(concat([encoder.encode(`tree ${body.length}\u0000`), body])));
-  memo.set(`t:${digest}`, id);
-  return id;
+  return concat(rows.map((r) => r.line));
+}
+
+/** git's object id of `bytes` as a `type` object: SHA-1 of `<type> <size>\0<bytes>`. */
+export function gitObjectId(type: "blob" | "tree" | "commit", bytes: Uint8Array): string {
+  return hexOf(sha1(concat([encoder.encode(`${type} ${bytes.length}\u0000`), bytes])));
 }
 
 /** git's commit object id: SHA-1 of `commit <size>\0<bytes>` (plan 049 O3, K12). */
