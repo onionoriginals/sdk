@@ -4,7 +4,7 @@
  *
  *   POST /api/originals/submit/<encoded site key>
  *     site key  <host>/<user-slug>/o-<name>, the alias's #files base without its scheme
- *     body      { original, entry, resources: { <digest>: <base64> }, identities: [{ did, log, witness? }] }
+ *     body      { original, entry, resources: { <digest>: <base64> }, identities: [{ did, log, witness? }], parents?: [{ did, log }] }
  *     200       { status: "accepted" | "already-accepted", checkpoint, head }
  *     409       { status: "stale-parent", error: "stale_parent", head }
  *     400 malformed · 401 not signed in · 403 caller not authorized · 404 not hosted · 413 too large
@@ -51,10 +51,25 @@
  *    editor rule the profile has; complete identity evidence), and every
  *    resource the entry introduces must arrive with bytes matching its
  *    digest.
+ *    For a child Original (P5.24, P5.25), the verification also needs each
+ *    parent Original's log through the pins, with its signers' DID logs, as
+ *    an evidence package carries them (P7.1, P14.10): the parent log the host
+ *    holds under `parents/<hex sha256 of its did:vh>/did.jsonl`, or a
+ *    submitted one that extends it line by line (a submitted log that the
+ *    held one extends leaves the held one in use; one that diverges from it
+ *    is refused, 422 parent_evidence_conflict). The parent's signers' logs
+ *    are judged exactly as the child's signers' are. Without the parent's log
+ *    through the pin, the entry is incomplete and refused (422 entry_invalid,
+ *    `PARENT_EVIDENCE_MISSING` or `PARENT_VERSION_MISSING`), never accepted;
+ *    a pin that goes backwards or names another branch is rejected, and so is
+ *    an inherited grant that does not cover the change, as `verifyOriginal`
+ *    decides (P5.24, P5.25, P5.28).
  * 5. The entry must not be historically authorized only (P7.9): one signed
  *    by a key the latest verified state of its signer's DID no longer lists,
  *    by an editor whose DID is deactivated, or once the author DID is
- *    deactivated (P6.5, P5.18), is refused (422
+ *    deactivated (P6.5, P5.18), or one an inherited grant alone authorizes
+ *    while the parent's latest state the host holds no longer grants it, is
+ *    forked or is deactivated (P5.26), is refused (422
  *    entry_historically_authorized_only, with the reason). No unanchored
  *    Original is ever current (P7.10), so being current is not asked of it;
  *    an earlier entry that has since become historically authorized only
@@ -69,9 +84,11 @@
  *    publishes nothing.
  *
  * Bounds (PROVISIONAL): the body is read with a byte counter (body.ts); at
- * most MAX_IDENTITIES signer DID logs of MAX_IDENTITY_BYTES each and
- * one resource version per submission (P4.1, originals-spec #53); at most MAX_QUEUED
- * submissions waiting per Original (503 busy past that).
+ * most SUBMISSION_LIMITS.identities signer DID logs of identityBytes each,
+ * one resource version per submission (P4.1, originals-spec #53), and at most
+ * SUBMISSION_LIMITS.parents parent logs (the nesting limit, P14.13) of
+ * parentBytes each; at most SUBMISSION_LIMITS.queued submissions waiting per
+ * Original (503 busy past that).
  *
  * The host stores the exact submitted line. It never re-signs, rebases,
  * reorders or changes a submission, and a refused one writes nothing.
@@ -93,6 +110,11 @@
  * head state names as the author or a granted editor (P5.15): a did:webvh on
  * the Original's host whose one path segment is the account's slug, a
  * namespace only that account can write (originals-routes.ts `hostPut`).
+ * For a child Original, a grant in a parent log the host holds also names an
+ * editor (P5.24): before the body is read any version of a held parent log
+ * counts, and in the queue the parent's state at the pin the entry names
+ * (PROVISIONAL: a grant only in a parent version the host does not yet hold
+ * names nobody until a save brings that version, or the owner relays it).
  * A byte-identical retry wins over a revoked grant (owner decision of
  * 23 October 2026; P6.7, C12-128): it is acknowledged when the caller was
  * allowed at the matching entry's parent, named by that parent's state (which
@@ -111,7 +133,7 @@ import { parseJson, isJsonObject, type JsonObject } from '@originals/vh/json';
 import { vhHash } from '@originals/vh/log';
 import { parseDidWebvh } from '@originals/vh/webvh';
 import { ORIGINALS_LIMITS, btcoAliasOf, resourceDigestAsync, verifyOriginal, type AuthorDidEvidence, type OriginalsReport } from '@originals/vh/originals';
-import { signerPath } from '@originals/sdk/originals';
+import { parentDidOf, parentPath, signerPath } from '@originals/sdk/originals';
 import { json } from './router.js';
 import { deeperThan, logPrefix, MAX_WITNESS_DEPTH, parseWitnessFile, signedMediaType, verifiedSignerLog } from './hosted-layout.js';
 import { storeFullBody, type OriginalsStore } from './originals-store.js';
@@ -119,16 +141,25 @@ import { storeFullBody, type OriginalsStore } from './originals-store.js';
 const DIGEST = /^z[1-9A-HJ-NP-Za-km-z]{40,60}$/;
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 const VERSION_ID = /^(\d+)-(.+)$/;
+const DID_VH = /^did:vh:[1-9A-HJ-NP-Za-km-z]{16,64}$/;
 const decoder = new TextDecoder('utf-8', { fatal: true });
 const encoder = new TextEncoder();
 
 /** PROVISIONAL bounds on one submission and on the queue for one Original. */
 export const SUBMISSION_LIMITS = Object.freeze({
-  /** The author and every editor a state can grant (P5.15, P7.7). */
-  identities: ORIGINALS_LIMITS.editors + 1,
+  /**
+   * Every member of a signer set and every editor a state can grant (P5.15,
+   * P5.19, P7.7), for the Original and, for a child, for its parents (P5.25).
+   * The body cap bounds what they add up to.
+   */
+  identities: 2 * (ORIGINALS_LIMITS.authors + ORIGINALS_LIMITS.editors),
   identityBytes: 2 * 1024 * 1024,
   /** An entry names at most one new resource version (P4.1, P14.4; originals-spec #53). */
   resources: 1,
+  /** Parent Originals, from the child to its furthest ancestor (P5.25, P7.7, P14.13). */
+  parents: ORIGINALS_LIMITS.parents,
+  /** Bytes of one parent's log; the body cap bounds them all together. */
+  parentBytes: 8 * 1024 * 1024,
   queued: 8,
 });
 
@@ -139,6 +170,8 @@ export interface ParsedSubmission {
   parsed: JsonObject & { versionId: string };
   resources: Map<string, Uint8Array>;
   identities: AuthorDidEvidence[];
+  /** A child Original's parent logs through the pins, as submitted (P5.25). */
+  parents: Array<{ did: string; log: string }>;
 }
 
 type Refusal = { http: number; body: Record<string, unknown> };
@@ -191,7 +224,18 @@ export function parseSubmission(text: string): ParsedSubmission | Refusal {
     if (encoder.encode(i.log).length + witnessBytes > SUBMISSION_LIMITS.identityBytes) return refuse(413, 'identity_too_large', { did: i.did });
     identities.push({ did: i.did, log: i.log, ...(i.witness !== undefined ? { witness: i.witness } : {}) });
   }
-  return { original: b.original, entry: b.entry, parsed: p as ParsedSubmission['parsed'], resources, identities };
+  const parents: Array<{ did: string; log: string }> = [];
+  const ps = b.parents ?? [];
+  if (!Array.isArray(ps)) return refuse(400, 'bad_request');
+  if (ps.length > SUBMISSION_LIMITS.parents) return refuse(400, 'too_many_parents');
+  for (const parent of ps as Array<Record<string, unknown>>) {
+    if (typeof parent !== 'object' || parent === null || Array.isArray(parent) || Object.keys(parent).length !== 2) return refuse(400, 'bad_request');
+    if (typeof parent.did !== 'string' || !DID_VH.test(parent.did) || typeof parent.log !== 'string') return refuse(400, 'bad_request');
+    if (parents.some((q) => q.did === parent.did)) return refuse(400, 'bad_request');
+    if (encoder.encode(parent.log).length > SUBMISSION_LIMITS.parentBytes) return refuse(413, 'parent_too_large', { did: parent.did });
+    parents.push({ did: parent.did, log: parent.log });
+  }
+  return { original: b.original, entry: b.entry, parsed: p as ParsedSubmission['parsed'], resources, identities, parents };
 }
 
 /** The signed-in account submitting: its JWT `sub` and its namespace slug. */
@@ -241,6 +285,37 @@ function allowedAt(line: string | undefined): unknown[] {
   const state = line === undefined ? undefined : (lineState(line) as StateRefs | undefined);
   const editors = Array.isArray(state?.asset?.editors) ? state.asset.editors : [];
   return [...membersOf(state), ...editors.map((g) => g?.did)];
+}
+
+/** The pin a line's state names, `asset.parent.versionId`, if any (P5.24). */
+function pinOf(line: string | undefined): string | undefined {
+  const parent = (lineState(line ?? '')?.asset as { parent?: { versionId?: unknown } } | undefined)?.parent;
+  return typeof parent?.versionId === 'string' ? parent.versionId : undefined;
+}
+
+/**
+ * The editor DIDs a parent Original's log grants (P5.24): at the version
+ * `pin`, or at any version when `pin` is undefined. Read without verifying:
+ * this only decides who may make the host read or verify a body, and the
+ * verification that follows decides the entry.
+ */
+function parentGrantees(logs: Array<string | null | undefined>, pin?: string): unknown[] {
+  const out: unknown[] = [];
+  for (const log of logs) {
+    if (!log) continue;
+    for (const line of log.trimEnd().split('\n')) {
+      let versionId: unknown;
+      try {
+        versionId = (JSON.parse(line) as { versionId?: unknown }).versionId;
+      } catch {
+        continue;
+      }
+      if (pin !== undefined && versionId !== pin) continue;
+      const editors = (lineState(line) as StateRefs | undefined)?.asset?.editors;
+      if (Array.isArray(editors)) for (const g of editors) out.push(g?.did);
+    }
+  }
+  return out;
 }
 
 /** Null when `caller` owns the namespace or one of `dids` is its landing DID; otherwise a 403, the same whatever the reason. */
@@ -352,6 +427,15 @@ function proofVerifies(entry: JsonObject, signer: { verificationMethod: string; 
   }
 }
 
+const withNewline = (log: string) => (log.endsWith('\n') ? log : `${log}\n`);
+
+/** True when every line of `prefix` is the same line of `log`, in order (JSONL; P6.4). */
+function linesPrefix(prefix: string, log: string): boolean {
+  const a = prefix.trimEnd().split('\n');
+  const b = log.trimEnd().split('\n');
+  return a.length <= b.length && a.every((line, i) => line === b[i]);
+}
+
 function text(bytes: Uint8Array): string | null {
   try {
     return decoder.decode(bytes);
@@ -385,6 +469,11 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
       if (queues.get(key) === tail) queues.delete(key);
     });
     return run;
+  }
+
+  function heldText(key: string): string | null {
+    const bytes = store.readHosted(key);
+    return bytes ? text(bytes) : null;
   }
 
   /** A manifest write that fails is repaired later: the log is the commit point (C6). */
@@ -439,6 +528,9 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     const lines = logText.trimEnd().split('\n');
     const dids = new Set<unknown>();
     for (const line of lines) for (const did of allowedAt(line)) dids.add(did);
+    // A child's editors may hold their grant in the parent (P5.24): any version of the held parent log.
+    const parent = parentDidOf(logText);
+    if (parent !== undefined) for (const did of parentGrantees([heldText(`${siteKey}/originals/${parentPath(parent)}/did.jsonl`)])) dids.add(did);
     return callerRefusal(siteKey, owner, dids, caller);
   }
 
@@ -466,6 +558,13 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     // hosted log is public).
     const match = lines.indexOf(s.entry);
     const allowed = match >= 0 ? allowedAt(lines[match - 1]) : allowedAt(lines[lines.length - 1]);
+    // For a child, a grant in the parent's state at the pin the entry names (P5.24), in the parent log
+    // the host holds or the one submitted; the verification below decides whether it covers the entry.
+    const parentDid = parentDidOf(logText);
+    if (parentDid !== undefined) {
+      const pin = pinOf(s.entry);
+      if (pin !== undefined) allowed.push(...parentGrantees([heldText(`${siteKey}/originals/${parentPath(parentDid)}/did.jsonl`), s.parents.find((p) => p.did === parentDid)?.log], pin));
+    }
     const callerRefused = callerRefusal(siteKey, owner, allowed, caller);
     if (callerRefused) return callerRefused;
     if (typeof head !== 'string' || s.original !== original) return refuse(400, 'original_mismatch');
@@ -481,6 +580,37 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     if (sat !== undefined) return refuse(422, 'original_anchored', { sat });
     // 3. Only an entry whose parent is the head; never rebased (P6.7).
     if (!extendsHead(s.parsed, head)) return refuse(409, 'stale_parent', { status: 'stale-parent', head });
+
+    // The parent logs verification uses (P5.25), nearest first: the one the host holds, or a submitted
+    // one extending it line by line. Never a silent choice between diverging logs (P6.6).
+    const candidate = [...lines, s.entry];
+    const parents: Array<{ did: string; log: string; key: string; held: Uint8Array | null; write: boolean }> = [];
+    for (let did = parentDidOf(logText); did !== undefined && parents.length < SUBMISSION_LIMITS.parents && !parents.some((p) => p.did === did);) {
+      const key = `${siteKey}/originals/${parentPath(did)}/did.jsonl`;
+      const held = store.readHosted(key);
+      const heldLog = held ? text(held) : null;
+      const submitted = s.parents.find((p) => p.did === did)?.log;
+      let log: string | undefined;
+      let write = false;
+      if (submitted !== undefined && heldLog !== null && heldLog !== '' && !linesPrefix(heldLog, submitted)) {
+        if (!linesPrefix(submitted, heldLog)) return refuse(422, 'parent_evidence_conflict', { did });
+        log = heldLog;
+      } else if (submitted !== undefined) {
+        log = submitted;
+        write = heldLog === null || withNewline(heldLog) !== withNewline(submitted);
+      } else if (heldLog !== null && heldLog !== '') {
+        log = heldLog;
+      }
+      // A parent the host neither holds nor was sent: verification reports it missing (P5.25).
+      if (log === undefined) break;
+      parents.push({ did, log: withNewline(log), key, held, write });
+      const next = parentDidOf(log);
+      if (next === undefined) break;
+      did = next;
+    }
+    for (const p of s.parents) {
+      if (!parents.some((q) => q.did === p.did)) return refuse(422, 'parent_not_named', { did: p.did });
+    }
 
     // 4a. Cheap checks before any signer DID log is verified (C7; #08d review r4 #4): the signer is the
     // author or granted in the head's state, and its key at the named version, in the stored or the
@@ -498,8 +628,10 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     }
     // An author entry's signers are the head's members, or members the entry adds (P5.20).
     const members = new Set<unknown>([...membersOf(headState), ...membersOf(state?.asset?.authors ? state : undefined)]);
+    // An editor holds a grant in the head's state, or for a child in its parent's state at the pin (P5.24).
+    const inherited = parents.length > 0 ? parentGrantees([parents[0].log], pinOf(s.entry)) : [];
     for (const signer of signers) {
-      const authorized = state?.editor ? (headState?.asset?.editors ?? []).some((g) => g.did === signer.did) : members.has(signer.did);
+      const authorized = state?.editor ? (headState?.asset?.editors ?? []).some((g) => g.did === signer.did) || inherited.includes(signer.did) : members.has(signer.did);
       if (!authorized) return refuse(422, 'signer_not_authorized', { did: signer.did });
     }
     for (const [index, signer] of signers.entries()) {
@@ -514,14 +646,16 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     }
 
     // 4. Verify under the profile against the head.
-    const candidate = [...lines, s.entry];
     const identities: AuthorDidEvidence[] = [];
     /** Submitted signer DID logs verification used, to store; a witness file only where verification needed it. */
     const keepIdentities: Array<{ did: string; log: string; witness?: unknown }> = [];
     // What verification used, to compare again in the append step (P1).
     const usedFiles = new Map<string, Uint8Array | null>();
     const now = deps.now();
-    for (const did of signerDids(candidate)) {
+    // The parents' signers are judged as the child's are, and stored beside them (P14.10).
+    const signedLines = [...candidate, ...parents.flatMap((p) => p.log.trimEnd().split('\n'))];
+    for (const p of parents) usedFiles.set(p.key, p.held);
+    for (const did of signerDids(signedLines)) {
       const base = `${siteKey}/originals/${signerPath(did)}`;
       const storedBytes = store.readHosted(`${base}/did.jsonl`);
       const stored = storedBytes ? text(storedBytes) : null;
@@ -582,9 +716,13 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
       newBytes.set(digest, bytes);
     }
     const bytesOf = (digest: string) => newBytes.get(digest) ?? (DIGEST.test(digest) ? store.readHosted(`${siteKey}/originals/resources/${digest}`) ?? undefined : undefined);
-    const report = await verifyOriginal({ log: `${candidate.join('\n')}\n`, authors: identities, bytes: bytesOf, now: deps.now() });
+    const report = await verifyOriginal({
+      log: `${candidate.join('\n')}\n`, authors: identities, bytes: bytesOf, now: deps.now(),
+      ...(parents.length > 0 ? { parents: parents.map((p) => ({ did: p.did, log: p.log })) } : {}),
+    });
     const ok =
       report.history.status === 'valid' && report.history.entries === candidate.length &&
+      (report.parentAuthority === null || report.parentAuthority.status === 'verified') &&
       report.authorBinding.status === 'valid' && report.identityEvidence.status === 'complete' &&
       report.head === s.parsed.versionId &&
       report.resources.versions.filter((v) => v.versionId === s.parsed.versionId).every((v) => v.bytes === 'verified');
@@ -607,6 +745,10 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     for (const [digest, bytes] of newBytes) {
       store.saveBytes(owner, `${siteKey}/originals/resources/${digest}`, bytes, signedMediaType(s.entry, digest) ?? 'application/octet-stream');
     }
+    // A parent log only grows here, as a signer DID log does: it replaces the held one only when it extends it.
+    for (const p of parents) {
+      if (p.write) store.saveBytes(owner, p.key, encoder.encode(p.log), 'application/jsonl');
+    }
     for (const identity of keepIdentities) {
       const base = `${siteKey}/originals/${signerPath(identity.did)}`;
       store.saveBytes(owner, `${base}/did.jsonl`, encoder.encode(identity.log), 'application/jsonl');
@@ -614,7 +756,7 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     }
     store.saveBytes(owner, assetKey, encoder.encode(`${candidate.join('\n')}\n`), 'application/jsonl');
     // The log write was the commit point: from here the save is accepted (C6).
-    tryWriteManifest(owner, siteKey, s.original, s.parsed.versionId, report, candidate);
+    tryWriteManifest(owner, siteKey, s.original, s.parsed.versionId, report, signedLines);
     return { http: 200, body: { status: 'accepted', checkpoint: s.parsed.versionId, head: s.parsed.versionId } };
   }
 

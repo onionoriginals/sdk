@@ -94,7 +94,7 @@ import {
 import { didWebvhFilesUrl, didWebvhLogUrl, parseDidWebvh } from "@originals/vh/webvh";
 import { inscriptionMetadata } from "./inscription.js";
 import { isLocalCopy } from "./local-copy.js";
-import { MANIFEST, parentDidOf, signerPath, readEvidence, readEvidenceFiles, readManifest, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
+import { MANIFEST, parentDidOf, parentPath, signerPath, readEvidence, readEvidenceFiles, readManifest, writeEvidence, type EvidenceContents, type EvidenceManifest, type MissingItem } from "./evidence.js";
 import { HOSTED_PREFIX, assertHostable, type HostedFetch, type RetrievalLimits } from "./hosting.js";
 import { Retrieval, retrievalPlan } from "./retrieval.js";
 import { describeEntry, summarize, type EntrySummary, type OriginalsSigner } from "./signer.js";
@@ -2037,8 +2037,20 @@ export class OriginalsSDK {
     await this.store.putPending(did, { parent: candidate.parent, entry: candidate.line });
     // The host takes resource versions only: a preview is not one (P9.30), and it stays with this store.
     const versions = new Set((candidate.entry.state as unknown as EntryState).transitions.map((t) => t.to));
+    const withEntry = committed ? stored : `${stored.trimEnd()}\n${candidate.line}\n`;
+    const identities: AuthorDidEvidence[] = await this.authorEvidence(withEntry);
+    // P5.25, P7.1: a child's entry is checked against its parent's log through the highest pin, with
+    // the parent's signers, so the host gets them as a package would carry them. A parent this store
+    // does not hold is not sent; the host then refuses the entry as incomplete, never accepts it.
+    const { parents } = await this.parentEvidence(withEntry, identities, []);
     const answer = checkAnswer(
-      await host.submit({ original: did, entry: candidate.line, resources: Object.fromEntries([...candidate.bytes].filter(([digest]) => versions.has(digest))), identities: await this.authorEvidence(stored ? `${stored.trimEnd()}\n${candidate.line}` : candidate.line) }),
+      await host.submit({
+        original: did,
+        entry: candidate.line,
+        resources: Object.fromEntries([...candidate.bytes].filter(([digest]) => versions.has(digest))),
+        identities,
+        ...(parents.length > 0 ? { parents } : {}),
+      }),
       did,
     );
     if (answer.status === "stale-parent") {
@@ -2177,33 +2189,7 @@ export class OriginalsSDK {
     }
     // P5.25, P7.1: a child's parent Original through the highest pin the packaged entries name, and
     // its own parent through the highest pin of that, with their signers; one not held is missing.
-    const parents: Array<{ did: string; log: string }> = [];
-    for (let did = parentDidOf(prefix), pin = lastPin(prefix); did !== undefined && pin !== undefined && parents.length < ORIGINALS_LIMITS.parents;) {
-      let held: string | undefined;
-      try {
-        held = (await this.store.get(did))?.log;
-      } catch (error) {
-        if (!(error instanceof OriginalsError)) throw error;
-      }
-      const at = held ? versionIds(held).indexOf(pin) : -1;
-      if (!held || at < 0) {
-        missing.push({ kind: "parent", did, versionId: pin });
-        break;
-      }
-      const through = `${lines(held).slice(0, at + 1).join("\n")}\n`;
-      parents.push({ did, log: through });
-      for (const a of await this.authorEvidence(through)) {
-        if (a.log !== undefined && !authors.some((b) => b.did === a.did)) authors.push({ did: a.did, log: a.log, ...(a.witness !== undefined ? { witness: a.witness } : {}) });
-      }
-      for (const [signer, role] of signerRolesOf(through)) {
-        if (signer.startsWith("did:btco:") || authors.some((a) => a.did === signer) || missing.some((m) => m.kind === "identity" && m.did === signer)) continue;
-        missing.push({ kind: "identity", did: signer, role });
-      }
-      const next = parentDidOf(through);
-      if (next === did) break;
-      did = next;
-      pin = lastPin(through);
-    }
+    const { parents } = await this.parentEvidence(prefix, authors, missing);
     const bytes: Record<string, Uint8Array> = {};
     // P7.1, P14.10: the objects scope checks read, each held one packaged, any other a missing item (P5.28).
     for (const digest of view.report.scopeObjects.read) {
@@ -2241,6 +2227,44 @@ export class OriginalsSDK {
       missing,
     };
     return { bytes: writeEvidence({ manifest, log: prefix, authors, bytes, ...(parents.length > 0 ? { parents } : {}) }), manifest };
+  }
+
+  /**
+   * P5.25, P7.1, P14.10: the parent Originals a child's `prefix` depends on,
+   * nearest first: each one's held log through the highest pin the entries
+   * before it name, and its own parent through the highest pin of that. Their
+   * signers' histories are added to `authors`, and a parent or signer not held
+   * to `missing`. A package and a shared-host submission carry the same.
+   */
+  private async parentEvidence(prefix: string, authors: Array<{ did: string; log?: string | unknown[]; witness?: unknown }>, missing: MissingItem[]): Promise<{ parents: Array<{ did: string; log: string }> }> {
+    const parents: Array<{ did: string; log: string }> = [];
+    for (let did = parentDidOf(prefix), pin = lastPin(prefix); did !== undefined && pin !== undefined && parents.length < ORIGINALS_LIMITS.parents;) {
+      let held: string | undefined;
+      try {
+        held = (await this.store.get(did))?.log;
+      } catch (error) {
+        if (!(error instanceof OriginalsError)) throw error;
+      }
+      const at = held ? versionIds(held).indexOf(pin) : -1;
+      if (!held || at < 0) {
+        missing.push({ kind: "parent", did, versionId: pin });
+        break;
+      }
+      const through = `${lines(held).slice(0, at + 1).join("\n")}\n`;
+      parents.push({ did, log: through });
+      for (const a of await this.authorEvidence(through)) {
+        if (a.log !== undefined && !authors.some((b) => b.did === a.did)) authors.push({ did: a.did, log: a.log, ...(a.witness !== undefined ? { witness: a.witness } : {}) });
+      }
+      for (const [signer, role] of signerRolesOf(through)) {
+        if (signer.startsWith("did:btco:") || authors.some((a) => a.did === signer) || missing.some((m) => m.kind === "identity" && m.did === signer)) continue;
+        missing.push({ kind: "identity", did: signer, role });
+      }
+      const next = parentDidOf(through);
+      if (next === did) break;
+      did = next;
+      pin = lastPin(through);
+    }
+    return { parents };
   }
 
   /**
@@ -2381,10 +2405,30 @@ export class OriginalsSDK {
     // a log and witness file from up to two locations, then from the latest verified location.
     const identityRequests = identities && this.options.identityFetch ? 6 * plan.authors.filter((did) => did.startsWith("did:webvh:")).length : 0;
     retrieval.plan(planned + identityRequests, files.size + planned);
-    for (const did of plan.authors) {
+    const fetchSigner = async (did: string) => {
       if (await put(`${signerPath(did)}/did.jsonl`, false)) await put(`${signerPath(did)}/did-witness.json`, false);
-    }
+    };
+    for (const did of plan.authors) await fetchSigner(did);
     for (const digest of plan.digests) await put(`resources/${digest}`, false, true);
+    // P5.25, P14.10: a child's parent logs, nearest first, each planned before it is requested, then
+    // their signers not already fetched. A parent the host does not serve is missing evidence.
+    const signers = new Set(plan.authors);
+    for (let did = parentDidOf(log), depth = 0; did !== undefined && depth < ORIGINALS_LIMITS.parents; depth++) {
+      retrieval.plan(1, files.size + 1);
+      const parentBytes = await put(`${parentPath(did)}/did.jsonl`, false);
+      if (!parentBytes) break;
+      const parentLog = text(parentBytes, `${base}${parentPath(did)}/did.jsonl`);
+      const added = retrievalPlan(parentLog).authors.filter((a) => !signers.has(a));
+      const addedIdentityRequests = identities && this.options.identityFetch ? 6 * added.filter((a) => a.startsWith("did:webvh:")).length : 0;
+      retrieval.plan(2 * added.length + addedIdentityRequests, files.size + 2 * added.length);
+      for (const a of added) {
+        signers.add(a);
+        await fetchSigner(a);
+      }
+      const next = parentDidOf(parentLog);
+      if (next === undefined || next === did) break;
+      did = next;
+    }
     return { alias, files };
   }
 

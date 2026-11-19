@@ -10,6 +10,7 @@
  *                                                      unpacked (originals-evidence.json,
  *                                                      asset/did.jsonl,
  *                                                      signers/<64 hex>/did.jsonl|did-witness.json,
+ *                                                      parents/<64 hex>/did.jsonl,
  *                                                      resources/<digest>)
  *
  * PROVISIONAL (P14.10, P14.11; section 14): each signer DID's history is
@@ -25,6 +26,13 @@
  * (P9.7). The host does not verify a log uploaded here; readers do. An
  * uploaded asset log may only extend the stored one, and saves from several
  * signers go through the verifying submit route instead (shared-saves.ts).
+ *
+ * A child Original's parent logs (parents/<hex sha256 of the parent's
+ * did:vh>/did.jsonl, P5.25, P14.10) only grow too: a replacement must keep
+ * every line of the stored log, in order (`parentLogVerdict`), so no upload
+ * rolls back a parent version, and the revocation in it (P5.26), that a save
+ * stored. The host does not verify an uploaded parent log; readers do, and
+ * the submit route verifies the one it uses.
  *
  * A signer's DID log and witness file (signers/<64 hex>/...) only grow: a
  * replacement must extend what is stored (`signerLogVerdict`,
@@ -53,7 +61,7 @@ const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]
 export type HostedKey =
   | { kind: 'identity-log' }
   | { kind: 'alias-log' | 'alias-witness' }
-  | { kind: 'evidence'; contentType: string; signer?: 'log' | 'witness'; signerHex?: string }
+  | { kind: 'evidence'; contentType: string; signer?: 'log' | 'witness'; signerHex?: string; parentHex?: string }
   | { kind: 'resource'; digest: string; assetLogKey: string };
 
 /** Classify `key` for the author whose namespace is `slug`, or null when it is not a hosted file of theirs. */
@@ -74,6 +82,7 @@ export function classifyHostedKey(key: string, slug: string): HostedKey | null {
   if (p.length === 2 && p[0] === 'asset' && p[1] === 'did.jsonl') return jsonl;
   if (p.length === 3 && p[0] === 'signers' && HEX64.test(p[1]) && p[2] === 'did.jsonl') return { ...jsonl, signer: 'log', signerHex: p[1] };
   if (p.length === 3 && p[0] === 'signers' && HEX64.test(p[1]) && p[2] === 'did-witness.json') return { ...json, signer: 'witness', signerHex: p[1] };
+  if (p.length === 3 && p[0] === 'parents' && HEX64.test(p[1]) && p[2] === 'did.jsonl') return { ...jsonl, parentHex: p[1] };
   if (p.length === 2 && p[0] === 'resources' && DIGEST.test(p[1])) {
     return { kind: 'resource', digest: p[1], assetLogKey: [host, ns, name, 'originals', 'asset', 'did.jsonl'].join('/') };
   }
@@ -173,6 +182,23 @@ export async function signerLogVerdict(
   if (storedText === null) return null;
   const kept = (await verifiedSignerLog(did, storedText, witness, now)).ids;
   return kept.every((id, i) => proposed.ids[i] === id) ? null : 'identity_log_not_extending';
+}
+
+/**
+ * Whether `next` may replace the stored parent log in `parents/<hex>` (P5.25,
+ * P14.10): null when it may. Its genesis must name, as its did:vh, the DID
+ * whose directory it is, and it must keep every line of the stored log, in
+ * order: a parent log only grows, so no upload rolls back a parent version
+ * that a save stored (P5.26).
+ */
+export function parentLogVerdict(stored: Uint8Array | null, next: Uint8Array, hex: string): null | 'parent_log_invalid' | 'parent_log_not_extending' {
+  const text = decodeText(next);
+  if (text === null || text.trim() === '' || signerDidOf(text, hex) === null) return 'parent_log_invalid';
+  const storedText = stored ? decodeText(stored) : null;
+  if (storedText === null || storedText.trim() === '') return null;
+  const a = storedText.trimEnd().split('\n');
+  const b = text.trimEnd().split('\n');
+  return a.length <= b.length && a.every((line, i) => line === b[i]) ? null : 'parent_log_not_extending';
 }
 
 /** The witness file the host holds next to a signer DID log, parsed, or undefined. */

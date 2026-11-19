@@ -5,7 +5,9 @@
  * `#files` base without its scheme: `<domain>/<user-slug>/o-<name>`.
  *
  * Wire format (PROVISIONAL): a JSON body
- *   { original, entry, resources: { <digest>: <base64 bytes> }, identities: [{ did, log, witness? }] }
+ *   { original, entry, resources: { <digest>: <base64 bytes> }, identities: [{ did, log, witness? }], parents?: [{ did, log }] }
+ * where `parents`, for a child Original only, carries each parent's log
+ * through the highest pin, nearest first (P5.25, P7.1)
  * and the answers
  *   200 { status: "accepted" | "already-accepted", checkpoint, head }
  *   409 { status: "stale-parent", head }
@@ -23,7 +25,7 @@
  * the alias's public URLs (`OriginalsSDK.retrieveHosted`), and the SDK
  * verifies it before using it.
  */
-import { base64 } from '@scure/base';
+import { encodeSubmission as sdkEncodeSubmission } from '@originals/sdk/originals';
 import type { EvidenceContents, HostAnswer, HostedFetch, OriginalsSDK, SharedHost, Submission } from '@originals/sdk/originals';
 import { didWebvhFilesUrl } from '@originals/vh/webvh';
 
@@ -32,15 +34,11 @@ export function siteKeyOf(aliasDid: string): string {
   return didWebvhFilesUrl(aliasDid).slice('https://'.length).replace(/\/$/, '');
 }
 
-export function encodeSubmission(submission: Submission): string {
-  return JSON.stringify({
-    original: submission.original,
-    entry: submission.entry,
-    resources: Object.fromEntries(Object.entries(submission.resources).map(([digest, bytes]) => [digest, base64.encode(bytes)])),
-    // A did:btco identity has no log to submit: its history is read from Bitcoin (P5.13).
-    identities: submission.identities.flatMap((i) => (i.log === undefined ? [] : [{ did: i.did, log: typeof i.log === 'string' ? i.log : i.log.map((e) => `${JSON.stringify(e)}\n`).join(''), ...(i.witness !== undefined ? { witness: i.witness } : {}) }])),
-  });
-}
+/**
+ * The SDK's own encoder (`@originals/sdk/originals`), so the landing sends
+ * exactly what the host parses, a child Original's `parents` included (P5.25).
+ */
+export const encodeSubmission: (submission: Submission) => string = sdkEncodeSubmission;
 
 /** Sends a submission to the landing's submit route. `DurableHostingStorageAdapter` is one. */
 export interface SubmitTransport {
