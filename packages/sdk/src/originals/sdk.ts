@@ -37,9 +37,15 @@
  *   fetches and verifies the host's new head and has the caller's signer sign
  *   the caller's reconciled change against it; the SDK never merges or signs
  *   on its own.
+ * - Signer sets (plan 050 §1, W1; PROVISIONAL): `create` with `authors:
+ *   {threshold, members}` and every member's signer, and `edit` (or
+ *   `deactivate`, `publish`, `anchor`) with the signer references of an
+ *   author entry and their `signers`. When the signers are not all present,
+ *   `prepare*` makes a draft, `cosign` adds one signer's proof at a time, and
+ *   `commitDraft` commits once every signer the entry names has signed.
  */
 import { OriginalsError } from "@originals/vh";
-import { bytesView, multibaseEncode, snapshotBytes } from "@originals/vh/crypto";
+import { bytesView, multibaseEncode, snapshotBytes, type DataIntegrityProof } from "@originals/vh/crypto";
 import { canonicalize, isJsonObject, parseJson, type JsonObject } from "@originals/vh/json";
 import { serializeLog, utf8Length, vhHash, type LogEntry, type UnsignedEntry } from "@originals/vh/log";
 import {
@@ -52,6 +58,7 @@ import {
   signerLocation,
   verifyAuthorHistory,
   verifyOriginal,
+  authorRefsOf,
   parseBtcoAlias,
   anchoringIndex,
   carriedDisclosure,
@@ -69,6 +76,7 @@ import {
   type AssetState,
   type AuthorDidEvidence,
   type AuthorRef,
+  type AuthorSet,
   type EditorGrant,
   type EditorRef,
   type EntryState,
@@ -164,9 +172,23 @@ export interface CreateInput {
   metadata?: JsonObject;
   /** The Original's one resource (P4.1). */
   resource: ResourceInput;
-  author: AuthorRef;
+  /** The author: give this, or `authors` for a signer set. */
+  author?: AuthorRef;
+  /**
+   * A signer set instead of one author (plan 050 §1, W1; PROVISIONAL): every
+   * member's reference, since every member signs genesis (P5.19), and the
+   * threshold of members that signs each later author entry (P5.20).
+   */
+  authors?: { threshold: number; members: AuthorRef[] };
   /** Editor grants (P5.15; PROVISIONAL member names, D4). */
   editors?: EditorGrant[];
+}
+
+/** Who signs: one signer, or each signer of a set Original's author entry (plan 050 §1). */
+export interface SignersInput {
+  signer?: OriginalsSigner;
+  /** A set Original's author entry: one signer per signer reference, in any order (plan 050, P5.22). */
+  signers?: OriginalsSigner[];
 }
 
 export interface EditInput {
@@ -176,8 +198,17 @@ export interface EditInput {
   metadata?: JsonObject | null;
   /** The resource's next version; omitted keeps the current one (P4.1). Earlier versions stay in history (P8.3). */
   resource?: ResourceChange;
-  /** The author reference: required for an author's edit; an editor's edit carries its parent's (P5.16). */
-  author?: AuthorRef;
+  /**
+   * The author reference: required for an author's edit; an editor's edit
+   * carries its parent's (P5.16). For a set Original, the references of the
+   * members that sign it: at least the parent's threshold (plan 050, P5.20).
+   */
+  author?: AuthorRef | AuthorRef[];
+  /**
+   * Replace the signer set, or introduce one in a single-author Original
+   * (plan 050, P5.20, P5.21): every added member signs. Author only.
+   */
+  authors?: AuthorSet;
   /**
    * Edit as a granted editor (P5.16): the editor DID, its verification method
    * and exact versionId. The signer is the editor's key. The grant in the
@@ -239,6 +270,11 @@ export interface Draft {
   readonly bytes: ReadonlyMap<string, Uint8Array>;
   /** For an entry prepared for Bitcoin: the preview it names, or why none, to tell the author (P9.30). */
   readonly preview?: PreviewReport;
+  /**
+   * The proofs collected so far by `cosign`, in the order they came (plan 050
+   * §1). `commitDraft` orders them by signer once every signer has signed.
+   */
+  readonly proofs?: readonly DataIntegrityProof[];
 }
 
 /** A signed entry verified against its exact parent, not yet history (P6.1). */
@@ -299,9 +335,12 @@ export interface ReconcileInput {
   host: SharedHost;
   /** The refused candidate this reconciles, if any; it is forgotten once the reconciled one is accepted. */
   refused?: string;
-  author: AuthorRef;
+  /** The author reference, or a set Original's signer references (plan 050 §1). */
+  author: AuthorRef | AuthorRef[];
   /** An authorized signer: the SDK never signs on anyone's behalf (P6.8). */
-  signer: OriginalsSigner;
+  signer?: OriginalsSigner;
+  /** A set Original's signers, one per signer reference (plan 050 §1). */
+  signers?: OriginalsSigner[];
   /**
    * The reconciled change, or a function that returns it from the new head
    * and the refused candidate. Required: the SDK never merges (P6.8).
@@ -561,6 +600,70 @@ async function checkedBytes(data: Uint8Array, digest: string): Promise<Uint8Arra
   return (await resourceDigestAsync(copy)) === digest ? copy : undefined;
 }
 
+interface SigningContext {
+  stored: string;
+  parentEntry?: UnsignedEntry;
+  predecessor?: string;
+  afterAnchor: boolean;
+}
+
+/**
+ * P9.17 (originals-spec #53): after the anchoring entry each entry is published in an inscription
+ * of its own, its metadata and the body it plans (P9.30) together at most 350,000 bytes. One that
+ * could never be inscribed would block every later publication, so it is not signed into history.
+ */
+function checkInscribable(e: LogEntry, preview: PreviewReport | undefined): void {
+  const size = inscriptionMetadata([JSON.stringify(e)]).length + plannedBody(e, preview);
+  if (size > ORIGINALS_INSCRIPTION_MAX_BYTES) {
+    sdkError("limit-exceeded", "INSCRIPTION_TOO_LARGE", `entry ${e.versionId} and the resource version it names would be ${size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, { size, limit: ORIGINALS_INSCRIPTION_MAX_BYTES });
+  }
+}
+
+/** The references whose proofs an entry needs, in proof order: its editor, its author, or a set Original's signers (P5.2, P5.16; plan 050, P5.22). */
+function namedSigners(entry: UnsignedEntry): AuthorRef[] {
+  const state = entry.state as unknown as EntryState;
+  return state.editor ? [state.editor] : authorRefsOf(state);
+}
+
+/**
+ * The signers given, with the proofs already collected, are exactly the signers the entry names
+ * (plan 050 §1), checked before anyone is asked to sign: none outside it, none twice, none left out.
+ */
+function checkCoverage(named: AuthorRef[], had: readonly DataIntegrityProof[], signers: OriginalsSigner[]): void {
+  const vms = [...had.map((p) => p.verificationMethod), ...signers.map((s) => s.verificationMethod)];
+  for (const vm of vms) {
+    if (!named.some((r) => r.verificationMethod === vm)) sdkError("invalid-evidence", "SIGNER_NOT_NAMED", `${vm} is not a signer this entry names (plan 050, P5.22)`);
+  }
+  if (new Set(vms).size !== vms.length) sdkError("invalid-evidence", "PROOF_DUPLICATE", "a signer is given twice, or has already signed this draft");
+  const missing = named.filter((r) => !vms.includes(r.verificationMethod));
+  if (missing.length > 0) {
+    const code = signers.length === 0 ? "PROOF_MISSING" : "SIGNER_MISSING";
+    sdkError("unauthorized-key", code, `the entry names ${missing.map((r) => r.did).join(", ")} as signers; ${signers.length === 0 ? "they have not cosigned" : "no signer was given for them"} (plan 050, P5.22)`);
+  }
+}
+
+/** The proofs in the order of the signer references (plan 050, P5.22). */
+function ordered(named: AuthorRef[], proofs: DataIntegrityProof[]): DataIntegrityProof[] {
+  return named.map((r) => proofs.find((p) => p.verificationMethod === r.verificationMethod)!);
+}
+
+/** `signers`, or the one `signer`, or undefined when neither is given (a draft). */
+function signersOf(input: SignersInput): OriginalsSigner | OriginalsSigner[] | undefined {
+  if (input.signers !== undefined && input.signer !== undefined) sdkError("invalid-evidence", "INPUT_INVALID", "give `signer`, or `signers` for a set Original's author entry, not both");
+  if (input.signers !== undefined && !Array.isArray(input.signers)) sdkError("invalid-evidence", "INPUT_INVALID", "`signers` is an array of signers");
+  return input.signers ?? input.signer;
+}
+
+/** A create's signer set (plan 050 §1): the members as signer references and the set they form, or undefined for one author. */
+function signerSetOf(input: CreateInput): { author: AuthorRef[]; authors: AuthorSet } | undefined {
+  if (input.authors === undefined) return undefined;
+  if (input.author !== undefined) sdkError("invalid-evidence", "INPUT_INVALID", "give `author`, or `authors` for a signer set (plan 050), not both");
+  const a = input.authors;
+  if (typeof a !== "object" || a === null || !Array.isArray(a.members)) sdkError("invalid-evidence", "INPUT_INVALID", "authors is {threshold, members}: the members' author references (plan 050)");
+  exactKeys(a, ["threshold", "members"], "authors");
+  return { author: a.members, authors: { threshold: a.threshold, dids: a.members.map((m) => m?.did) } };
+}
+
 function exactKeys(value: object, allowed: string[], where: string): void {
   for (const key of Object.keys(value)) {
     if (!allowed.includes(key)) sdkError("invalid-evidence", "INPUT_INVALID", `${where} has an unknown field ${key}`);
@@ -601,17 +704,27 @@ function serializeLines(logLines: string[]): string {
 
 /** The signer identity DIDs a log names: its author and each editor of an editor entry (P7.1), before verification. */
 function signerDidsOf(log: string): string[] {
-  const dids = new Set<string>();
+  return [...signerRolesOf(log).keys()];
+}
+
+/**
+ * Each signer identity DID a log names, with its role: the author, each signer of a set Original
+ * (plan 050 §1), and each editor of an editor entry (P7.1), before verification. A DID named as an
+ * author anywhere is an author.
+ */
+function signerRolesOf(log: string): Map<string, "author" | "editor"> {
+  const dids = new Map<string, "author" | "editor">();
   for (const line of lines(log)) {
     try {
-      const entry = JSON.parse(line) as { state?: { author?: { did?: unknown }; editor?: { did?: unknown } } };
-      if (typeof entry.state?.author?.did === "string") dids.add(entry.state.author.did);
-      if (typeof entry.state?.editor?.did === "string") dids.add(entry.state.editor.did);
+      const entry = JSON.parse(line) as { state?: { author?: { did?: unknown } | Array<{ did?: unknown }>; editor?: { did?: unknown } } };
+      const author = entry.state?.author;
+      for (const ref of Array.isArray(author) ? author : [author]) if (typeof ref?.did === "string") dids.set(ref.did, "author");
+      if (typeof entry.state?.editor?.did === "string" && !dids.has(entry.state.editor.did)) dids.set(entry.state.editor.did, "editor");
     } catch {
       // Verification reports the malformed line.
     }
   }
-  return [...dids];
+  return dids;
 }
 
 type ChainedEntry = JsonObject & { versionId: string };
@@ -654,12 +767,16 @@ function chainedEntries(log: string): ChainedEntry[] {
  */
 function retrievableIdentities(chained: ChainedEntry[], verified: number): string[] {
   const out = new Set<string>();
-  const author = isJsonObject(chained[0]?.state) && isJsonObject(chained[0].state.author) ? chained[0].state.author.did : undefined;
-  if (typeof author === "string") out.add(author);
+  // The author, or every member of a set Original's genesis set, who all sign it (plan 050, P5.19).
+  const genesis = isJsonObject(chained[0]?.state) ? chained[0].state.author : undefined;
+  for (const author of Array.isArray(genesis) ? genesis : [genesis]) if (isJsonObject(author) && typeof author.did === "string") out.add(author.did);
   for (const entry of chained.slice(0, verified)) {
     const asset = isJsonObject(entry.state) ? entry.state.asset : undefined;
     const editors = isJsonObject(asset) && Array.isArray(asset.editors) ? asset.editors : [];
     for (const grant of editors) if (isJsonObject(grant) && typeof grant.did === "string") out.add(grant.did);
+    // A member a verified entry adds to the signer set (plan 050, P5.20).
+    const set = isJsonObject(asset) && isJsonObject(asset.authors) && Array.isArray(asset.authors.dids) ? asset.authors.dids : [];
+    for (const did of set) if (typeof did === "string") out.add(did);
   }
   return [...out];
 }
@@ -688,7 +805,9 @@ function retrievableIdentities(chained: ChainedEntry[], verified: number): strin
 function identityLocations(chained: ChainedEntry[], did: string, verified: number): string[] {
   const signedBy = (i: number) => {
     const state = chained[i].state;
-    const signer = isJsonObject(state) ? (isJsonObject(state.editor) ? state.editor : state.author) : undefined;
+    // An editor entry is signed by its editor; an author entry by its author, or by each signer of a set Original (plan 050 §1).
+    const author = isJsonObject(state) ? state.author : undefined;
+    const signer = isJsonObject(state) ? (isJsonObject(state.editor) ? state.editor : Array.isArray(author) ? author.find((r) => isJsonObject(r) && r.did === did) : author) : undefined;
     return isJsonObject(signer) && signer.did === did && typeof signer.verificationMethod === "string" ? signerLocation(signer as unknown as AuthorRef) : undefined;
   };
   for (let i = Math.min(verified, chained.length) - 1; i >= 0; i--) {
@@ -1316,7 +1435,8 @@ export class OriginalsSDK {
   }
 
   async prepareCreate(input: CreateInput): Promise<Draft> {
-    exactKeys(input, ["name", "metadata", "resource", "author", "signer", "editors"], "create input");
+    exactKeys(input, ["name", "metadata", "resource", "author", "authors", "signer", "signers", "editors"], "create input");
+    const set = signerSetOf(input);
     const bytes = new Map<string, Uint8Array>();
     const r = input.resource;
     if (typeof r !== "object" || r === null) sdkError("invalid-evidence", "INPUT_INVALID", "an Original has exactly one resource: give `resource` (P4.1)");
@@ -1333,18 +1453,23 @@ export class OriginalsSDK {
     // hashed, sized and kept agree.
     const resource: ResourceDescriptor = { mediaType: r.mediaType, size: (void r.bytes, view.length), digest };
     const entry = prepareCreateOriginal({
-      versionTime: this.versionTime(), name: input.name, ...(input.metadata !== undefined ? { metadata: input.metadata } : {}), resource, author: input.author,
+      versionTime: this.versionTime(), name: input.name, ...(input.metadata !== undefined ? { metadata: input.metadata } : {}), resource,
+      author: set ? set.author : input.author!, ...(set ? { authors: set.authors } : {}),
       ...(input.editors !== undefined ? { editors: input.editors } : {}),
     });
     const summary = summarize(entry);
-    return Promise.resolve({ kind: "draft", signed: false, original: entry.state.id as string, parent: null, entry, summary, display: describeEntry(summary), bytes });
+    return Promise.resolve({ kind: "draft", signed: false, original: entry.state.id as string, parent: null, entry, summary, display: describeEntry(summary), bytes, proofs: [] });
   }
 
-  /** Create an Original, or return an unsigned draft when no signer is given. */
-  async create(input: CreateInput & { signer?: OriginalsSigner }): Promise<{ kind: "draft"; draft: Draft } | { kind: "original"; original: OriginalView }> {
+  /**
+   * Create an Original, or return an unsigned draft when no signer is given.
+   * A set Original's genesis needs every member's signer (plan 050, P5.19).
+   */
+  async create(input: CreateInput & SignersInput): Promise<{ kind: "draft"; draft: Draft } | { kind: "original"; original: OriginalView }> {
     const draft = await this.prepareCreate(input);
-    if (!input.signer) return { kind: "draft", draft };
-    return { kind: "original", original: (await this.commit(draft, input.signer)).original };
+    const signers = signersOf(input);
+    if (!signers) return { kind: "draft", draft };
+    return { kind: "original", original: (await this.commit(draft, signers)).original };
   }
 
   private async parentOf(did: string, parent: string): Promise<{ log: string; head: LogEntry; view: OriginalView }> {
@@ -1360,7 +1485,7 @@ export class OriginalsSDK {
   }
 
   async prepareEdit(did: string, input: EditInput): Promise<Draft> {
-    exactKeys(input, ["parent", "name", "metadata", "resource", "author", "editor", "editors", "signer", "body", "preview"], "edit input");
+    exactKeys(input, ["parent", "name", "metadata", "resource", "author", "authors", "editor", "editors", "signer", "signers", "body", "preview"], "edit input");
     return this.prepareUpdate(did, input);
   }
 
@@ -1395,6 +1520,7 @@ export class OriginalsSDK {
       ...(input.author !== undefined ? { author: input.author } : {}),
       ...(input.editor !== undefined ? { editor: input.editor } : {}),
       ...(input.editors !== undefined ? { editors: input.editors } : {}),
+      ...(input.authors !== undefined ? { authors: input.authors } : {}),
       ...(aliases ? { aliases } : {}),
     });
     // Read once, now, before anything is awaited: the entry holds the caller's objects (C12-02).
@@ -1403,7 +1529,7 @@ export class OriginalsSDK {
     const choice: PreviewChoice = { ...(input.body !== undefined ? { body: input.body } : {}), ...(input.preview !== undefined ? { preview: input.preview } : {}) };
     const chosen = await this.previewEntry(head, entry, bytes, choice, input.editor !== undefined);
     const summary = summarize(chosen.entry, parentState);
-    return { kind: "draft", signed: false, original: did, parent: input.parent, entry: chosen.entry, summary, display: describeEntry(summary), bytes, ...(chosen.report ? { preview: chosen.report } : {}) };
+    return { kind: "draft", signed: false, original: did, parent: input.parent, entry: chosen.entry, summary, display: describeEntry(summary), bytes, ...(chosen.report ? { preview: chosen.report } : {}), proofs: [] };
   }
 
   /**
@@ -1431,7 +1557,7 @@ export class OriginalsSDK {
       ? prepareDeactivateOriginal(head, { versionTime: snapshot.versionTime, author: s.author, preview: null })
       : prepareUpdateOriginal(head, {
           versionTime: snapshot.versionTime, name: s.asset.name, metadata: s.asset.metadata ?? null, resource: s.asset.resource,
-          ...(s.editor ? { editor: s.editor } : { author: s.author, aliases: s.asset.aliases, editors: s.asset.editors ?? null }),
+          ...(s.editor ? { editor: s.editor } : { author: s.author, aliases: s.asset.aliases, editors: s.asset.editors ?? null, ...(s.asset.authors ? { authors: s.asset.authors } : {}) }),
           preview: plan.preview,
         });
     return { entry: rebuilt, report: plan.report };
@@ -1504,29 +1630,29 @@ export class OriginalsSDK {
     return none("not-an-image", `No preview was supplied for this ${what} version, which is not an image: the inscription has no body unless the full version is chosen (P9.30).`);
   }
 
-  async edit(did: string, input: EditInput & { signer: OriginalsSigner }): Promise<CommitResult> {
-    return this.commit(await this.prepareEdit(did, input), input.signer);
+  /** Edit and commit. A set Original's author entry takes one signer per signer reference (plan 050 §1). */
+  async edit(did: string, input: EditInput & SignersInput): Promise<CommitResult> {
+    return this.commit(await this.prepareEdit(did, input), signersOf(input) as OriginalsSigner);
   }
 
-  /** Only the author deactivates (P5.16, P6.5). */
   /**
-   * Only the author deactivates (P5.16, P6.5). For an anchored Original the
-   * deactivation keeps its parent's preview, or with `body: "full"` names none
-   * (P9.30).
+   * Only the author, or a threshold of a set Original's members, deactivates
+   * (P5.16, P6.5; plan 050). For an anchored Original the deactivation keeps
+   * its parent's preview, or with `body: "full"` names none (P9.30).
    */
-  async prepareDeactivate(did: string, input: { parent: string; author: AuthorRef; body?: PreviewChoice["body"] }): Promise<Draft> {
-    exactKeys(input, ["parent", "author", "signer", "body"], "deactivate input");
+  async prepareDeactivate(did: string, input: { parent: string; author: AuthorRef | AuthorRef[]; body?: PreviewChoice["body"] }): Promise<Draft> {
+    exactKeys(input, ["parent", "author", "signer", "signers", "body"], "deactivate input");
     const { head } = await this.parentOf(did, input.parent);
     const bytes = new Map<string, Uint8Array>();
     // Read once, now, before anything is awaited (C12-02).
     const built = parseJson(JSON.stringify(prepareDeactivateOriginal(head, { versionTime: this.versionTime(head.versionTime), author: input.author }))) as unknown as UnsignedEntry;
     const { entry, report } = await this.previewEntry(head, built, bytes, input.body !== undefined ? { body: input.body } : {}, false);
     const summary = summarize(entry, head.state as unknown as EntryState);
-    return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary, display: describeEntry(summary), bytes, ...(report ? { preview: report } : {}) };
+    return { kind: "draft", signed: false, original: did, parent: input.parent, entry, summary, display: describeEntry(summary), bytes, ...(report ? { preview: report } : {}), proofs: [] };
   }
 
-  async deactivate(did: string, input: { parent: string; author: AuthorRef; signer: OriginalsSigner; body?: PreviewChoice["body"] }): Promise<CommitResult> {
-    return this.commit(await this.prepareDeactivate(did, input), input.signer);
+  async deactivate(did: string, input: { parent: string; author: AuthorRef | AuthorRef[]; body?: PreviewChoice["body"] } & SignersInput): Promise<CommitResult> {
+    return this.commit(await this.prepareDeactivate(did, input), signersOf(input) as OriginalsSigner);
   }
 
   /**
@@ -1534,8 +1660,8 @@ export class OriginalsSDK {
    * must already point back to this Original, and it is kept with the store's
    * DID evidence so later reads confirm it.
    */
-  async publish(did: string, input: { parent: string; author: AuthorRef; signer: OriginalsSigner; alias: AliasEvidence }): Promise<CommitResult> {
-    exactKeys(input, ["parent", "author", "signer", "alias"], "publish input");
+  async publish(did: string, input: { parent: string; author: AuthorRef | AuthorRef[]; alias: AliasEvidence } & SignersInput): Promise<CommitResult> {
+    exactKeys(input, ["parent", "author", "signer", "signers", "alias"], "publish input");
     const check = await checkAlias(did, input.alias, input.alias.did, this.clock());
     if (check.status !== "confirmed") {
       sdkError("invalid-evidence", "ALIAS_NOT_CONFIRMED", `${input.alias.did} does not point to ${did}: ${check.reason ?? check.message ?? check.status}`);
@@ -1543,7 +1669,7 @@ export class OriginalsSDK {
     const draft = await this.prepareUpdate(did, { parent: input.parent, author: input.author }, [input.alias.did]);
     assertHostable(await this.stored(did));
     await this.store.putAuthorEvidence(input.alias);
-    return this.commit(draft, input.signer);
+    return this.commit(draft, signersOf(input) as OriginalsSigner);
   }
 
   /**
@@ -1556,8 +1682,8 @@ export class OriginalsSDK {
    * version together would exceed 350,000 bytes is refused before anything
    * is committed (ANCHORING_LOG_TOO_LARGE, P9.17; originals-spec #53).
    */
-  async anchor(did: string, input: { parent: string; author: AuthorRef; signer: OriginalsSigner; sat: string } & PreviewChoice): Promise<CommitResult> {
-    exactKeys(input, ["parent", "author", "signer", "sat", "body", "preview"], "anchor input");
+  async anchor(did: string, input: { parent: string; author: AuthorRef | AuthorRef[]; sat: string } & PreviewChoice & SignersInput): Promise<CommitResult> {
+    exactKeys(input, ["parent", "author", "signer", "signers", "sat", "body", "preview"], "anchor input");
     parseBtcoAlias(input.sat);
     const aliases = (await this.get(did)).state.aliases;
     if (aliases.some((a) => a.startsWith("did:btco:"))) sdkError("invalid-evidence", "ALREADY_ANCHORED", `${did} is already anchored (P9.10)`);
@@ -1567,7 +1693,7 @@ export class OriginalsSDK {
     // The anchoring inscription carries the whole log through the anchoring entry as metadata and
     // the body the entry sets: its preview, or the full version when chosen, or none. Together they
     // must fit: refuse before committing (P9.17).
-    const candidate = await this.sign(draft, input.signer);
+    const candidate = await this.sign(draft, signersOf(input) as OriginalsSigner);
     const carried = [...lines(await this.stored(did)), candidate.line];
     const size = inscriptionMetadata(carried).length + plannedBody(candidate.entry, draft.preview);
     if (size > ORIGINALS_INSCRIPTION_MAX_BYTES) {
@@ -1594,51 +1720,84 @@ export class OriginalsSDK {
     }
   }
 
-  /**
-   * Sign a draft and verify the whole resulting history against its exact
-   * parent, without committing anything (P6.1, P6.4). The result is a
-   * candidate for `submit` to a shared host, or for `commit` locally.
-   */
-  async sign(draft: Draft, signer: OriginalsSigner): Promise<SignedCandidate> {
-    this.requireSigner(signer, draft.original);
-    await this.notRefused(draft.original, draft.entry.versionId);
+  /** The stored log a draft extends, its parent entry for the signer (P5.11), and whether that is after anchoring. */
+  private async signingContext(draft: Draft): Promise<SigningContext> {
     const stored = (await this.store.get(draft.original))?.log ?? "";
     const head = headOf(stored);
     if (head !== draft.parent) throw staleHead(draft.original, draft.parent, head);
-
-    const proofOptions = { type: "DataIntegrityProof" as const, cryptosuite: signer.cryptosuite, verificationMethod: signer.verificationMethod, proofPurpose: "assertionMethod" };
     // The parent entry, so the signer can tell what this entry changes (P5.11).
     const storedLines = lines(stored);
     const parentEntry = storedLines.length > 0 ? (parseJson(storedLines[storedLines.length - 1]) as unknown as UnsignedEntry) : undefined;
     const predecessor = storedLines.length > 1 ? (parseJson(storedLines[storedLines.length - 2]) as { versionId: string }).versionId : undefined;
-    // P9.17 (originals-spec #53): after the anchoring entry each entry is published in an inscription
-    // of its own, its metadata and the resource version it names together at most 350,000 bytes.
-    // One that could never be inscribed would block every later publication, so it is not signed into history.
-    // Checked first with the shortest proof a 64-byte signature encodes to (P5.12), so an author is never
-    // asked to sign an entry that is refused anyway; checked again on the signed entry below.
     const afterAnchor = ((parentEntry?.state as unknown as EntryState | undefined)?.asset?.aliases ?? []).some((a) => a.startsWith("did:btco:"));
-    const checkInscribable = (e: LogEntry) => {
-      const size = inscriptionMetadata([JSON.stringify(e)]).length + plannedBody(e, draft.preview);
-      if (size > ORIGINALS_INSCRIPTION_MAX_BYTES) {
-        sdkError("limit-exceeded", "INSCRIPTION_TOO_LARGE", `entry ${e.versionId} and the resource version it names would be ${size} bytes; an inscription holds at most ${ORIGINALS_INSCRIPTION_MAX_BYTES} (P9.17)`, { size, limit: ORIGINALS_INSCRIPTION_MAX_BYTES });
-      }
-    };
-    const shortest: LogEntry = { ...draft.entry, proof: [{ ...proofOptions, proofValue: multibaseEncode(new Uint8Array(64)) }] };
-    // P14.13: the SDK refuses to sign an entry over the entry limit, measured as its JCS form in UTF-8.
-    // An entry over it even with the shortest proof is refused before the signer is asked; one that a
-    // longer proof takes over is refused after signing, by the verification below, and never committed.
+    return { stored, parentEntry, predecessor, afterAnchor };
+  }
+
+  /**
+   * The size checks before anyone is asked to sign (P14.13, P9.17), with the shortest proof a
+   * 64-byte signature encodes to (P5.12) for every signer the entry names: an entry refused anyway
+   * is never signed. `known` gives the proofs and proof options already settled.
+   */
+  private checkSizeBeforeSigning(draft: Draft, context: SigningContext, known: Array<{ type: "DataIntegrityProof"; cryptosuite: string; verificationMethod: string; proofPurpose: string; proofValue?: string }>): void {
+    const shortest: LogEntry = { ...draft.entry, proof: known.map((p): DataIntegrityProof => ({ ...p, proofValue: p.proofValue ?? multibaseEncode(new Uint8Array(64)) })) };
     const size = utf8Length(canonicalize(shortest as unknown as JsonObject));
     if (size > ORIGINALS_LIMITS.entryBytes) {
       sdkError("limit-exceeded", "ENTRY_TOO_LARGE", `entry ${draft.entry.versionId} would be at least ${size} bytes as its JCS form; an entry holds at most ${ORIGINALS_LIMITS.entryBytes} (P14.13)`, { size, limit: ORIGINALS_LIMITS.entryBytes });
     }
-    if (afterAnchor) checkInscribable(shortest);
+    if (context.afterAnchor) checkInscribable(shortest, draft.preview);
+  }
+
+  /** Ask one signer for its signature over the draft's entry, showing it the entry as itself (P5.11). */
+  private async requestProof(draft: Draft, signer: OriginalsSigner, context: SigningContext, summary: EntrySummary, display: string): Promise<DataIntegrityProof> {
+    const proofOptions = { type: "DataIntegrityProof" as const, cryptosuite: signer.cryptosuite, verificationMethod: signer.verificationMethod, proofPurpose: "assertionMethod" };
     const signature = await signer.sign({
-      entry: draft.entry, proofOptions, summary: draft.summary, display: draft.display ?? describeEntry(draft.summary),
-      ...(parentEntry ? { parent: { entry: parentEntry, ...(predecessor ? { predecessor } : {}) } } : {}),
+      entry: draft.entry, proofOptions, summary, display,
+      ...(context.parentEntry ? { parent: { entry: context.parentEntry, ...(context.predecessor ? { predecessor: context.predecessor } : {}) } } : {}),
     });
-    const entry: LogEntry = { ...draft.entry, proof: [{ ...proofOptions, proofValue: multibaseEncode(signature) }] };
-    const candidate = stored + serializeLog([entry]);
-    if (afterAnchor) checkInscribable(entry);
+    return { ...proofOptions, proofValue: multibaseEncode(signature) };
+  }
+
+  /** The summary and display for one signer of a draft: the draft's own when it names one signer. */
+  private shownTo(draft: Draft, signer: OriginalsSigner, context: SigningContext): { summary: EntrySummary; display: string } {
+    if (namedSigners(draft.entry).length === 1) return { summary: draft.summary, display: draft.display ?? describeEntry(draft.summary) };
+    const summary = summarize(draft.entry, context.parentEntry?.state as unknown as EntryState | undefined, signer.verificationMethod);
+    return { summary, display: describeEntry(summary) };
+  }
+
+  /**
+   * Sign a draft and verify the whole resulting history against its exact
+   * parent, without committing anything (P6.1, P6.4). The result is a
+   * candidate for `submit` to a shared host, or for `commit` locally. A set
+   * Original's author entry takes one signer per signer reference not yet
+   * cosigned (plan 050 §1): each is checked against the entry before anyone
+   * is asked to sign, and each is shown the entry as itself (P5.11).
+   */
+  async sign(draft: Draft, signer: OriginalsSigner | OriginalsSigner[]): Promise<SignedCandidate> {
+    const signers = Array.isArray(signer) ? signer : [signer];
+    if (signers.length === 0) this.requireSigner(undefined as never, draft.original);
+    for (const s of signers) this.requireSigner(s, draft.original);
+    await this.notRefused(draft.original, draft.entry.versionId);
+    const context = await this.signingContext(draft);
+    const had = draft.proofs ?? [];
+    const named = namedSigners(draft.entry);
+    // One signer for one named signer, nothing cosigned: exactly as before signer sets.
+    const single = named.length === 1 && signers.length === 1 && had.length === 0;
+    if (!single) checkCoverage(named, had, signers);
+    const options = (s: OriginalsSigner) => ({ type: "DataIntegrityProof" as const, cryptosuite: s.cryptosuite, verificationMethod: s.verificationMethod, proofPurpose: "assertionMethod" });
+    this.checkSizeBeforeSigning(draft, context, single ? [options(signers[0])] : named.map((r) => had.find((p) => p.verificationMethod === r.verificationMethod) ?? options(signers.find((s) => s.verificationMethod === r.verificationMethod)!)));
+    const proofs = [...had];
+    for (const s of signers) {
+      const shown = this.shownTo(draft, s, context);
+      proofs.push(await this.requestProof(draft, s, context, shown.summary, shown.display));
+    }
+    return this.candidate(draft, single ? proofs : ordered(named, proofs), context);
+  }
+
+  /** Verify a signed entry against its exact parent and make it a candidate (P6.1, P6.4). */
+  private async candidate(draft: Draft, proof: DataIntegrityProof[], context: SigningContext): Promise<SignedCandidate> {
+    const entry: LogEntry = { ...draft.entry, proof };
+    const candidate = context.stored + serializeLog([entry]);
+    if (context.afterAnchor) checkInscribable(entry, draft.preview);
 
     const report = await this.verify(candidate, undefined, draft.bytes);
     const added = report.resources.versions.filter((v) => v.versionId === entry.versionId);
@@ -1659,9 +1818,55 @@ export class OriginalsSDK {
     return signed;
   }
 
-  /** Sign, verify and durably commit a draft (P6.1, P6.2, P6.4). */
-  async commit(draft: Draft, signer: OriginalsSigner): Promise<CommitResult> {
+  /**
+   * Add one signer's proof to a draft (plan 050 §1): for a set Original's
+   * author entry whose signers are not all present. The signer must be one the
+   * entry names and has not signed yet; it is shown the entry as itself
+   * (P5.11). Returns a new draft; the one given is unchanged. Nothing is
+   * verified or committed until `commitDraft` (or `finalizeDraft`).
+   */
+  async cosign(draft: Draft, signer: OriginalsSigner): Promise<Draft> {
     this.requireSigner(signer, draft.original);
+    await this.notRefused(draft.original, draft.entry.versionId);
+    const context = await this.signingContext(draft);
+    const had = draft.proofs ?? [];
+    const named = namedSigners(draft.entry);
+    if (!named.some((r) => r.verificationMethod === signer.verificationMethod)) {
+      sdkError("invalid-evidence", "SIGNER_NOT_NAMED", `${signer.verificationMethod} is not a signer this entry names (plan 050, P5.22)`);
+    }
+    if (had.some((p) => p.verificationMethod === signer.verificationMethod)) sdkError("invalid-evidence", "PROOF_DUPLICATE", `${signer.verificationMethod} has already signed this draft`);
+    const options = (vm: string) => ({ type: "DataIntegrityProof" as const, cryptosuite: vm === signer.verificationMethod ? signer.cryptosuite : "eddsa-jcs-2022" as const, verificationMethod: vm, proofPurpose: "assertionMethod" });
+    this.checkSizeBeforeSigning(draft, context, named.map((r) => had.find((p) => p.verificationMethod === r.verificationMethod) ?? options(r.verificationMethod)));
+    const shown = this.shownTo(draft, signer, context);
+    const proof = await this.requestProof(draft, signer, context, shown.summary, shown.display);
+    return { ...draft, proofs: [...had, proof] };
+  }
+
+  /**
+   * The verified candidate of a cosigned draft, once every signer it names has
+   * signed (plan 050 §1), with its proofs ordered by signer; for `submit`.
+   */
+  async finalizeDraft(draft: Draft): Promise<SignedCandidate> {
+    await this.notRefused(draft.original, draft.entry.versionId);
+    const context = await this.signingContext(draft);
+    const named = namedSigners(draft.entry);
+    checkCoverage(named, draft.proofs ?? [], []);
+    return this.candidate(draft, ordered(named, [...(draft.proofs ?? [])]), context);
+  }
+
+  /** Verify and durably commit a cosigned draft once every signer it names has signed (plan 050 §1; P6.1, P6.2, P6.4). */
+  async commitDraft(draft: Draft): Promise<CommitResult> {
+    const stored = (await this.store.get(draft.original))?.log ?? "";
+    if (versionIds(stored).includes(draft.entry.versionId)) {
+      return { status: "duplicate", original: await this.get(draft.original) };
+    }
+    return this.commitCandidate(await this.finalizeDraft(draft));
+  }
+
+  /** Sign, verify and durably commit a draft (P6.1, P6.2, P6.4). */
+  async commit(draft: Draft, signer: OriginalsSigner | OriginalsSigner[]): Promise<CommitResult> {
+    for (const s of Array.isArray(signer) ? signer : [signer]) this.requireSigner(s, draft.original);
+    if (Array.isArray(signer) && signer.length === 0) this.requireSigner(undefined as never, draft.original);
     const stored = (await this.store.get(draft.original))?.log ?? "";
     if (versionIds(stored).includes(draft.entry.versionId)) {
       return { status: "duplicate", original: await this.get(draft.original) };
@@ -1796,11 +2001,12 @@ export class OriginalsSDK {
    * own; a host that diverges from local history is a fork, not a parent.
    */
   async reconcile(did: string, input: ReconcileInput): Promise<SubmitResult> {
-    exactKeys(input, ["host", "refused", "author", "signer", "change"], "reconcile input");
+    exactKeys(input, ["host", "refused", "author", "signer", "signers", "change"], "reconcile input");
+    const signers = signersOf(input);
     if (input.change === undefined || input.change === null) {
       sdkError("invalid-evidence", "RECONCILE_CHANGE_REQUIRED", "reconcile needs the reconciled change; the SDK never merges (P6.8)");
     }
-    this.requireSigner(input.signer, did);
+    for (const s of Array.isArray(signers) ? signers : [signers]) this.requireSigner(s as OriginalsSigner, did);
     const kept = input.refused === undefined ? undefined : (await this.refused(did)).find((r) => r.versionId === input.refused);
     if (input.refused !== undefined && !kept) sdkError("invalid-evidence", "REFUSED_NOT_FOUND", `${input.refused} is not a refused candidate of ${did}`);
     const synced = await this.sync(did, input.host);
@@ -1812,7 +2018,7 @@ export class OriginalsSDK {
     if (typeof change !== "object" || change === null) sdkError("invalid-evidence", "RECONCILE_CHANGE_REQUIRED", "reconcile needs the reconciled change; the SDK never merges (P6.8)");
     exactKeys(change, ["name", "metadata", "resource"], "reconciled change");
     const draft = await this.prepareEdit(did, { ...change, parent: head.checkpoint, author: input.author });
-    const result = await this.submit(await this.sign(draft, input.signer), input.host);
+    const result = await this.submit(await this.sign(draft, signers as OriginalsSigner), input.host);
     // The refused candidate stays, labelled with what carried its change (P6.8).
     if (result.status !== "stale-parent" && kept) {
       const record = (await this.store.getRefused(did)).find((r) => refusedVersionId(r) === kept.versionId);
@@ -1841,10 +2047,13 @@ export class OriginalsSDK {
       .filter((a) => a.log !== undefined)
       .map(({ did, log, witness }) => ({ did, log, ...(witness !== undefined ? { witness } : {}) }));
     const missing: MissingItem[] = [];
-    const editorDids = new Set(signerDidsOf(prefix).filter((d) => d !== (view.report.identityEvidence.author ?? undefined)));
-    for (const did of signerDidsOf(prefix)) {
+    // A set Original has several author DIDs (plan 050 §1); a single-author one names its author.
+    const roles = signerRolesOf(prefix);
+    const single = view.report.identityEvidence.author;
+    for (const did of roles.keys()) {
       if (did.startsWith("did:btco:") || authors.some((a) => a.did === did)) continue;
-      missing.push({ kind: "identity", did, role: editorDids.has(did) ? "editor" : "author" });
+      const role = single !== null ? (did === single ? "author" : "editor") : (roles.get(did) ?? "author");
+      missing.push({ kind: "identity", did, role });
     }
     const bytes: Record<string, Uint8Array> = {};
     const versions = view.report.resources.versions;

@@ -25,7 +25,7 @@
 import { OriginalsError, type ErrorCategory } from "@originals/vh";
 import { canonicalize, isJsonObject, parseJson } from "@originals/vh/json";
 import { utf8Length } from "@originals/vh/log";
-import { ORIGINALS_LIMITS, checkAsset, checkAuthorRef, checkEditorRef } from "@originals/vh/originals";
+import { ORIGINALS_LIMITS, checkAsset, checkAuthorMember, checkEditorRef } from "@originals/vh/originals";
 import { RETRIEVAL_LIMITS, type HostedFetch, type RetrievalLimits } from "./hosting.js";
 import { ZIP_LIMITS, type ZipLimits } from "./zip.js";
 
@@ -54,9 +54,12 @@ export function retrievalPlan(log: string): { authors: string[]; digests: string
       // P7.7; P14.13: an entry is at most this many UTF-8 bytes as its JCS form, however it is written.
       if (utf8Length(canonicalize(entry)) > ORIGINALS_LIMITS.entryBytes) unplannable("limit-exceeded", i, "ENTRY_TOO_LARGE", `entry exceeds ${ORIGINALS_LIMITS.entryBytes} bytes`);
       if (!isJsonObject(entry) || !isJsonObject(entry.state)) unplannable("invalid-evidence", i, "ENTRY_STATE", "an entry is an object with a state object");
-      const author = checkAuthorRef(entry.state.author);
-      if (!DID.test(author.did)) unplannable("invalid-evidence", i, "STATE_AUTHOR", "state.author.did is not a DID");
-      authors.add(author.did);
+      // One author, or each signer of a set Original (plan 050 §1).
+      const author = checkAuthorMember(entry.state.author);
+      for (const ref of Array.isArray(author) ? author : [author]) {
+        if (!DID.test(ref.did)) unplannable("invalid-evidence", i, "STATE_AUTHOR", "state.author.did is not a DID");
+        authors.add(ref.did);
+      }
       // An editor entry's signer DID history is needed too (P7.1).
       if (entry.state.editor !== undefined) {
         const editor = checkEditorRef(entry.state.editor);
@@ -64,7 +67,7 @@ export function retrievalPlan(log: string): { authors: string[]; digests: string
         authors.add(editor.did);
       }
       // One resource per Original: each entry names one version of it (P4.1; originals-spec #53).
-      digests.add(checkAsset(entry.state.asset, author.did).resource.digest);
+      digests.add(checkAsset(entry.state.asset, Array.isArray(author) ? undefined : author.did).resource.digest);
     } catch (error) {
       if (error instanceof OriginalsError && error.code !== "SNAPSHOT_LOG_INVALID") unplannable(error.category, i, error.code, error.message);
       throw error;
