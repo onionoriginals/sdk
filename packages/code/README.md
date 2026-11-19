@@ -21,6 +21,9 @@ unpublished; every name and format in it is PROVISIONAL.
   the chain, checking that commits continue across segments.
 - A **repo Original** lists delegates, per-ref thresholds, each delegate's
   branch and per-path grants.
+- Anyone may publish a **contribution**: their own branch Original for a ref,
+  naming the repo but not listed in it (K14). It is verified and reported on
+  its own, and never votes.
 - The **canonical head** of a ref is computed from threshold agreement across
   delegates' branches, never by timestamp (P2.1), and is reported on its own.
 
@@ -29,6 +32,10 @@ originals-code identity new me.json
 originals-code init    --dir ws --identity me.json --name my-repo   # --private: commit objects need --include-commits
 originals-code mirror  --dir ws --identity me.json --git . --ref refs/heads/main
 originals-code package --dir ws --out repo.zip
+# a contributor: take the bundle, mirror your own branch, package with it
+originals-code import  repo.zip --dir mine
+originals-code mirror  --dir mine --identity bob.json --git ../fork --contribute
+originals-code package --dir mine --out with-contribution.zip
 originals-code verify  repo.zip           # no key, no network
 originals-code serve   repo.zip --port 4180  # browse it, GitHub-style, at http://127.0.0.1:4180/
 ```
@@ -39,6 +46,7 @@ const report = await verifyRepository(bundleBytes);
 report.repo;        // the repo Original: SDK report + code checks
 report.branches;    // per branch: SDK report, code history, content, git trees, commit ids, grants
 report.canonical;   // per ref: agreed | no-quorum | diverged | incomplete | inconsistent
+report.contributions; // contributor branches: verified, never voting
 report.current;     // always false: nothing here is anchored (P7.10)
 ```
 

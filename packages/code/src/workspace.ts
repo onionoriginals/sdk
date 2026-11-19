@@ -14,7 +14,8 @@ import { parseLog, serializeLog, type LogEntry } from "@originals/vh/log";
 import { ORIGINALS_LIMITS, signerOf, type AuthorDidEvidence, type EditorGrant, type EntryState } from "@originals/vh/originals";
 import { OriginalsSDK, keySigner, writeEvidence, type OriginalsStore } from "@originals/sdk/originals";
 import { appendCommits, branchChain, metadataOf, type MirrorCommit } from "./branch.js";
-import { writeBundle } from "./bundle.js";
+import { readBundle, writeBundle } from "./bundle.js";
+import { verifyRepository, type RepositoryReport } from "./verify.js";
 import { REPO_MEDIA_TYPE, decodeRepoDocument, encodeRepoDocument, repoMetadata, type RepoDocument } from "./documents.js";
 import { codeError } from "./errors.js";
 import { covers } from "./grants.js";
@@ -59,6 +60,8 @@ export interface MirrorResult {
   segments: number;
   /** Segments this mirror started, oldest first. */
   newSegments: string[];
+  /** A contributor's own branch (K14, O7): never listed, never votes. */
+  contribution?: boolean;
   /** Set when the branch is new and the signer is not the repo's author, who must list it (K5). */
   needsListing?: boolean;
 }
@@ -207,12 +210,22 @@ export class CodeWorkspace {
     commits?: boolean;
     /** The source is private: commit objects need an explicit `commits: true`. */
     private?: boolean;
+    /**
+     * Mirror as a contributor (K14, plan 049 O7): into the signer's own
+     * branch Original for this ref, `branch` if given (its newest segment),
+     * never listed in the repo document. It names the repo and is verified
+     * as a contribution; it never votes for a canonical head.
+     */
+    contribute?: boolean;
   }): Promise<MirrorResult> {
     const { repo, ref, identity } = input;
     this.addIdentity(identity);
     const repoDoc = await this.repoDocument(repo);
-    const own = repoDoc.document.refs[ref]?.branches[identity.did];
+    const own = input.contribute ? undefined : repoDoc.document.refs[ref]?.branches[identity.did];
     const branch = input.branch ?? own;
+    if (input.contribute && branch && Object.values(repoDoc.document.refs).some((r) => Object.values(r.branches).includes(branch))) {
+      codeError("invalid-evidence", "CONTRIBUTION_LISTED", `${branch} is a delegate's listed branch; a contribution is the contributor's own branch (K14)`);
+    }
     const segments = branch ? await this.segments(branch) : [];
     const log = segments.at(-1) ?? [];
     if (branch && log.length === 0) codeError("incomplete-evidence", "BRANCH_NOT_HELD", `${branch} is not in this workspace`);
@@ -243,6 +256,7 @@ export class CodeWorkspace {
       if (current.length >= this.maxEntries) {
         if (role !== "author") codeError("outside-grant", "SEGMENT_AUTHOR_ONLY", `${currentDid} is full (${this.maxEntries} entries); only the branch's author starts its next segment (K13)`);
         const last = current[current.length - 1];
+        if (!currentDid) return codeError("invalid-evidence", "SEGMENT_PREVIOUS", "a full segment has no did");
         previous = { did: currentDid, versionId: last.versionId };
         prior = { root: stateOf(last).asset.resource.digest, versionTime: last.versionTime };
         current = [];
@@ -282,12 +296,46 @@ export class CodeWorkspace {
       segments: segments.length + created.length,
       newSegments: created,
     };
-    if (currentDid !== branch) {
+    if (input.contribute) {
+      if (role !== "author") codeError("outside-grant", "CONTRIBUTION_NOT_OWN", "a contribution is written by its own author (K14)");
+      result.contribution = true;
+    } else if (currentDid !== branch) {
       const repoAuthor = stateOf((await this.entries(repo))[0]).author.did;
       if (repoAuthor === identity.did) await this.listBranch(repo, identity, { ref, delegate: identity.did, branch: currentDid });
       else result.needsListing = true;
     }
     return result;
+  }
+
+  /**
+   * Take a repo bundle into this workspace (K14: how a contributor starts):
+   * verify it offline first, refuse it unless the repo Original verifies,
+   * then import each Original through the SDK (which verifies it again and
+   * commits it durably, P6.2) and store every object (checked by digest,
+   * P4.3). Returns the repo and the contributions the bundle carried.
+   */
+  async importBundle(bundle: Uint8Array): Promise<{ repo: string; report: RepositoryReport; contributions: string[] }> {
+    const report = await verifyRepository(bundle);
+    if (report.repo.code?.history.status !== "valid" || !report.validAsOf.repo) {
+      codeError("invalid-evidence", "BUNDLE_REPO_INVALID", "the bundle's repo Original does not verify; nothing is imported");
+    }
+    const contents = await readBundle(bundle);
+    for (const p of contents.packages) {
+      const result = report.repo.original === p.original ? report.repo : report.branches.find((b) => b.original === p.original);
+      if (!result?.report?.validAsOf) continue; // only what verified
+      await this.sdk.import(p.bytes, { original: p.original });
+    }
+    for (const [digest, bytes] of contents.objects) await this.objects.put(digest, bytes);
+    return { repo: report.repo.original, report, contributions: report.contributions.map((c) => c.original) };
+  }
+
+  /** Among `branches` (newest segments), the one `author` writes for `ref`, if held (K14). */
+  async findBranch(branches: readonly string[], author: string, ref: string): Promise<string | undefined> {
+    for (const did of branches) {
+      const log = await this.entries(did);
+      if (log.length && stateOf(log[0]).author.did === author && metadataOf(log[0]).ref === ref) return did;
+    }
+    return undefined;
   }
 
   /** Refuse, before signing, a change outside the signer's path grant (K7; as the SDK refuses outside-grant, P5.16). */
@@ -373,12 +421,14 @@ export class CodeWorkspace {
    * branch's evidence package, as `sdk.package` writes them, and every object
    * they reach. Root trees travel in the packages (they are the resources),
    * so the object pack leaves them out. `omitBlobs` leaves out every blob
-   * (a partial bundle: trees and commit objects only).
+   * (a partial bundle: trees and commit objects only). `contributions`
+   * names contributor branches (their newest segments) to carry too (K14).
    */
-  async package(repo: string, options: { omitBlobs?: boolean } = {}): Promise<Uint8Array> {
+  async package(repo: string, options: { omitBlobs?: boolean; contributions?: readonly string[] } = {}): Promise<Uint8Array> {
     const repoPackage = await this.sdk.package(repo);
     const { document } = await this.repoDocument(repo);
-    const listed = [...new Set(Object.values(document.refs).flatMap((r) => Object.values(r.branches)))].sort();
+    // Listed branches, then contributions (K14, O7): each by its newest segment.
+    const listed = [...new Set([...Object.values(document.refs).flatMap((r) => Object.values(r.branches)), ...(options.contributions ?? [])])].sort();
     // Every segment of each listed branch travels with it (K13).
     const branches: string[] = [];
     for (const b of listed) {

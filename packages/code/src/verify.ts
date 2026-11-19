@@ -66,8 +66,11 @@ export interface BranchCodeReport {
    * repo and ref itself (as an alias counts only both ways, P3.6).
    * `superseded`: an earlier segment of a confirmed branch (K13), reached
    * through the listed segment's chain, not listed itself.
+   * `contribution` (K14, O7): a branch naming this repo and ref that the repo
+   * document does not list under any delegate. Anyone may publish one; it is
+   * verified like any branch and never votes for a canonical head.
    */
-  binding: { status: "confirmed" | "superseded" | "not-listed" | "mismatch" | "not-checked"; delegate?: string; reason?: string };
+  binding: { status: "confirmed" | "superseded" | "contribution" | "mismatch" | "not-checked"; delegate?: string; reason?: string };
   /** Content availability, separately (P7.3, P7.4 by analogy): missing objects never fail the history. */
   content: { status: "complete" | "partial" | "digest-failure"; objects: number; bytes: number; missing: string[]; failures: string[] };
   /** git tree ids recomputed from the objects against each entry's claim. A mismatch fails the history. */
@@ -387,7 +390,7 @@ export async function checkBranch(
   // Binding both ways against the repo document at its checkpoint.
   if (context.latest && finalRef && author) {
     const listed = Object.entries(context.latest.refs).flatMap(([r, rule]) => Object.entries(rule.branches).filter(([, b]) => b === original).map(([d]) => ({ ref: r, delegate: d })));
-    if (listed.length === 0) report.binding = { status: "not-listed" };
+    if (listed.length === 0) report.binding = { status: "contribution" };
     else if (listed[0].ref !== finalRef) report.binding = { status: "mismatch", delegate: listed[0].delegate, reason: `listed for ${listed[0].ref}, names ${finalRef}` };
     else if (listed[0].delegate !== author) report.binding = { status: "mismatch", delegate: listed[0].delegate, reason: `listed under ${listed[0].delegate}, authored by ${author}` };
     else report.binding = { status: "confirmed", delegate: author };
@@ -418,9 +421,26 @@ export interface RepositoryReport {
    */
   canonicalStatus: "computed" | "incomplete" | "invalid";
   canonical: CanonicalResult[];
+  /**
+   * Contributor branches (K14, plan 049 O7): branches naming this repo that
+   * the repo document does not list. Each is verified (its Originals report
+   * and code history, in `branches`) and never votes for a canonical head.
+   */
+  contributions: Contribution[];
   /** Each Original the results rely on, as of its checkpoint. Never current: nothing here is anchored (P7.10). */
   validAsOf: { repo: string | null; branches: Array<{ original: string; checkpoint: string }> };
   current: false;
+}
+
+export interface Contribution {
+  /** The contribution's newest segment. */
+  original: string;
+  author: string | null;
+  ref: string | null;
+  /** valid: both reports valid; head is its last commit. Never a vote. */
+  status: "valid" | "invalid" | "incomplete" | "forked";
+  head: string | null;
+  segments: number;
 }
 
 export interface VerifyRepositoryOptions {
@@ -579,13 +599,32 @@ export async function openRepository(bundle: Uint8Array, options: VerifyReposito
     if (r.original === contents.manifest.repo) continue;
     branches.push({ ...r, code: await codeOf(r.original, new Set()) });
   }
-  // Earlier segments of a confirmed branch are reached through it, not listed (K13).
+  // Earlier segments of a branch are reached through its newest segment, not listed (K13).
+  const named = new Set<string>();
+  for (const b of branches) for (const seg of b.code?.segment.segments.slice(0, -1) ?? []) named.add(seg);
   for (const b of branches) {
-    if (b.code?.binding.status !== "confirmed") continue;
-    for (const seg of b.code.segment.segments.slice(0, -1)) {
+    const status = b.code?.binding.status;
+    if (status !== "confirmed" && status !== "contribution") continue;
+    if (status === "contribution" && named.has(b.original)) continue;
+    for (const seg of b.code!.segment.segments.slice(0, -1)) {
       const c = codes.get(seg);
-      if (c && c.binding.status === "not-listed") c.binding = { status: "superseded", delegate: b.code.binding.delegate! };
+      if (c && c.binding.status === "contribution") c.binding = status === "confirmed" ? { status: "superseded", delegate: b.code!.binding.delegate! } : { status: "superseded" };
     }
+  }
+  // K14, O7: contributions, verified and reported on their own; they never vote.
+  const contributions: Contribution[] = [];
+  for (const b of branches) {
+    if (b.code?.binding.status !== "contribution") continue;
+    const c = b.code;
+    const status: Contribution["status"] = b.report?.fork ? "forked" : !b.report?.validAsOf ? "invalid" : c.history.status;
+    contributions.push({
+      original: b.original,
+      author: c.author,
+      ref: c.ref,
+      status,
+      head: status === "valid" && c.chain.length ? c.chain[c.chain.length - 1].commit : null,
+      segments: c.segment.segments.length,
+    });
   }
 
   const canonical: CanonicalResult[] = [];
@@ -612,6 +651,7 @@ export async function openRepository(bundle: Uint8Array, options: VerifyReposito
     branches,
     canonicalStatus: repoUsable && repoCode?.document ? "computed" : repoIncomplete(repoResult.report, repoCode) ? "incomplete" : "invalid",
     canonical,
+    contributions,
     validAsOf: {
       repo: repoUsable ? repoResult.report!.validAsOf!.checkpoint : null,
       branches: branches.filter((b) => b.report?.validAsOf && b.code?.history.status === "valid").map((b) => ({ original: b.original, checkpoint: b.report!.validAsOf!.checkpoint })),

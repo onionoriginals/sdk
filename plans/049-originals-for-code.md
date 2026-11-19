@@ -176,6 +176,19 @@ with the one the entry's metadata claims (`gitBinding` report).
   keys are delegates. Each listed branch Original must name this repo and ref
   in its metadata and be authored by that delegate: the binding counts only in
   both directions (as an alias does, P3.6).
+- **Contributions** (K14, O7, PROVISIONAL): anyone may publish their own
+  branch Original for a ref, with the same metadata (naming this repo, the
+  ref and a repo version), authored by themselves and not listed in the repo
+  document. The verifier checks it like any branch (both reports, segments,
+  trees, commit objects) and reports it under `contributions` with binding
+  `contribution`: verified, **never voting**; canonical heads read only listed
+  branches. A failing contribution is reported and does not fail the repo
+  (`originals-code verify` exits 0 for the repo). A contributor takes a
+  repo bundle into a workspace (`originals-code import`, which verifies it
+  offline first and refuses a bundle whose repo Original fails), mirrors with
+  `--contribute`, and packages: bundles carry the contributions their
+  workspace holds. The second role stays: a trusted contributor writes into a
+  delegate's branch as an editor with a path grant (phase 3).
 - `grants` lists path grants (phase 3). A branch's own author is
   unrestricted in that branch; every other signer of it, another delegate
   included, needs a path grant.
@@ -330,6 +343,7 @@ too; that is open question O3. `push` maps to `mirror` plus a shared-host
 | K11 | A read-only, GitHub-like viewer (`originals-code serve`): server-rendered pages over `openRepository`, showing only verified entries with each result beside the content, separately. Commits are shown by id, signing DID and claimed versionTime; a commit whose id was recomputed from its commit object (K12) also shows its message and git author, as text |
 | K12 | Raw git commit objects mirrored verbatim as objects, named by `metadata.code.commitObject`; public by default, opt-in for a source marked private; `commitBinding` reported separately (O3) |
 | K13 | A branch longer than the entry limit is a chain of segment Originals; a segment genesis names the previous segment's did and last versionId (`metadata.code.previous`); the repo document lists the newest segment; earlier segments are `superseded` (O1) |
+| K14 | Contributor branches: a branch Original naming the repo but not listed is a `contribution`, verified and never voting; bundles carry the contributions a workspace holds; `import` verifies a bundle before taking it in (O7) |
 
 ## 5. Acceptance tests (IDs cited by tests)
 
@@ -357,6 +371,8 @@ too; that is open question O3. `push` maps to `mirror` plus a shared-host
 | CODE-20 | Commit binding failures: a commit object hashing to another id, naming another tree, or with another first parent fails the code history |
 | CODE-21 | Segments: with an injected limit the writer starts new segments, the repo lists the newest, the verifier walks the chain and the canonical head is the whole branch's; an incremental mirror crosses a boundary |
 | CODE-22 | Segment failures: a missing previous segment is incomplete; a closed segment that continues is invalid; a commit gap at a boundary is invalid; only the author starts a segment |
+| CODE-23 | A contributor's own branch: mirrored from an imported bundle, verified and reported as a contribution, ignored by the canonical head, extended later |
+| CODE-24 | Contributions stay outside the vote: no quorum from a contribution; an invalid contribution leaves the head alone; no contribution into a listed branch; a bundle whose repo fails is not imported |
 | CODE-ACC | Mirror `main` of this repository and verify it with no network (script, timings, store size vs. pack) |
 
 ## 6. Phase 4 and the owner's decisions of 2026-11-19
@@ -402,7 +418,7 @@ The owner reviewed this plan in a grilling session on 2026-11-19 and decided:
   deltas: 66.1 MiB for this repository's first-parent history, against git's
   35.7 MiB pack of the same objects (§8). Delta compression inside the pack
   (K8) would close most of the gap without changing any digest.
-- **O7 — decided 2026-11-19: both, by role.** Anyone may publish their own branch Original, which never votes. Trusted contributors become editors of a delegate's branch with path-scoped grants. The original question was: **editor branches for non-delegates.** Today a contributor who is not
+- **O7 — decided 2026-11-19: both, by role; built (K14, CODE-23, CODE-24).** Anyone may publish their own branch Original, which never votes. Trusted contributors become editors of a delegate's branch with path-scoped grants. The original question was: **editor branches for non-delegates.** Today a contributor who is not
   a delegate writes into a delegate's branch as an editor. Radicle instead
   lets anyone publish their own namespace and only counts delegates'. Both
   fit the model; the second needs no editor grant and is closer to Radicle.

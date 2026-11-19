@@ -3,7 +3,7 @@
  *
  *   <root>/originals/     the SDK's FileStore (durable commit, P6.2; one writer per root)
  *   <root>/objects/zQ/m…  objects, deflate-raw compressed (PROVISIONAL, K8)
- *   <root>/workspace.json { format, repo, private? }
+ *   <root>/workspace.json { format, repo, private?, contributions? }
  *   <root>/identities/    public identities (DID logs) of signers, by hex sha256 of the DID
  *
  * An object is written to a temporary file, fsynced and renamed, before any
@@ -111,6 +111,9 @@ export interface DiskWorkspace {
    */
   private: boolean;
   setRepo(repo: string, options?: { private?: boolean }): Promise<void>;
+  /** Contributor branches (their newest segments) this workspace carries in its bundles (K14, O7). */
+  contributions: string[];
+  setContributions(dids: readonly string[]): Promise<void>;
   /** Keep a signer's public identity, so later runs verify its entries. */
   rememberIdentity(identity: LocalIdentity): Promise<void>;
   close(): Promise<void>;
@@ -126,11 +129,13 @@ export async function openWorkspace(root: string, options: { clock?: () => numbe
   const configPath = join(root, "workspace.json");
   let repo: string | undefined;
   let isPrivate = false;
+  let contributions: string[] = [];
   try {
-    const config = JSON.parse(await readFile(configPath, "utf8")) as { format?: string; repo?: string; private?: boolean };
+    const config = JSON.parse(await readFile(configPath, "utf8")) as { format?: string; repo?: string; private?: boolean; contributions?: string[] };
     if (config.format !== WORKSPACE_FORMAT) codeError("unsupported-profile", "WORKSPACE_FORMAT", `${configPath} is not an ${WORKSPACE_FORMAT} file`);
     repo = config.repo;
     isPrivate = config.private === true;
+    contributions = Array.isArray(config.contributions) ? config.contributions.filter((d) => typeof d === "string") : [];
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
   }
@@ -139,15 +144,25 @@ export async function openWorkspace(root: string, options: { clock?: () => numbe
     if (f.endsWith(".json")) identities.push(JSON.parse(await readFile(join(root, "identities", f), "utf8")) as { did: string; log: string });
   }
   const workspace = CodeWorkspace.create({ originals, objects, identities, ...(options.clock ? { clock: options.clock } : {}), ...(options.segmentEntries ? { segmentEntries: options.segmentEntries } : {}) });
+  const save = () =>
+    writeFile(
+      configPath,
+      `${JSON.stringify({ format: WORKSPACE_FORMAT, repo: disk.repo, ...(disk.private ? { private: true } : {}), ...(disk.contributions.length ? { contributions: disk.contributions } : {}) }, null, 2)}\n`,
+    );
   const disk: DiskWorkspace = {
     workspace,
     objects,
     repo,
     private: isPrivate,
+    contributions,
     async setRepo(next: string, options: { private?: boolean } = {}) {
       disk.repo = next;
       if (options.private !== undefined) disk.private = options.private;
-      await writeFile(configPath, `${JSON.stringify({ format: WORKSPACE_FORMAT, repo: next, ...(disk.private ? { private: true } : {}) }, null, 2)}\n`);
+      await save();
+    },
+    async setContributions(dids: readonly string[]) {
+      disk.contributions = [...new Set(dids)].sort();
+      await save();
     },
     async rememberIdentity(identity: LocalIdentity) {
       const pub = publicIdentity(identity);
