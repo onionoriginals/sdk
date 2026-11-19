@@ -193,6 +193,35 @@ with the one the entry's metadata claims (`gitBinding` report).
   unrestricted in that branch; every other signer of it, another delegate
   included, needs a path grant.
 
+### 1.4 Release Original (K15, PROVISIONAL; owner decision 2026-11-19)
+
+- The repo document gains an optional `releases` member: the release
+  Original's did:vh. The repo's author creates it with the first release and
+  names it (plan 050 W1 later makes its author the delegate set, signing by
+  threshold).
+- `metadata.code`: exactly `{ "profile", "kind": "releases", "repo" }`.
+- Each entry names one release. Its resource is a small JSON release
+  manifest (JCS bytes, media type
+  `application/vnd.originals.code-release+json`):
+  `{ "format": "originals-code-release/0.1", "tag", "ref", "commit", "branch", "versionId", "canonical": { "status", "head", "threshold", "votes" } }`.
+  `branch` and `versionId` name the branch Original (any segment, K13) and
+  the entry naming the commit; `canonical` records the canonical result the
+  releaser's own offline verification gave at the time, as a claim.
+- Writer (`originals-code release <tag>`): signed by the repo's author; the
+  commit is the agreed canonical head unless `--commit` names another, which
+  must be in a listed, verified branch's chain; a tag is released once.
+- Verifier (`report.releases`, its own result): the release Original's
+  Originals report unchanged (anchored or not), its author the repo's author,
+  bound both ways, tags not repeated, and each release's commit at the named
+  entry of the named branch's chain (`RELEASE_NOT_IN_CHAIN` is invalid). A
+  branch missing from the evidence leaves the release `branch-missing` and
+  the release history incomplete, never a pass.
+- Anchoring uses the SDK's own flow (`sdk.anchor`,
+  `prepareEntryInscription`, `submitEntryInscription`, `readAnchored`). Only
+  the release Original (and later the repo Original) is anchored; branch
+  Originals stay unanchored. Anchoring a private repo's releases needs a
+  disclosure warning (§6). Tested on disposable regtest only.
+
 ## 2. Verification and reports (section 7: reports stay separate)
 
 `verifyRepository(bundle)` returns, with nothing merged into one verdict:
@@ -344,6 +373,7 @@ too; that is open question O3. `push` maps to `mirror` plus a shared-host
 | K12 | Raw git commit objects mirrored verbatim as objects, named by `metadata.code.commitObject`; public by default, opt-in for a source marked private; `commitBinding` reported separately (O3) |
 | K13 | A branch longer than the entry limit is a chain of segment Originals; a segment genesis names the previous segment's did and last versionId (`metadata.code.previous`); the repo document lists the newest segment; earlier segments are `superseded` (O1) |
 | K14 | Contributor branches: a branch Original naming the repo but not listed is a `contribution`, verified and never voting; bundles carry the contributions a workspace holds; `import` verifies a bundle before taking it in (O7) |
+| K15 | Release Original: named by the repo document (`releases`), authored by the repo's author, one release manifest per entry (tag, ref, commit, branch and entry, canonical result at the time); its commit must be in the named chain |
 
 ## 5. Acceptance tests (IDs cited by tests)
 
@@ -373,6 +403,8 @@ too; that is open question O3. `push` maps to `mirror` plus a shared-host
 | CODE-22 | Segment failures: a missing previous segment is incomplete; a closed segment that continues is invalid; a commit gap at a boundary is invalid; only the author starts a segment |
 | CODE-23 | A contributor's own branch: mirrored from an imported bundle, verified and reported as a contribution, ignored by the canonical head, extended later |
 | CODE-24 | Contributions stay outside the vote: no quorum from a contribution; an invalid contribution leaves the head alone; no contribution into a listed branch; a bundle whose repo fails is not imported |
+| CODE-25 | Releases: created on the first release and named by the repo; later releases, an older commit by name, a release in an earlier segment; only the repo's author; a repeated tag refused; manifests strict JCS |
+| CODE-26 | Release failures: a commit not at the named entry and a repeated tag fail the release history; a missing branch is incomplete. `bun run release:regtest`: anchoring and reinscribing the release Original on disposable regtest |
 | CODE-ACC | Mirror `main` of this repository and verify it with no network (script, timings, store size vs. pack) |
 
 ## 6. Phase 4 and the owner's decisions of 2026-11-19
@@ -383,7 +415,7 @@ The owner reviewed this plan in a grilling session on 2026-11-19 and decided:
 - **The code profile moves onto those mechanisms.** The repo Original becomes a set Original whose members are the delegates. Each branch Original becomes a W2 child of the repo, whose pins replace `metadata.code.repoVersion`. Path grants become W3 `paths` scopes on inherited grants.
 - **Audience:** projects on GitHub first, then a decentralized GitHub, then audit and compliance.
 - **Radicle is a transport only.** A bundle can ride in a Radicle repo as a custom collaborative object. Radicle's delegates and canonical refs are a different claim from Originals verification, and our verifier ignores them (P3.5 by analogy). Radicle identities are did:key, cannot rotate, and are not P5.8 methods. Still to confirm: whether arbitrary custom refs replicate.
-- **Anchoring is optional and for releases only.** The repo Original (governance) and a separate **release Original** are anchored. A release Original's entries name a release (tag, commit, branch entry) and are signed by the repo's delegates by threshold. Branch Originals stay unanchored, because an anchored Original needs an inscription for every later entry.
+- **Anchoring is optional and for releases only** (release Original built: §1.4, K15). The repo Original (governance) and a separate **release Original** are anchored. A release Original's entries name a release (tag, commit, branch entry) and are signed by the repo's delegates by threshold. Branch Originals stay unanchored, because an anchored Original needs an inscription for every later entry.
 - **Reads** are host-enforced and specified separately (the read-authorization spec PR). For code:
   - read access covers the whole repo, and branches inherit it through W2;
   - a bundle holder reads everything in it;
@@ -457,6 +489,18 @@ verify 4.9 s offline walks the chain, 677 commits in the listed segment's
 chain, every git tree and commit id recomputed (the listed segment reports
 its own 177; continuity at both boundaries checked from the commit
 objects), canonical head agreed at `174d3144`, equal to git's.
+
+**K15 (release Original), 2026-11-19**: `bun run release:regtest` on
+disposable regtest (Bitcoin Core 31.1, ord 0.29.0, started in a temporary
+directory and stopped): release v1, `sdk.anchor` and one commit/reveal
+inscription carrying genesis and the anchoring entry; mined, `readAnchored`
+reports the release Original anchored and current with provisional
+ownership of the reveal output. Release v2 is reinscribed on the same sat
+by spending that output: current again at the new head. The repo bundle
+then verifies offline: release history valid, both releases in-chain,
+canonical head agreed; the release Original's offline report is
+`anchoring: unverified` (no Bitcoin read offline), and branches stay
+unanchored (`current: false`). No mainnet or testnet.
 
 The store is about 1.9 times git's pack of the same objects (O6) and about
 0.6 times the whole repository's 114 MiB pack, which also holds every

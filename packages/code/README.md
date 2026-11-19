@@ -24,6 +24,9 @@ unpublished; every name and format in it is PROVISIONAL.
 - Anyone may publish a **contribution**: their own branch Original for a ref,
   naming the repo but not listed in it (K14). It is verified and reported on
   its own, and never votes.
+- A **release Original** named by the repo document records releases: tag,
+  commit, branch entry and the canonical result at the time (K15). It can be
+  anchored on Bitcoin with the SDK's own flow; branches stay unanchored.
 - The **canonical head** of a ref is computed from threshold agreement across
   delegates' branches, never by timestamp (P2.1), and is reported on its own.
 
@@ -36,6 +39,7 @@ originals-code package --dir ws --out repo.zip
 originals-code import  repo.zip --dir mine
 originals-code mirror  --dir mine --identity bob.json --git ../fork --contribute
 originals-code package --dir mine --out with-contribution.zip
+originals-code release v1.0.0 --dir ws --identity me.json   # the repo's author records a release
 originals-code verify  repo.zip           # no key, no network
 originals-code serve   repo.zip --port 4180  # browse it, GitHub-style, at http://127.0.0.1:4180/
 ```
@@ -47,6 +51,7 @@ report.repo;        // the repo Original: SDK report + code checks
 report.branches;    // per branch: SDK report, code history, content, git trees, commit ids, grants
 report.canonical;   // per ref: agreed | no-quorum | diverged | incomplete | inconsistent
 report.contributions; // contributor branches: verified, never voting
+report.releases;    // the release Original: SDK report + each release checked against its branch chain
 report.current;     // always false: nothing here is anchored (P7.10)
 ```
 
@@ -54,3 +59,4 @@ Entry points: `@originals/code` (browser-safe), `@originals/code/fs` (a
 workspace on disk), `@originals/code/git` (reads a git repository).
 
 Acceptance on this repository: `bun run acceptance` (in this package).
+Anchoring a release Original on disposable regtest: `bun run release:regtest`.

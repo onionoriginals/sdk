@@ -31,6 +31,12 @@ export interface RepoDocument {
   delegates: string[];
   refs: Record<string, RefRule>;
   grants: PathGrant[];
+  /**
+   * PROVISIONAL (K15): the release Original's did:vh, once the repo has one.
+   * Its entries each name a release; its author is the repo's author for now
+   * (plan 050 W1 makes it the delegate set later).
+   */
+  releases?: string;
 }
 
 /** The `code` member of a branch Original's metadata (K4). */
@@ -94,7 +100,9 @@ export function checkRef(ref: unknown): string {
 }
 
 function checkRepo(value: unknown): RepoDocument {
-  if (!exactly(value, ["delegates", "format", "grants", "refs"])) codeError("invalid-evidence", "REPO_MEMBERS", "a repo document is exactly { format, delegates, refs, grants }");
+  const members = ["delegates", "format", "grants", "refs"];
+  if (isJsonObject(value) && "releases" in value) members.push("releases");
+  if (!exactly(value, members)) codeError("invalid-evidence", "REPO_MEMBERS", "a repo document is exactly { format, delegates, refs, grants, releases? }");
   if (value.format !== REPO_FORMAT) codeError("unsupported-profile", "REPO_FORMAT", `unsupported repo document format ${JSON.stringify(value.format)}`);
 
   const delegates = value.delegates;
@@ -136,10 +144,14 @@ function checkRepo(value: unknown): RepoDocument {
     grants.push({ did: g.did, paths: paths });
   }
   if (!sorted(grants.map((g) => g.did))) codeError("invalid-evidence", "REPO_GRANTS", "grants name unique DIDs, sorted by DID");
-  return { delegates: delegates as string[], refs, grants };
+  if ("releases" in value && (typeof value.releases !== "string" || !BRANCH_DID.test(value.releases) || seenBranches.has(value.releases))) {
+    codeError("invalid-evidence", "REPO_RELEASES", "releases is the release Original's did:vh, not a branch (K15)");
+  }
+  return { delegates: delegates as string[], refs, grants, ...(typeof value.releases === "string" ? { releases: value.releases } : {}) };
 }
 
-const jcs = (doc: RepoDocument) => canonicalize({ ...doc, format: REPO_FORMAT } as unknown as JsonObject);
+const jcs = (doc: RepoDocument) =>
+  canonicalize({ format: REPO_FORMAT, delegates: doc.delegates, refs: doc.refs, grants: doc.grants, ...(doc.releases !== undefined ? { releases: doc.releases } : {}) } as unknown as JsonObject);
 
 /** The canonical bytes of a repo document (JCS), after checking it. */
 export function encodeRepoDocument(doc: RepoDocument): Uint8Array {
@@ -222,4 +234,96 @@ export function branchMetadata(m: Omit<BranchMetadata, "profile" | "kind">): Jso
       ...(m.previous !== undefined ? { previous: { did: m.previous.did, versionId: m.previous.versionId } } : {}),
     },
   };
+}
+
+/** PROVISIONAL (K15): a release manifest's format and media type, the release Original's resource. */
+export const RELEASE_FORMAT = "originals-code-release/0.1";
+export const RELEASE_MEDIA_TYPE = "application/vnd.originals.code-release+json";
+
+/** One release (K15): what a release Original's entry names, as its resource. */
+export interface ReleaseManifest {
+  /** The tag name, as git's `refs/tags/<tag>`. */
+  tag: string;
+  ref: string;
+  commit: string;
+  /** The branch Original (any segment) whose chain holds the commit, and its entry naming it. */
+  branch: string;
+  versionId: string;
+  /** The canonical head of `ref` when the release was made, as the releaser's verifier reported it. */
+  canonical: { status: string; head: string | null; threshold: number; votes: string[] };
+}
+
+/** A release Original's asset metadata: exactly `{ code: { profile, kind: "releases", repo } }` (K15). */
+export function releasesMetadata(repo: string): JsonObject {
+  return { code: { profile: CODE_PROFILE, kind: "releases", repo } };
+}
+
+export function checkReleasesMetadata(metadata: unknown): { repo: string } {
+  if (!exactly(metadata, ["code"]) || !exactly(metadata.code, ["kind", "profile", "repo"]) || metadata.code.kind !== "releases") {
+    codeError("invalid-evidence", "RELEASES_METADATA", "a release Original's metadata is exactly { code: { profile, kind: \"releases\", repo } }");
+  }
+  if (metadata.code.profile !== CODE_PROFILE) codeError("unsupported-profile", "CODE_PROFILE", `unsupported code profile ${JSON.stringify(metadata.code.profile)}`);
+  if (typeof metadata.code.repo !== "string" || !BRANCH_DID.test(metadata.code.repo)) codeError("invalid-evidence", "RELEASES_METADATA", "metadata.code.repo is the repo Original's did:vh");
+  return { repo: metadata.code.repo };
+}
+
+/** PROVISIONAL: a tag name with git's check-ref-format basics. */
+export function checkTag(tag: unknown): string {
+  const bad = () => codeError("invalid-evidence", "RELEASE_TAG", `${JSON.stringify(tag)} is not a tag name`);
+  if (typeof tag !== "string" || tag.length === 0 || tag.length > 255) return bad();
+  if (!/^[A-Za-z0-9._/+-]+$/.test(tag) || tag.includes("..") || tag.includes("//") || tag.startsWith("/") || tag.endsWith("/") || tag.startsWith("-")) bad();
+  if (tag.split("/").some((s) => s.startsWith(".") || s.endsWith(".lock"))) bad();
+  return tag;
+}
+
+function badRelease(why: string): never {
+  return codeError("invalid-evidence", "RELEASE_MANIFEST", `a release manifest ${why}`);
+}
+
+function checkRelease(value: unknown): ReleaseManifest {
+  const bad = badRelease;
+  if (!exactly(value, ["branch", "canonical", "commit", "format", "ref", "tag", "versionId"])) badRelease("is exactly { format, tag, ref, commit, branch, versionId, canonical }");
+  if (value.format !== RELEASE_FORMAT) codeError("unsupported-profile", "RELEASE_FORMAT", `unsupported release format ${JSON.stringify(value.format)}`);
+  checkTag(value.tag);
+  checkRef(value.ref);
+  if (typeof value.commit !== "string" || !HEX40.test(value.commit)) bad("names a 40-hex commit");
+  if (typeof value.branch !== "string" || !BRANCH_DID.test(value.branch)) bad("names a branch Original's did:vh");
+  if (typeof value.versionId !== "string" || !VERSION_ID.test(value.versionId)) bad("names the branch entry's versionId");
+  const c = value.canonical;
+  if (
+    !exactly(c, ["head", "status", "threshold", "votes"]) ||
+    typeof c.status !== "string" ||
+    !["agreed", "no-quorum", "diverged", "incomplete", "inconsistent"].includes(c.status) ||
+    !(c.head === null || (typeof c.head === "string" && HEX40.test(c.head))) ||
+    typeof c.threshold !== "number" ||
+    !Number.isInteger(c.threshold) ||
+    c.threshold < 1 ||
+    !Array.isArray(c.votes) ||
+    !c.votes.every((v) => typeof v === "string" && DID.test(v)) ||
+    !sorted(c.votes as string[])
+  ) {
+    bad("records the canonical result as { status, head, threshold, votes }");
+  }
+  return value as unknown as ReleaseManifest;
+}
+
+const releaseJcs = (r: ReleaseManifest) =>
+  canonicalize({ format: RELEASE_FORMAT, tag: r.tag, ref: r.ref, commit: r.commit, branch: r.branch, versionId: r.versionId, canonical: { status: r.canonical.status, head: r.canonical.head, threshold: r.canonical.threshold, votes: r.canonical.votes } });
+
+export function encodeReleaseManifest(r: ReleaseManifest): Uint8Array {
+  const text = releaseJcs(r);
+  checkRelease(parseJson(text));
+  return encoder.encode(text);
+}
+
+export function decodeReleaseManifest(bytes: Uint8Array): ReleaseManifest {
+  let text: string;
+  try {
+    text = decoder.decode(bytes);
+  } catch {
+    return codeError("invalid-evidence", "RELEASE_ENCODING", "a release manifest is UTF-8 JSON");
+  }
+  const r = checkRelease(parseJson(text));
+  if (releaseJcs(r) !== text) codeError("invalid-evidence", "RELEASE_NOT_CANONICAL", "a release manifest's bytes must be the JCS form of its content");
+  return r;
 }
