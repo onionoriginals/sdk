@@ -354,12 +354,29 @@ function entriesThrough(log: string, checkpoint: string | null): LogEntry[] {
   return at < 0 ? [] : all.slice(0, at + 1);
 }
 
+/** A verified bundle, opened for reading (the repository viewer). */
+export interface OpenedRepository {
+  report: RepositoryReport;
+  /** Each Original's entries through its verified checkpoint, oldest first; absent when there is none. */
+  entries: Map<string, LogEntry[]>;
+  /** Every object the bundle carries: root trees, trees, blobs and the repo documents. */
+  objects: ObjectSource;
+}
+
 /**
  * Verify a repo bundle offline, with no key and no network (P7.3): each
  * Original through the SDK, unchanged, then the code checks and the
  * canonical heads, each reported separately.
  */
 export async function verifyRepository(bundle: Uint8Array, options: VerifyRepositoryOptions = {}): Promise<RepositoryReport> {
+  return (await openRepository(bundle, options)).report;
+}
+
+/**
+ * {@link verifyRepository}, also returning the verified entries and the
+ * objects, so a reader shows only what the report vouches for.
+ */
+export async function openRepository(bundle: Uint8Array, options: VerifyRepositoryOptions = {}): Promise<OpenedRepository> {
   const contents = await readBundle(bundle, options.limits);
   const now = options.now === undefined ? undefined : typeof options.now === "number" ? options.now : options.now.getTime();
   const store = new MemoryStore();
@@ -404,9 +421,12 @@ export async function verifyRepository(bundle: Uint8Array, options: VerifyReposi
 
   const repoResult = results.get(contents.manifest.repo) ?? { original: contents.manifest.repo, report: null, packages: [], error: { category: "incomplete-evidence", code: "REPO_MISSING", message: "the bundle carries no evidence for its repo Original" } };
   let repoCode: RepoCodeReport | null = null;
+  const verified = new Map<string, LogEntry[]>();
   const repoLog = await logOf(contents.manifest.repo);
   if (repoResult.report?.checkpoint && repoLog) {
-    repoCode = await checkRepo(contents.manifest.repo, entriesThrough(repoLog, repoResult.report.checkpoint), resources);
+    const entries = entriesThrough(repoLog, repoResult.report.checkpoint);
+    verified.set(contents.manifest.repo, entries);
+    repoCode = await checkRepo(contents.manifest.repo, entries, resources);
   }
   const repoUsable = repoResult.report?.validAsOf != null && repoCode?.history.status === "valid";
 
@@ -416,8 +436,10 @@ export async function verifyRepository(bundle: Uint8Array, options: VerifyReposi
     if (r.original === contents.manifest.repo) continue;
     const log = await logOf(r.original);
     let code: BranchCodeReport | null = null;
-    if (r.report?.checkpoint && log && repoCode) {
-      code = await checkBranch(r.original, entriesThrough(log, r.report.checkpoint), { repo: contents.manifest.repo, versions: repoCode.versions, latest: repoCode.document, objects, gitMemo });
+    const entries = r.report?.checkpoint && log ? entriesThrough(log, r.report.checkpoint) : [];
+    if (entries.length) verified.set(r.original, entries);
+    if (entries.length && repoCode) {
+      code = await checkBranch(r.original, entries, { repo: contents.manifest.repo, versions: repoCode.versions, latest: repoCode.document, objects, gitMemo });
     }
     branches.push({ ...r, code });
   }
@@ -439,7 +461,7 @@ export async function verifyRepository(bundle: Uint8Array, options: VerifyReposi
     }
   }
 
-  return {
+  const report: RepositoryReport = {
     profile: "originals-code/0.1",
     manifest: contents.manifest,
     repo: { ...repoResult, code: repoCode },
@@ -452,4 +474,5 @@ export async function verifyRepository(bundle: Uint8Array, options: VerifyReposi
     },
     current: false,
   };
+  return { report, entries: verified, objects: objects.get };
 }

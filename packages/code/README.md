@@ -21,6 +21,7 @@ originals-code init    --dir ws --identity me.json --name my-repo
 originals-code mirror  --dir ws --identity me.json --git . --ref refs/heads/main
 originals-code package --dir ws --out repo.zip
 originals-code verify  repo.zip           # no key, no network
+originals-code serve   repo.zip --port 4180  # browse it, GitHub-style, at http://127.0.0.1:4180/
 ```
 
 ```ts

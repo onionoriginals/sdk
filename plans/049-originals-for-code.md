@@ -290,6 +290,7 @@ too; that is open question O3. `push` maps to `mirror` plus a shared-host
 | K8 | Bundle layout and object pack; deflate-raw per object |
 | K9 | Gitlinks refused; first-parent only; second parents not mirrored |
 | K10 | Local did:vh identities and key files for the CLI (development only) |
+| K11 | A read-only, GitHub-like viewer (`originals-code serve`): server-rendered pages over `openRepository`, showing only verified entries with each result beside the content, separately. Commits are shown by id, signing DID and claimed versionTime, since messages are not mirrored (O3) |
 
 ## 5. Acceptance tests (IDs cited by tests)
 
@@ -312,6 +313,7 @@ too; that is open question O3. `push` maps to `mirror` plus a shared-host
 | CODE-15 | Grant revoked later: historically authorized only, not invalid |
 | CODE-16 | `repoVersion` going backwards is refused |
 | CODE-17 | Bundle reader bounds: oversize object, bad index, inflate bomb |
+| CODE-18 | The viewer: files, README, commits, line diffs, verification page; repository content never rendered as markup; unknown routes 404 |
 | CODE-ACC | Mirror `main` of this repository and verify it with no network (script, timings, store size vs. pack) |
 
 ## 6. Proposed spec change for phase 4: threshold-signed repo identity (STOP for decision)

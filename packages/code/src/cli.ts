@@ -8,17 +8,20 @@
  *   originals-code mirror  --dir <workspace> --identity <file> --git <repo> [--ref refs/heads/main] [--rev <revision>] [--limit <n>]
  *   originals-code package --dir <workspace> --out <bundle.zip> [--omit-blobs]
  *   originals-code verify  <bundle.zip> [--json] [--now <time>]
+ *   originals-code serve   <bundle.zip> [--port 4173] [--host 127.0.0.1] [--now <time>]
  *
  * `verify` needs no key and makes no network request (P7.3). It never
  * reports anything current: nothing here is anchored (P7.10).
  */
 import { readFile, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { OriginalsError } from "./errors.js";
 import { openWorkspace } from "./fs.js";
 import { GitSource } from "./git.js";
 import { createLocalIdentity, parseIdentity, serializeIdentity } from "./identity.js";
-import { verifyRepository, type RepositoryReport } from "./verify.js";
+import { openRepository, verifyRepository, type RepositoryReport } from "./verify.js";
+import { createRepositoryView } from "./view.js";
 
 function flags(args: string[]): { positional: string[]; opts: Record<string, string | true> } {
   const positional: string[] = [];
@@ -130,8 +133,42 @@ async function main(argv: string[]): Promise<number> {
       const ok = report.repo.code?.history.status === "valid" && report.branches.every((b) => b.code?.history.status === "valid" && b.report?.validAsOf);
       return ok ? 0 : 1;
     }
+    case "serve": {
+      // A read-only, GitHub-like view of a verified bundle (K11). Local by default.
+      if (!positional[0]) throw new Error("usage: originals-code serve <bundle.zip> [--port 4173] [--host 127.0.0.1]");
+      const now = typeof opts.now === "string" ? Date.parse(opts.now) : undefined;
+      if (now !== undefined && Number.isNaN(now)) throw new Error("--now is an ISO 8601 time");
+      const started = performance.now();
+      const opened = await openRepository(new Uint8Array(await readFile(positional[0])), now !== undefined ? { now } : {});
+      console.log(summary(opened.report));
+      console.log(`verified in ${((performance.now() - started) / 1000).toFixed(1)} s`);
+      const view = createRepositoryView(opened);
+      const port = typeof opts.port === "string" ? Number(opts.port) : 4173;
+      const host = typeof opts.host === "string" ? opts.host : "127.0.0.1";
+      const server = createServer((req, res) => {
+        if (req.method !== "GET" && req.method !== "HEAD") {
+          res.writeHead(405).end();
+          return;
+        }
+        view.handle(req.url ?? "/").then(
+          (r) => {
+            res.writeHead(r.status, { "content-type": r.type, "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'", "x-content-type-options": "nosniff" });
+            res.end(req.method === "HEAD" ? undefined : r.body);
+          },
+          (e: unknown) => {
+            res.writeHead(500, { "content-type": "text/plain; charset=utf-8" }).end(e instanceof Error ? e.message : String(e));
+          },
+        );
+      });
+      await new Promise<void>((done, fail) => {
+        server.once("error", (e: NodeJS.ErrnoException) => fail(new Error(e.code === "EADDRINUSE" ? `port ${port} is in use; pass --port` : e.message)));
+        server.listen(port, host, done);
+      });
+      console.log(`serving http://${host === "0.0.0.0" ? "localhost" : host}:${port}/  (Ctrl-C to stop)`);
+      return new Promise<number>(() => {});
+    }
     default:
-      console.error("usage: originals-code identity new <file> | init | mirror | package | verify <bundle.zip>");
+      console.error("usage: originals-code identity new <file> | init | mirror | package | verify <bundle.zip> | serve <bundle.zip>");
       return 2;
   }
 }
