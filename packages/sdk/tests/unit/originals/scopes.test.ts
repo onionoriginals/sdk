@@ -63,7 +63,7 @@ describe("C12-412 (P5.28, P5.29): an editor's commit under a paths scope", () =>
     expect(edited.original.report.grants).toEqual([{ versionId: edited.original.checkpoint, editor: dana.did, source: "direct", scope: { type: "paths", status: "checked" } }]);
     const outside = trees({ docs: "guide v2", src: "main v2" });
     for (const [d, b] of outside.objects) await store.putResource(d, b);
-    await rejects(sdk.edit(did, { parent: edited.original.checkpoint, resource: { bytes: outside.root }, editor: dana.ref("orig"), signer: asDana }), "invalid-evidence");
+    await rejects(sdk.edit(did, { parent: edited.original.checkpoint, resource: { bytes: outside.root }, editor: dana.ref("orig"), signer: asDana }), "outside-grant", "SCOPE_OUTSIDE");
     expect((await sdk.get(did)).checkpoint).toBe(edited.original.checkpoint);
   });
 });

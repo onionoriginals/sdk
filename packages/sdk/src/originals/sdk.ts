@@ -68,6 +68,10 @@ import {
   ORIGINALS_INSCRIPTION_MAX_BYTES,
   ORIGINALS_LIMITS,
   isImageMediaType,
+  checkScopeChange,
+  outsideGrant,
+  DEFAULT_SCOPE_VIEWS,
+  type ScopeCheck,
   type Carrier,
   type CarriedDisclosure,
   type CarriedFileReport,
@@ -239,6 +243,31 @@ export interface EditInput {
    * pin. An editor relying on an inherited grant is judged at this pin.
    */
   pin?: string;
+  /**
+   * An editor entry relying on a scoped grant (P5.28) is checked against the
+   * scope before anyone is asked to sign: a change outside it is refused
+   * (`SCOPE_OUTSIDE`, `outside-grant`, naming the paths or operations), and
+   * so is one the SDK cannot check (`SCOPE_UNCHECKED`, `incomplete-evidence`:
+   * an unknown scope type, a media type with no view here, or bytes this
+   * store does not hold). `"allow"` lets an unchecked one be signed anyway.
+   * The SDK still cannot verify the signed entry, so it neither commits nor
+   * submits it: `sign` returns it with `scope.status: "unchecked"`, for a
+   * verifier that holds what the check needs. Never a pass (P5.28).
+   */
+  uncheckedScope?: "refuse" | "allow";
+}
+
+/**
+ * The scope check made before signing an editor entry (P5.28): `checked`, or
+ * `unchecked` when the caller allowed it (`EditInput.uncheckedScope`).
+ */
+export interface ScopeCheckResult {
+  status: "checked" | "unchecked";
+  type: string;
+  source: "direct" | "inherited";
+  /** For an unchecked scope: why, and the objects it lacked. */
+  reason?: Extract<ScopeCheck, { status: "unchecked" }>["reason"];
+  missing?: string[];
 }
 
 /**
@@ -289,6 +318,8 @@ export interface Draft {
    * The proofs collected so far by `cosign`, in the order they came (P5.22). `commitDraft` orders them by signer once every signer has signed.
    */
   readonly proofs?: readonly DataIntegrityProof[];
+  /** `EditInput.uncheckedScope`: an unchecked scope is signed only with `"allow"` (P5.28). */
+  readonly uncheckedScope?: "refuse" | "allow";
 }
 
 /** A signed entry verified against its exact parent, not yet history (P6.1). */
@@ -306,6 +337,12 @@ export interface SignedCandidate {
   readonly bytes: ReadonlyMap<string, Uint8Array>;
   /** For an entry prepared for Bitcoin: the preview it names, or why none (P9.30). */
   readonly preview?: PreviewReport;
+  /**
+   * An editor entry signed with an unchecked scope (`uncheckedScope: "allow"`,
+   * P5.28): this SDK cannot verify it, so it is never committed or submitted
+   * here; its `line` is for a verifier that holds what the check needs.
+   */
+  readonly scope?: ScopeCheckResult;
 }
 
 /**
@@ -606,6 +643,16 @@ function copyBytes(view: Uint8Array, original: Uint8Array): Uint8Array {
  * resource it hashed as; a value that is not a Uint8Array is hashed as given,
  * and refused as it was.
  */
+/**
+ * P5.28, P5.6: an entry signed with an unchecked scope does not verify here, so this SDK never keeps
+ * it as history or sends it as an accepted save; its `line` goes to a verifier that can check it.
+ */
+function uncheckedNotKept(candidate: SignedCandidate, what: "committed" | "submitted"): void {
+  if (candidate.scope?.status === "unchecked") {
+    sdkError("incomplete-evidence", "SCOPE_UNCHECKED", `${candidate.versionId} was signed with its ${candidate.scope.type} scope unchecked (${candidate.scope.reason ?? "unchecked"}); this SDK cannot verify it, so it is not ${what} here (P5.28)`, { ...candidate.scope });
+  }
+}
+
 async function checkedBytes(data: Uint8Array, digest: string): Promise<Uint8Array | undefined> {
   // A Uint8Array of any realm (an iframe's or a `vm` context's too) is copied through its internal
   // slots; a store handing over another realm's buffer gets the same guarantee as any other.
@@ -1601,8 +1648,15 @@ export class OriginalsSDK {
   }
 
   async prepareEdit(did: string, input: EditInput): Promise<Draft> {
-    exactKeys(input, ["parent", "name", "metadata", "resource", "author", "authors", "editor", "editors", "signer", "signers", "body", "preview", "pin"], "edit input");
-    return this.prepareUpdate(did, input);
+    exactKeys(input, ["parent", "name", "metadata", "resource", "author", "authors", "editor", "editors", "signer", "signers", "body", "preview", "pin", "uncheckedScope"], "edit input");
+    if (input.uncheckedScope !== undefined && input.uncheckedScope !== "refuse" && input.uncheckedScope !== "allow") {
+      sdkError("invalid-evidence", "INPUT_INVALID", "uncheckedScope is \"refuse\" or \"allow\" (P5.28)");
+    }
+    const draft = await this.prepareUpdate(did, input);
+    const withChoice: Draft = input.uncheckedScope !== undefined ? { ...draft, uncheckedScope: input.uncheckedScope } : draft;
+    // Refused now, before any signer is involved (P5.28); sign and cosign check again.
+    if (input.editor !== undefined) await this.checkScopeBeforeSigning(withChoice, await this.signingContext(withChoice));
+    return withChoice;
   }
 
   private async prepareUpdate(did: string, input: EditInput, aliases?: string[]): Promise<Draft> {
@@ -1867,6 +1921,80 @@ export class OriginalsSDK {
     if (context.afterAnchor) checkInscribable(shortest, draft.preview);
   }
 
+  /**
+   * P5.28, before anyone is asked to sign: an editor entry that changes the
+   * resource's digest, relying on a scoped grant, must stay within the scope.
+   * The grant is chosen as the verifier chooses it (P5.24): a direct grant
+   * allowing the change first, then the grant inherited at the pin; a grant
+   * without a scope, or an entry keeping the digest, needs no check. Bytes
+   * come from the draft and this store, read until no more are found (a code
+   * tree's subtrees come to light a level at a time). Outside: refused,
+   * naming the paths or operations. Unchecked: refused unless the draft
+   * allows it. Undefined when no check was needed.
+   */
+  private async checkScopeBeforeSigning(draft: Draft, context: SigningContext): Promise<ScopeCheckResult | undefined> {
+    const state = draft.entry.state as unknown as EntryState;
+    const parent = context.parentEntry?.state as unknown as EntryState | undefined;
+    if (!state.editor || !parent || state.asset.resource.digest === parent.asset.resource.digest) return undefined;
+    const editor = state.editor.did;
+    const uses: Array<{ source: "direct" | "inherited"; grant: EditorGrant }> = [];
+    const direct = parent.asset.editors?.find((g) => g.did === editor);
+    if (direct && outsideGrant(direct, state.asset, parent.asset) === null) uses.push({ source: "direct", grant: direct });
+    const pinned = state.asset.parent;
+    if (pinned) {
+      let held: string | undefined;
+      try {
+        held = (await this.store.get(pinned.did))?.log;
+      } catch (error) {
+        if (!(error instanceof OriginalsError)) throw error;
+      }
+      const at = held ? versionIds(held).indexOf(pinned.versionId) : -1;
+      const pinState = at >= 0 ? ((parseJson(lines(held!)[at]) as unknown as LogEntry).state as unknown as EntryState) : undefined;
+      const inherited = pinState && pinState.asset.status !== "deactivated" ? pinState.asset.editors?.find((g) => g.did === editor) : undefined;
+      if (inherited && outsideGrant(inherited, state.asset, parent.asset) === null) uses.push({ source: "inherited", grant: inherited });
+    }
+    if (uses.length === 0 || uses.some((u) => !u.grant.scope)) return undefined;
+    const objects = new Map<string, Uint8Array>(draft.bytes);
+    const lookup = (digest: string) => objects.get(digest);
+    const fetchMissing = async (digests: readonly string[]): Promise<boolean> => {
+      let found = false;
+      for (const digest of digests) {
+        if (objects.has(digest)) continue;
+        const data = await this.store.getResource(digest);
+        const checked = data && (await checkedBytes(data, digest));
+        if (checked) {
+          objects.set(digest, checked);
+          found = true;
+        }
+      }
+      return found;
+    };
+    let unchecked: { use: (typeof uses)[number]; result: Extract<ScopeCheck, { status: "unchecked" }> } | undefined;
+    let outside: { use: (typeof uses)[number]; result: Extract<ScopeCheck, { status: "outside" }> } | undefined;
+    for (const use of uses) {
+      const scope = use.grant.scope!;
+      let result = checkScopeChange(scope, parent.asset.resource, state.asset.resource, lookup, DEFAULT_SCOPE_VIEWS);
+      for (let round = 0; round < 64 && result.status === "unchecked" && result.reason === "missing-bytes"; round++) {
+        if (!(await fetchMissing(result.missing ?? []))) break;
+        result = checkScopeChange(scope, parent.asset.resource, state.asset.resource, lookup, DEFAULT_SCOPE_VIEWS);
+      }
+      if (result.status === "checked") return { status: "checked", type: scope.type, source: use.source };
+      if (result.status === "unchecked") unchecked ??= { use, result };
+      else outside ??= { use, result };
+    }
+    if (unchecked) {
+      const { use, result } = unchecked;
+      if (draft.uncheckedScope === "allow") {
+        return { status: "unchecked", type: result.type, source: use.source, reason: result.reason, ...(result.missing ? { missing: result.missing } : {}) };
+      }
+      sdkError("incomplete-evidence", "SCOPE_UNCHECKED", `${editor}'s ${result.type} scope cannot be checked before signing: ${result.message}; nothing was signed (P5.28). Pass uncheckedScope: "allow" to sign it anyway`, {
+        type: result.type, reason: result.reason, missing: result.missing ?? [], source: use.source,
+      });
+    }
+    const { use, result } = outside!;
+    sdkError("outside-grant", "SCOPE_OUTSIDE", `${editor}'s ${result.type} scope does not allow ${result.outside.join(", ")}; nothing was signed (P5.28, P5.29)`, { type: result.type, outside: result.outside, source: use.source });
+  }
+
   /** Ask one signer for its signature over the draft's entry, showing it the entry as itself (P5.11). */
   private async requestProof(draft: Draft, signer: OriginalsSigner, context: SigningContext, summary: EntrySummary, display: string): Promise<DataIntegrityProof> {
     const proofOptions = { type: "DataIntegrityProof" as const, cryptosuite: signer.cryptosuite, verificationMethod: signer.verificationMethod, proofPurpose: "assertionMethod" };
@@ -1905,22 +2033,35 @@ export class OriginalsSDK {
     if (!single) checkCoverage(named, had, signers);
     const options = (s: OriginalsSigner) => ({ type: "DataIntegrityProof" as const, cryptosuite: s.cryptosuite, verificationMethod: s.verificationMethod, proofPurpose: "assertionMethod" });
     this.checkSizeBeforeSigning(draft, context, single ? [options(signers[0])] : named.map((r) => had.find((p) => p.verificationMethod === r.verificationMethod) ?? options(signers.find((s) => s.verificationMethod === r.verificationMethod)!)));
+    const scope = await this.checkScopeBeforeSigning(draft, context);
     const proofs = [...had];
     for (const s of signers) {
       const shown = this.shownTo(draft, s, context);
       proofs.push(await this.requestProof(draft, s, context, shown.summary, shown.display));
     }
-    return this.candidate(draft, single ? proofs : ordered(named, proofs), context);
+    return this.candidate(draft, single ? proofs : ordered(named, proofs), context, scope);
   }
 
   /** Verify a signed entry against its exact parent and make it a candidate (P6.1, P6.4). */
-  private async candidate(draft: Draft, proof: DataIntegrityProof[], context: SigningContext): Promise<SignedCandidate> {
+  private async candidate(draft: Draft, proof: DataIntegrityProof[], context: SigningContext, scope?: ScopeCheckResult): Promise<SignedCandidate> {
     const entry: LogEntry = { ...draft.entry, proof };
     const candidate = context.stored + serializeLog([entry]);
     if (context.afterAnchor) checkInscribable(entry, draft.preview);
 
     const report = await this.verify(candidate, undefined, draft.bytes);
     const added = report.resources.versions.filter((v) => v.versionId === entry.versionId);
+    // Signed with an unchecked scope the caller allowed (P5.28): incomplete at this entry only, every
+    // earlier one verified. Kept as a candidate for a verifier that can check it; never committed here.
+    const failure = report.history.failure;
+    if (
+      scope?.status === "unchecked" && report.history.status === "incomplete" && failure?.code === "SCOPE_UNCHECKED" &&
+      failure.versionId === entry.versionId && report.history.entries === lines(candidate).length - 1
+    ) {
+      return {
+        kind: "candidate", original: draft.original, parent: draft.parent, versionId: entry.versionId, entry, line: JSON.stringify(entry), summary: draft.summary, bytes: draft.bytes,
+        ...(draft.preview ? { preview: draft.preview } : {}), scope,
+      };
+    }
     if (
       report.history.status !== "valid" || report.history.entries !== lines(candidate).length ||
       report.authorBinding.status !== "valid" || report.identityEvidence.status !== "complete" ||
@@ -1957,6 +2098,7 @@ export class OriginalsSDK {
     if (had.some((p) => p.verificationMethod === signer.verificationMethod)) sdkError("invalid-evidence", "PROOF_DUPLICATE", `${signer.verificationMethod} has already signed this draft`);
     const options = (vm: string) => ({ type: "DataIntegrityProof" as const, cryptosuite: vm === signer.verificationMethod ? signer.cryptosuite : "eddsa-jcs-2022" as const, verificationMethod: vm, proofPurpose: "assertionMethod" });
     this.checkSizeBeforeSigning(draft, context, named.map((r) => had.find((p) => p.verificationMethod === r.verificationMethod) ?? options(r.verificationMethod)));
+    await this.checkScopeBeforeSigning(draft, context);
     const shown = this.shownTo(draft, signer, context);
     const proof = await this.requestProof(draft, signer, context, shown.summary, shown.display);
     return { ...draft, proofs: [...had, proof] };
@@ -1971,7 +2113,8 @@ export class OriginalsSDK {
     const context = await this.signingContext(draft);
     const named = namedSigners(draft.entry);
     checkCoverage(named, draft.proofs ?? [], []);
-    return this.candidate(draft, ordered(named, [...(draft.proofs ?? [])]), context);
+    const scope = await this.checkScopeBeforeSigning(draft, context);
+    return this.candidate(draft, ordered(named, [...(draft.proofs ?? [])]), context, scope);
   }
 
   /** Verify and durably commit a cosigned draft once every signer it names has signed (P5.19; P6.1, P6.2, P6.4). */
@@ -1996,6 +2139,7 @@ export class OriginalsSDK {
 
   /** Store a verified candidate's new bytes, then replace the log atomically (P6.2). */
   private async commitCandidate(candidate: SignedCandidate): Promise<CommitResult> {
+    uncheckedNotKept(candidate, "committed");
     await this.notRefused(candidate.original, candidate.versionId);
     const stored = (await this.store.get(candidate.original))?.log ?? "";
     const log = stored + serializeLog([candidate.entry]);
@@ -2024,6 +2168,7 @@ export class OriginalsSDK {
    */
   async submit(candidate: SignedCandidate, host: SharedHost): Promise<SubmitResult> {
     if (candidate?.kind !== "candidate" || typeof candidate.line !== "string") sdkError("invalid-evidence", "INPUT_INVALID", "submit takes a candidate from sign()");
+    uncheckedNotKept(candidate, "submitted");
     const did = candidate.original;
     await this.notRefused(did, candidate.versionId);
     const stored = await this.stored(did);
