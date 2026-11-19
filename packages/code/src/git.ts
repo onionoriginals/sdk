@@ -15,7 +15,7 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child
 import { promisify } from "node:util";
 import type { MirrorCommit } from "./branch.js";
 import { codeError } from "./errors.js";
-import { encodeTree, gitTreeIdOf, objectDigestAsync, type Mode, type Tree } from "./objects.js";
+import { encodeTree, gitCommitId, gitTreeIdOf, objectDigestAsync, parseGitCommit, type Mode, type Tree } from "./objects.js";
 import type { ObjectStore } from "./store.js";
 import type { CommitSource } from "./workspace.js";
 
@@ -112,6 +112,9 @@ function parseGitTree(bytes: Uint8Array): Array<{ mode: string; name: string; id
 
 export interface GitSourceStats {
   commits: number;
+  /** Raw commit objects mirrored (K12) and their bytes. */
+  commitObjects: number;
+  commitBytes: number;
   trees: number;
   blobs: number;
   blobBytes: number;
@@ -124,7 +127,7 @@ export class GitSource implements CommitSource {
   private readonly converted = new Map<string, string>();
   /** For checking converted trees against git: `t:`/`b:` digest → git id. */
   private readonly memo = new Map<string, string>();
-  readonly stats: GitSourceStats = { commits: 0, trees: 0, blobs: 0, blobBytes: 0 };
+  readonly stats: GitSourceStats = { commits: 0, commitObjects: 0, commitBytes: 0, trees: 0, blobs: 0, blobBytes: 0 };
 
   /**
    * `revisions` maps a ref to the git revision to read for it, so a
@@ -145,15 +148,23 @@ export class GitSource implements CommitSource {
     return stdout.split("\n").filter((l) => l.length > 0);
   }
 
-  async convert(commit: string, objects: ObjectStore): Promise<MirrorCommit> {
+  async convert(commit: string, objects: ObjectStore, options: { commitObject?: boolean } = {}): Promise<MirrorCommit> {
     const c = await this.cat.read(commit);
     if (c.type !== "commit") codeError("invalid-evidence", "GIT_NOT_COMMIT", `${commit} is a ${c.type}, not a commit`);
-    const tree = /^tree ([0-9a-f]{40})$/m.exec(Buffer.from(c.bytes).toString("utf8"))?.[1];
-    if (!tree) return codeError("invalid-evidence", "GIT_TREE_PARSE", `commit ${commit} names no tree`);
+    const { tree } = parseGitCommit(c.bytes);
     const digest = await this.tree(tree, objects);
     const bytes = await objects.get(digest);
     this.stats.commits++;
-    return { commit, tree, root: { digest, size: bytes!.length } };
+    const out: MirrorCommit = { commit, tree, root: { digest, size: bytes!.length } };
+    if (options.commitObject) {
+      // K12: the commit object verbatim; its git id must be the commit's own.
+      if (gitCommitId(c.bytes) !== commit) codeError("invalid-evidence", "MIRROR_COMMIT_MISMATCH", `git commit ${commit} does not hash to its own id`);
+      out.object = await objectDigestAsync(c.bytes);
+      await objects.put(out.object, c.bytes);
+      this.stats.commitObjects++;
+      this.stats.commitBytes += c.bytes.length;
+    }
+    return out;
   }
 
   private async tree(id: string, objects: ObjectStore): Promise<string> {

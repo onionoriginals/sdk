@@ -4,8 +4,13 @@
  * repo bundles offline.
  *
  *   originals-code identity new <file>
- *   originals-code init    --dir <workspace> --identity <file> --name <name>
+ *   originals-code init    --dir <workspace> --identity <file> --name <name> [--private]
  *   originals-code mirror  --dir <workspace> --identity <file> --git <repo> [--ref refs/heads/main] [--rev <revision>] [--limit <n>]
+ *                          [--include-commits | --no-commits]
+ *
+ * Raw git commit objects are mirrored by default (K12, plan 049 O3). They
+ * carry author and committer emails, so in a workspace marked `--private`
+ * they are mirrored only with `--include-commits` (P8.2: no confidentiality).
  *   originals-code package --dir <workspace> --out <bundle.zip> [--omit-blobs]
  *   originals-code verify  <bundle.zip> [--json] [--now <time>]
  *   originals-code serve   <bundle.zip> [--port 4173] [--host 127.0.0.1] [--now <time>]
@@ -23,13 +28,15 @@ import { createLocalIdentity, parseIdentity, serializeIdentity } from "./identit
 import { openRepository, verifyRepository, type RepositoryReport } from "./verify.js";
 import { createRepositoryView } from "./view.js";
 
+const BOOLEAN_FLAGS = new Set(["--json", "--omit-blobs", "--private", "--include-commits", "--no-commits"]);
+
 function flags(args: string[]): { positional: string[]; opts: Record<string, string | true> } {
   const positional: string[] = [];
   const opts: Record<string, string | true> = {};
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (!a.startsWith("--")) positional.push(a);
-    else if (i + 1 < args.length && !args[i + 1].startsWith("--") && !["--json", "--omit-blobs"].includes(a)) opts[a.slice(2)] = args[++i];
+    else if (i + 1 < args.length && !args[i + 1].startsWith("--") && !BOOLEAN_FLAGS.has(a)) opts[a.slice(2)] = args[++i];
     else opts[a.slice(2)] = true;
   }
   return { positional, opts };
@@ -54,7 +61,9 @@ function summary(r: RepositoryReport): string {
       const c = b.code;
       lines.push(`  code:      ${c.history.status}${c.history.failure ? ` at entry ${c.history.failure.index} (${c.history.failure.code}: ${c.history.failure.message})` : ""}; binding ${c.binding.status}`);
       lines.push(`  content:   ${c.content.status}: ${c.content.objects} objects, ${c.content.bytes} bytes${c.content.missing.length ? `, ${c.content.missing.length} missing` : ""}${c.content.failures.length ? `, ${c.content.failures.length} failed` : ""}`);
-      lines.push(`  git trees: ${c.gitBinding.status} (${c.gitBinding.checked} checked, ${c.gitBinding.unchecked} unchecked); commit ids are claimed by the signer`);
+      lines.push(`  git trees: ${c.gitBinding.status} (${c.gitBinding.checked} checked, ${c.gitBinding.unchecked} unchecked)`);
+      const cb = c.commitBinding;
+      lines.push(`  commits:   ${cb.status} (${cb.checked} recomputed from commit objects, ${cb.unchecked} unchecked, ${cb.claimed} claimed by the signer only)`);
       const outside = c.grants.filter((g) => g.status !== "allowed").length;
       if (c.grants.length) lines.push(`  grants:    ${c.grants.length} editor entries, ${outside} not allowed, ${c.historicallyAuthorizedOnly.length} historically authorized only`);
     }
@@ -85,7 +94,7 @@ async function main(argv: string[]): Promise<number> {
         const identity = parseIdentity(await readFile(need(opts, "identity"), "utf8"));
         await ws.rememberIdentity(identity);
         const repo = await ws.workspace.initRepo({ name: need(opts, "name"), identity });
-        await ws.setRepo(repo);
+        await ws.setRepo(repo, { private: opts.private === true });
         console.log(repo);
       } finally {
         await ws.close();
@@ -101,10 +110,21 @@ async function main(argv: string[]): Promise<number> {
         const identity = parseIdentity(await readFile(need(opts, "identity"), "utf8"));
         await ws.rememberIdentity(identity);
         const started = performance.now();
-        const r = await ws.workspace.mirror({ repo: ws.repo, ref, identity, source, ...(typeof opts.limit === "string" ? { limit: Number(opts.limit) } : {}) });
+        if (opts["include-commits"] === true && opts["no-commits"] === true) throw new Error("--include-commits and --no-commits contradict each other");
+        const commits = opts["include-commits"] === true ? true : opts["no-commits"] === true ? false : undefined;
+        const r = await ws.workspace.mirror({
+          repo: ws.repo,
+          ref,
+          identity,
+          source,
+          private: ws.private,
+          ...(commits !== undefined ? { commits } : {}),
+          ...(typeof opts.limit === "string" ? { limit: Number(opts.limit) } : {}),
+        });
         const s = source.stats;
         console.log(`${r.created ? "created" : "extended"} ${r.branch}: +${r.appended} entries, head ${r.head.commit} (${r.head.versionId})`);
         console.log(`converted ${s.commits} commits, ${s.trees} trees, ${s.blobs} blobs (${s.blobBytes} bytes) in ${((performance.now() - started) / 1000).toFixed(1)} s`);
+        if (r.commitObjects === "omitted-private") console.log("commit objects not mirrored: the workspace is marked private (pass --include-commits to opt in); commit ids are claimed only");
         if (r.needsListing) console.log("the repo's author must list this branch in the repo document");
       } finally {
         source.close();

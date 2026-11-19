@@ -18,6 +18,11 @@ export interface MirrorCommit {
   tree: string;
   /** The root tree object: its digest and size in bytes. */
   root: { digest: string; size: number };
+  /**
+   * The raw git commit object, stored as an object: its digest (K12, O3).
+   * Absent when commit objects are not mirrored.
+   */
+  object?: string;
 }
 
 export interface AppendCommitsInput {
@@ -73,7 +78,7 @@ export async function appendCommits(input: AppendCommitsInput): Promise<LogEntry
     const time = Math.max(clock(), lastTime + 1);
     lastTime = time;
     const versionTime = new Date(time).toISOString();
-    const metadata = branchMetadata({ repo: input.repo, ref: input.ref, commit: c.commit, tree: c.tree, repoVersion: input.repoVersion });
+    const metadata = branchMetadata({ repo: input.repo, ref: input.ref, commit: c.commit, tree: c.tree, repoVersion: input.repoVersion, ...(c.object ? { commitObject: c.object } : {}) });
     const resource = { mediaType: TREE_MEDIA_TYPE, size: c.root.size, digest: c.root.digest };
     await input.check?.(previous ? stateOf(previous).asset.resource.digest : null, c.root.digest);
     const unsigned: UnsignedEntry = previous

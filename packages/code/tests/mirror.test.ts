@@ -111,10 +111,10 @@ describe("CODE-02 dedup across versions", () => {
     const repoDid = await ws.initRepo({ name: "dedup", identity: alice });
     await ws.mirror({ repo: repoDid, ref: "refs/heads/main", identity: alice, source: source(repo) });
     const objects = ws.objects as MemoryObjectStore;
-    // 3 roots + big.txt once + a.txt three times.
-    expect(objects.size).toBe(7);
+    // 3 roots + big.txt once + a.txt three times + 3 commit objects (K12).
+    expect(objects.size).toBe(10);
     const contents = await readBundle(await ws.package(repoDid));
-    expect(contents.manifest.objects.count).toBe(4); // roots travel in the packages
+    expect(contents.manifest.objects.count).toBe(7); // roots travel in the packages
   });
 });
 

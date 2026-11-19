@@ -93,15 +93,27 @@ so a large tree never meets the 65,536-byte entry limit (P7.7).
 
 Because trees mirror git's tree structure and modes exactly, a verifier holding
 the objects can recompute the **git tree SHA-1** of every version and compare it
-with the one the entry's metadata claims (`gitBinding` report). It cannot check
-the commit hash itself (the commit object, its message and parents are not
-mirrored), so the commit hash is reported as **claimed** by the signer.
+with the one the entry's metadata claims (`gitBinding` report).
+
+- **Commit object** (K12, O3, PROVISIONAL): the raw git commit object, byte for
+  byte (`tree`, `parent`s, author, committer, any signature and the message),
+  held as an object like a blob. A verifier holding it recomputes the commit
+  id as git does (SHA-1 of `commit <size>\0` and the bytes), and reads its
+  `tree` and first `parent` lines (`commitBinding` report, §2). Second parents
+  stay named in the object, but their commits are not mirrored (K9). Without a
+  commit object, the commit id is reported as **claimed** by the signer.
 
 ### 1.2 Branch Original (PROVISIONAL)
 
 - `name`: the ref, `refs/heads/<branch>`.
 - `metadata.code`: exactly
-  `{ "profile": "originals-code/0.1", "repo": "<repo did:vh>", "ref": "<ref>", "commit": "<40 hex>", "tree": "<40 hex>", "repoVersion": "<repo versionId>" }`.
+  `{ "profile": "originals-code/0.1", "repo": "<repo did:vh>", "ref": "<ref>", "commit": "<40 hex>", "tree": "<40 hex>", "repoVersion": "<repo versionId>" }`,
+  plus `"commitObject": "z…"` (K12), the digest of the raw commit object, when
+  it is mirrored. Mirroring is public by default: the writer includes commit
+  objects unless the source is marked private, where it needs an explicit
+  opt-in (`commits: true`, CLI `--include-commits`), since a commit object
+  carries author and committer emails and Originals give no confidentiality
+  (P8.2). An entry that repeats its parent's commit repeats its `commitObject`.
   `repoVersion` names the repo Original's version the entry was made under, so
   path grants are judged against a named version, as an entry names its
   author DID version (P5.1, P5.3). It never goes backwards within a branch
@@ -164,6 +176,13 @@ mirrored), so the commit hash is reported as **claimed** by the signer.
     a history failure (P7.3, P7.4 by analogy).
   - `gitBinding`: per entry `matches` · `mismatch` · `unchecked` (objects
     missing). A mismatch fails the code history.
+  - `commitBinding` (K12): for each commit whose entry names a commit object,
+    its SHA-1 must be the entry's commit, its `tree` line the entry's tree, and
+    its first parent the previous entry's commit; a mismatch fails the code
+    history. Status `matches` · `mismatch` · `unchecked` (a commit object is
+    missing; content is then partial) · `claimed` (some commit has no commit
+    object). `base` is the first parent of the branch's first commit (null for
+    a root commit).
   - `grants`: per entry by a non-delegate signer, `allowed` or `outside-grant`
     with the paths outside it; `historicallyAuthorizedOnly` for entries allowed
     by the named repo version but not by the latest (P7.9 by analogy).
@@ -289,7 +308,8 @@ too; that is open question O3. `push` maps to `mirror` plus a shared-host
 | K8 | Bundle layout and object pack; deflate-raw per object |
 | K9 | Gitlinks refused; first-parent only; second parents not mirrored |
 | K10 | Local did:vh identities and key files for the CLI (development only) |
-| K11 | A read-only, GitHub-like viewer (`originals-code serve`): server-rendered pages over `openRepository`, showing only verified entries with each result beside the content, separately. Commits are shown by id, signing DID and claimed versionTime, since messages are not mirrored (O3) |
+| K11 | A read-only, GitHub-like viewer (`originals-code serve`): server-rendered pages over `openRepository`, showing only verified entries with each result beside the content, separately. Commits are shown by id, signing DID and claimed versionTime; a commit whose id was recomputed from its commit object (K12) also shows its message and git author, as text |
+| K12 | Raw git commit objects mirrored verbatim as objects, named by `metadata.code.commitObject`; public by default, opt-in for a source marked private; `commitBinding` reported separately (O3) |
 
 ## 5. Acceptance tests (IDs cited by tests)
 
@@ -313,6 +333,8 @@ too; that is open question O3. `push` maps to `mirror` plus a shared-host
 | CODE-16 | `repoVersion` going backwards is refused |
 | CODE-17 | Bundle reader bounds: oversize object, bad index, inflate bomb |
 | CODE-18 | The viewer: files, README, commits, line diffs, verification page; repository content never rendered as markup; unknown routes 404 |
+| CODE-19 | Commit objects: mirrored by default, the verifier recomputes commit id, tree and first parent (`commitBinding`); a private source needs opt-in; bundles without them verify with ids claimed; a missing one is unchecked |
+| CODE-20 | Commit binding failures: a commit object hashing to another id, naming another tree, or with another first parent fails the code history |
 | CODE-ACC | Mirror `main` of this repository and verify it with no network (script, timings, store size vs. pack) |
 
 ## 6. Phase 4 and the owner's decisions of 2026-11-19
@@ -345,7 +367,7 @@ The owner reviewed this plan in a grilling session on 2026-11-19 and decided:
 - **O2 — git ancestry beyond first parents.** Canonical heads only trust
   signed first-parent chains (K6). Mirroring parents in metadata would make
   ancestry claimed, not checked.
-- **O3 — decided 2026-11-19: mirror commit objects verbatim for public repos.** A private repo needs explicit opt-in, because of author emails (P8.2). The original question was: **commit objects.** Mirroring raw commit objects as blobs would let a
+- **O3 — decided 2026-11-19: mirror commit objects verbatim for public repos; built (K12, CODE-19, CODE-20).** A private repo needs explicit opt-in, because of author emails (P8.2). The original question was: **commit objects.** Mirroring raw commit objects as blobs would let a
   verifier check the commit hash and let a remote helper rebuild identical
   commits; it exposes author emails (P8.2: no confidentiality).
 - **O4 — Originals verification cost.** `verifyOriginal` hashes every
@@ -379,6 +401,15 @@ in `packages/code`, `main` at `e5a3e3d4`; Apple Silicon laptop):
 | git packs | all refs 113.9 MiB; `main` 37.3 MiB; `main` first-parent objects only 35.7 MiB |
 | Bundle | 70.2 MiB, written in 5.5 s |
 | Verify | 4.3 s, offline (0 fetch attempts), no key: repo and branch valid as Originals and under the code profile, content complete, 675 of 675 git tree ids match, canonical head of `refs/heads/main` agreed at `e5a3e3d4`, equal to git's; `current: false` |
+
+**K12 (commit objects, O3), 2026-11-19** (same command, `main` at
+`174d3144`, 1,539 commits, 677 first-parent): 677 raw commit objects
+mirrored (1.4 MiB raw); mirror 20.2 s; store 16,364 objects, 67.3 MiB;
+bundle 71.5 MiB in 11.7 s; verify 4.7 s offline: 677 of 677 git tree ids
+and 677 of 677 **commit ids recomputed from the commit objects**
+(`commitBinding` matches, none claimed), canonical head agreed at
+`174d3144`, equal to git's. Commit objects add about 1.2 MiB to the store
+and bundle.
 
 The store is about 1.9 times git's pack of the same objects (O6) and about
 0.6 times the whole repository's 114 MiB pack, which also holds every

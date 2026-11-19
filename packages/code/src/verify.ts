@@ -13,7 +13,7 @@ import { REPO_MEDIA_TYPE, checkBranchMetadata, checkRepoMetadata, decodeRepoDocu
 import { StructuredError } from "@originals/vh";
 import { OriginalsError } from "./errors.js";
 import { covers } from "./grants.js";
-import { TREE_MEDIA_TYPE, diffTrees, gitTreeIdOf, readTree, type ObjectSource } from "./objects.js";
+import { TREE_MEDIA_TYPE, diffTrees, gitCommitId, gitTreeIdOf, parseGitCommit, readTree, type ObjectSource } from "./objects.js";
 
 export interface CodeFailure {
   index: number;
@@ -70,6 +70,28 @@ export interface BranchCodeReport {
   content: { status: "complete" | "partial" | "digest-failure"; objects: number; bytes: number; missing: string[]; failures: string[] };
   /** git tree ids recomputed from the objects against each entry's claim. A mismatch fails the history. */
   gitBinding: { status: "matches" | "mismatch" | "unchecked"; checked: number; unchecked: number; mismatches: Array<{ versionId: string; claimed: string; computed: string }> };
+  /**
+   * git commit ids recomputed from the mirrored raw commit objects (K12, O3),
+   * reported separately from `gitBinding`. For each commit whose entry names
+   * a commit object: its SHA-1 must be the commit id, its `tree` the entry's
+   * tree and its first parent the previous entry's commit; a mismatch fails
+   * the history. A commit with no commit object is `claimed` by its signer
+   * only; one whose object is missing is `unchecked` (never a pass).
+   * Status: mismatch, else unchecked, else claimed, else matches.
+   */
+  commitBinding: {
+    status: "matches" | "mismatch" | "unchecked" | "claimed";
+    checked: number;
+    unchecked: number;
+    claimed: number;
+    mismatches: Array<{ versionId: string; code: string; claimed: string; computed: string }>;
+    /**
+     * The first parent of the branch's first commit, from its commit object:
+     * null for a root commit, absent when that commit is not checked. History
+     * before it is not in this branch.
+     */
+    base?: string | null;
+  };
   /** Entries by a signer other than the branch's author, checked against path grants (phase 3). */
   grants: GrantCheck[];
   /** Entries allowed by the repo version they name but not by the latest one (P7.9 by analogy). */
@@ -177,6 +199,7 @@ export async function checkBranch(
     binding: { status: "not-checked" },
     content: { status: "complete", objects: 0, bytes: 0, missing: [], failures: [] },
     gitBinding: { status: "matches", checked: 0, unchecked: 0, mismatches: [] },
+    commitBinding: { status: "matches", checked: 0, unchecked: 0, claimed: 0, mismatches: [] },
     grants: [],
     historicallyAuthorizedOnly: [],
     chain: [],
@@ -210,6 +233,33 @@ export async function checkBranch(
     for (const child of Object.values(entriesOf)) await reach(child.digest, child.mode === "40000");
   }
 
+  // K12: the commit id, tree and first parent recomputed from the raw commit object.
+  const cb = report.commitBinding;
+  async function checkCommitObject(versionId: string, m: { commit: string; tree: string; commitObject?: string }, before: string | undefined): Promise<void> {
+    if (!m.commitObject) {
+      cb.claimed++;
+      return;
+    }
+    await reach(m.commitObject, false);
+    const bytes = failedSet.has(m.commitObject) ? undefined : await get(m.commitObject);
+    if (!bytes) {
+      cb.unchecked++;
+      return;
+    }
+    const mismatch = (code: string, claimed: string, computed: string, message: string): never => {
+      cb.mismatches.push({ versionId, code, claimed, computed });
+      throw new Stop("invalid", code, message);
+    };
+    const id = gitCommitId(bytes);
+    if (id !== m.commit) mismatch("GIT_COMMIT_MISMATCH", m.commit, id, `the entry claims commit ${m.commit}; its commit object hashes to ${id}`);
+    const header = parseGitCommit(bytes);
+    if (header.tree !== m.tree) mismatch("COMMIT_TREE_MISMATCH", m.tree, header.tree, `commit ${m.commit} names tree ${header.tree}, the entry ${m.tree}`);
+    const first = header.parents[0] ?? null;
+    if (before === undefined) cb.base = first;
+    else if (first !== before) mismatch("COMMIT_PARENT_MISMATCH", before, first ?? "none", `commit ${m.commit}'s first parent is ${first ?? "none"}, not the previous entry's commit ${before}`);
+    cb.checked++;
+  }
+
   let ref: string | null = null;
   let previousRepoIndex = -1;
   const seenCommits = new Set<string>();
@@ -232,9 +282,13 @@ export async function checkBranch(
       const previousCommit = previous ? (previous.asset.metadata as { code: { commit: string } }).code.commit : undefined;
       if (previousCommit === m.commit) {
         if (previous!.asset.resource.digest !== root) throw new Stop("invalid", "BRANCH_COMMIT_CHANGED", "an entry repeating its parent's commit keeps its tree");
+        const previousObject = (previous!.asset.metadata as { code: { commitObject?: string } }).code.commitObject;
+        if (previousObject !== m.commitObject) throw new Stop("invalid", "BRANCH_COMMIT_CHANGED", "an entry repeating its parent's commit keeps its commit object (K12)");
       } else {
         if (seenCommits.has(m.commit)) throw new Stop("invalid", "BRANCH_COMMIT_REPEATED", `commit ${m.commit} appears twice in one first-parent chain`);
         seenCommits.add(m.commit);
+        const before = report.chain.length > 0 ? report.chain[report.chain.length - 1].commit : undefined;
+        await checkCommitObject(e.versionId, m, before);
         report.chain.push({ commit: m.commit, root, versionId: e.versionId });
       }
 
@@ -289,6 +343,7 @@ export async function checkBranch(
   if (report.content.failures.length > 0) report.content.status = "digest-failure";
   else if (report.content.missing.length > 0) report.content.status = "partial";
   report.gitBinding.status = report.gitBinding.mismatches.length > 0 ? "mismatch" : report.gitBinding.unchecked > 0 ? "unchecked" : "matches";
+  cb.status = cb.mismatches.length > 0 ? "mismatch" : cb.unchecked > 0 ? "unchecked" : cb.claimed > 0 ? "claimed" : "matches";
 
   // Binding both ways against the repo document at its checkpoint.
   if (context.latest && finalRef && author) {

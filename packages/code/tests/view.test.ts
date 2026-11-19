@@ -58,7 +58,8 @@ describe("CODE-18 the repository viewer", () => {
     const { get, c1, c2 } = await viewer();
     const r = await get("/b/0/commits");
     expect(r.status).toBe(200);
-    expect(r.html.indexOf(c2)).toBeLessThan(r.html.indexOf(c1));
+    expect(r.html.indexOf(`>${c2.slice(0, 7)}<`)).toBeGreaterThan(-1);
+    expect(r.html.indexOf(`>${c2.slice(0, 7)}<`)).toBeLessThan(r.html.indexOf(`>${c1.slice(0, 7)}<`));
     expect(r.html).toContain("3 files changed");
     expect(r.html).toContain("genesis");
   });
@@ -71,6 +72,17 @@ describe("CODE-18 the repository viewer", () => {
     expect(r.html).toContain('<tr class="add"><td class="ln"></td><td class="ln">2</td><td class="lc">+TWO</td></tr>');
     expect(r.html).toContain(">deleted</span>");
     expect(r.html).toContain(">added</span>");
+  });
+
+  test("CODE-19 a commit whose id was recomputed from its commit object shows its message as text", async () => {
+    const { get, c2, entries } = await viewer();
+    const list = await get("/b/0/commits");
+    expect(list.html).toContain(">commit 1</a>"); // the subject from the commit object
+    const r = await get(`/b/0/v/${encodeURIComponent(entries[1].versionId)}`);
+    expect(r.html).toContain(c2);
+    expect(r.html).toContain(`<pre class="message">commit 1</pre>`);
+    expect(r.html).toContain("Fixture &lt;fixture@example.invalid&gt;");
+    expect(r.html).toContain("recomputed from the mirrored commit object");
   });
 
   test("trees and files at an earlier entry; raw bytes by digest", async () => {

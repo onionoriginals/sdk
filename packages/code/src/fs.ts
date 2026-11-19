@@ -3,7 +3,7 @@
  *
  *   <root>/originals/     the SDK's FileStore (durable commit, P6.2; one writer per root)
  *   <root>/objects/zQ/m…  objects, deflate-raw compressed (PROVISIONAL, K8)
- *   <root>/workspace.json { format, repo }
+ *   <root>/workspace.json { format, repo, private? }
  *   <root>/identities/    public identities (DID logs) of signers, by hex sha256 of the DID
  *
  * An object is written to a temporary file, fsynced and renamed, before any
@@ -105,7 +105,12 @@ export interface DiskWorkspace {
   objects: FsObjectStore;
   /** The repo Original, once `init` has run. */
   repo: string | undefined;
-  setRepo(repo: string): Promise<void>;
+  /**
+   * The source repository is marked private: commit objects, which carry
+   * author emails, are mirrored only on explicit opt-in (K12, O3; P8.2).
+   */
+  private: boolean;
+  setRepo(repo: string, options?: { private?: boolean }): Promise<void>;
   /** Keep a signer's public identity, so later runs verify its entries. */
   rememberIdentity(identity: LocalIdentity): Promise<void>;
   close(): Promise<void>;
@@ -120,10 +125,12 @@ export async function openWorkspace(root: string, options: { clock?: () => numbe
   const objects = new FsObjectStore(join(root, "objects"));
   const configPath = join(root, "workspace.json");
   let repo: string | undefined;
+  let isPrivate = false;
   try {
-    const config = JSON.parse(await readFile(configPath, "utf8")) as { format?: string; repo?: string };
+    const config = JSON.parse(await readFile(configPath, "utf8")) as { format?: string; repo?: string; private?: boolean };
     if (config.format !== WORKSPACE_FORMAT) codeError("unsupported-profile", "WORKSPACE_FORMAT", `${configPath} is not an ${WORKSPACE_FORMAT} file`);
     repo = config.repo;
+    isPrivate = config.private === true;
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
   }
@@ -136,9 +143,11 @@ export async function openWorkspace(root: string, options: { clock?: () => numbe
     workspace,
     objects,
     repo,
-    async setRepo(next: string) {
+    private: isPrivate,
+    async setRepo(next: string, options: { private?: boolean } = {}) {
       disk.repo = next;
-      await writeFile(configPath, `${JSON.stringify({ format: WORKSPACE_FORMAT, repo: next }, null, 2)}\n`);
+      if (options.private !== undefined) disk.private = options.private;
+      await writeFile(configPath, `${JSON.stringify({ format: WORKSPACE_FORMAT, repo: next, ...(disk.private ? { private: true } : {}) }, null, 2)}\n`);
     },
     async rememberIdentity(identity: LocalIdentity) {
       const pub = publicIdentity(identity);
