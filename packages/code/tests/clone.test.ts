@@ -126,7 +126,8 @@ describe("CODE-28 the helper refuses what it cannot rebuild exactly", () => {
     const { ws, repoDid } = await bundleOf(repo);
     const alice = await identity(1);
     const dave = await identity(4);
-    await ws.updateRepo(repoDid, alice, (d) => ({ ...d, delegates: [alice.did, dave.did].sort(), refs: { [MAIN]: { ...d.refs[MAIN], threshold: 2 } } }));
+    // Dave joins, signing the change that adds him (P5.20); main now needs both.
+    await ws.updateRepo(repoDid, [alice, dave], (d) => ({ ...d, delegates: [alice.did, dave.did].sort(), refs: { [MAIN]: { ...d.refs[MAIN], threshold: 2 } } }));
     const opened = await openRepository(await ws.package(repoDid), { now: NOW + 3_600_000 });
     expect((await planClone(opened)).refused[0]).toMatchObject({ ref: MAIN, reason: expect.stringContaining("no-quorum") });
   });

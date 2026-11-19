@@ -1,5 +1,5 @@
 /**
- * Content-addressed objects of `originals-code/0.1` (plan 049 §1.1).
+ * Content-addressed objects of the code profile (unchanged in `originals-code/0.2`; tree format `originals-code-tree/0.1`) (plan 049 §1.1).
  *
  * PROVISIONAL (K2): a blob is a file's exact bytes; a tree is one directory,
  * the JCS bytes of `{ entries: { <name>: { mode, digest } }, format }`, with
@@ -57,7 +57,7 @@ function checkEntry(name: string, value: unknown): TreeEntry {
     codeError("invalid-evidence", "TREE_MEMBERS", `tree entry ${JSON.stringify(name)} is exactly { mode, digest }`);
   }
   const { mode, digest } = value as { mode: unknown; digest: unknown };
-  if (mode === "160000") codeError("unsupported-profile", "GITLINK_UNSUPPORTED", `tree entry ${JSON.stringify(name)} is a gitlink (submodule), which originals-code/0.1 does not mirror (PROVISIONAL, K9)`);
+  if (mode === "160000") codeError("unsupported-profile", "GITLINK_UNSUPPORTED", `tree entry ${JSON.stringify(name)} is a gitlink (submodule), which the code profile does not mirror (PROVISIONAL, K9)`);
   if (typeof mode !== "string" || !MODES.has(mode)) codeError("invalid-evidence", "TREE_MODE", `tree entry ${JSON.stringify(name)} has mode ${JSON.stringify(mode)}; allowed: 100644, 100755, 120000, 40000`);
   return { mode: mode as Mode, digest: checkDigest(digest, `tree entry ${name}`) };
 }

@@ -1,10 +1,11 @@
 /**
- * The release Original (plan 049 §6, decided 2026-11-19; PROVISIONAL K15;
- * CODE-25, CODE-26): the repo document names a release Original, authored by
- * the repo's author for now; each entry names one release (tag, commit, the
- * branch Original and entry, and the canonical result at the time) as a
- * small JSON manifest. The verifier checks each release's commit is in the
- * named branch's chain. Network is disabled for every test.
+ * The release Original (plan 049 §6, decided 2026-11-19; PROVISIONAL K15,
+ * K17; CODE-25, CODE-26): the repo document names a release Original, a set
+ * Original with the repo's members and threshold and a child of the repo, its
+ * signer set the repo's at each entry's pin; each entry names one release
+ * (tag, commit, the branch Original and entry, and the canonical result at the
+ * time) as a small JSON manifest. The verifier checks each release's commit is
+ * in the named branch's chain. Network is disabled for every test.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { MemoryStore } from "@originals/sdk/originals";
@@ -44,7 +45,7 @@ async function rawRelease(ws: CodeWorkspace, releases: string, alice: Awaited<Re
   await ws.sdk.edit(releases, {
     parent: view.checkpoint,
     resource: { mediaType: RELEASE_MEDIA_TYPE, bytes: encodeReleaseManifest(manifest) },
-    author: identityRef(alice),
+    author: [identityRef(alice)],
     signer: keySigner({ keyType: "Ed25519", secretKey: alice.signingSecret, verificationMethod: `${alice.did}#${SIGNING_FRAGMENT}` }),
   });
 }
@@ -70,7 +71,9 @@ describe("CODE-25 the release Original", () => {
     expect(report.branches).toHaveLength(1); // the release Original is not a branch
     const rel = report.releases!;
     expect(rel.report?.validAsOf).not.toBeNull();
-    expect(rel.code).toMatchObject({ history: { status: "valid" }, binding: "confirmed", author: alice.did });
+    // K17: a set Original, a child of the repo, with the repo's signer set.
+    expect(rel.code).toMatchObject({ history: { status: "valid" }, binding: "confirmed", authors: { threshold: 1, dids: [alice.did] } });
+    expect(rel.report?.parentAuthority).toMatchObject({ did: repoDid, status: "verified" });
     expect(rel.code!.releases.map((x) => [x.tag, x.commit, x.chain])).toEqual([
       ["v1.0.0", commits[2], "in-chain"],
       ["v1.1.0", commits[3], "in-chain"],
@@ -89,7 +92,7 @@ describe("CODE-25 the release Original", () => {
     expect(report.releases!.code!.releases[0]).toMatchObject({ branch: r.manifest.branch, chain: "in-chain" });
   });
 
-  test("only the repo's author releases; a commit outside every listed chain is refused", async () => {
+  test("only delegates release; a commit outside every listed chain is refused", async () => {
     const { ws, repoDid } = await mirrored();
     const bob = await identity(2);
     await expect(ws.release(repoDid, bob, { tag: "v1" })).rejects.toMatchObject({ code: "RELEASE_AUTHOR" });

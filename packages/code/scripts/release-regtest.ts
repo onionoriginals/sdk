@@ -101,7 +101,8 @@ try {
   const signer = keySigner({ keyType: "Ed25519", secretKey: alice.signingSecret, verificationMethod: `${alice.did}#${SIGNING_FRAGMENT}` });
   const satUtxo = await fundUtxo(0.001);
   const sat = btcoAlias("regtest", await provider.getFirstSatOfOutput!(satUtxo));
-  const anchored = await sdk.anchor(releases, { parent: v1.versionId, author, signer, sat });
+  // K17: the release Original is a set Original (the repo's members, here Alice alone), so its author is an array (P5.19).
+  const anchored = await sdk.anchor(releases, { parent: v1.versionId, author: [author], signers: [signer], sat });
   const anchorPair = await prepareEntryInscription({ sdk, did: releases, fundingUtxos: [satUtxo, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: "regtest", provider, clock, index: ORD, recoveryStore });
   assert.equal(anchorPair.versionId, anchored.original.checkpoint);
   assert.equal(anchorPair.notice.permanent, true);

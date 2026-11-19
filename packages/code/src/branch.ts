@@ -3,7 +3,9 @@
  * first-parent commit, built with the `@originals/vh/originals` builders, so
  * the state rules are the verifier's own (P4.1, P4.4, P4.6, P5.16). The
  * resource is the commit's root tree (K2, K3); the metadata names the commit
- * (K4). Nothing here changes an Originals rule.
+ * (K4). A branch Original is a child of the repo Original (P5.24): its genesis
+ * names the repo and each entry pins a repo version, which never goes
+ * backwards (K4, revised). Nothing here changes an Originals rule.
  */
 import { signEntry, type EntrySigner, type LogEntry, type UnsignedEntry } from "@originals/vh/log";
 import { ORIGINALS_LIMITS, prepareCreateOriginal, prepareUpdateOriginal, type AuthorRef, type EditorGrant, type EntryState } from "@originals/vh/originals";
@@ -32,15 +34,19 @@ export interface AppendCommitsInput {
   commits: readonly MirrorCommit[];
   repo: string;
   ref: string;
-  /** The repo Original's versionId these entries are made under (K4). */
-  repoVersion: string;
   /**
-   * Who signs: the branch's author (the delegate), or a granted editor of the
-   * branch (P5.15, P5.16). Only the author starts a branch.
+   * The repo Original's versionId each entry pins (P5.24): the newest repo
+   * version the writer holds. Never older than the previous entry's pin.
+   */
+  pin: string;
+  /**
+   * Who signs: the branch's author (the delegate), or an editor holding a
+   * path grant in the repo, inherited at the pin (P5.24, K7). Only the author
+   * starts a branch.
    */
   signer: { role: "author" | "editor"; ref: AuthorRef; sign: EntrySigner };
-  /** Editor grants at genesis (P5.15). */
-  editors?: EditorGrant[];
+  /** For an editor: the grant the repo's state at the pin holds for it (P5.24). */
+  inherited?: EditorGrant;
   /** At genesis of a later segment: the previous segment's did:vh and last versionId (K13, O1). */
   previous?: { did: string; versionId: string };
   /** The previous segment's last root tree and versionTime: the path-grant check and the clock continue from them. */
@@ -86,7 +92,7 @@ export async function appendCommits(input: AppendCommitsInput): Promise<LogEntry
     const time = Math.max(clock(), lastTime + 1);
     lastTime = time;
     const versionTime = new Date(time).toISOString();
-    const metadata = branchMetadata({ repo: input.repo, ref: input.ref, commit: c.commit, tree: c.tree, repoVersion: input.repoVersion, ...(c.object ? { commitObject: c.object } : {}), ...(!previous && input.previous ? { previous: input.previous } : {}) });
+    const metadata = branchMetadata({ repo: input.repo, ref: input.ref, commit: c.commit, tree: c.tree, ...(c.object ? { commitObject: c.object } : {}), ...(!previous && input.previous ? { previous: input.previous } : {}) });
     const resource = { mediaType: TREE_MEDIA_TYPE, size: c.root.size, digest: c.root.digest };
     await input.check?.(previous ? stateOf(previous).asset.resource.digest : (input.prior?.root ?? null), c.root.digest);
     const unsigned: UnsignedEntry = previous
@@ -94,9 +100,10 @@ export async function appendCommits(input: AppendCommitsInput): Promise<LogEntry
           versionTime,
           metadata,
           resource,
-          ...(input.signer.role === "author" ? { author: input.signer.ref } : { editor: input.signer.ref }),
+          ...(stateOf(previous).asset.parent?.versionId !== input.pin ? { pin: input.pin } : {}),
+          ...(input.signer.role === "author" ? { author: input.signer.ref } : { editor: input.signer.ref, ...(input.inherited ? { inherited: input.inherited } : {}) }),
         })
-      : prepareCreateOriginal({ versionTime, name: input.ref, metadata, resource, author: input.signer.ref, ...(input.editors ? { editors: input.editors } : {}) });
+      : prepareCreateOriginal({ versionTime, name: input.ref, metadata, resource, author: input.signer.ref, parent: { did: input.repo, versionId: input.pin } });
     const entry = await signEntry(unsigned, input.signer.sign);
     out.push(entry);
     previous = entry;

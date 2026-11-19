@@ -4,7 +4,18 @@
  * repo bundles offline.
  *
  *   originals-code identity new <file>
- *   originals-code init    --dir <workspace> --identity <file> --name <name> [--private]
+ *   originals-code identity public <file> [--out <public.json>]   (the DID and its log, to share)
+ *   originals-code identity add <public.json> --dir <workspace>   (another delegate's or contributor's public identity)
+ *   originals-code init    --dir <workspace> --identity <file>[,<file>…] --name <name> [--threshold <n>] [--private]
+ *                          (K5: a set Original whose members are the delegates; every one signs its genesis, P5.19)
+ *   originals-code repo propose --dir <workspace> --signers <did>[,<did>…] --out <proposal.json>
+ *                          [--add-delegate <did>[,…]] [--remove-delegate <did>[,…]] [--threshold <n>]
+ *                          [--ref-threshold <ref>=<n>] [--list <ref>=<branch> --delegate <did>]
+ *                          [--grant <did>=<pattern>[,<pattern>…]] [--revoke <did>]
+ *   originals-code repo cosign <proposal.json> --dir <workspace> --identity <file>
+ *   originals-code repo commit <proposal.json> --dir <workspace>
+ *                          (K5: a repo change is an author entry signed by the threshold of delegates, and by every
+ *                          delegate it adds, P5.20; members who are not together sign the proposal file in turn)
  *   originals-code mirror  --dir <workspace> --identity <file> --git <repo> [--ref refs/heads/main] [--rev <revision>] [--limit <n>]
  *                          [--include-commits | --no-commits]
  *
@@ -12,8 +23,9 @@
  * carry author and committer emails, so in a workspace marked `--private`
  * they are mirrored only with `--include-commits` (P8.2: no confidentiality).
  *                          [--contribute]   (K14: your own branch for the ref, never listed, never voting)
- *   originals-code release <tag> --dir <workspace> --identity <file> [--ref refs/heads/main] [--commit <id>]
- *                          (K15: record a release in the repo's release Original; the repo's author signs)
+ *   originals-code release <tag> --dir <workspace> --identity <file>[,<file>…] [--ref refs/heads/main] [--commit <id>]
+ *                          (K15, K17: record a release in the release Original, signed by the repo's threshold of
+ *                          delegates; the first release creates it, which every delegate signs)
  *   originals-code import  <bundle.zip> --dir <workspace>   (verify a repo bundle offline, then take it in)
  *   originals-code package --dir <workspace> --out <bundle.zip> [--omit-blobs]
  *   originals-code verify  <bundle.zip> [--json] [--now <time>]
@@ -27,8 +39,11 @@ import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { OriginalsError } from "./errors.js";
 import { openWorkspace } from "./fs.js";
+import { pathGrant } from "./grants.js";
 import { GitSource } from "./git.js";
-import { createLocalIdentity, parseIdentity, serializeIdentity } from "./identity.js";
+import { createLocalIdentity, parseIdentity, parsePublicIdentity, publicIdentity, serializeIdentity, type LocalIdentity } from "./identity.js";
+import { parseProposal, serializeProposal } from "./workspace.js";
+import type { RepoDocument } from "./documents.js";
 import { openRepository, verifyRepository, type RepositoryReport } from "./verify.js";
 import { createRepositoryView } from "./view.js";
 
@@ -52,12 +67,21 @@ function need(opts: Record<string, string | true>, name: string): string {
   return v;
 }
 
+/** `--identity a.json,b.json`: each identity file, in order. */
+async function identities(opts: Record<string, string | true>): Promise<LocalIdentity[]> {
+  return Promise.all(need(opts, "identity").split(",").filter(Boolean).map(async (f) => parseIdentity(await readFile(f, "utf8"))));
+}
+
+const list = (v: string | true | undefined) => (typeof v === "string" ? v.split(",").map((x) => x.trim()).filter(Boolean) : []);
+
 function summary(r: RepositoryReport): string {
   const lines: string[] = [];
   const repo = r.repo;
   lines.push(`repo ${repo.original}`);
   lines.push(`  originals: history ${repo.report?.history.status ?? "unread"}, valid as of ${repo.report?.validAsOf?.checkpoint ?? "nothing"}${repo.error ? ` (${repo.error.code}: ${repo.error.message})` : ""}`);
   lines.push(`  code:      ${repo.code?.history.status ?? "not checked"}${repo.code?.history.failure ? ` (${repo.code.history.failure.code}: ${repo.code.history.failure.message})` : ""}`);
+  if (repo.code?.authors) lines.push(`  delegates: ${repo.code.authors.dids.length}, ${repo.code.authors.threshold} of them sign each repo change (signer set, P5.19)`);
+  for (const g of repo.code?.grants ?? []) lines.push(`  grant:     ${g.did} ${g.paths.join(" ")} (inherited by every branch, P5.24)`);
   for (const b of r.branches) {
     lines.push(`branch ${b.original} ${b.code?.ref ?? ""}`);
     lines.push(`  originals: history ${b.report?.history.status ?? "unread"}, entries ${b.report?.history.entries ?? 0}, valid as of ${b.report?.validAsOf?.checkpoint ?? "nothing"}${b.report?.fork ? ", FORKED (unresolved, P9.16)" : ""}`);
@@ -69,8 +93,9 @@ function summary(r: RepositoryReport): string {
       lines.push(`  git trees: ${c.gitBinding.status} (${c.gitBinding.checked} checked, ${c.gitBinding.unchecked} unchecked)`);
       const cb = c.commitBinding;
       lines.push(`  commits:   ${cb.status} (${cb.checked} recomputed from commit objects, ${cb.unchecked} unchecked, ${cb.claimed} claimed by the signer only)`);
-      const outside = c.grants.filter((g) => g.status !== "allowed").length;
-      if (c.grants.length) lines.push(`  grants:    ${c.grants.length} editor entries, ${outside} not allowed, ${c.historicallyAuthorizedOnly.length} historically authorized only`);
+      if (c.pins.length) lines.push(`  pins:      ${c.pins.length} repo version(s), last ${c.pins[c.pins.length - 1]}; parent evidence ${b.report?.parentAuthority?.status ?? "unknown"} (P5.25)`);
+      const unchecked = c.grants.filter((g) => g.status !== "allowed").length;
+      if (c.grants.length) lines.push(`  grants:    ${c.grants.length} editor entries (inherited path grants), ${unchecked} unchecked, ${c.historicallyAuthorizedOnly.length} historically authorized only (P5.26)`);
     }
   }
   for (const c of r.contributions) lines.push(`contribution ${c.original} ${c.ref ?? ""} by ${c.author ?? "?"}: ${c.status}${c.head ? ` at ${c.head}` : ""} (verified, never voting)`);
@@ -94,19 +119,87 @@ async function main(argv: string[]): Promise<number> {
   const { positional, opts } = flags(rest);
   switch (command) {
     case "identity": {
-      if (positional[0] !== "new" || !positional[1]) throw new Error("usage: originals-code identity new <file>");
+      if (positional[0] === "public" && positional[1]) {
+        const pub = `${JSON.stringify(publicIdentity(parseIdentity(await readFile(positional[1], "utf8"))))}\n`;
+        if (typeof opts.out === "string") await writeFile(opts.out, pub, { flag: "wx" });
+        else process.stdout.write(pub);
+        return 0;
+      }
+      if (positional[0] === "add" && positional[1]) {
+        const ws = await openWorkspace(resolve(need(opts, "dir")));
+        try {
+          const pub = parsePublicIdentity(await readFile(positional[1], "utf8"));
+          await ws.rememberIdentity(pub);
+          console.log(pub.did);
+        } finally {
+          await ws.close();
+        }
+        return 0;
+      }
+      if (positional[0] !== "new" || !positional[1]) throw new Error("usage: originals-code identity new <file> | identity public <file> [--out <file>] | identity add <public.json> --dir <workspace>");
       const id = await createLocalIdentity();
       await writeFile(positional[1], serializeIdentity(id), { mode: 0o600, flag: "wx" });
       console.log(id.did);
       return 0;
     }
+    case "repo": {
+      const ws = await openWorkspace(resolve(need(opts, "dir")));
+      try {
+        if (!ws.repo) throw new Error("run init or import first");
+        if (positional[0] === "propose") {
+          const added = list(opts["add-delegate"]);
+          const removed = list(opts["remove-delegate"]);
+          const draft = await ws.workspace.proposeRepo(ws.repo, list(opts.signers), (s) => {
+            const document: RepoDocument = { ...s.document, delegates: [...new Set([...s.document.delegates.filter((d) => !removed.includes(d)), ...added])].sort() };
+            if (typeof opts["ref-threshold"] === "string") {
+              const [ref, n] = opts["ref-threshold"].split("=");
+              document.refs[ref] = { ...(document.refs[ref] ?? { branches: {} }), threshold: Number(n) };
+            }
+            if (typeof opts.list === "string") {
+              const at = opts.list.indexOf("=");
+              const rule = document.refs[opts.list.slice(0, at)] ?? { threshold: 1, branches: {} };
+              rule.branches[need(opts, "delegate")] = opts.list.slice(at + 1);
+              document.refs[opts.list.slice(0, at)] = rule;
+            }
+            let editors = s.editors;
+            if (typeof opts.revoke === "string") editors = editors.filter((g) => g.did !== opts.revoke);
+            if (typeof opts.grant === "string") {
+              const at = opts.grant.lastIndexOf("=");
+              const did = opts.grant.slice(0, at);
+              editors = [...editors.filter((g) => g.did !== did), pathGrant(did, list(opts.grant.slice(at + 1)))].sort((a, b) => (a.did < b.did ? -1 : 1));
+            }
+            return { document, threshold: typeof opts.threshold === "string" ? Number(opts.threshold) : s.threshold, editors };
+          });
+          await writeFile(need(opts, "out"), serializeProposal(draft), { flag: "wx" });
+          console.log(draft.display);
+          console.log(`${need(opts, "out")}: signed by none of ${list(opts.signers).length} yet; each runs \`repo cosign\`, then \`repo commit\``);
+          return 0;
+        }
+        if (positional[0] === "cosign" && positional[1]) {
+          const [identity] = await identities(opts);
+          await ws.rememberIdentity(identity);
+          const draft = await ws.workspace.cosignRepo(parseProposal(await readFile(positional[1], "utf8")), identity);
+          await writeFile(positional[1], serializeProposal(draft));
+          console.log(`${identity.did} signed; ${draft.proofs?.length ?? 0} signature(s) so far`);
+          return 0;
+        }
+        if (positional[0] === "commit" && positional[1]) {
+          const checkpoint = await ws.workspace.commitRepo(parseProposal(await readFile(positional[1], "utf8")));
+          console.log(`committed ${ws.repo} at ${checkpoint}`);
+          return 0;
+        }
+        throw new Error("usage: originals-code repo propose | repo cosign <proposal.json> | repo commit <proposal.json>");
+      } finally {
+        await ws.close();
+      }
+    }
     case "init": {
       const ws = await openWorkspace(resolve(need(opts, "dir")));
       try {
         if (ws.repo) throw new Error(`the workspace already has repo ${ws.repo}`);
-        const identity = parseIdentity(await readFile(need(opts, "identity"), "utf8"));
-        await ws.rememberIdentity(identity);
-        const repo = await ws.workspace.initRepo({ name: need(opts, "name"), identity });
+        const [identity, ...delegates] = await identities(opts);
+        for (const id of [identity, ...delegates]) await ws.rememberIdentity(id);
+        const repo = await ws.workspace.initRepo({ name: need(opts, "name"), identity, delegates, ...(typeof opts.threshold === "string" ? { threshold: Number(opts.threshold) } : {}) });
         await ws.setRepo(repo, { private: opts.private === true });
         console.log(repo);
       } finally {
@@ -145,7 +238,7 @@ async function main(argv: string[]): Promise<number> {
           await ws.setContributions([...ws.contributions.filter((d) => d !== mine), r.branch]);
           console.log("a contribution: verified with the repo's bundles, never voting for a canonical head (K14)");
         }
-        if (r.needsListing) console.log("the repo's author must list this branch in the repo document");
+        if (r.needsListing) console.log(`the delegates list this branch with a repo change: originals-code repo propose --list ${ref}=${r.branch} --delegate ${identity.did} --signers <dids>`);
       } finally {
         source.close();
         await ws.close();
@@ -157,9 +250,9 @@ async function main(argv: string[]): Promise<number> {
       const ws = await openWorkspace(resolve(need(opts, "dir")));
       try {
         if (!ws.repo) throw new Error("run init first");
-        const identity = parseIdentity(await readFile(need(opts, "identity"), "utf8"));
-        await ws.rememberIdentity(identity);
-        const r = await ws.workspace.release(ws.repo, identity, { tag: positional[0], ...(typeof opts.ref === "string" ? { ref: opts.ref } : {}), ...(typeof opts.commit === "string" ? { commit: opts.commit } : {}) });
+        const signers = await identities(opts);
+        for (const id of signers) await ws.rememberIdentity(id);
+        const r = await ws.workspace.release(ws.repo, signers, { tag: positional[0], ...(typeof opts.ref === "string" ? { ref: opts.ref } : {}), ...(typeof opts.commit === "string" ? { commit: opts.commit } : {}) });
         const m = r.manifest;
         console.log(`${r.created ? "created release Original" : "released in"} ${r.releases} (${r.versionId}): ${m.tag} = ${m.commit}`);
         console.log(`  from ${m.branch} at ${m.versionId}; canonical ${m.ref} was ${m.canonical.status}${m.canonical.head ? ` at ${m.canonical.head}` : ""} (threshold ${m.canonical.threshold})`);
@@ -240,7 +333,7 @@ async function main(argv: string[]): Promise<number> {
       return new Promise<number>(() => {});
     }
     default:
-      console.error("usage: originals-code identity new <file> | init | mirror | release <tag> | import <bundle.zip> | package | verify <bundle.zip> | serve <bundle.zip>");
+      console.error("usage: originals-code identity new|public|add | init | repo propose|cosign|commit | mirror | release <tag> | import <bundle.zip> | package | verify <bundle.zip> | serve <bundle.zip>");
       return 2;
   }
 }

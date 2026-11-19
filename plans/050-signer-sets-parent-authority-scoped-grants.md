@@ -132,7 +132,7 @@ New rows, `C12-4xx`, are assigned in the spec PR. Each comes with its negative c
 
 1. **Spec PR** to `aviarytech/originals-spec`, stacked on PR 64. It covers the rules above, section 12 rows, section 13 (decision W, reversing S8) and section 14 members.
 2. **SDK PRs**, each against `main` with tests citing the new rows: (a) W1 in vh and sdk, (b) W2, (c) W3 (the scope checker registry, `paths` with the code tree path view, and `items` as a generic JSON item-view reference implementation). They repin to the spec PR head, which is treated as merged, as `specs/README.md` does for upstream PRs.
-3. **Plan 049 follow-up:** the code profile moves onto the core mechanisms:
+3. **Plan 049 follow-up — done 2026-11-19** (`originals-code/0.2`, plan 049 §1.5; with the shared-host parent evidence and the SDK's scope check before signing): the code profile moves onto the core mechanisms:
    - repo Original → a set Original, with W1 delegates and threshold;
    - branch → a child of the repo with W2 pins, replacing `metadata.code.repoVersion`;
    - path grants → W3 `paths` scopes on inherited grants.

@@ -32,6 +32,8 @@ interface Entry {
   signer: { role: "author" | "editor"; did: string };
   root: string;
   code: BranchMetadata | null;
+  /** The repo version this entry pins (P5.24, K4). */
+  pin: string | null;
 }
 
 interface Branch {
@@ -89,7 +91,7 @@ export function createRepositoryView(repo: OpenedRepository): { handle(url: stri
       } catch {
         code = null;
       }
-      return { index, versionId: e.versionId, time: e.versionTime, signer: { role: signer.role, did: signer.ref.did }, root: s.asset.resource.digest, code };
+      return { index, versionId: e.versionId, time: e.versionTime, signer: { role: signer.role, did: signer.ref.did }, root: s.asset.resource.digest, code, pin: s.asset.parent?.versionId ?? null };
     });
   const repoEntries = repo.entries.get(report.manifest.repo) ?? [];
   const repoName = repoEntries.length ? stateOf(repoEntries[repoEntries.length - 1]).asset.name : "repository";
@@ -209,6 +211,8 @@ export function createRepositoryView(repo: OpenedRepository): { handle(url: stri
 
   function overview(): string {
     const doc: RepoDocument | null | undefined = report.repo.code?.document;
+    const set = report.repo.code?.authors ?? null;
+    const grants = report.repo.code?.grants ?? [];
     const refs = report.canonical
       .map(
         (c) =>
@@ -218,8 +222,8 @@ export function createRepositoryView(repo: OpenedRepository): { handle(url: stri
     const canonical = report.canonicalStatus === "computed" ? refs || "<li class=muted>No refs listed.</li>" : `<li>${badge("canonical ", report.canonicalStatus, tone(report.canonicalStatus))} the repo Original did not verify, so no ref has a canonical head.</li>`;
     return `<aside class="about"><h3>About</h3><p class="muted">Signed history, verified offline. Canonical heads come from delegate agreement, never from timestamps (P2.1).</p>
 <h4>Canonical heads</h4><ul class="plain">${canonical}</ul>
-<h4>Delegates</h4><ul class="plain">${(doc?.delegates ?? []).map((d, i) => `<li>${i + 1}. ${did(d)}</li>`).join("") || "<li class=muted>unknown</li>"}</ul>
-${doc && doc.grants.length ? `<h4>Path grants</h4><ul class="plain">${doc.grants.map((g) => `<li>${did(g.did)}<br>${g.paths.map((p) => `<code>${esc(p)}</code>`).join(" ")}</li>`).join("")}</ul>` : ""}
+<h4>Delegates</h4>${set ? `<p class="muted small">The repo Original's signer set: ${set.threshold} of ${set.dids.length} sign each change to the repo (P5.20).</p>` : ""}<ul class="plain">${(doc?.delegates ?? []).map((d, i) => `<li>${i + 1}. ${did(d)}</li>`).join("") || "<li class=muted>unknown</li>"}</ul>
+${grants.length ? `<h4>Path grants</h4><p class="muted small">Granted in the repo; every branch inherits them at the repo version its entries pin (P5.24).</p><ul class="plain">${grants.map((g) => `<li>${did(g.did)}<br>${g.paths.map((p) => `<code>${esc(p)}</code>`).join(" ")}</li>`).join("")}</ul>` : ""}
 <h4>Branches</h4><ul class="plain">${branches.map((b) => `<li><a href="/b/${b.index}">${esc(b.name)}</a> <span class="muted">${b.entries.length} entries</span></li>`).join("")}</ul></aside>`;
   }
 
@@ -318,8 +322,8 @@ ${doc && doc.grants.length ? `<h4>Path grants</h4><ul class="plain">${doc.grants
       const flags = [
         e.index === 0 ? `<span class="pill">genesis</span>` : "",
         sameCommit ? `<span class="pill">no content change</span>` : "",
-        g ? `<span class="pill ${tone(g.status)}">${esc(g.status === "allowed" ? "within path grant" : g.status)}</span>` : "",
-        historic.has(e.versionId) ? `<span class="pill warn" title="allowed by the repo version it names, not by the latest one (P7.9 by analogy)">historically authorized only</span>` : "",
+        g ? `<span class="pill ${tone(g.status)}" title="${esc(g.status === "allowed" ? `${g.source ?? ""} grant${g.pin ? ` at repo version ${g.pin}` : ""}${g.scope ? `, ${g.scope.type} scope ${g.scope.status}` : ""}` : "no grant found in the Originals report")}">${esc(g.status === "allowed" ? (g.source === "inherited" ? "inherited path grant" : "within path grant") : g.status)}</span>` : "",
+        historic.has(e.versionId) ? `<span class="pill warn" title="allowed by the grant at the repo version it pins, which the repo's latest state no longer gives (P5.26)">historically authorized only</span>` : "",
         failure && failure.versionId === e.versionId ? `<span class="pill bad" title="${esc(failure.message)}">${esc(failure.code)}</span>` : "",
       ].join("");
       const subject = sameCommit ? null : (await commitInfo(b, e))?.message.split("\n")[0];
@@ -362,6 +366,7 @@ ${doc && doc.grants.length ? `<h4>Path grants</h4><ul class="plain">${doc.grants
     }
     const more = touched.length > MAX_DIFF_FILES ? `<div class="box empty">${touched.length - MAX_DIFF_FILES} more files changed.</div>` : "";
     const g = b.result.code?.grants.find((x) => x.versionId === e.versionId);
+    const hist = b.result.code?.historicallyAuthorizedOnly.find((x) => x.versionId === e.versionId);
     const info = await commitInfo(b, e);
     const cs = commitStatus(b, e, info);
     const message = info ? `<pre class="message">${esc(info.message)}</pre>` : "";
@@ -372,8 +377,8 @@ ${info?.author ? `<dt>git author</dt><dd>${esc(info.author)} <span class="muted"
 <dt>versionTime</dt><dd>${esc(e.time)} <span class="muted">(claimed by the signer)</span></dd>
 <dt>Entry</dt><dd><code>${esc(e.versionId)}</code> of ${did(b.original)}</dd>
 <dt>git tree</dt><dd><code>${esc(e.code?.tree ?? "")}</code> ${badge("", b.result.code?.gitBinding.mismatches.some((m) => m.versionId === e.versionId) ? "mismatch" : (b.result.code?.gitBinding.status ?? "unchecked"), tone(b.result.code?.gitBinding.mismatches.some((m) => m.versionId === e.versionId) ? "mismatch" : b.result.code?.gitBinding.status))}</dd>
-<dt>Repo version</dt><dd><code>${esc(e.code?.repoVersion ?? "")}</code></dd>
-${g ? `<dt>Path grant</dt><dd>${badge("", g.status, tone(g.status))} ${g.outside ? `outside: ${g.outside.map((p) => `<code>${esc(p)}</code>`).join(" ")}` : ""}</dd>` : ""}
+<dt>Pins repo version</dt><dd><code>${esc(e.pin ?? "")}</code> <span class="muted">(P5.24)</span></dd>
+${g ? `<dt>Path grant</dt><dd>${badge("", g.status, tone(g.status))} ${g.source ? `${esc(g.source)} grant` : ""}${g.pin ? ` at repo version <code>${esc(g.pin)}</code>` : ""}${g.scope ? `, ${esc(g.scope.type)} scope ${esc(g.scope.status)}` : ""}${hist ? ` ${badge("", "historically authorized only", "warn", hist.reason)}` : ""}</dd>` : ""}
 <dt>Parent</dt><dd>${parent ? `<a class="mono" href="/b/${b.index}/v/${encodeURIComponent(parent.versionId)}">${esc(short(parent.code?.commit ?? parent.versionId, 10))}</a>` : "none (genesis)"}</dd>
 </dl><p class="muted small">The tree is recomputed from the objects. ${info ? "The commit id, tree and first parent are recomputed from the commit object (plan 049, K12)." : "The commit id is the signer's claim (plan 049, K12)."}</p>
 <a class="btn" href="/b/${b.index}/tree/${encodeURIComponent(e.versionId)}">Browse files</a></div></div>`;
@@ -401,6 +406,7 @@ ${g ? `<dt>Path grant</dt><dd>${badge("", g.status, tone(g.status))} ${g.outside
       `<tr><th colspan="2">Repo Original ${did(r.original)}</th></tr>`,
       `<tr><td>Originals history</td><td>${badge("", r.report?.history.status ?? "unread", tone(r.report?.history.status))} valid as of <code>${esc(r.report?.validAsOf?.checkpoint ?? "nothing")}</code>${r.error ? ` <span class="bad-text">${esc(r.error.code)}: ${esc(r.error.message)}</span>` : ""}</td></tr>`,
       `<tr><td>Author binding</td><td>${badge("", r.report?.authorBinding.status ?? "unknown", tone(r.report?.authorBinding.status))}</td></tr>`,
+      `<tr><td>Signer set</td><td>${r.code?.authors ? `${r.code.authors.threshold} of ${r.code.authors.dids.length} delegates sign each repo change (P5.19, P5.20)` : "unknown"}</td></tr>`,
       `<tr><td>Code profile</td><td>${badge("", r.code?.history.status ?? "not checked", tone(r.code?.history.status))} ${r.code?.history.failure ? esc(`${r.code.history.failure.code}: ${r.code.history.failure.message}`) : ""}</td></tr>`,
       `<tr><td>Canonical heads</td><td>${badge("", report.canonicalStatus, tone(report.canonicalStatus))} ${report.canonical.map((c) => `${esc(c.ref)}: ${badge("", c.status, tone(c.status))} ${c.head ? `<code>${esc(c.head.commit)}</code>` : esc(c.reason ?? "")}`).join("<br>")}</td></tr>`,
       ...branches.flatMap((b) => {
@@ -412,7 +418,8 @@ ${g ? `<dt>Path grant</dt><dd>${badge("", g.status, tone(g.status))} ${g.outside
           `<tr><td>Listed in the repo</td><td>${badge("", c?.binding.status ?? "not checked", tone(c?.binding.status))} ${esc(c?.binding.reason ?? "")}</td></tr>`,
           `<tr><td>git tree ids</td><td>${badge("", c?.gitBinding.status ?? "unchecked", tone(c?.gitBinding.status))} ${c ? `${c.gitBinding.checked} recomputed and matched, ${c.gitBinding.unchecked} unchecked, ${c.gitBinding.mismatches.length} mismatched` : ""}</td></tr>`,
           `<tr><td>Content</td><td>${badge("", c?.content.status ?? "unknown", tone(c?.content.status))} ${c ? `${c.content.objects} objects, ${bytes(c.content.bytes)}, ${c.content.missing.length} missing, ${c.content.failures.length} failed` : ""}</td></tr>`,
-          c && c.grants.length ? `<tr><td>Editor entries</td><td>${c.grants.length} checked against path grants: ${c.grants.filter((g) => g.status === "allowed").length} allowed; ${c.historicallyAuthorizedOnly.length} historically authorized only</td></tr>` : "",
+          c && c.pins.length ? `<tr><td>Pins</td><td>${c.pins.length} repo version${c.pins.length === 1 ? "" : "s"} pinned, last <code>${esc(c.pins[c.pins.length - 1])}</code>; parent evidence ${badge("", b.result.report?.parentAuthority?.status ?? "unknown", tone(b.result.report?.parentAuthority?.status === "verified" ? "valid" : b.result.report?.parentAuthority?.status))}</td></tr>` : "",
+          c && c.grants.length ? `<tr><td>Editor entries</td><td>${c.grants.length} by inherited path grants: ${c.grants.filter((g) => g.status === "allowed").length} allowed by the core's scope check; ${c.historicallyAuthorizedOnly.length} historically authorized only (P5.26)</td></tr>` : "",
         ];
       }),
     ];

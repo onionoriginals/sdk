@@ -7,7 +7,7 @@
  *
  * Every converted tree is checked against git: its git tree id, recomputed
  * from the new objects, must equal the id git gave (K2). A tree git can hold
- * but `originals-code/0.1` cannot (a gitlink, a non-UTF-8 name, a
+ * but the code profile cannot (a gitlink, a non-UTF-8 name, a
  * non-canonical mode) stops the mirror with that tree's error; nothing is
  * silently dropped.
  */
@@ -102,7 +102,7 @@ function parseGitTree(bytes: Uint8Array): Array<{ mode: string; name: string; id
     try {
       name = utf8.decode(bytes.subarray(sp + 1, nul));
     } catch {
-      return codeError("unsupported-profile", "TREE_NAME", "a git tree entry name is not UTF-8; originals-code/0.1 names are UTF-8 (PROVISIONAL, K2)");
+      return codeError("unsupported-profile", "TREE_NAME", "a git tree entry name is not UTF-8; originals-code names are UTF-8 (PROVISIONAL, K2)");
     }
     out.push({ mode, name, id: hex(bytes.subarray(nul + 1, nul + 21)) });
     at = nul + 21;
@@ -175,7 +175,7 @@ export class GitSource implements CommitSource {
     const entries: Tree["entries"] = {};
     for (const e of parseGitTree(o.bytes)) {
       if (e.mode === "40000") entries[e.name] = { mode: "40000", digest: await this.tree(e.id, objects) };
-      else if (e.mode === "160000") codeError("unsupported-profile", "GITLINK_UNSUPPORTED", `${e.name} is a gitlink (submodule); originals-code/0.1 does not mirror them (PROVISIONAL, K9)`);
+      else if (e.mode === "160000") codeError("unsupported-profile", "GITLINK_UNSUPPORTED", `${e.name} is a gitlink (submodule); the code profile does not mirror them (PROVISIONAL, K9)`);
       else entries[e.name] = { mode: e.mode as Mode, digest: await this.blob(e.id, objects) };
     }
     const bytes = encodeTree({ entries });

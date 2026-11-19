@@ -1,6 +1,6 @@
 # 049 — Originals for code: signed, offline-verifiable version control on Originals
 
-Status: **phases 0–3 merged (#1064); the owner's 2026-11-19 follow-ups built: O3 commit objects (K12), O1 segments (K13), O7 contributions (K14), the release Original (K15) and phase 5, `git-remote-originals` (K16); §8 has the results. Phase 4 was decided on 2026-11-19 as a core spec change (§6, plan 050); moving the code profile onto it waits for W1–W3.** Written 2026-11-18 against `main` at `e5a3e3d4`. Rule IDs refer to
+Status: **phases 0–3 merged (#1064); the owner's 2026-11-19 follow-ups built: O3 commit objects (K12), O1 segments (K13), O7 contributions (K14), the release Original (K15) and phase 5, `git-remote-originals` (K16). Phase 4 was decided on 2026-11-19 as a core spec change (§6, plan 050, W1–W3 merged as #1071–#1073), and the code profile now runs on it: `originals-code/0.2` (§1.5, revised K4, K5, K7, K15, new K17 and K18); §8 has the results.** Written 2026-11-18 against `main` at `e5a3e3d4`. Rule IDs refer to
 the pinned Originals Protocol (`aviarytech/originals-spec@45ed1dc`, see
 [`specs/README.md`](../specs/README.md)); terms follow
 [`CONTEXT.md`](../CONTEXT.md) and the consumer contract
@@ -15,7 +15,9 @@ a 114 MiB git pack.
 
 Constraints, set by the owner:
 
-- **No change to `originals:1.0`.** Every log this layer writes is an ordinary
+- **No change to `originals:1.0` from this plan.** (Phase 4's signer sets,
+  parent Originals and scoped grants were added to `originals:1.0` itself by
+  plan 050; profile 0.2 uses them, §1.5.) Every log this layer writes is an ordinary
   Original under `originals:1.0`. A plain Originals verifier accepts it and
   reports exactly what it reports for any other Original. The code rules are a
   separate profile, `originals-code/0.1` (PROVISIONAL name), checked on top of
@@ -61,7 +63,7 @@ Consequences:
   entry bringing content from another branch is an ordinary entry).
 - **Ownership is not authority.** There is no owner: nothing is anchored (P9.11).
 
-### 1.1 Objects (PROVISIONAL, `originals-code/0.1`)
+### 1.1 Objects (PROVISIONAL; unchanged in `originals-code/0.2`)
 
 Digests are sha2-256 multihashes, multibase base58btc (`zQm…`), exactly the
 Originals resource digest (P4.3, P14.7), computed over the exact bytes.
@@ -106,7 +108,8 @@ with the one the entry's metadata claims (`gitBinding` report).
 
 - `name`: the ref, `refs/heads/<branch>`.
 - `metadata.code`: exactly
-  `{ "profile": "originals-code/0.1", "repo": "<repo did:vh>", "ref": "<ref>", "commit": "<40 hex>", "tree": "<40 hex>", "repoVersion": "<repo versionId>" }`,
+  `{ "profile": "originals-code/0.2", "repo": "<repo did:vh>", "ref": "<ref>", "commit": "<40 hex>", "tree": "<40 hex>" }`
+  (0.1 also had `"repoVersion"`, replaced in 0.2 by the core pin, §1.5),
   plus `"commitObject": "z…"` (K12), the digest of the raw commit object, when
   it is mirrored. Mirroring is public by default: the writer includes commit
   objects unless the source is marked private, where it needs an explicit
@@ -147,7 +150,7 @@ with the one the entry's metadata claims (`gitBinding` report).
   mirror signs, never the commit time (git commit times are not monotonic
   along a branch; VH-Log requires increasing `versionTime`).
 
-### 1.3 Repo Original (PROVISIONAL)
+### 1.3 Repo Original (PROVISIONAL; 0.1 as first built, revised in §1.5)
 
 - `name`: the repository name.
 - `resource`: the repo document, JCS bytes, media type
@@ -221,6 +224,64 @@ with the one the entry's metadata claims (`gitBinding` report).
   Originals stay unanchored. Anchoring a private repo's releases needs a
   disclosure warning (§6). Tested on disposable regtest only.
 
+### 1.5 Profile 0.2: the code profile on signer sets, parents and scoped grants (built 2026-11-19; plan 050 §5 step 3)
+
+The owner's decisions of 2026-11-19 (§6) move what 0.1 kept in its own
+documents into the core. `originals-code/0.2` (PROVISIONAL) replaces 0.1; 0.1
+bundles are not read, because nothing was published under 0.1 (no migration,
+as plan 011 did for earlier formats).
+
+- **Repo Original (K5, revised).** A set Original (P5.19) whose `authors`
+  are the delegates, with a threshold. Every delegate signs its genesis; each
+  later change (refs, per-ref thresholds, branch listings, delegates, the
+  release Original, grants) is an author entry signed by the threshold of the
+  set before it and by every delegate it adds (P5.20). The repo document is
+  `{ "format": "originals-code-repo/0.2", "delegates", "refs", "releases"? }`:
+  `delegates` must equal `authors.dids` at every version
+  (`REPO_DELEGATES_MISMATCH`), and `grants` is gone. Delegates who are not
+  together sign a proposal file in turn (K18): `CodeWorkspace.proposeRepo`
+  → `cosignRepo` → `commitRepo`, CLI `originals-code repo propose|cosign|commit`.
+  The repo Original names no parent. `SIGNER_SET_UNSUPPORTED` is gone.
+- **Branch Originals (K4, revised).** A W2 child of the repo Original
+  (`parent.did` = the repo; P5.24), with one author, its delegate or
+  contributor (`BRANCH_SET_AUTHOR` otherwise). Each entry pins a repo
+  version; writers pin the newest repo version they hold. The pin replaces
+  `metadata.code.repoVersion`. Within a log the core checks the pin
+  (backwards, other branch, unknown version: P5.24, P5.25); across a segment
+  boundary the code profile does (`PIN_BACKWARDS`). A branch has no `editors`
+  of its own (`BRANCH_EDITORS`).
+- **Path grants (K7, revised).** A path grant is an editor grant in the repo
+  Original's `editors`: `{did, name: false, metadata: true, resource: true,
+  scope: {type: "paths", paths}}` (P5.15, P5.28, P14.23; `metadata` because
+  every branch entry names its commit there). Every branch inherits it at the
+  version it pins (P5.24), so no per-branch grant is needed. The core checks
+  the scope over the code tree's path view; the code report restates, per
+  editor entry, the grant source, pin and scope status from the Originals
+  report, and its P5.26 labels (`inherited-grant-revoked`), and computes
+  nothing of its own. P5.15 makes editors and members disjoint, so a
+  delegate writes only its own branch; others write by grant. A grant
+  without a scope allows every path.
+- **Release Original (K15 revised, K17).** A set Original with the repo's
+  members and threshold, and a child of the repo: at every entry its
+  `authors` equal the repo's `authors` at the entry's pin
+  (`RELEASES_AUTHORS`). A child gains nothing for authorship from its parent
+  (P5.24: the parent's signer set has no authority over the child), so the
+  release Original carries the set itself, and the pin says which repo
+  version's set that is. A delegate change reaches releases with the next
+  release, which pins the new repo version and changes the release set,
+  signed by the old set's threshold and every added member (P5.20). Creating
+  it is a set Original's genesis, which every delegate signs (P5.19). Chosen
+  over "a child only", which would leave releases to one author, and over
+  "a set only", which would leave no link from a release to the repo version
+  whose delegates signed it.
+- **Contributions and segments.** A contribution and every segment are
+  children of the repo; a segment's genesis still names its previous segment
+  in `metadata.code.previous` (K13).
+- **Viewer.** The repo page shows the signer set and threshold and the
+  repo's path grants (inherited by every branch); commit pages show each
+  entry's pin and, for an editor entry, the inherited grant and its scope
+  check; the verification page shows the parent evidence status.
+
 ## 2. Verification and reports (section 7: reports stay separate)
 
 `verifyRepository(bundle)` returns, with nothing merged into one verdict:
@@ -243,9 +304,10 @@ with the one the entry's metadata claims (`gitBinding` report).
     missing; content is then partial) · `claimed` (some commit has no commit
     object). `base` is the first parent of the branch's first commit (null for
     a root commit).
-  - `grants`: per entry by a non-delegate signer, `allowed` or `outside-grant`
-    with the paths outside it; `historicallyAuthorizedOnly` for entries allowed
-    by the named repo version but not by the latest (P7.9 by analogy).
+  - `grants`: per editor entry, the grant the Originals report found (source,
+    pin, scope status; 0.2, K7); `historicallyAuthorizedOnly` restates the
+    Originals report's P5.26 labels. In 0.1 these were computed here against
+    the repo document's `grants`.
 - `canonical[]`: per ref, its own result (§3.2).
 - `validAsOf`: the repo checkpoint and each branch checkpoint used. Never
   `current` (P7.10).
@@ -335,9 +397,10 @@ Threshold 1 with one delegate needs no protocol change.
 - The writer refuses before signing a change outside the signer's grant
   (`outside-grant`, as the SDK does for P5.16).
 
-### Phase 4 — Multi-delegate repo identity changes (PROPOSED SPEC CHANGE; not implemented)
+### Phase 4 — Multi-delegate repo identity changes (built as profile 0.2)
 
-See §6. Waits for the owner's decision.
+Decided on 2026-11-19 as a core change (§6, plan 050). The code profile moved
+onto it in `originals-code/0.2` (§1.5).
 
 ### Phase 5 — `git-remote-originals` (built, K16)
 
@@ -388,13 +451,13 @@ URL of a repo bundle> <dir>` works.
 
 | ID | Choice |
 |---|---|
-| K1 | Package name `@originals/code`; profile `originals-code/0.1` |
+| K1 | Package name `@originals/code`; profile `originals-code/0.2` (0.1 dropped, not migrated: nothing was published under it) |
 | K2 | Tree object format, git modes, JCS bytes; tree per directory |
 | K3 | Media types `application/vnd.originals.code-tree+json`, `…code-repo+json` |
-| K4 | Branch metadata `code` members; `versionTime` = signing time |
-| K5 | Repo document members; repo author = founding delegate |
+| K4 | Branch metadata `code` members (0.2: no `repoVersion`); a branch is a W2 child of the repo pinning the newest repo version its writer holds, with one author and no editors of its own; `versionTime` = signing time |
+| K5 | (revised for 0.2) The repo Original is a set Original whose members are the delegates, with a threshold (W1): every delegate signs genesis, a threshold signs each change, added delegates sign too; the repo document is `{format, delegates, refs, releases?}`, `delegates` equal to `authors.dids`; per-ref thresholds and branch listings stay in the document |
 | K6 | Canonical-head rule (§3, phase 2), including invalid/forked branches not voting |
-| K7 | Path-grant pattern grammar (a final `**` matches one or more segments, as in gitignore); a branch's author unrestricted in its own branch, every other signer needs a grant; an invalid entry makes the whole branch invalid for canonical heads |
+| K7 | (revised for 0.2) Path grants are W3 `paths`-scoped grants in the repo Original's `editors` (`name: false, metadata: true, resource: true`), inherited by every branch at its pin (W2); the pattern grammar is P14.23's (a final `**` matches one or more segments); the core checks scopes and P5.26; a branch's author unrestricted in its own branch, every other signer needs a grant; delegates are never editors (P5.15); an invalid entry makes the whole branch invalid for canonical heads |
 | K8 | Bundle layout and object pack; deflate-raw per object |
 | K9 | Gitlinks refused; first-parent only; second parents not mirrored |
 | K10 | Local did:vh identities and key files for the CLI (development only) |
@@ -402,8 +465,10 @@ URL of a repo bundle> <dir>` works.
 | K12 | Raw git commit objects mirrored verbatim as objects, named by `metadata.code.commitObject`; public by default, opt-in for a source marked private; `commitBinding` reported separately (O3) |
 | K13 | A branch longer than the entry limit is a chain of segment Originals; a segment genesis names the previous segment's did and last versionId (`metadata.code.previous`); the repo document lists the newest segment; earlier segments are `superseded` (O1) |
 | K14 | Contributor branches: a branch Original naming the repo but not listed is a `contribution`, verified and never voting; bundles carry the contributions a workspace holds; `import` verifies a bundle before taking it in (O7) |
-| K15 | Release Original: named by the repo document (`releases`), authored by the repo's author, one release manifest per entry (tag, ref, commit, branch and entry, canonical result at the time); its commit must be in the named chain |
+| K15 | Release Original: named by the repo document (`releases`), one release manifest per entry (tag, ref, commit, branch and entry, canonical result at the time); its commit must be in the named chain. Signed as K17 says (0.1: by the repo's author) |
 | K16 | `git-remote-originals`: verify the bundle offline first, list only agreed and completely verified refs, rebuild commits byte for byte from commit objects; second parents stated in `info/grafts`, a mid-history start in `shallow`; no push |
+| K17 | The release Original is a set Original with the repo's members and threshold and a W2 child of the repo: at every entry its `authors` equal the repo's at the pin (`RELEASES_AUTHORS`); every delegate signs its creation (P5.19), a threshold each release, and a delegate change reaches it with the next release (P5.20) |
+| K18 | Proposal files (`originals-code-proposal/0.1`): an unsigned or partly signed draft as JSON (entry, summary, display, bytes, proofs), cosigned in turn and committed once every named signer has signed; the SDK rechecks it at each step, and a moved repo makes it stale, never rebased |
 
 ## 5. Acceptance tests (IDs cited by tests)
 
@@ -420,11 +485,11 @@ URL of a repo bundle> <dir>` works.
 | CODE-09 | Repo document rules: threshold bounds, branch binding both ways |
 | CODE-10 | Canonical head: agreed, no-quorum, diverged, incomplete, inconsistent; never by timestamp |
 | CODE-11 | A forked branch Original does not vote; the fork is reported (P9.16) |
-| CODE-12 | Path grant allows a covered change |
-| CODE-13 | Path grant refuses a change outside it (verifier and writer); removing and renaming count |
-| CODE-14 | Entry by an editor with no path grant is refused |
-| CODE-15 | Grant revoked later: historically authorized only, not invalid |
-| CODE-16 | `repoVersion` going backwards is refused |
+| CODE-12 | Path grant allows a covered change (0.2: an inherited `packages/vh/**` grant, the scope checked by the core) |
+| CODE-13 | Path grant refuses a change outside it (writer before signing; the core verifier, SCOPE_OUTSIDE); removing and renaming count |
+| CODE-14 | Entry by an editor with no path grant is refused (writer; core: EDITOR_NOT_GRANTED) |
+| CODE-15 | Grant revoked later: historically authorized only (P5.26, from the core report), not invalid; a new entry under it is refused |
+| CODE-16 | A pin going backwards is refused (0.1: `repoVersion`; core: PARENT_PIN_BACKWARDS) |
 | CODE-17 | Bundle reader bounds: oversize object, bad index, inflate bomb |
 | CODE-18 | The viewer: files, README, commits, line diffs, verification page; repository content never rendered as markup; unknown routes 404 |
 | CODE-19 | Commit objects: mirrored by default, the verifier recomputes commit id, tree and first parent (`commitBinding`); a private source needs opt-in; bundles without them verify with ids claimed; a missing one is unchecked |
@@ -437,6 +502,10 @@ URL of a repo bundle> <dir>` works.
 | CODE-26 | Release failures: a commit not at the named entry and a repeated tag fail the release history; a missing branch is incomplete. `bun run release:regtest`: anchoring and reinscribing the release Original on disposable regtest |
 | CODE-27 | `git clone originals::<bundle>`: first-parent ids equal git's, trees and messages identical, the merge's second parent in `info/grafts`, `fsck` clean, `git fetch` takes a later bundle |
 | CODE-28 | The helper refuses what it cannot rebuild exactly: no commit objects, no agreed head |
+| CODE-29 | 0.2 repo governance: three delegates, threshold 2, every one signs genesis; a change signed by 2 of 3 verifies and one by 1 is refused; a delegate change adds a member who signs and drops one, refused with 1 old signature or without the added member's |
+| CODE-30 | Proposal files: propose, cosign in turn, commit; commit before the last signature, and a signer the proposal does not name, are refused; a proposal whose repo moved is stale |
+| CODE-31 | The release Original's set: creation needs every delegate, a release the threshold; a delegate change reaches it with the next release; a release set that differs from the repo's at the pin fails the release history |
+| CODE-32 | One repo grant lets an editor write into two delegates' branches with no grant in either; a grant naming a delegate is refused (P5.15) |
 | CODE-ACC | Mirror `main` of this repository and verify it with no network (script, timings, store size vs. pack) |
 
 ## 6. Phase 4 and the owner's decisions of 2026-11-19
@@ -487,7 +556,7 @@ The owner reviewed this plan in a grilling session on 2026-11-19 and decided:
   lets anyone publish their own namespace and only counts delegates'. Both
   fit the model; the second needs no editor grant and is closer to Radicle.
 
-## 8. Results (2026-11-18)
+## 8. Results (2026-11-18, updated 2026-11-19 for profile 0.2)
 
 Phases 0–3 are in `packages/code` with tests citing CODE-01 to CODE-17
 (93 tests, all passing; network disabled in every test).
@@ -544,6 +613,23 @@ bundle again, rebuilding and indexing 16,499 objects): **the clone's 680
 `git log --first-parent` ids equal `origin/main`'s**, its `HEAD` tree is
 git's, `git fsck` is clean, and 199 merge commits keep only their first
 parent through `info/grafts`.
+
+**Profile 0.2 (plan 050 §5 step 3), 2026-11-19**
+(`bun run acceptance -- --rev origin/main --clone`, `main` at `1aad0f30`,
+1,548 commits, 686 first-parent, 2,109 files, Apple Silicon laptop): the repo
+Original is a set Original (one delegate, threshold 1) and the branch a child
+of it, pinning the repo version it was mirrored under. Mirror 686 entries in
+19.6 s (6,705 trees, 9,279 blobs, 171.9 MiB raw; 686 commit objects,
+1.4 MiB); store 16,670 objects, 68.8 MiB compressed, plus 3.2 MiB of logs
+and root trees; bundle 73.1 MiB in 6.2 s; verify 4.5 s offline (0 fetches):
+repo and branch valid under both reports, parent evidence verified, 686 of 686
+tree ids and commit ids recomputed, canonical head agreed at `1aad0f30`,
+equal to git's, `current: false`. `git clone originals::<bundle>` in 11.0 s:
+686 first-parent ids equal git's, tree matches, `fsck` clean, 199 merges
+grafted. The code package has 147 tests (CODE-01 to CODE-32), all passing.
+`bun run release:regtest` (disposable regtest) anchors and reinscribes the
+release Original, now a set child of the repo: both inscriptions accepted and
+current, the bundle's release history valid offline.
 
 The store is about 1.9 times git's pack of the same objects (O6) and about
 0.6 times the whole repository's 114 MiB pack, which also holds every
