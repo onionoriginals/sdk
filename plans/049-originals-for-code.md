@@ -1,8 +1,7 @@
 # 049 — Originals for code: signed, offline-verifiable version control on Originals
 
 Status: **phases 0–3 implemented on `feat/originals-for-code` (§8 has the
-results); phase 4 is a proposed spec change waiting for the owner's
-decision (§6); phase 5 is a plan item, not built.** Written 2026-11-18 against `main` at `e5a3e3d4`. Rule IDs refer to
+results); phase 4 was decided on 2026-11-19 as a core spec change (§6, plan 050); phase 5 is a plan item, not built.** Written 2026-11-18 against `main` at `e5a3e3d4`. Rule IDs refer to
 the pinned Originals Protocol (`aviarytech/originals-spec@45ed1dc`, see
 [`specs/README.md`](../specs/README.md)); terms follow
 [`CONTEXT.md`](../CONTEXT.md) and the consumer contract
@@ -316,62 +315,37 @@ too; that is open question O3. `push` maps to `mirror` plus a shared-host
 | CODE-18 | The viewer: files, README, commits, line diffs, verification page; repository content never rendered as markup; unknown routes 404 |
 | CODE-ACC | Mirror `main` of this repository and verify it with no network (script, timings, store size vs. pack) |
 
-## 6. Proposed spec change for phase 4: threshold-signed repo identity (STOP for decision)
+## 6. Phase 4 and the owner's decisions of 2026-11-19
 
-**Need.** With several delegates, changing the delegate set, a threshold or
-path grants should need agreement of a threshold of current delegates, as in
-Radicle. Today one author signs every author entry of the repo Original.
+The owner reviewed this plan in a grilling session on 2026-11-19 and decided:
 
-**Rules it would relax.**
-
-- **P5.2 / owner decision S8** — one author, one signature per entry. A
-  repo-identity entry would carry `k` proofs, one per signing delegate.
-- **P5.3** — the proof's key is an `assertionMethod` key of the author DID at
-  the named version. Each proof would be bound to its own delegate DID and
-  version.
-- **P5.8** — the author is fixed at genesis and never transfers. Delegate
-  membership would change by a threshold entry; the genesis "author" becomes
-  the genesis delegate set.
-- **P5.16 / P5.17** — only author entries change grants. Threshold entries
-  would be the only entries allowed to change the delegate set, thresholds and
-  grants.
-- **P14.1, P14.8 (exact members)** — an entry carries exactly one proof
-  today (ORIGINALS.md, "Exact members"); a threshold entry carries several.
-  The owner should confirm which section 14 rule fixes the proof count.
-
-**Proposal (a separate profile, not a change to `originals:1.0`).** Define
-`originals-quorum:0.1` (name open), a did:vh extension alongside
-`originals:1.0` for identity-like Originals only:
-
-1. Genesis state names `delegates: [{did}]` and `threshold` (1 ≤ t ≤ n). No
-   single `author`.
-2. Each entry carries `signers: [{did, verificationMethod, versionId}]`, sorted
-   and unique, and exactly one proof per signer, in the same order. Each proof
-   is checked as P5.3 against its own delegate DID (assertionMethod, not an
-   update key, P5.11), and P7.8/P7.9 apply per signer.
-3. An entry is accepted only if its signers are delegates in its **parent's**
-   state and number at least the parent's threshold (as VH-Log witness
-   thresholds use the active set; editors are judged against the parent,
-   P5.17).
-4. Forks, P6.6 and P9.16 are unchanged: two threshold entries with the same
-   parent are an unresolved fork.
-5. `originals:1.0` is unchanged; branch Originals stay single-author.
-
-**Questions for the owner.** (a) Separate profile vs. extending
-`originals:1.0`; (b) whether VH-Log's multi-proof entries (proof array) can
-carry the delegates' proofs or a new member is needed; (c) whether a quorum
-Original may be anchored, and who signs the anchoring entry (P9.10, P9.12).
+- **Phase 4 changes the core, not a separate profile.** Signer sets with a threshold (W1), authority from a parent Original pinned per entry (W2) and scoped grants (W3) become part of `originals:1.0` as an additive draft change. That reverses this plan's earlier proposal for an `originals-quorum:0.1` profile. The design contract is [plan 050](050-signer-sets-parent-authority-scoped-grants.md).
+- **The code profile moves onto those mechanisms.** The repo Original becomes a set Original whose members are the delegates. Each branch Original becomes a W2 child of the repo, whose pins replace `metadata.code.repoVersion`. Path grants become W3 `paths` scopes on inherited grants.
+- **Audience:** projects on GitHub first, then a decentralized GitHub, then audit and compliance.
+- **Radicle is a transport only.** A bundle can ride in a Radicle repo as a custom collaborative object. Radicle's delegates and canonical refs are a different claim from Originals verification, and our verifier ignores them (P3.5 by analogy). Radicle identities are did:key, cannot rotate, and are not P5.8 methods. Still to confirm: whether arbitrary custom refs replicate.
+- **Anchoring is optional and for releases only.** The repo Original (governance) and a separate **release Original** are anchored. A release Original's entries name a release (tag, commit, branch entry) and are signed by the repo's delegates by threshold. Branch Originals stay unanchored, because an anchored Original needs an inscription for every later entry.
+- **Reads** are host-enforced and specified separately (the read-authorization spec PR). For code:
+  - read access covers the whole repo, and branches inherit it through W2;
+  - a bundle holder reads everything in it;
+  - a host serves an object by digest only to a requester who may read an Original naming it;
+  - anchoring a private repo needs a disclosure warning;
+  - per-path reads come later.
+- **Milestone 1: dogfood this repo.**
+  - CI mirrors `main` on each merge, signing as an editor with a `**` grant and its key held in Turnkey.
+  - The owner signs release entries.
+  - Each GitHub release attaches the bundle.
+  - A static GitHub Pages viewer verifies in the visitor's browser. It loads the logs first and fetches files by digest on demand.
 
 ## 7. Open questions
 
-- **O1 — repositories over 10,000 first-parent commits** (P7.7). One branch
+- **O1 — decided 2026-11-19: a chain of segments.** A full branch Original is followed by a new one whose genesis names the previous segment's last entry. The limit stays, because it bounds a verifier's work on untrusted logs (P7.7). The original question was: **repositories over 10,000 first-parent commits** (P7.7). One branch
   Original per ref cannot hold them. Options: segment a branch into a chain of
   Originals (each genesis naming the previous one's last entry), or a profile
   limit. Not needed for this repository (675).
 - **O2 — git ancestry beyond first parents.** Canonical heads only trust
   signed first-parent chains (K6). Mirroring parents in metadata would make
   ancestry claimed, not checked.
-- **O3 — commit objects.** Mirroring raw commit objects as blobs would let a
+- **O3 — decided 2026-11-19: mirror commit objects verbatim for public repos.** A private repo needs explicit opt-in, because of author emails (P8.2). The original question was: **commit objects.** Mirroring raw commit objects as blobs would let a
   verifier check the commit hash and let a remote helper rebuild identical
   commits; it exposes author emails (P8.2: no confidentiality).
 - **O4 — Originals verification cost.** `verifyOriginal` hashes every
@@ -384,7 +358,7 @@ Original may be anchored, and who signs the anchoring entry (P9.10, P9.12).
   deltas: 66.1 MiB for this repository's first-parent history, against git's
   35.7 MiB pack of the same objects (§8). Delta compression inside the pack
   (K8) would close most of the gap without changing any digest.
-- **O7 — editor branches for non-delegates.** Today a contributor who is not
+- **O7 — decided 2026-11-19: both, by role.** Anyone may publish their own branch Original, which never votes. Trusted contributors become editors of a delegate's branch with path-scoped grants. The original question was: **editor branches for non-delegates.** Today a contributor who is not
   a delegate writes into a delegate's branch as an editor. Radicle instead
   lets anyone publish their own namespace and only counts delegates'. Both
   fit the model; the second needs no editor grant and is closer to Radicle.
