@@ -1377,24 +1377,50 @@ export class OriginalsSDK {
     return out;
   }
 
+  /**
+   * P5.28: verify, then fetch from this store the objects a scope check
+   * needed and lacked, and verify again, until none is newly found. A code
+   * tree's subtrees come to light one level at a time.
+   */
+  private async withObjects(objects: Map<string, Uint8Array>, run: (find: (digest: string) => Uint8Array | undefined) => Promise<OriginalsReport>, supplied?: Readonly<Record<string, Uint8Array>>): Promise<OriginalsReport> {
+    const find = (digest: string) => objects.get(digest) ?? (supplied && Object.prototype.hasOwnProperty.call(supplied, digest) ? supplied[digest] : undefined);
+    let report = await run(find);
+    for (let round = 0; round < 64; round++) {
+      let found = false;
+      for (const digest of report.scopeObjects.missing) {
+        if (objects.has(digest)) continue;
+        const held = await this.store.getResource(digest);
+        const checked = held && (await checkedBytes(held, digest));
+        if (checked) {
+          objects.set(digest, checked);
+          found = true;
+        }
+      }
+      if (!found) break;
+      report = await run(find);
+    }
+    return report;
+  }
+
   private async verify(log: string, checkpoint?: string, extra?: ReadonlyMap<string, Uint8Array>, bitcoin?: SatEvidence[], optIn?: boolean): Promise<OriginalsReport> {
     const aliases = await this.aliasEvidence(log);
     const { bytes, checked } = await this.storedBytes(log, extra);
     const comparisons = await this.comparisons(log);
     const parents = await this.heldParents(log);
-    const run = (authors: AuthorDidEvidence[]) =>
+    const objects = new Map<string, Uint8Array>();
+    const run = (authors: AuthorDidEvidence[]) => this.withObjects(objects, (find) =>
       verifyOriginal({
         log,
         ...(parents.length > 0 ? { parents } : {}),
         ...(bitcoin ? { bitcoin } : {}),
         aliases,
         authors,
-        bytes,
+        bytes: (digest: string) => (Object.prototype.hasOwnProperty.call(bytes, digest) ? bytes[digest] : undefined) ?? find(digest),
         ...(checked.size > 0 ? { checked: (digest: string) => checked.get(digest) } : {}),
         now: this.clock(),
         ...comparisons,
         ...(checkpoint ? { checkpoint } : {}),
-      });
+      }));
     const others = [...(comparisons.copies ?? []), ...parents].flatMap((c) => (typeof c.log === "string" ? [c.log] : []));
     const base = await this.authorEvidence(log, [], others, comparisons.retained, optIn);
     return (await this.withIdentities(log, base, run, undefined, optIn)).report;
@@ -2179,6 +2205,16 @@ export class OriginalsSDK {
       pin = lastPin(through);
     }
     const bytes: Record<string, Uint8Array> = {};
+    // P7.1, P14.10: the objects scope checks read, each held one packaged, any other a missing item (P5.28).
+    for (const digest of view.report.scopeObjects.read) {
+      const held = await this.store.getResource(digest);
+      const checked = held && (await checkedBytes(held, digest));
+      if (checked) bytes[digest] = checked;
+      else missing.push({ kind: "object", digest });
+    }
+    for (const digest of view.report.scopeObjects.missing) {
+      if (!bytes[digest] && !missing.some((m) => m.kind === "object" && m.digest === digest)) missing.push({ kind: "object", digest });
+    }
     const versions = view.report.resources.versions;
     // Bytes are packaged by digest: a version is left out only when no packaged version names the same bytes.
     const kept = new Set(versions.filter((v) => !omit(v)).map((v) => v.digest));
@@ -2236,18 +2272,18 @@ export class OriginalsSDK {
     const notCheckedAgainstAnchor = k > 0 ? all.slice(k).flatMap(versionIdOfLine) : [];
     // P5.25: the package's parent logs, then any this store holds.
     const parents = await this.heldParents(contents.log, contents.parents ?? []);
-    const run = (authors: AuthorDidEvidence[]) =>
-      verifyOriginal({
+    const objects = new Map<string, Uint8Array>();
+    const run = (authors: AuthorDidEvidence[]) => this.withObjects(objects, (find) => verifyOriginal({
         ...(parents.length > 0 ? { parents } : {}),
         ...(bitcoin ? { bitcoin } : {}),
         aliases: aliasEvidence,
         log: k > 0 ? serializeLines(all.slice(0, k)) : contents.log,
         authors,
-        bytes: contents.bytes,
+        bytes: find,
         ...(k > 0 ? {} : { checkpoint: contents.manifest.checkpoint }),
         now: this.clock(),
         ...comparisons,
-      });
+      }), contents.bytes);
     // A host's snapshot is a copy, like a package: no fetch location, so the location rule does not
     // apply to its signer logs (P7.8; owner decision on #993's review).
     const supplied = contents.authors.map(({ did, log, witness }) => this.obtained({ did, log, ...(witness !== undefined ? { witness } : {}) }, from));
@@ -2264,7 +2300,7 @@ export class OriginalsSDK {
     const packaged = new Set(contents.authors.map((a) => a.did));
     // P7.1, P5.25: and a child's parent logs through its pins, with their signers.
     const packagedParents = contents.parents ?? [];
-    const actuallyComplete = report.resources.missing.length === 0 &&
+    const actuallyComplete = report.resources.missing.length === 0 && report.scopeObjects.missing.length === 0 &&
       [contents.log, ...packagedParents.map((p) => p.log)].flatMap(signerDidsOf).every((d) => d.startsWith("did:btco:") || packaged.has(d)) &&
       (parentDidOf(contents.log) === undefined || packagedParents.some((p) => p.did === parentDidOf(contents.log)));
     if ((m.completeness === "complete") !== actuallyComplete) reasons.push("manifest-completeness-mismatch");

@@ -9,13 +9,13 @@
  */
 import { sha1 } from "@noble/hashes/legacy.js";
 import { canonicalize, isJsonObject, parseJson } from "@originals/vh/json";
-import { checkDigest, resourceDigest, resourceDigestAsync } from "@originals/vh/originals";
+import { CODE_TREE_FORMAT, CODE_TREE_MEDIA_TYPE, checkDigest, resourceDigest, resourceDigestAsync } from "@originals/vh/originals";
 import { codeError } from "./errors.js";
 
-/** PROVISIONAL (K2): the tree object format. */
-export const TREE_FORMAT = "originals-code-tree/0.1";
-/** PROVISIONAL (K3): the media type of a root tree, a branch Original's resource. RFC 6838, no parameters. */
-export const TREE_MEDIA_TYPE = "application/vnd.originals.code-tree+json";
+/** PROVISIONAL (K2): the tree object format, shared with the path view in `@originals/vh/originals` (P5.29). */
+export const TREE_FORMAT = CODE_TREE_FORMAT;
+/** PROVISIONAL (K3): the media type of a root tree, a branch Original's resource; `@originals/vh` defines its path view (P5.29). */
+export const TREE_MEDIA_TYPE = CODE_TREE_MEDIA_TYPE;
 
 /** git's raw tree modes for a file, an executable, a symlink and a directory. Gitlinks are refused (K9). */
 export type Mode = "100644" | "100755" | "120000" | "40000";

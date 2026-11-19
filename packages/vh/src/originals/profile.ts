@@ -19,6 +19,7 @@ import type { DidVhExtension } from "../didvh/index.js";
 import { parseDidWebvh } from "../webvh/index.js";
 import { authorKey, authorMethod, namedVersion, versionNumberOf, type AuthorHistory } from "./author.js";
 import { checkPin, inheritedGrant, lookupPin, pinFailure, type ParentViews } from "./parent.js";
+import { checkScopeChange, type ObjectLookup, type ScopeCheck, type ScopeViews } from "./scope.js";
 import {
   ORIGINALS_LIMITS,
   ORIGINALS_METHOD,
@@ -29,6 +30,7 @@ import {
   checkEntrySigners,
   checkEntryState,
   checkParent,
+  outsideGrant,
   type AuthorRef,
   type EditorGrant,
   type EntryState,
@@ -41,6 +43,8 @@ export interface GrantUse {
   source: GrantSource;
   grant: EditorGrant;
   parent?: ParentRef;
+  /** For a scoped grant (P5.28): checked, or not required because the entry keeps the resource's digest. */
+  scope?: { type: string; status: "checked" | "not-required" };
 }
 
 /** What the profile's rules read beyond the signer histories. */
@@ -49,6 +53,12 @@ export interface OriginalsRulesContext {
   parents?: ParentViews;
   /** Filled with the grant each editor entry relied on, for the report (P5.24). */
   grants?: WeakMap<object, GrantUse>;
+  /**
+   * Checking scoped grants (P5.28, P5.29): where resource bytes and the
+   * objects they reference come from, the views this verifier implements,
+   * and, filled here, every object digest a check read or lacked.
+   */
+  scopes?: { lookup: ObjectLookup; views: ScopeViews; read?: Set<string>; missing?: Set<string> };
 }
 
 export const ORIGINALS_1_0: VersionRules = Object.freeze({
@@ -254,7 +264,36 @@ export function originalsRules(authors: Iterable<AuthorHistory>, context: Origin
             scid, index, previous: parentState, deactivatedParameter: entry.parameters.deactivated === true,
             ...(from.grant ? { inherited: from.grant } : {}),
           });
-          if (source) context.grants?.set(entry, source === "direct" ? { source, grant: direct! } : { source, grant: from.grant!, parent: from.parent! });
+          if (!source || !parentState) return;
+          // P5.28: one grant allows the whole change, within its scope when it has one; a direct grant first.
+          const state = entry.state as unknown as EntryState;
+          const candidates: GrantUse[] = [
+            ...(direct && outsideGrant(direct, state.asset, parentState.asset) === null ? [{ source: "direct" as const, grant: direct }] : []),
+            ...(from.grant && outsideGrant(from.grant, state.asset, parentState.asset) === null ? [{ source: "inherited" as const, grant: from.grant, parent: from.parent! }] : []),
+          ];
+          const changes = state.asset.resource.digest !== parentState.asset.resource.digest;
+          let unchecked: Extract<ScopeCheck, { status: "unchecked" }> | undefined;
+          let outside: Extract<ScopeCheck, { status: "outside" }> | undefined;
+          for (const use of candidates) {
+            const scope = use.grant.scope;
+            if (!scope || !changes) {
+              context.grants?.set(entry, scope ? { ...use, scope: { type: scope.type, status: "not-required" } } : use);
+              return;
+            }
+            const result = checkScopeChange(scope, parentState.asset.resource, state.asset.resource, context.scopes?.lookup ?? (() => undefined), context.scopes?.views ?? {});
+            for (const d of result.read) context.scopes?.read?.add(d);
+            if (result.status === "checked") {
+              context.grants?.set(entry, { ...use, scope: { type: scope.type, status: "checked" } });
+              return;
+            }
+            if (result.status === "unchecked") unchecked ??= result;
+            else outside ??= result;
+          }
+          if (unchecked) {
+            for (const d of unchecked.missing ?? []) context.scopes?.missing?.add(d);
+            fail("incomplete-evidence", "SCOPE_UNCHECKED", `${editor}'s ${unchecked.type} scope is unchecked: ${unchecked.message}; the entry is not verified as authorized (P5.28)`, { type: unchecked.type, reason: unchecked.reason, missing: unchecked.missing ?? [], role: "scope" });
+          }
+          fail("outside-grant", "SCOPE_OUTSIDE", `${editor}'s ${outside!.type} scope does not allow ${outside!.outside.join(", ")} (P5.28, P5.29)`, { type: outside!.type, outside: outside!.outside });
         },
       },
     },

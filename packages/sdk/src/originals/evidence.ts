@@ -13,7 +13,9 @@
  *                                         own parent in turn, through the highest pin the packaged
  *                                         entries depend on (P5.25, P14.10); their signers are under
  *                                         `signers/` with the child's
- *   resources/<digest>                    the bytes of each version of the resource included, named by digest
+ *   resources/<digest>                    the bytes of each version of the resource included, and of each
+ *                                         object a version references that a scope check needs (P5.29),
+ *                                         named by digest
  *
  * PROVISIONAL (P14.10, section 14): the `signers/` layout. Signer histories are
  * under `signers/`, because editors are signers too, and there is no asset
@@ -38,7 +40,9 @@ export type MissingItem =
   /** A signer DID history the package lacks (P7.1, P7.4): the author's, or an editor's. */
   | { kind: "identity"; did: string; role: "author" | "editor" }
   /** A parent Original whose log through that pin the package lacks (P5.25, P14.10). */
-  | { kind: "parent"; did: string; versionId: string };
+  | { kind: "parent"; did: string; versionId: string }
+  /** Bytes a scope check needs that the package lacks: an object a version references (P5.28, P14.10). */
+  | { kind: "object"; digest: string };
 
 /** P14.10: one missing item, with exactly the members of its kind. */
 function checkMissingItem(item: JsonValue): void {
@@ -46,10 +50,12 @@ function checkMissingItem(item: JsonValue): void {
   const ok = isJsonObject(item) && (item.kind === "resource"
     ? exactly(["kind", "version", "digest", "versionId"]) && Number.isSafeInteger(item.version) && (item.version as number) >= 1 &&
       typeof item.digest === "string" && typeof item.versionId === "string"
-    : item.kind === "parent"
+    : item.kind === "object"
+      ? exactly(["kind", "digest"]) && typeof item.digest === "string"
+      : item.kind === "parent"
       ? exactly(["kind", "did", "versionId"]) && typeof item.did === "string" && typeof item.versionId === "string"
       : item.kind === "identity" && exactly(["kind", "did", "role"]) && typeof item.did === "string" && (item.role === "author" || item.role === "editor"));
-  if (!ok) evidenceError("EVIDENCE_MANIFEST", "a missing item is exactly { kind: \"resource\", version, digest, versionId }, { kind: \"identity\", did, role: \"author\" | \"editor\" } or { kind: \"parent\", did, versionId } (P14.10)");
+  if (!ok) evidenceError("EVIDENCE_MANIFEST", "a missing item is exactly { kind: \"resource\", version, digest, versionId }, { kind: \"identity\", did, role: \"author\" | \"editor\" } { kind: \"parent\", did, versionId } or { kind: \"object\", digest } (P14.10)");
 }
 
 export interface EvidenceManifest {

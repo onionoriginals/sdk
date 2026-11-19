@@ -14,3 +14,4 @@ export * from "./btco.js";
 export * from "./cbor.js";
 export * from "./carried.js";
 export * from "./parent.js";
+export * from "./scope.js";

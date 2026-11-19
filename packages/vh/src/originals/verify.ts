@@ -47,6 +47,8 @@ import { didWebvhLogUrl } from "../webvh/index.js";
 import { NATIVE_SHA256_MIN_BYTES, bytesView } from "../crypto/index.js";
 import { deriveDocument, exactNumberError, originalsSpecialisation, type GrantUse } from "./profile.js";
 import { acceptedHeadAt, inheritedGrant, pinNumber, type ParentView } from "./parent.js";
+import { DEFAULT_SCOPE_VIEWS, checkScopeChange, type ObjectLookup, type ScopeViews } from "./scope.js";
+import { canonicalize } from "../json/index.js";
 import { ORIGINALS_LIMITS, ORIGINALS_METHOD, authorRefsOf, governingSet, outsideGrant, resourceDigest, resourceDigestAsync, signersOf, type AssetState, type EntryState, type GrantSource, type ParentRef } from "./state.js";
 
 export interface VerifyOriginalOptions {
@@ -99,6 +101,14 @@ export interface VerifyOriginalOptions {
    * it, a child's result is incomplete, never a pass.
    */
   parents?: ParentEvidence[];
+  /**
+   * The path and item views this verifier implements, by media type (P5.29).
+   * Default: the code tree's path view and the reference item list's item
+   * view (`DEFAULT_SCOPE_VIEWS`). A scope on a media type with no view here
+   * is unchecked, never allowed (P5.28). Objects a view needs come from
+   * `bytes`.
+   */
+  scopeViews?: ScopeViews;
   now?: number | Date;
   limits?: LogLimits & { maxAuthorVersions?: number };
 }
@@ -121,6 +131,8 @@ export interface GrantReport {
   editor: string;
   source: GrantSource;
   parent?: ParentRef;
+  /** For a scoped grant (P5.28): its type, and whether this entry's change was checked against it or did not need to be. */
+  scope?: { type: string; status: "checked" | "not-required" };
 }
 
 /**
@@ -342,6 +354,12 @@ export interface OriginalsReport {
   grants: GrantReport[];
   /** The parent Original a child names (P5.24–P5.27); null for an Original with no parent. */
   parentAuthority: ParentAuthorityReport | null;
+  /**
+   * The objects scope checks read, beyond the resource versions, and those
+   * they needed but were not supplied (P5.28, P7.1): what a complete package
+   * must include.
+   */
+  scopeObjects: { read: string[]; missing: string[] };
   /**
    * Content availability, reported separately (P7.4): `partial` lists the missing resource
    * versions and is not a verification failure (P7.3, P9.18); `digest-failure` is.
@@ -645,6 +663,10 @@ async function buildParentViews(options: VerifyOriginalOptions, cache: ParentCac
 async function verifyWith(options: VerifyOriginalOptions, cache: ParentCache): Promise<{ report: OriginalsReport; entries: VerifiedEntry[] }> {
   await buildParentViews(options, cache);
   const grants = new WeakMap<object, GrantUse>();
+  // P5.28: resource and object bytes for scope checks, from `bytes` and, once read, the anchoring sat.
+  const fromSat = new Map<string, Uint8Array>();
+  const scopeLookup: ObjectLookup = (digest) => lookup(options.bytes, digest) ?? fromSat.get(digest);
+  const scopes = { lookup: scopeLookup, views: options.scopeViews ?? DEFAULT_SCOPE_VIEWS, read: new Set<string>(), missing: new Set<string>() };
   /** Child entries whose pin P5.27 checked at their inscription; P5.26 does not apply to them. */
   const pinChecked = new Set<string>();
   let parentAnchoring: ParentAuthorityReport["anchoring"] = "not-applicable";
@@ -691,7 +713,7 @@ async function verifyWith(options: VerifyOriginalOptions, cache: ParentCache): P
   }
 
   const verifyOptions = {
-    specialisation: originalsSpecialisation(histories, { parents: (did) => cache.views.get(did), grants }),
+    specialisation: originalsSpecialisation(histories, { parents: (did) => cache.views.get(did), grants, scopes }),
     now: options.now,
     limits: { maxEntries: ORIGINALS_LIMITS.entries, maxEntryBytes: ORIGINALS_LIMITS.entryBytes, ...options.limits },
   };
@@ -739,6 +761,9 @@ async function verifyWith(options: VerifyOriginalOptions, cache: ParentCache): P
       ...(previousAnchor ? { previousAnchor } : {}),
       ...(previousHead !== undefined ? { previousHead } : {}),
       atInscription,
+      onBodies: (bodies: ReadonlyMap<string, Uint8Array>) => {
+        for (const [digest, body] of bodies) fromSat.set(digest, body);
+      },
     });
     input = assembly.entries;
   }
@@ -936,7 +961,7 @@ async function verifyWith(options: VerifyOriginalOptions, cache: ParentCache): P
     validAsOf: null,
     // P7.9 is for entries not inscribed on an anchoring sat; those are checked at their inscription
     // time instead, and entries the anchoring inscription carries against the version they name (P9.15).
-    historicallyAuthorizedOnly: withInherited(onBitcoin === null ? historicallyAuthorizedOnly(prefix, histories, authorDid) : [], prefix, grants, pinChecked, cache),
+    historicallyAuthorizedOnly: withInherited(onBitcoin === null ? historicallyAuthorizedOnly(prefix, histories, authorDid) : [], prefix, grants, pinChecked, cache, scopes),
     signedBy: prefix.map((v) => {
       const { role, refs } = signersOf(v.entry.state as unknown as EntryState);
       return { versionId: v.entry.versionId, role, dids: refs.map((r) => r.did) };
@@ -944,8 +969,12 @@ async function verifyWith(options: VerifyOriginalOptions, cache: ParentCache): P
     grants: prefix.flatMap((v) => {
       const use = grants.get(v.entry);
       const editor = (v.entry.state as unknown as EntryState).editor;
-      return use && editor ? [{ versionId: v.entry.versionId, editor: editor.did, source: use.source, ...(use.parent ? { parent: use.parent } : {}) }] : [];
+      return use && editor ? [{ versionId: v.entry.versionId, editor: editor.did, source: use.source, ...(use.parent ? { parent: use.parent } : {}), ...(use.scope ? { scope: use.scope } : {}) }] : [];
     }),
+    scopeObjects: {
+      read: [...scopes.read].filter((d) => !prefixDigests(prefix).has(d)).sort(),
+      missing: [...scopes.missing].sort(),
+    },
     parentAuthority: parentAuthorityOf(log, prefix, failure, cache, parentAnchoring),
     current: false,
     notices: [],
@@ -1013,6 +1042,11 @@ async function verifyWith(options: VerifyOriginalOptions, cache: ParentCache): P
   return { report, entries: log.entries };
 }
 
+/** The resource version digests a prefix names: not objects, which `scopeObjects` lists. */
+function prefixDigests(prefix: VerifiedEntry[]): Set<string> {
+  return new Set(prefix.map((v) => (v.entry.state as unknown as EntryState).asset.resource.digest));
+}
+
 /**
  * The parent Original a child names, as the report states it (P5.24, P5.25):
  * whether the verifier held its evidence, the pins of the prefix, and the
@@ -1046,7 +1080,7 @@ function parentAuthorityOf(log: LogVerification, prefix: VerifiedEntry[], failur
  * deactivated, or the parent is forked and has none. Its validity is
  * unchanged; only its label is.
  */
-function withInherited(list: HistoricalAuthorization[], prefix: VerifiedEntry[], grants: WeakMap<object, GrantUse>, checked: Set<string>, cache: ParentCache): HistoricalAuthorization[] {
+function withInherited(list: HistoricalAuthorization[], prefix: VerifiedEntry[], grants: WeakMap<object, GrantUse>, checked: Set<string>, cache: ParentCache, scopes: { lookup: ObjectLookup; views: ScopeViews }): HistoricalAuthorization[] {
   const out = [...list];
   prefix.forEach((v, i) => {
     const use = grants.get(v.entry);
@@ -1060,7 +1094,11 @@ function withInherited(list: HistoricalAuthorization[], prefix: VerifiedEntry[],
     else {
       const grant = inheritedGrant(latest, state.editor.did, { id: state.id, author: state.author, asset: state.asset });
       const before = (prefix[i - 1].entry.state as unknown as EntryState).asset;
-      if (!grant || outsideGrant(grant, state.asset, before) !== null) reason = "inherited-grant-revoked";
+      // Narrowed: the latest grant's flags, or a different scope that does not allow this change (P5.28).
+      const scopeNarrowed = grant !== undefined && canonicalize((grant.scope ?? null)) !== canonicalize((use.grant.scope ?? null)) && grant.scope !== undefined &&
+        state.asset.resource.digest !== before.resource.digest &&
+        checkScopeChange(grant.scope, before.resource, state.asset.resource, scopes.lookup, scopes.views).status !== "checked";
+      if (!grant || outsideGrant(grant, state.asset, before) !== null || scopeNarrowed) reason = "inherited-grant-revoked";
     }
     if (reason) out.push({ versionId: v.entry.versionId, did: state.editor.did, role: "editor", reason, parent: use.parent });
   });
