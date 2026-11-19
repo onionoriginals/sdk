@@ -13,7 +13,7 @@
 import { parseLog, serializeLog, type LogEntry } from "@originals/vh/log";
 import { signerOf, type AuthorDidEvidence, type EditorGrant, type EntryState } from "@originals/vh/originals";
 import { OriginalsSDK, keySigner, writeEvidence, type OriginalsStore } from "@originals/sdk/originals";
-import { appendCommits, branchChain, type MirrorCommit } from "./branch.js";
+import { appendCommits, branchChain, metadataOf, type MirrorCommit } from "./branch.js";
 import { writeBundle } from "./bundle.js";
 import { REPO_MEDIA_TYPE, decodeRepoDocument, encodeRepoDocument, repoMetadata, type RepoDocument } from "./documents.js";
 import { codeError } from "./errors.js";
@@ -26,8 +26,12 @@ import { sourceOf, type ObjectStore } from "./store.js";
 export interface CommitSource {
   /** The ref's first-parent chain, oldest first (`git rev-list --first-parent --reverse`). */
   firstParent(ref: string): Promise<string[]>;
-  /** Convert one commit: store its trees and blobs in `objects` and return its ids and root tree. */
-  convert(commit: string, objects: ObjectStore): Promise<MirrorCommit>;
+  /**
+   * Convert one commit: store its trees and blobs in `objects` and return its
+   * ids and root tree. With `commitObject`, also store the raw git commit
+   * object and return its digest (K12).
+   */
+  convert(commit: string, objects: ObjectStore, options?: { commitObject?: boolean }): Promise<MirrorCommit>;
 }
 
 export interface CodeWorkspaceOptions {
@@ -43,6 +47,12 @@ export interface MirrorResult {
   created: boolean;
   appended: number;
   head: { commit: string; versionId: string };
+  /**
+   * Whether the appended entries carry raw commit objects (K12, O3):
+   * `included`, `omitted-private` (the source is marked private and the
+   * caller did not opt in) or `omitted` (the caller opted out).
+   */
+  commitObjects: "included" | "omitted-private" | "omitted";
   /** Set when the branch is new and the signer is not the repo's author, who must list it (K5). */
   needsListing?: boolean;
 }
@@ -153,7 +163,23 @@ export class CodeWorkspace {
    * no longer extends the branch (a force-push) is refused as
    * `MIRROR_DIVERGED`: never a silent rebase (P4.5).
    */
-  async mirror(input: { repo: string; ref: string; identity: LocalIdentity; source: CommitSource; branch?: string; limit?: number }): Promise<MirrorResult> {
+  async mirror(input: {
+    repo: string;
+    ref: string;
+    identity: LocalIdentity;
+    source: CommitSource;
+    branch?: string;
+    limit?: number;
+    /**
+     * Mirror raw commit objects (K12, plan 049 O3). Default: yes for a public
+     * source; for a source marked `private`, only with `commits: true`, since a
+     * commit object carries author and committer names and emails, and
+     * Originals give no confidentiality (P8.2).
+     */
+    commits?: boolean;
+    /** The source is private: commit objects need an explicit `commits: true`. */
+    private?: boolean;
+  }): Promise<MirrorResult> {
     const { repo, ref, identity } = input;
     this.addIdentity(identity);
     const repoDoc = await this.repoDocument(repo);
@@ -171,8 +197,9 @@ export class CodeWorkspace {
       commits = commits.slice(chain.length);
     }
     if (input.limit !== undefined) commits = commits.slice(0, input.limit);
+    const commitObjects: MirrorResult["commitObjects"] = input.commits === false ? "omitted" : input.private && input.commits !== true ? "omitted-private" : "included";
     const converted: MirrorCommit[] = [];
-    for (const c of commits) converted.push(await input.source.convert(c, this.objects));
+    for (const c of commits) converted.push(await input.source.convert(c, this.objects, { commitObject: commitObjects === "included" }));
 
     const check = role === "editor" ? this.pathCheck(repoDoc.document, identity.did) : undefined;
     const fresh = await appendCommits({
@@ -189,7 +216,7 @@ export class CodeWorkspace {
     if (fresh.length > 0) await this.importLog(all, branch);
     const did = branch ?? (all[0].state.id as string);
     const last = all[all.length - 1];
-    const result: MirrorResult = { branch: did, created: !branch, appended: fresh.length, head: { commit: branchChain([last])[0].commit, versionId: last.versionId } };
+    const result: MirrorResult = { branch: did, created: !branch, appended: fresh.length, head: { commit: branchChain([last])[0].commit, versionId: last.versionId }, commitObjects };
     if (!branch) {
       const repoAuthor = stateOf((await this.entries(repo))[0]).author.did;
       if (repoAuthor === identity.did) await this.listBranch(repo, identity, { ref, delegate: identity.did, branch: did });
@@ -244,9 +271,10 @@ export class CodeWorkspace {
   }
 
   /** Every object reachable from every version of `branches`, and those not held. */
-  private async reachable(branches: string[]): Promise<{ objects: Map<string, Uint8Array>; trees: Set<string>; missing: string[] }> {
+  private async reachable(branches: string[]): Promise<{ objects: Map<string, Uint8Array>; trees: Set<string>; commits: Set<string>; missing: string[] }> {
     const objects = new Map<string, Uint8Array>();
     const trees = new Set<string>();
+    const commits = new Set<string>();
     const missing = new Set<string>();
     const seen = new Set<string>();
     const walk = async (digest: string, tree: boolean): Promise<void> => {
@@ -262,8 +290,17 @@ export class CodeWorkspace {
       trees.add(digest);
       for (const child of Object.values((await readTree(digest, () => b)).entries)) await walk(child.digest, child.mode === "40000");
     };
-    for (const b of branches) for (const e of await this.entries(b)) await walk(stateOf(e).asset.resource.digest, true);
-    return { objects, trees, missing: [...missing] };
+    for (const b of branches) {
+      for (const e of await this.entries(b)) {
+        await walk(stateOf(e).asset.resource.digest, true);
+        const commitObject = metadataOf(e).commitObject;
+        if (commitObject) {
+          commits.add(commitObject);
+          await walk(commitObject, false);
+        }
+      }
+    }
+    return { objects, trees, commits, missing: [...missing] };
   }
 
   /**
@@ -271,7 +308,7 @@ export class CodeWorkspace {
    * branch's evidence package, as `sdk.package` writes them, and every object
    * they reach. Root trees travel in the packages (they are the resources),
    * so the object pack leaves them out. `omitBlobs` leaves out every blob
-   * (a partial bundle: trees only).
+   * (a partial bundle: trees and commit objects only).
    */
   async package(repo: string, options: { omitBlobs?: boolean } = {}): Promise<Uint8Array> {
     const repoPackage = await this.sdk.package(repo);
@@ -285,12 +322,12 @@ export class CodeWorkspace {
       packages.push({ original: b, checkpoint: p.manifest.checkpoint, bytes: p.bytes });
       for (const e of await this.entries(b)) roots.add(stateOf(e).asset.resource.digest);
     }
-    const { objects, trees, missing } = await this.reachable(branches);
+    const { objects, trees, commits, missing } = await this.reachable(branches);
     for (const r of roots) objects.delete(r);
     const omitted: string[] = [];
     if (options.omitBlobs) {
       for (const d of [...objects.keys()]) {
-        if (trees.has(d)) continue;
+        if (trees.has(d) || commits.has(d)) continue;
         objects.delete(d);
         omitted.push(d);
       }

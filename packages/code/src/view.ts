@@ -5,15 +5,18 @@
  * verification results are shown beside the content, separately, as the
  * report gives them (section 7). Nothing is ever shown as current (P7.10).
  *
- * Commit messages, authors' names and emails are not mirrored (plan 049, O3),
- * so a commit is shown by its id, the DID that signed its entry and the
- * entry's claimed versionTime (unanchored ordering is claimed only, P9.8).
+ * A commit is shown by its id, the DID that signed its entry and the entry's
+ * claimed versionTime (unanchored ordering is claimed only, P9.8). When the
+ * bundle carries the commit's raw commit object and the verifier recomputed
+ * the commit id from it (K12, `commitBinding`), its message and git author
+ * are shown too, as text; otherwise the id is the signer's claim.
  */
 import { signerOf, type EntryState } from "@originals/vh/originals";
 import type { LogEntry } from "@originals/vh/log";
 import { metadataOf } from "./branch.js";
 import type { BranchMetadata, RepoDocument } from "./documents.js";
 import { diffTrees, readTree, type Tree, type TreeEntry } from "./objects.js";
+import { decodeCommitText } from "./commit-text.js";
 import type { OpenedRepository, RepositoryReport } from "./verify.js";
 
 export interface ViewResponse {
@@ -96,6 +99,23 @@ export function createRepositoryView(repo: OpenedRepository): { handle(url: stri
     return { index, original: result.original, name: result.code?.ref?.replace(/^refs\/heads\//, "") ?? (last ? stateOf(last).asset.name : result.original), result, entries };
   });
 
+  /**
+   * The commit object's text, only for an entry whose commit id the verifier
+   * recomputed from it (K12): named by the entry, held, before any code
+   * failure, and not a recorded mismatch.
+   */
+  async function commitInfo(b: Branch, e: Entry): Promise<{ author: string | null; message: string } | null> {
+    const c = b.result.code;
+    const digest = e.code?.commitObject;
+    if (!c || !digest) return null;
+    if (c.history.failure && c.history.failure.index <= e.index) return null;
+    if (c.commitBinding.mismatches.some((m) => m.versionId === e.versionId)) return null;
+    const raw = await objects(digest);
+    return raw ? decodeCommitText(raw) : null;
+  }
+  const commitStatus = (b: Branch, e: Entry, info: unknown): string =>
+    b.result.code?.commitBinding.mismatches.some((m) => m.versionId === e.versionId) ? "mismatch" : info ? "matches" : e.code?.commitObject ? "unchecked" : "claimed";
+
   const delegateOf = (d: string) => {
     const i = report.repo.code?.document?.delegates.indexOf(d) ?? -1;
     return i >= 0 ? `delegate ${i + 1}` : null;
@@ -133,7 +153,7 @@ export function createRepositoryView(repo: OpenedRepository): { handle(url: stri
 <header class="top"><a class="logo" href="/">◈ originals<span>code</span></a><span class="repo-did" title="${esc(report.manifest.repo)}">${esc(shortDid(report.manifest.repo))}</span></header>
 <div class="repohead"><div class="wrap"><h1><a href="/">${esc(repoName)}</a> ${repoBadge()}</h1>${tabs}</div></div>
 <main class="wrap">${body}</main>
-<footer class="wrap">Verified offline from the bundle at repo checkpoint <code>${esc(report.manifest.checkpoint)}</code>. Nothing here is anchored, so every result is valid only as of its checkpoint, never current (P7.10). Commit messages and authors are not mirrored (plan 049, O3).</footer>
+<footer class="wrap">Verified offline from the bundle at repo checkpoint <code>${esc(report.manifest.checkpoint)}</code>. Nothing here is anchored, so every result is valid only as of its checkpoint, never current (P7.10). Commit messages are shown only from commit objects the verifier checked (plan 049, K12).</footer>
 </body></html>`;
   }
 
@@ -302,7 +322,8 @@ ${doc && doc.grants.length ? `<h4>Path grants</h4><ul class="plain">${doc.grants
         historic.has(e.versionId) ? `<span class="pill warn" title="allowed by the repo version it names, not by the latest one (P7.9 by analogy)">historically authorized only</span>` : "",
         failure && failure.versionId === e.versionId ? `<span class="pill bad" title="${esc(failure.message)}">${esc(failure.code)}</span>` : "",
       ].join("");
-      rows.push(`<div class="crow"><div class="cmain"><a class="ctitle" href="/b/${b.index}/v/${encodeURIComponent(e.versionId)}">${esc(e.code?.commit ?? e.versionId)}</a> ${flags}<div class="muted small">${did(e.signer.did)} ${e.signer.role === "editor" ? "(editor)" : `(author${delegateOf(e.signer.did) ? `, ${delegateOf(e.signer.did)}` : ""})`} · ${esc(e.time.replace("T", " ").replace(/\.\d+Z$|Z$/, " UTC"))}${touched ? ` · ${touched.length} file${touched.length === 1 ? "" : "s"} changed` : ""}</div></div><div class="cside"><a class="btn sm mono" href="/b/${b.index}/v/${encodeURIComponent(e.versionId)}">${esc(short(e.code?.commit ?? ""))}</a><a class="btn sm" title="Browse files at this commit" href="/b/${b.index}/tree/${encodeURIComponent(e.versionId)}">&lt;&gt;</a></div></div>`);
+      const subject = sameCommit ? null : (await commitInfo(b, e))?.message.split("\n")[0];
+      rows.push(`<div class="crow"><div class="cmain"><a class="ctitle" href="/b/${b.index}/v/${encodeURIComponent(e.versionId)}">${esc(subject || e.code?.commit || e.versionId)}</a> ${flags}<div class="muted small">${did(e.signer.did)} ${e.signer.role === "editor" ? "(editor)" : `(author${delegateOf(e.signer.did) ? `, ${delegateOf(e.signer.did)}` : ""})`} · ${esc(e.time.replace("T", " ").replace(/\.\d+Z$|Z$/, " UTC"))}${touched ? ` · ${touched.length} file${touched.length === 1 ? "" : "s"} changed` : ""}</div></div><div class="cside"><a class="btn sm mono" href="/b/${b.index}/v/${encodeURIComponent(e.versionId)}">${esc(short(e.code?.commit ?? ""))}</a><a class="btn sm" title="Browse files at this commit" href="/b/${b.index}/tree/${encodeURIComponent(e.versionId)}">&lt;&gt;</a></div></div>`);
     }
     const nav = `<div class="pager">${p > 1 ? `<a class="btn" href="?page=${p - 1}">← Newer</a>` : `<span class="btn disabled">← Newer</span>`}<span class="muted">Page ${p} of ${pages}</span>${p < pages ? `<a class="btn" href="?page=${p + 1}">Older →</a>` : `<span class="btn disabled">Older →</span>`}</div>`;
     return page("Commits", `<div class="bar">${branchSwitcher(b, (x) => `/b/${x.index}/commits`)}<span class="grow"></span></div>${branchBadges(b)}<p class="muted small">One signed entry per first-parent commit, newest first. Times are the signer's claim: unanchored ordering is not proven (P9.8).</p><div class="box">${rows.join("")}</div>${nav}`, b);
@@ -341,7 +362,12 @@ ${doc && doc.grants.length ? `<h4>Path grants</h4><ul class="plain">${doc.grants
     }
     const more = touched.length > MAX_DIFF_FILES ? `<div class="box empty">${touched.length - MAX_DIFF_FILES} more files changed.</div>` : "";
     const g = b.result.code?.grants.find((x) => x.versionId === e.versionId);
-    const meta = `<div class="box commitbox"><div class="pad"><h2 class="mono">${esc(e.code?.commit ?? "(no commit)")}</h2><dl>
+    const info = await commitInfo(b, e);
+    const cs = commitStatus(b, e, info);
+    const message = info ? `<pre class="message">${esc(info.message)}</pre>` : "";
+    const meta = `<div class="box commitbox"><div class="pad"><h2 class="mono">${esc(e.code?.commit ?? "(no commit)")}</h2>${message}<dl>
+${info?.author ? `<dt>git author</dt><dd>${esc(info.author)} <span class="muted">(from the commit object)</span></dd>` : ""}
+<dt>Commit id</dt><dd>${badge("", cs, tone(cs))} ${cs === "matches" ? "recomputed from the mirrored commit object" : cs === "claimed" ? "claimed by the signer: no commit object is mirrored" : ""}</dd>
 <dt>Signed by</dt><dd>${did(e.signer.did)} as ${e.signer.role}${delegateOf(e.signer.did) ? ` (${delegateOf(e.signer.did)})` : ""}</dd>
 <dt>versionTime</dt><dd>${esc(e.time)} <span class="muted">(claimed by the signer)</span></dd>
 <dt>Entry</dt><dd><code>${esc(e.versionId)}</code> of ${did(b.original)}</dd>
@@ -349,7 +375,7 @@ ${doc && doc.grants.length ? `<h4>Path grants</h4><ul class="plain">${doc.grants
 <dt>Repo version</dt><dd><code>${esc(e.code?.repoVersion ?? "")}</code></dd>
 ${g ? `<dt>Path grant</dt><dd>${badge("", g.status, tone(g.status))} ${g.outside ? `outside: ${g.outside.map((p) => `<code>${esc(p)}</code>`).join(" ")}` : ""}</dd>` : ""}
 <dt>Parent</dt><dd>${parent ? `<a class="mono" href="/b/${b.index}/v/${encodeURIComponent(parent.versionId)}">${esc(short(parent.code?.commit ?? parent.versionId, 10))}</a>` : "none (genesis)"}</dd>
-</dl><p class="muted small">The commit id is the signer's claim; the tree it names is recomputed from the objects. The commit message is not mirrored (plan 049, O3).</p>
+</dl><p class="muted small">The tree is recomputed from the objects. ${info ? "The commit id, tree and first parent are recomputed from the commit object (plan 049, K12)." : "The commit id is the signer's claim (plan 049, K12)."}</p>
 <a class="btn" href="/b/${b.index}/tree/${encodeURIComponent(e.versionId)}">Browse files</a></div></div>`;
     const stat = `<div class="bar"><span><b>${touched.length}</b> file${touched.length === 1 ? "" : "s"} changed</span> <span class="add">+${adds}</span> <span class="del">−${dels}</span></div>`;
     return page(short(e.code?.commit ?? e.versionId), `${meta}${stat}${files.join("")}${more}`, b);
@@ -661,7 +687,7 @@ table{border-collapse:collapse;width:100%}.files td{padding:7px 16px;border-top:
 .day{padding:8px 16px;background:var(--subtle);border-top:1px solid var(--border);color:var(--muted);font-size:13px}.day:first-child{border-top:0}
 .crow{display:flex;gap:12px;padding:10px 16px;border-top:1px solid var(--border);align-items:center}.cmain{flex:1;min-width:0}.ctitle{font-weight:600;color:var(--fg);font-family:ui-monospace,monospace;font-size:13px}.cside{display:flex;gap:6px}
 .pager{display:flex;justify-content:center;align-items:center;gap:16px}
-.commitbox h2{margin:0 0 12px;font-size:18px;word-break:break-all}dl{display:grid;grid-template-columns:140px 1fr;gap:6px 12px;margin:0 0 12px}dt{color:var(--muted)}dd{margin:0;word-break:break-all}
+.commitbox h2{margin:0 0 12px;font-size:18px;word-break:break-all}.commitbox .message{white-space:pre-wrap;margin:0 0 12px;font-size:13px}dl{display:grid;grid-template-columns:140px 1fr;gap:6px 12px;margin:0 0 12px}dt{color:var(--muted)}dd{margin:0;word-break:break-all}
 .report td,.report th{padding:8px 16px;border-top:1px solid var(--border);text-align:left;vertical-align:top}.report th{background:var(--subtle);font-weight:600}.report td:first-child{width:200px;color:var(--muted)}.bad-text{color:var(--bad)}
 .json{background:var(--subtle);padding:16px;border-radius:6px;overflow:auto;max-height:600px}details>summary{cursor:pointer;margin:8px 0}
 .did{background:none}

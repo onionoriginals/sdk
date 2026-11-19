@@ -4,6 +4,7 @@
  * code profile is layered on `originals:1.0` and changes none of its rules.
  */
 import { canonicalize, isJsonObject, parseJson, type JsonObject } from "@originals/vh/json";
+import { checkDigest } from "@originals/vh/originals";
 import { checkPattern } from "./grants.js";
 import { codeError } from "./errors.js";
 
@@ -38,12 +39,22 @@ export interface BranchMetadata {
   kind: "branch";
   repo: string;
   ref: string;
-  /** The git commit this entry mirrors: claimed by its signer, not checkable from the objects. */
+  /**
+   * The git commit this entry mirrors. Claimed by its signer unless
+   * `commitObject` is present, when the verifier recomputes it (K12).
+   */
   commit: string;
   /** The git tree id of the commit, recomputable from the objects (`gitBinding`). */
   tree: string;
   /** The repo Original's version this entry was made under; path grants are judged against it. */
   repoVersion: string;
+  /**
+   * PROVISIONAL (K12, plan 049 O3): the digest of the raw git commit object,
+   * byte for byte, held as a content-addressed object. Absent when the commit
+   * object is not mirrored (a private repo without opt-in, or a branch
+   * written before K12); the commit id is then claimed only.
+   */
+  commitObject?: string;
 }
 
 /** The `code` member of a repo Original's metadata (K5). */
@@ -150,14 +161,23 @@ export function checkBranchMetadata(metadata: unknown): BranchMetadata {
   if (!exactly(metadata, ["code"])) badMetadata("a branch entry's metadata is exactly { code }");
   const code = metadata.code;
   if (isJsonObject(code) && code.profile !== CODE_PROFILE) codeError("unsupported-profile", "CODE_PROFILE", `unsupported code profile ${JSON.stringify(code.profile)}`);
-  if (!exactly(code, ["commit", "kind", "profile", "ref", "repo", "repoVersion", "tree"]) || code.kind !== "branch") {
-    badMetadata("metadata.code is exactly { profile, kind: \"branch\", repo, ref, commit, tree, repoVersion }");
+  const members = ["commit", "kind", "profile", "ref", "repo", "repoVersion", "tree"];
+  if (isJsonObject(code) && "commitObject" in code) members.push("commitObject");
+  if (!exactly(code, members) || code.kind !== "branch") {
+    badMetadata("metadata.code is exactly { profile, kind: \"branch\", repo, ref, commit, tree, repoVersion, commitObject? }");
   }
   if (typeof code.repo !== "string" || !BRANCH_DID.test(code.repo)) badMetadata("metadata.code.repo is the repo Original's did:vh");
   checkRef(code.ref);
   if (typeof code.commit !== "string" || !HEX40.test(code.commit)) badMetadata("metadata.code.commit is a 40-hex git commit id");
   if (typeof code.tree !== "string" || !HEX40.test(code.tree)) badMetadata("metadata.code.tree is a 40-hex git tree id");
   if (typeof code.repoVersion !== "string" || !VERSION_ID.test(code.repoVersion)) badMetadata("metadata.code.repoVersion is a versionId");
+  if ("commitObject" in code) {
+    try {
+      checkDigest(code.commitObject, "metadata.code.commitObject");
+    } catch {
+      badMetadata("metadata.code.commitObject is an object digest (K12)");
+    }
+  }
   return code as unknown as BranchMetadata;
 }
 
@@ -175,5 +195,16 @@ export function repoMetadata(): JsonObject {
 }
 
 export function branchMetadata(m: Omit<BranchMetadata, "profile" | "kind">): JsonObject {
-  return { code: { profile: CODE_PROFILE, kind: "branch", repo: m.repo, ref: m.ref, commit: m.commit, tree: m.tree, repoVersion: m.repoVersion } };
+  return {
+    code: {
+      profile: CODE_PROFILE,
+      kind: "branch",
+      repo: m.repo,
+      ref: m.ref,
+      commit: m.commit,
+      tree: m.tree,
+      repoVersion: m.repoVersion,
+      ...(m.commitObject !== undefined ? { commitObject: m.commitObject } : {}),
+    },
+  };
 }

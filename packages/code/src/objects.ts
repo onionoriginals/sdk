@@ -226,3 +226,48 @@ export async function gitTreeIdOf(digest: string, get: ObjectSource, memo: Map<s
   memo.set(`t:${digest}`, id);
   return id;
 }
+
+/** git's commit object id: SHA-1 of `commit <size>\0<bytes>` (plan 049 O3, K12). */
+export function gitCommitId(bytes: Uint8Array): string {
+  return hexOf(sha1(concat([encoder.encode(`commit ${bytes.length}\u0000`), bytes])));
+}
+
+/** The members of a raw git commit object the code profile checks (K12). */
+export interface GitCommitHeader {
+  tree: string;
+  /** Parent commit ids in order; the first is the first parent. */
+  parents: string[];
+}
+
+/**
+ * Parse the header of a raw git commit object: a first line `tree <hex>`,
+ * then zero or more `parent <hex>` lines. The rest (author, committer,
+ * signatures, message) is kept verbatim in the object and never interpreted.
+ * Throws GIT_COMMIT_PARSE for anything else.
+ */
+export function parseGitCommit(bytes: Uint8Array): GitCommitHeader {
+  // Header lines up to the blank line are ASCII in their tree and parent members; latin1 keeps byte offsets.
+  let end = bytes.indexOf(10);
+  let at = 0;
+  const line = () => {
+    if (end < 0) return codeError("invalid-evidence", "GIT_COMMIT_PARSE", "a git commit object's header ends with a newline");
+    const text = Array.from(bytes.subarray(at, end), (b) => String.fromCharCode(b)).join("");
+    at = end + 1;
+    end = bytes.indexOf(10, at);
+    return text;
+  };
+  const tree = /^tree ([0-9a-f]{40})$/.exec(line())?.[1];
+  if (!tree) return codeError("invalid-evidence", "GIT_COMMIT_PARSE", "a git commit object starts with `tree <40 hex>`");
+  const parents: string[] = [];
+  for (;;) {
+    if (end < 0) break;
+    const save = { at, end };
+    const p = /^parent ([0-9a-f]{40})$/.exec(line())?.[1];
+    if (!p) {
+      ({ at, end } = save);
+      break;
+    }
+    parents.push(p);
+  }
+  return { tree, parents };
+}

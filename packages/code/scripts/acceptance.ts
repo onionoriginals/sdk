@@ -62,7 +62,7 @@ try {
   await ws.setRepo(repo);
   const [m, ms] = await time(() => ws.workspace.mirror({ repo, ref, identity, source }));
   mirrorSeconds = ms;
-  console.log(`mirror: +${m.appended} entries into ${m.branch} in ${ms.toFixed(1)} s; converted ${source.stats.trees} trees, ${source.stats.blobs} blobs (${mib(source.stats.blobBytes)} raw)`);
+  console.log(`mirror: +${m.appended} entries into ${m.branch} in ${ms.toFixed(1)} s; converted ${source.stats.trees} trees, ${source.stats.blobs} blobs (${mib(source.stats.blobBytes)} raw), ${source.stats.commitObjects} commit objects (${mib(source.stats.commitBytes)})`);
   [bundle, packageSeconds] = await time(() => ws.workspace.package(repo));
   usage = await ws.objects.usage();
   const du = (p: string): number => (statSync(p).isDirectory() ? readdirSync(p).reduce((n, f) => n + du(join(p, f)), 0) : statSync(p).size);
@@ -90,18 +90,19 @@ console.log(`verify (offline, ${fetches} fetches attempted): ${verifySeconds.toF
 console.log(`  repo: originals ${report.repo.report?.history.status}, code ${report.repo.code?.history.status}`);
 console.log(`  branch: originals ${b.report?.history.status} (${b.report?.history.entries} entries, validAsOf ${b.report?.validAsOf?.checkpoint}), code ${b.code?.history.status}, binding ${b.code?.binding.status}`);
 console.log(`  content ${b.code?.content.status}: ${b.code?.content.objects} objects, ${mib(b.code?.content.bytes ?? 0)}; git trees ${b.code?.gitBinding.status} (${b.code?.gitBinding.checked} checked)`);
+console.log(`  commits ${b.code?.commitBinding.status}: ${b.code?.commitBinding.checked} commit ids recomputed from commit objects, ${b.code?.commitBinding.claimed} claimed, ${b.code?.commitBinding.unchecked} unchecked`);
 console.log(`  canonical ${c?.ref}: ${c?.status} ${c?.head?.commit ?? ""} (git: ${git("rev-parse", rev)})`);
 console.log(`  current: ${report.current}`);
 
 const result = {
   repository: { commits, firstParent, files, packs: { allRefs: repoPack, ref: mainPack, firstParentOnly: firstParentPack } },
-  mirror: { seconds: mirrorSeconds, entries: b.report?.history.entries, trees: source.stats.trees, blobs: source.stats.blobs, blobBytes: source.stats.blobBytes },
+  mirror: { seconds: mirrorSeconds, entries: b.report?.history.entries, trees: source.stats.trees, blobs: source.stats.blobs, blobBytes: source.stats.blobBytes, commitObjects: source.stats.commitObjects, commitBytes: source.stats.commitBytes },
   store: { objects: usage.objects, objectBytes: usage.bytes, originalsBytes },
   bundle: { bytes: bundle.length, seconds: packageSeconds },
-  verify: { seconds: verifySeconds, fetches, canonical: c?.status, head: c?.head?.commit, gitHead: git("rev-parse", rev), content: b.code?.content.status, gitTrees: b.code?.gitBinding.status, current: report.current },
+  verify: { seconds: verifySeconds, fetches, canonical: c?.status, head: c?.head?.commit, gitHead: git("rev-parse", rev), content: b.code?.content.status, gitTrees: b.code?.gitBinding.status, commits: b.code?.commitBinding.status, commitsChecked: b.code?.commitBinding.checked, current: report.current },
 };
 if (opt("json")) writeFileSync(opt("json")!, `${JSON.stringify(result, null, 2)}\n`);
 if (!keep) rmSync(root, { recursive: true, force: true });
-const ok = report.repo.code?.history.status === "valid" && b.code?.history.status === "valid" && b.report?.validAsOf && c?.status === "agreed" && c.head?.commit === result.verify.gitHead && fetches === 0;
+const ok = report.repo.code?.history.status === "valid" && b.code?.history.status === "valid" && b.report?.validAsOf && c?.status === "agreed" && c.head?.commit === result.verify.gitHead && b.code?.commitBinding.status === "matches" && fetches === 0;
 console.log(ok ? "CODE-ACC: PASS" : "CODE-ACC: FAIL");
 process.exit(ok ? 0 : 1);
