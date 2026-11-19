@@ -11,6 +11,8 @@
  * Raw git commit objects are mirrored by default (K12, plan 049 O3). They
  * carry author and committer emails, so in a workspace marked `--private`
  * they are mirrored only with `--include-commits` (P8.2: no confidentiality).
+ *                          [--contribute]   (K14: your own branch for the ref, never listed, never voting)
+ *   originals-code import  <bundle.zip> --dir <workspace>   (verify a repo bundle offline, then take it in)
  *   originals-code package --dir <workspace> --out <bundle.zip> [--omit-blobs]
  *   originals-code verify  <bundle.zip> [--json] [--now <time>]
  *   originals-code serve   <bundle.zip> [--port 4173] [--host 127.0.0.1] [--now <time>]
@@ -28,7 +30,7 @@ import { createLocalIdentity, parseIdentity, serializeIdentity } from "./identit
 import { openRepository, verifyRepository, type RepositoryReport } from "./verify.js";
 import { createRepositoryView } from "./view.js";
 
-const BOOLEAN_FLAGS = new Set(["--json", "--omit-blobs", "--private", "--include-commits", "--no-commits"]);
+const BOOLEAN_FLAGS = new Set(["--json", "--omit-blobs", "--private", "--include-commits", "--no-commits", "--contribute"]);
 
 function flags(args: string[]): { positional: string[]; opts: Record<string, string | true> } {
   const positional: string[] = [];
@@ -69,6 +71,7 @@ function summary(r: RepositoryReport): string {
       if (c.grants.length) lines.push(`  grants:    ${c.grants.length} editor entries, ${outside} not allowed, ${c.historicallyAuthorizedOnly.length} historically authorized only`);
     }
   }
+  for (const c of r.contributions) lines.push(`contribution ${c.original} ${c.ref ?? ""} by ${c.author ?? "?"}: ${c.status}${c.head ? ` at ${c.head}` : ""} (verified, never voting)`);
   if (r.canonicalStatus === "incomplete") lines.push("canonical: incomplete — the repo Original or its document did not verify");
   for (const c of r.canonical) {
     lines.push(`canonical ${c.ref} (threshold ${c.threshold}): ${c.status}${c.head ? ` ${c.head.commit} (votes: ${c.head.votes.length})` : ""}${c.reason ? ` — ${c.reason}` : ""}`);
@@ -113,12 +116,15 @@ async function main(argv: string[]): Promise<number> {
         const started = performance.now();
         if (opts["include-commits"] === true && opts["no-commits"] === true) throw new Error("--include-commits and --no-commits contradict each other");
         const commits = opts["include-commits"] === true ? true : opts["no-commits"] === true ? false : undefined;
+        const contribute = opts.contribute === true;
+        const mine = contribute ? await ws.workspace.findBranch(ws.contributions, identity.did, ref) : undefined;
         const r = await ws.workspace.mirror({
           repo: ws.repo,
           ref,
           identity,
           source,
           private: ws.private,
+          ...(contribute ? { contribute, ...(mine ? { branch: mine } : {}) } : {}),
           ...(commits !== undefined ? { commits } : {}),
           ...(typeof opts.limit === "string" ? { limit: Number(opts.limit) } : {}),
         });
@@ -126,9 +132,27 @@ async function main(argv: string[]): Promise<number> {
         console.log(`${r.created ? "created" : "extended"} ${r.branch}: +${r.appended} entries, head ${r.head.commit} (${r.head.versionId})`);
         console.log(`converted ${s.commits} commits, ${s.trees} trees, ${s.blobs} blobs (${s.blobBytes} bytes) in ${((performance.now() - started) / 1000).toFixed(1)} s`);
         if (r.commitObjects === "omitted-private") console.log("commit objects not mirrored: the workspace is marked private (pass --include-commits to opt in); commit ids are claimed only");
+        if (r.contribution) {
+          await ws.setContributions([...ws.contributions.filter((d) => d !== mine), r.branch]);
+          console.log("a contribution: verified with the repo's bundles, never voting for a canonical head (K14)");
+        }
         if (r.needsListing) console.log("the repo's author must list this branch in the repo document");
       } finally {
         source.close();
+        await ws.close();
+      }
+      return 0;
+    }
+    case "import": {
+      if (!positional[0]) throw new Error("usage: originals-code import <bundle.zip> --dir <workspace>");
+      const ws = await openWorkspace(resolve(need(opts, "dir")));
+      try {
+        const r = await ws.workspace.importBundle(new Uint8Array(await readFile(positional[0])));
+        if (ws.repo && ws.repo !== r.repo) throw new Error(`the workspace holds repo ${ws.repo}, the bundle ${r.repo}`);
+        if (!ws.repo) await ws.setRepo(r.repo);
+        await ws.setContributions([...ws.contributions, ...r.contributions]);
+        console.log(`imported ${r.repo}: ${r.report.branches.length} branch Originals, ${r.contributions.length} contributions`);
+      } finally {
         await ws.close();
       }
       return 0;
@@ -137,7 +161,7 @@ async function main(argv: string[]): Promise<number> {
       const ws = await openWorkspace(resolve(need(opts, "dir")));
       try {
         if (!ws.repo) throw new Error("run init first");
-        const bytes = await ws.workspace.package(ws.repo, { omitBlobs: opts["omit-blobs"] === true });
+        const bytes = await ws.workspace.package(ws.repo, { omitBlobs: opts["omit-blobs"] === true, contributions: ws.contributions });
         await writeFile(need(opts, "out"), bytes);
         console.log(`${need(opts, "out")}: ${bytes.length} bytes`);
       } finally {
@@ -151,7 +175,9 @@ async function main(argv: string[]): Promise<number> {
       if (now !== undefined && Number.isNaN(now)) throw new Error("--now is an ISO 8601 time");
       const report = await verifyRepository(new Uint8Array(await readFile(positional[0])), now !== undefined ? { now } : {});
       console.log(opts.json === true ? JSON.stringify(report, null, 2) : summary(report));
-      const ok = report.repo.code?.history.status === "valid" && report.branches.every((b) => b.code?.history.status === "valid" && b.report?.validAsOf);
+      // A contribution that fails is reported, but does not fail the repository: anyone may publish one (K14).
+      const contributed = new Set(report.contributions.map((c) => c.original));
+      const ok = report.repo.code?.history.status === "valid" && report.branches.every((b) => contributed.has(b.original) || (b.code?.history.status === "valid" && b.report?.validAsOf));
       return ok ? 0 : 1;
     }
     case "serve": {
@@ -189,7 +215,7 @@ async function main(argv: string[]): Promise<number> {
       return new Promise<number>(() => {});
     }
     default:
-      console.error("usage: originals-code identity new <file> | init | mirror | package | verify <bundle.zip> | serve <bundle.zip>");
+      console.error("usage: originals-code identity new <file> | init | mirror | import <bundle.zip> | package | verify <bundle.zip> | serve <bundle.zip>");
       return 2;
   }
 }
