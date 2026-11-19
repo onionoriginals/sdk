@@ -15,6 +15,10 @@ unpublished; every name and format in it is PROVISIONAL.
   (`commitBinding`). Public by default; for a workspace marked `--private`
   only with `--include-commits`, since commit objects carry author emails.
   Without one, a commit id is reported as claimed.
+- A branch longer than one Original's entry limit (10,000, P7.7) is a **chain
+  of segments** (K13): each segment's genesis names the previous one's did and
+  last versionId; the repo document lists the newest, and the verifier walks
+  the chain, checking that commits continue across segments.
 - A **repo Original** lists delegates, per-ref thresholds, each delegate's
   branch and per-path grants.
 - The **canonical head** of a ref is computed from threshold agreement across

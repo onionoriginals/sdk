@@ -55,6 +55,13 @@ export interface BranchMetadata {
    * written before K12); the commit id is then claimed only.
    */
   commitObject?: string;
+  /**
+   * PROVISIONAL (K13, plan 049 O1): on a segment's genesis entry only, the
+   * previous segment of the same branch: its did:vh and its last versionId.
+   * A branch longer than one Original's entry limit (P7.7) is a chain of
+   * segments, each a full Original of its own.
+   */
+  previous?: { did: string; versionId: string };
 }
 
 /** The `code` member of a repo Original's metadata (K5). */
@@ -163,8 +170,9 @@ export function checkBranchMetadata(metadata: unknown): BranchMetadata {
   if (isJsonObject(code) && code.profile !== CODE_PROFILE) codeError("unsupported-profile", "CODE_PROFILE", `unsupported code profile ${JSON.stringify(code.profile)}`);
   const members = ["commit", "kind", "profile", "ref", "repo", "repoVersion", "tree"];
   if (isJsonObject(code) && "commitObject" in code) members.push("commitObject");
+  if (isJsonObject(code) && "previous" in code) members.push("previous");
   if (!exactly(code, members) || code.kind !== "branch") {
-    badMetadata("metadata.code is exactly { profile, kind: \"branch\", repo, ref, commit, tree, repoVersion, commitObject? }");
+    badMetadata("metadata.code is exactly { profile, kind: \"branch\", repo, ref, commit, tree, repoVersion, commitObject?, previous? }");
   }
   if (typeof code.repo !== "string" || !BRANCH_DID.test(code.repo)) badMetadata("metadata.code.repo is the repo Original's did:vh");
   checkRef(code.ref);
@@ -176,6 +184,12 @@ export function checkBranchMetadata(metadata: unknown): BranchMetadata {
       checkDigest(code.commitObject, "metadata.code.commitObject");
     } catch {
       badMetadata("metadata.code.commitObject is an object digest (K12)");
+    }
+  }
+  if ("previous" in code) {
+    const p = code.previous;
+    if (!exactly(p, ["did", "versionId"]) || typeof p.did !== "string" || !BRANCH_DID.test(p.did) || typeof p.versionId !== "string" || !VERSION_ID.test(p.versionId)) {
+      badMetadata("metadata.code.previous is exactly { did, versionId }: the previous segment's did:vh and last versionId (K13)");
     }
   }
   return code as unknown as BranchMetadata;
@@ -205,6 +219,7 @@ export function branchMetadata(m: Omit<BranchMetadata, "profile" | "kind">): Jso
       tree: m.tree,
       repoVersion: m.repoVersion,
       ...(m.commitObject !== undefined ? { commitObject: m.commitObject } : {}),
+      ...(m.previous !== undefined ? { previous: { did: m.previous.did, versionId: m.previous.versionId } } : {}),
     },
   };
 }

@@ -59,6 +59,7 @@ function summary(r: RepositoryReport): string {
     lines.push(`  originals: history ${b.report?.history.status ?? "unread"}, entries ${b.report?.history.entries ?? 0}, valid as of ${b.report?.validAsOf?.checkpoint ?? "nothing"}${b.report?.fork ? ", FORKED (unresolved, P9.16)" : ""}`);
     if (b.code) {
       const c = b.code;
+      if (c.segment.segments.length > 1 || c.binding.status === "superseded") lines.push(`  segment:   ${c.segment.index + 1} of the branch${c.segment.previous ? `, after ${c.segment.previous.did} at ${c.segment.previous.versionId}` : ""} (K13)`);
       lines.push(`  code:      ${c.history.status}${c.history.failure ? ` at entry ${c.history.failure.index} (${c.history.failure.code}: ${c.history.failure.message})` : ""}; binding ${c.binding.status}`);
       lines.push(`  content:   ${c.content.status}: ${c.content.objects} objects, ${c.content.bytes} bytes${c.content.missing.length ? `, ${c.content.missing.length} missing` : ""}${c.content.failures.length ? `, ${c.content.failures.length} failed` : ""}`);
       lines.push(`  git trees: ${c.gitBinding.status} (${c.gitBinding.checked} checked, ${c.gitBinding.unchecked} unchecked)`);

@@ -64,8 +64,10 @@ export interface BranchCodeReport {
    * Whether the branch counts for the repo, both ways: listed in the repo
    * document at its checkpoint under its author for its ref, and naming that
    * repo and ref itself (as an alias counts only both ways, P3.6).
+   * `superseded`: an earlier segment of a confirmed branch (K13), reached
+   * through the listed segment's chain, not listed itself.
    */
-  binding: { status: "confirmed" | "not-listed" | "mismatch" | "not-checked"; delegate?: string; reason?: string };
+  binding: { status: "confirmed" | "superseded" | "not-listed" | "mismatch" | "not-checked"; delegate?: string; reason?: string };
   /** Content availability, separately (P7.3, P7.4 by analogy): missing objects never fail the history. */
   content: { status: "complete" | "partial" | "digest-failure"; objects: number; bytes: number; missing: string[]; failures: string[] };
   /** git tree ids recomputed from the objects against each entry's claim. A mismatch fails the history. */
@@ -96,9 +98,24 @@ export interface BranchCodeReport {
   grants: GrantCheck[];
   /** Entries allowed by the repo version they name but not by the latest one (P7.9 by analogy). */
   historicallyAuthorizedOnly: Array<{ versionId: string; signer: string; reason: "path-grant-narrowed" }>;
-  /** The commits the verified entries name, oldest first, consecutive repeats folded. */
+  /**
+   * The commits the verified entries name, oldest first, consecutive repeats
+   * folded. For a later segment (K13), the whole branch's: every earlier
+   * segment's chain, then this one's.
+   */
   chain: Array<{ commit: string; root: string; versionId: string }>;
+  /**
+   * Where this Original sits in its branch's chain of segments (K13, O1):
+   * index 0 is the first segment; `previous` is what its genesis names;
+   * `segments` lists the branch's segments through this one, oldest first.
+   */
+  segment: { index: number; previous: { did: string; versionId: string } | null; segments: string[] };
 }
+
+/** The previous segment a segment's genesis names, as the caller verified it (K13). */
+export type PriorSegment =
+  | { status: "valid"; report: BranchCodeReport; last: LogEntry }
+  | { status: "invalid" | "incomplete"; code: string; message: string };
 
 export interface Objects {
   get: ObjectSource;
@@ -184,7 +201,7 @@ export async function checkRepo(original: string, entries: readonly LogEntry[], 
 export async function checkBranch(
   original: string,
   entries: readonly LogEntry[],
-  context: { repo: string; versions: readonly RepoVersion[]; latest: RepoDocument | null; objects: Objects; gitMemo?: Map<string, string> },
+  context: { repo: string; versions: readonly RepoVersion[]; latest: RepoDocument | null; objects: Objects; gitMemo?: Map<string, string>; prior?: PriorSegment },
 ): Promise<BranchCodeReport> {
   const author = entries.length > 0 ? stateOf(entries[0]).author.did : null;
   const byId = new Map(context.versions.map((v) => [v.versionId, v]));
@@ -203,7 +220,14 @@ export async function checkBranch(
     grants: [],
     historicallyAuthorizedOnly: [],
     chain: [],
+    segment: { index: 0, previous: null, segments: [original] },
   };
+  const prior = context.prior?.status === "valid" ? context.prior : undefined;
+  if (prior) {
+    report.chain = [...prior.report.chain];
+    report.segment = { index: prior.report.segment.index + 1, previous: null, segments: [...prior.report.segment.segments, original] };
+    if (prior.report.commitBinding.base !== undefined) report.commitBinding.base = prior.report.commitBinding.base;
+  }
 
   // Content: every object reachable from every verified version, each once.
   const seen = new Set<string>();
@@ -260,15 +284,29 @@ export async function checkBranch(
     cb.checked++;
   }
 
-  let ref: string | null = null;
+  let ref: string | null = prior ? prior.report.ref : null;
   let previousRepoIndex = -1;
-  const seenCommits = new Set<string>();
+  if (prior) {
+    const v = byId.get(checkBranchMetadata(stateOf(prior.last).asset.metadata).repoVersion);
+    previousRepoIndex = v ? v.index : -1;
+  }
+  const seenCommits = new Set<string>(report.chain.map((c) => c.commit));
   report.history = await historyOf(entries.length, () =>
     each(entries, async (e, i) => {
       const s = stateOf(e);
       const m = checkBranchMetadata(s.asset.metadata);
       if (m.repo !== context.repo) throw new Stop("invalid", "BRANCH_REPO", `the entry names repo ${m.repo}, not ${context.repo}`);
-      if (i === 0) ref = m.ref;
+      // K13: a later segment's genesis names the previous segment, which must verify and end at the named entry.
+      if (m.previous && i > 0) throw new Stop("invalid", "SEGMENT_PREVIOUS_LATE", "only a segment's genesis names the previous segment (K13)");
+      if (i === 0 && m.previous) {
+        const p = context.prior;
+        if (!p) throw new Stop("incomplete", "SEGMENT_PREVIOUS_MISSING", `the previous segment ${m.previous.did} is not in the evidence`);
+        if (p.status !== "valid") throw new Stop(p.status, p.code, p.message);
+        if (p.last.state.id !== m.previous.did || p.last.versionId !== m.previous.versionId) throw new Stop("invalid", "SEGMENT_PREVIOUS", "the previous segment does not end at the entry this genesis names");
+        if (stateOf(p.last).author.did !== author) throw new Stop("invalid", "SEGMENT_AUTHOR", "every segment of a branch has the same author (P5.8, K13)");
+        report.segment.previous = { did: m.previous.did, versionId: m.previous.versionId };
+      }
+      if (i === 0 && !prior) ref = m.ref;
       if (m.ref !== ref || s.asset.name !== m.ref) throw new Stop("invalid", "BRANCH_REF", "a branch Original's name and ref are its ref, at every entry");
       if (s.asset.resource.mediaType !== TREE_MEDIA_TYPE) throw new Stop("invalid", "BRANCH_RESOURCE", `a branch Original's resource is ${TREE_MEDIA_TYPE}`);
       const root = s.asset.resource.digest;
@@ -278,8 +316,9 @@ export async function checkBranch(
       if (version.index < previousRepoIndex) throw new Stop("invalid", "REPO_VERSION_BACKWARDS", "repoVersion never goes backwards within a branch (as P5.8 for signer versions)");
       previousRepoIndex = version.index;
 
-      const previous = i > 0 ? stateOf(entries[i - 1]) : undefined;
-      const previousCommit = previous ? (previous.asset.metadata as { code: { commit: string } }).code.commit : undefined;
+      // At a later segment's genesis, the parent state is the previous segment's last entry.
+      const previous = i > 0 ? stateOf(entries[i - 1]) : prior ? stateOf(prior.last) : undefined;
+      const previousCommit = i > 0 ? (previous!.asset.metadata as { code: { commit: string } }).code.commit : undefined;
       if (previousCommit === m.commit) {
         if (previous!.asset.resource.digest !== root) throw new Stop("invalid", "BRANCH_COMMIT_CHANGED", "an entry repeating its parent's commit keeps its tree");
         const previousObject = (previous!.asset.metadata as { code: { commitObject?: string } }).code.commitObject;
@@ -485,18 +524,68 @@ export async function openRepository(bundle: Uint8Array, options: VerifyReposito
   }
   const repoUsable = repoResult.report?.validAsOf != null && repoCode?.history.status === "valid";
 
-  const branches: RepositoryReport["branches"] = [];
   const gitMemo = new Map<string, string>();
+  const codes = new Map<string, BranchCodeReport | null>();
+  const branchEntries = new Map<string, LogEntry[]>();
   for (const r of results.values()) {
     if (r.original === contents.manifest.repo) continue;
     const log = await logOf(r.original);
-    let code: BranchCodeReport | null = null;
     const entries = r.report?.checkpoint && log ? entriesThrough(log, r.report.checkpoint) : [];
     if (entries.length) verified.set(r.original, entries);
-    if (entries.length && repoCode) {
-      code = await checkBranch(r.original, entries, { repo: contents.manifest.repo, versions: repoCode.versions, latest: repoCode.document, objects, gitMemo });
+    branchEntries.set(r.original, entries);
+  }
+  const previousOf = (entries: readonly LogEntry[]) => {
+    try {
+      return entries.length ? checkBranchMetadata(stateOf(entries[0]).asset.metadata).previous : undefined;
+    } catch {
+      return undefined;
     }
-    branches.push({ ...r, code });
+  };
+  // K13: a segment is checked after the segment its genesis names, continuing that one's chain.
+  const codeOf = async (did: string, path: Set<string>): Promise<BranchCodeReport | null> => {
+    if (codes.has(did)) return codes.get(did)!;
+    const entries = branchEntries.get(did) ?? [];
+    if (!entries.length || !repoCode) {
+      codes.set(did, null);
+      return null;
+    }
+    const named = previousOf(entries);
+    let prior: PriorSegment | undefined;
+    if (named) {
+      const pr = results.get(named.did);
+      const pEntries = branchEntries.get(named.did) ?? [];
+      if (path.has(named.did) || named.did === did) prior = { status: "invalid", code: "SEGMENT_CYCLE", message: "segments name each other in a cycle" };
+      else if (!pr || !pr.report) prior = { status: "incomplete", code: "SEGMENT_PREVIOUS_MISSING", message: `the previous segment ${named.did} is not in the evidence` };
+      else if (pr.report.fork) prior = { status: "invalid", code: "SEGMENT_PREVIOUS_INVALID", message: `the previous segment ${named.did} is forked (P9.16)` };
+      else if (pr.report.history.status === "incomplete" || pr.report.identityEvidence.status === "incomplete") prior = { status: "incomplete", code: "SEGMENT_PREVIOUS_INCOMPLETE", message: `the previous segment ${named.did} is incomplete` };
+      else if (!pr.report.validAsOf || !pEntries.length) prior = { status: "invalid", code: "SEGMENT_PREVIOUS_INVALID", message: `the previous segment ${named.did} is not a valid Original` };
+      else {
+        const pc = await codeOf(named.did, new Set([...path, did]));
+        const last = pEntries[pEntries.length - 1];
+        const at = pEntries.findIndex((e) => e.versionId === named.versionId);
+        if (!pc || pc.history.status === "incomplete") prior = { status: "incomplete", code: "SEGMENT_PREVIOUS_INCOMPLETE", message: `the previous segment ${named.did}'s code history is incomplete` };
+        else if (pc.history.status !== "valid") prior = { status: "invalid", code: "SEGMENT_PREVIOUS_INVALID", message: `the previous segment ${named.did}'s code history is invalid` };
+        else if (at < 0) prior = { status: "incomplete", code: "SEGMENT_PREVIOUS_VERSION", message: `${named.versionId} is not in the previous segment's verified evidence` };
+        else if (last.versionId !== named.versionId) prior = { status: "invalid", code: "SEGMENT_CONTINUED", message: `the previous segment ${named.did} continues after ${named.versionId}, the entry this segment names` };
+        else prior = { status: "valid", report: pc, last };
+      }
+    }
+    const code = await checkBranch(did, entries, { repo: contents.manifest.repo, versions: repoCode.versions, latest: repoCode.document, objects, gitMemo, ...(prior ? { prior } : {}) });
+    codes.set(did, code);
+    return code;
+  };
+  const branches: RepositoryReport["branches"] = [];
+  for (const r of results.values()) {
+    if (r.original === contents.manifest.repo) continue;
+    branches.push({ ...r, code: await codeOf(r.original, new Set()) });
+  }
+  // Earlier segments of a confirmed branch are reached through it, not listed (K13).
+  for (const b of branches) {
+    if (b.code?.binding.status !== "confirmed") continue;
+    for (const seg of b.code.segment.segments.slice(0, -1)) {
+      const c = codes.get(seg);
+      if (c && c.binding.status === "not-listed") c.binding = { status: "superseded", delegate: b.code.binding.delegate! };
+    }
   }
 
   const canonical: CanonicalResult[] = [];
