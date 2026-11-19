@@ -1193,7 +1193,8 @@ export class DemoEngine {
       versionId: entry.versionId,
       versionTime: entry.versionTime,
       operation: entry.state.operation,
-      authorKey: entry.state.author.verificationMethod,
+      // A set Original names several signers (P5.19); this app writes single-author Originals.
+      authorKey: Array.isArray(entry.state.author) ? entry.state.author.map((a) => a.verificationMethod).join(", ") : entry.state.author.verificationMethod,
       changes: entry.state.transitions.map((t) => ({ from: t.from, to: t.to })),
       name: entry.state.asset.name,
     }));

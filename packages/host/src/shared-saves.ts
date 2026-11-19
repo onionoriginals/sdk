@@ -216,17 +216,31 @@ export function namesAccount(did: string, host: string, slug: string): boolean {
   }
 }
 
-type StateRefs = { author?: { did?: unknown }; asset?: { editors?: Array<{ did?: unknown }> } };
+type Ref = { did?: unknown; verificationMethod?: unknown; versionId?: unknown };
+type StateRefs = { author?: Ref | Ref[]; editor?: Ref; asset?: { editors?: Array<{ did?: unknown }>; authors?: { dids?: unknown } } };
+
+/** The author references a state names: its one author, or each signer of a set Original (P5.19). */
+function authorRefs(state: StateRefs | Record<string, unknown> | undefined): Ref[] {
+  const author = (state as StateRefs | undefined)?.author;
+  return Array.isArray(author) ? author : author === undefined ? [] : [author];
+}
+
+/** The members of a state's signer set (P5.19), or its one author. */
+function membersOf(state: StateRefs | undefined): unknown[] {
+  const dids = state?.asset?.authors?.dids;
+  return Array.isArray(dids) ? dids : authorRefs(state).map((r) => r?.did);
+}
 
 /**
- * The DIDs the state at `line` names as author or granted editor (P5.15); none for no line. Any valid
- * signer of the next entry is among them: the author is fixed, and an editor needs a grant in its
- * parent's state (P5.16, P5.17).
+ * The DIDs the state at `line` names as author, signer set member or granted editor (P5.15; plan
+ * 050 §1); none for no line. Any valid signer of the next entry is among them, or is a member that
+ * entry adds and that signs it: the author is fixed, a set's signers are its members, and an
+ * editor needs a grant in its parent's state (P5.16, P5.17).
  */
 function allowedAt(line: string | undefined): unknown[] {
   const state = line === undefined ? undefined : (lineState(line) as StateRefs | undefined);
   const editors = Array.isArray(state?.asset?.editors) ? state.asset.editors : [];
-  return [state?.author?.did, ...editors.map((g) => g?.did)];
+  return [...membersOf(state), ...editors.map((g) => g?.did)];
 }
 
 /** Null when `caller` owns the namespace or one of `dids` is its landing DID; otherwise a 403, the same whatever the reason. */
@@ -266,17 +280,24 @@ function satOf(state: Record<string, unknown> | undefined): string | undefined {
   return Array.isArray(asset?.aliases) ? btcoAliasOf(asset.aliases.filter((a): a is string => typeof a === 'string')) : undefined;
 }
 
-/** Every DID that signs the log's entries: the author, and an editor where an entry names one (P5.16). */
+/** Every DID that signs the log's entries: the author, each signer of a set Original (P5.19), and an editor where an entry names one (P5.16). */
 function signerDids(lines: string[]): string[] {
   const dids = new Set<string>();
   for (const line of lines) {
-    const state = lineState(line);
-    for (const ref of [state?.author, state?.editor]) {
-      const did = (ref as { did?: unknown } | undefined)?.did;
+    const state = lineState(line) as StateRefs | undefined;
+    for (const ref of [...authorRefs(state), state?.editor]) {
+      const did = ref?.did;
       if (typeof did === 'string') dids.add(did);
     }
   }
   return [...dids];
+}
+
+/** Every DID the log's entries name as an author: the author, or each signer of a set Original (P5.19). */
+function authorDids(lines: string[]): Set<string> {
+  const dids = new Set<string>();
+  for (const line of lines) for (const ref of authorRefs(lineState(line))) if (typeof ref?.did === 'string') dids.add(ref.did);
+  return dids;
 }
 
 /**
@@ -287,24 +308,26 @@ function signerDids(lines: string[]): string[] {
  */
 export function hostedMissing(lines: string[], report: OriginalsReport, hosted: (did: string) => boolean): Array<Record<string, unknown>> {
   const out: Array<Record<string, unknown>> = report.resources.missing.map((v) => ({ kind: 'resource', version: v.version, digest: v.digest, versionId: v.versionId }));
-  const author = (lineState(lines[0]) as { author?: { did?: unknown } } | undefined)?.author?.did;
+  const authors = authorDids(lines);
   for (const did of signerDids(lines)) {
-    if (!hosted(did)) out.push({ kind: 'identity', did, role: did === author ? 'author' : 'editor' });
+    if (!hosted(did)) out.push({ kind: 'identity', did, role: authors.has(did) ? 'author' : 'editor' });
   }
   return out;
 }
 
 /**
  * The proof check that needs no history verification (C7): the signer's key
- * at the version the entry names, read from `log`, verifies the entry's one
- * proof. Undefined when `log` does not show that version or key, which full
- * verification then decides; false when the key is there and the proof does
- * not verify with it, which full verification would refuse too.
+ * at the version the entry names, read from `log`, verifies the entry's
+ * proof by that signer: its one proof, or for a set Original the proof at the
+ * signer's position (P5.22). Undefined when `log` does not show that
+ * version or key, which full verification then decides; false when the key
+ * is there and the proof does not verify with it, which full verification
+ * would refuse too.
  */
-function proofVerifies(entry: JsonObject, signer: { verificationMethod: string; versionId: string }, log: string): boolean | undefined {
+function proofVerifies(entry: JsonObject, signer: { verificationMethod: string; versionId: string }, log: string, index = 0, count = 1): boolean | undefined {
   const proofs = entry.proof;
-  if (!Array.isArray(proofs) || proofs.length !== 1 || !isJsonObject(proofs[0])) return false;
-  const proof = proofs[0] as unknown as DataIntegrityProof;
+  if (!Array.isArray(proofs) || proofs.length !== count || !isJsonObject(proofs[index])) return false;
+  const proof = proofs[index] as unknown as DataIntegrityProof;
   if (proof.verificationMethod !== signer.verificationMethod) return false;
   let document: Record<string, unknown> | undefined;
   for (const line of log.split('\n')) {
@@ -463,17 +486,27 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
     // author or granted in the head's state, and its key at the named version, in the stored or the
     // submitted signer log read without verifying it, verifies the one proof. Full verification would
     // refuse an entry failing either, so nobody can make the host verify a log for one.
-    const headState = lineState(lines[lines.length - 1]) as { author?: { did?: unknown }; asset?: { editors?: Array<{ did?: unknown }> } } | undefined;
-    const state = lineState(s.entry) as { author?: { did?: unknown; verificationMethod?: unknown; versionId?: unknown }; editor?: { did?: unknown; verificationMethod?: unknown; versionId?: unknown } } | undefined;
-    const signer = state?.editor ?? state?.author;
-    if (!signer || typeof signer.did !== 'string' || typeof signer.verificationMethod !== 'string' || typeof signer.versionId !== 'string') return refuse(422, 'entry_invalid');
-    const authorized = state?.editor ? (headState?.asset?.editors ?? []).some((g) => g.did === signer.did) : signer.did === headState?.author?.did;
-    if (!authorized) return refuse(422, 'signer_not_authorized', { did: signer.did });
-    {
+    // A set Original's author entry has a signer, and a proof, per signer reference (P5.19).
+    const headState = lineState(lines[lines.length - 1]) as StateRefs | undefined;
+    const state = lineState(s.entry) as StateRefs | undefined;
+    const refs = state?.editor ? [state.editor] : authorRefs(state);
+    if (refs.length === 0) return refuse(422, 'entry_invalid');
+    const signers: Array<{ did: string; verificationMethod: string; versionId: string }> = [];
+    for (const ref of refs) {
+      if (!ref || typeof ref.did !== 'string' || typeof ref.verificationMethod !== 'string' || typeof ref.versionId !== 'string') return refuse(422, 'entry_invalid');
+      signers.push({ did: ref.did, verificationMethod: ref.verificationMethod, versionId: ref.versionId });
+    }
+    // An author entry's signers are the head's members, or members the entry adds (P5.20).
+    const members = new Set<unknown>([...membersOf(headState), ...membersOf(state?.asset?.authors ? state : undefined)]);
+    for (const signer of signers) {
+      const authorized = state?.editor ? (headState?.asset?.editors ?? []).some((g) => g.did === signer.did) : members.has(signer.did);
+      if (!authorized) return refuse(422, 'signer_not_authorized', { did: signer.did });
+    }
+    for (const [index, signer] of signers.entries()) {
       const storedSigner = store.readHosted(`${siteKey}/originals/${signerPath(signer.did)}/did.jsonl`);
       const unverified = [s.identities.find((i) => i.did === signer.did)?.log, storedSigner ? text(storedSigner) : null].filter((l): l is string => typeof l === 'string');
       if (unverified.length === 0) return refuse(422, 'identity_missing', { did: signer.did });
-      const checked = unverified.map((log) => proofVerifies(s.parsed, { verificationMethod: signer.verificationMethod as string, versionId: signer.versionId as string }, log));
+      const checked = unverified.map((log) => proofVerifies(s.parsed, signer, log, index, signers.length));
       if (!checked.includes(true)) {
         if (checked.every((c) => c === undefined)) return refuse(422, 'signer_version_unavailable', { did: signer.did, versionId: signer.versionId });
         return refuse(422, 'proof_invalid');
@@ -524,12 +557,14 @@ export function createSharedSaves(deps: { store: OriginalsStore; now: () => numb
       }
       if (heldEvidence) identities.push(heldEvidence);
     }
-    // 4b. The signer DID log verification uses must show the named version and key (#08d review r2 #8).
-    const signerLog = identities.find((i) => i.did === signer.did)?.log;
-    if (typeof signerLog !== 'string') return refuse(422, 'identity_missing', { did: signer.did });
-    const verifies = proofVerifies(s.parsed, { verificationMethod: signer.verificationMethod, versionId: signer.versionId }, signerLog);
-    if (verifies === undefined) return refuse(422, 'signer_version_unavailable', { did: signer.did, versionId: signer.versionId });
-    if (verifies === false) return refuse(422, 'proof_invalid');
+    // 4b. The signer DID log verification uses must show the named version and key (#08d review r2 #8), for each signer.
+    for (const [index, signer] of signers.entries()) {
+      const signerLog = identities.find((i) => i.did === signer.did)?.log;
+      if (typeof signerLog !== 'string') return refuse(422, 'identity_missing', { did: signer.did });
+      const verifies = proofVerifies(s.parsed, signer, signerLog, index, signers.length);
+      if (verifies === undefined) return refuse(422, 'signer_version_unavailable', { did: signer.did, versionId: signer.versionId });
+      if (verifies === false) return refuse(422, 'proof_invalid');
+    }
 
     // P14.4 (originals-spec #53): at most one transition, naming the new version's digest.
     const entryState = lineState(s.entry) as { transitions?: Array<{ to?: unknown }> } | undefined;

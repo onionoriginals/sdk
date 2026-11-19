@@ -1,8 +1,10 @@
 /**
  * The `originals:1.0` did:vh extension (did:vh PR 3) as a VH-Log
  * specialisation. Keys come from the author DID (VH-Log PR 11): one proof per
- * entry (P5.2), by the author key the entry names (P5.3). versionTime carries
- * milliseconds (VH-Log PR 8; owner decision Q8).
+ * entry (P5.2), by the author key the entry names (P5.3), or, for a set
+ * Original, one proof per signer the entry names, in the same order, each by
+ * that signer's key (P5.22, P14.8). versionTime
+ * carries milliseconds (VH-Log PR 8; owner decision Q8).
  *
  * No witnesses (P9.8, P9.9; owner decision Q14): an asset log never sets the
  * VH witness parameter to anything but `{}`. Unanchored Originals have claimed
@@ -16,7 +18,18 @@ import type { LogEntry, Specialisation, VerifiedEntry, VersionRules } from "../l
 import type { DidVhExtension } from "../didvh/index.js";
 import { parseDidWebvh } from "../webvh/index.js";
 import { authorKey, authorMethod, namedVersion, versionNumberOf, type AuthorHistory } from "./author.js";
-import { ORIGINALS_METHOD, checkAuthorRef, checkEditorChange, checkEditorRef, checkEntryState, type AuthorRef, type EntryState } from "./state.js";
+import {
+  ORIGINALS_LIMITS,
+  ORIGINALS_METHOD,
+  authorRefsOf,
+  checkAuthorMember,
+  checkEditorChange,
+  checkEditorRef,
+  checkEntrySigners,
+  checkEntryState,
+  type AuthorRef,
+  type EntryState,
+} from "./state.js";
 
 export const ORIGINALS_1_0: VersionRules = Object.freeze({
   vhLog: "vh-log:1.0",
@@ -59,7 +72,7 @@ function namedThrough(record: WeakMap<LogEntry, Named>, previous: VerifiedEntry 
   if (known) return known;
   // A predecessor verified elsewhere: its own signer and author references are what it names.
   const state = previous.entry.state as unknown as EntryState;
-  const out = new Map([[identityKey(state.author.did), state.author.versionId]]);
+  const out = new Map(authorRefsOf(state).map((r) => [identityKey(r.did), r.versionId]));
   if (state.editor) out.set(identityKey(state.editor.did), state.editor.versionId);
   return out;
 }
@@ -87,23 +100,51 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
   const byDid = histories(authors);
   const named = new WeakMap<LogEntry, Named>();
 
+  /**
+   * The author reference `proof` is by: the author's, or for a set Original the signer reference
+   * at the proof's position (P5.22). Who may sign is judged from the state first
+   * (P5.19-P5.21), before any signer evidence is looked up, so a signer outside the set is
+   * rejected, never reported as missing evidence.
+   */
+  const authorSigner = (entry: LogEntry, previous: VerifiedEntry | undefined, proof: DataIntegrityProof, role: "author" | "editor"): AuthorRef | undefined => {
+    const author = checkAuthorMember(entry.state.author);
+    const parent = previous?.entry.state as unknown as EntryState | undefined;
+    const set = Array.isArray(author) || (parent !== undefined && Array.isArray(parent.author));
+    if (!set) {
+      const ref = author;
+      if (previous) {
+        const genesisAuthor = (previous.entry.state.author as JsonObject | undefined)?.did;
+        if (ref.did !== genesisAuthor) fail("invalid-evidence", "AUTHOR_DID_CHANGED", "the author DID is fixed at genesis (P5.8)");
+      }
+      authorMethod(ref.did);
+      if (role === "editor") return undefined;
+      if (entry.proof.length !== 1) fail("invalid-evidence", "PROOF_COUNT", "an entry carries exactly one proof, by its author (P5.2)");
+      return ref;
+    }
+    // An editor entry carries its parent's author member unchanged (P5.16): the editor hook's limit checks it.
+    if (role === "editor") return undefined;
+    checkEntrySigners(entry.state, parent);
+    const refs = author as AuthorRef[];
+    if (entry.proof.length !== refs.length) {
+      fail("invalid-evidence", "PROOF_COUNT", `a set Original's author entry carries one proof per signer reference: ${refs.length}, not ${entry.proof.length} (P5.22)`);
+    }
+    const ref = refs[entry.proof.indexOf(proof)];
+    authorMethod(ref.did);
+    return ref;
+  };
+
   /** The key `signer` authorizes for `proof` at the version it names: the author's, or an editor's (P5.3, P5.18). */
   const signerKey = (entry: LogEntry, previous: VerifiedEntry | undefined, proof: DataIntegrityProof, role: "author" | "editor"): Promise<string> => {
-    const ref = checkAuthorRef(entry.state.author);
-    if (previous) {
-      const genesisAuthor = (previous.entry.state.author as JsonObject | undefined)?.did;
-      if (ref.did !== genesisAuthor) fail("invalid-evidence", "AUTHOR_DID_CHANGED", "the author DID is fixed at genesis (P5.8)");
-    }
-    authorMethod(ref.did);
     const editor = role === "editor";
-    const signer: AuthorRef = editor ? checkEditorRef(entry.state.editor) : ref;
+    const ref = authorSigner(entry, previous, proof, role);
+    const signer: AuthorRef = editor ? checkEditorRef(entry.state.editor) : ref!;
     if (proof.verificationMethod !== signer.verificationMethod) {
       fail("author-binding", editor ? "SIGNER_VM_MISMATCH" : "AUTHOR_VM_MISMATCH", `the proof's verificationMethod must be the ${role} verification method the entry names (P5.2)`);
     }
     const history = byDid.get(signer.did);
     if (!history) {
       if (editor) fail("incomplete-evidence", "EDITOR_HISTORY_MISSING", `no verified history for editor DID ${signer.did} (P7.1, P5.6)`, { did: signer.did, role: "editor" });
-      fail("incomplete-evidence", "AUTHOR_HISTORY_MISSING", `no verified history for author DID ${ref.did}`, { did: ref.did, role: "author" });
+      fail("incomplete-evidence", "AUTHOR_HISTORY_MISSING", `no verified history for author DID ${signer.did}`, { did: signer.did, role: "author" });
     }
     // P5.8, P5.18: per signer identity, never older than the version its own most recent earlier
     // entry named, ordered by the signer DID's own history: versionId number, or chain order
@@ -122,7 +163,10 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
       fail("deactivated", "SIGNER_VERSION_DEACTIVATED", `${signer.did} is deactivated at version ${signer.versionId}; an entry cannot name it (P6.5, P5.18)`, { did: signer.did, role });
     }
     const key = authorKey(version, signer);
-    named.set(entry, new Map([...through, [identity, signer.versionId]]));
+    // Each signer of a set Original's entry adds its own identity's versionId (P5.8 per identity,
+    // P5.22), starting afresh at the first proof: an entry can be verified again after another parent.
+    const base = proof === entry.proof[0] ? through : (named.get(entry) ?? through);
+    named.set(entry, new Map([...base, [identity, signer.versionId]]));
     return Promise.resolve(key);
   };
 
@@ -130,7 +174,10 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
     name: "originals",
     // P14.2: at most three fractional digits, and UTC written as Z.
     versionTime: { fractionalDigits: 3, utc: "Z" },
-    maxProofs: 1,
+    // One proof per signer: one for a single-author or editor entry (P5.2, VH-Log PR 11), one
+    // per signer reference of a set Original's author entry (P5.22), checked by the key hook
+    // and again with the state.
+    maxProofs: ORIGINALS_LIMITS.authors,
     keys: {
       kind: "controller",
       authorize: ({ entry, previous, proof }) => signerKey(entry, previous, proof, "author"),
@@ -172,6 +219,10 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
         // The editor rules run through the engine's editor hook (`keys.editors.limit`).
         editorRules: false,
       });
+      // P5.2, P5.22 (P5.19): one proof per signer, also when the signers' authorization is set aside.
+      if (entry.state.editor === undefined && entry.proof.length !== authorRefsOf(entry.state as unknown as EntryState).length) {
+        fail("invalid-evidence", "PROOF_COUNT", "an author entry carries one proof per signer reference (P5.2, P5.22)");
+      }
     },
   };
 }
@@ -294,7 +345,8 @@ export function deriveDocument(entries: VerifiedEntry[]): JsonObject {
   return {
     "@context": ["https://www.w3.org/ns/did/v1"],
     id: state.id,
-    controller: state.author.did,
+    // A set Original's controller is its member array at that version (P14.9).
+    controller: state.asset.authors ? state.asset.authors.dids : (state.author as AuthorRef).did,
     ...(state.asset.aliases.length > 0 ? { alsoKnownAs: state.asset.aliases } : {}),
     service: [service],
   };

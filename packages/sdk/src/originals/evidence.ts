@@ -136,12 +136,14 @@ export function readEvidenceFiles(files: ReadonlyMap<string, Uint8Array>): Evide
   const manifest = readManifest(manifestBytes);
 
   const authors = new Map<string, AuthorDidEvidence>();
-  // Every signer identity the log names: the author and each editor of an editor entry (P7.1).
+  // Every signer identity the log names: the author, each signer of a set Original (P5.19)
+  // and each editor of an editor entry (P7.1).
   const authorDids = new Set<string>();
   for (const line of text(logBytes, "asset/did.jsonl").trimEnd().split("\n")) {
     try {
-      const entry = JSON.parse(line) as { state?: { author?: { did?: unknown }; editor?: { did?: unknown } } };
-      if (typeof entry.state?.author?.did === "string") authorDids.add(entry.state.author.did);
+      const entry = JSON.parse(line) as { state?: { author?: { did?: unknown } | Array<{ did?: unknown }>; editor?: { did?: unknown } } };
+      const author = entry.state?.author;
+      for (const ref of Array.isArray(author) ? author : [author]) if (typeof ref?.did === "string") authorDids.add(ref.did);
       if (typeof entry.state?.editor?.did === "string") authorDids.add(entry.state.editor.did);
     } catch {
       // A malformed line fails verification later.

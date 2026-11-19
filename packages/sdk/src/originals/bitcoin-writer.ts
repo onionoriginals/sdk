@@ -379,6 +379,8 @@ function offChainOf(did: string, through: string, report: OriginalsReport, inscr
   const id = report.identityEvidence;
   const signers = [
     ...(id.author ? [{ did: id.author, role: "author" as const, held: id.latestVersionId !== null && !id.failure }] : []),
+    // A set Original has no one author: each member that signed (P5.19).
+    ...(id.author ? [] : id.authors.map((a) => ({ did: a.did, role: "author" as const, held: a.status === "complete" }))),
     ...id.editors.map((e) => ({ did: e.did, role: "editor" as const, held: e.status === "complete" })),
   ];
   return {

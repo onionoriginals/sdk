@@ -34,4 +34,17 @@ describe('hosted manifest missing items (P14.10)', () => {
       { kind: 'identity', did: EDITOR, role: 'editor' },
     ]);
   });
+
+  test('every member of a set Original that signed is listed as an author (P5.30, P7.1)', () => {
+    const MEMBER = 'did:vh:QmMember';
+    const set = [
+      line({ author: [{ did: AUTHOR }, { did: MEMBER }], asset: { authors: { threshold: 1, dids: [AUTHOR, MEMBER] } } }),
+      line({ author: [{ did: AUTHOR }, { did: MEMBER }], editor: { did: EDITOR } }),
+    ];
+    expect(hostedMissing(set, report(), () => false)).toEqual([
+      { kind: 'identity', did: AUTHOR, role: 'author' },
+      { kind: 'identity', did: MEMBER, role: 'author' },
+      { kind: 'identity', did: EDITOR, role: 'editor' },
+    ]);
+  });
 });

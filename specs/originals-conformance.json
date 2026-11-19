@@ -1,8 +1,8 @@
 {
-  "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row, pinned to originals-spec 940c6d4, the head of open PR 64 on master 5c42958: EVM anchoring withdrawn (owner decision, 18 November 2026; Bitcoin is the only anchor), carried logs kept, and Bitcoin previews added. At 940c6d4 the table has 284 rows: 90 EVM rows are retired (C12-235 to C12-289, C12-292 to C12-296, C12-301, C12-310 to C12-315, C12-323 to C12-330, C12-334 to C12-342 and C12-349 to C12-354; see `retired`), 15 rows are reworded and keep their ids (C12-23, C12-97, C12-112, C12-150, C12-190, C12-191, C12-192, C12-193, C12-194, C12-290, C12-291, C12-300, C12-331, C12-332, C12-343), and the 27 preview rows are new, C12-355 to C12-381 (rows 120 and 122 to 147), registered todo for plan 011 phase 12b. Each row is covered by a test that references its id, or stays status=todo. status=partial means some layers are tested and the note says what remains; coveredBy lists the citing test files (checked by packages/vh/tests/conformance/registry.test.ts). Phases follow spec section 10 and plans/011. status=not-applicable means an owner decision makes the row moot pending a spec edit; its note names the decision. Ids are stable across re-pins: position is the row's place in the pinned table. Pinned rows are in table order, positions 1 to N; rows from open pull requests follow them, and two pull requests can each propose a row at the same position. A proposal can also insert rows between pinned ones, and reword pinned rows, whose note then gives the proposed wording. A row with `proposal` is not in the pinned table: it comes from the named open spec pull request, is implemented provisionally, and its position is its place in that pull request's table. A row the pinned table no longer has is listed under `retired` with the commit and reason; its id is never reused, and no test cites it.",
+  "$comment": "Section 12 conformance matrix of the Originals Protocol, one entry per row, pinned to originals-spec a2b5013, master after #64 (EVM anchoring withdrawn, Bitcoin previews; merged as 55aefc4, the same table as 940c6d4) and #66 (signer sets, parent Originals and scoped grants; owner decisions of 19 November 2026, D8). At a2b5013 the table has 324 rows: rows 1 to 284 are those of 940c6d4 at the same positions, with no row reworded (C12-63 keeps its text, which P5.2 now reads for one signer reference; see its note), and the 40 rows #66 adds are new, C12-382 to C12-421 (rows 285 to 324: signer sets 285-300, parent Originals 301-314, scoped grants 315-324). Earlier: at 940c6d4 the 90 EVM rows were retired (C12-235 to C12-289, C12-292 to C12-296, C12-301, C12-310 to C12-315, C12-323 to C12-330, C12-334 to C12-342 and C12-349 to C12-354; see `retired`), 15 rows were reworded and kept their ids, and the 27 preview rows were new, C12-355 to C12-381. Each row is covered by a test that references its id, or stays status=todo. status=partial means some layers are tested and the note says what remains; coveredBy lists the citing test files (checked by packages/vh/tests/conformance/registry.test.ts). Phases follow spec section 10 and plans/011. status=not-applicable means an owner decision makes the row moot pending a spec edit; its note names the decision. Ids are stable across re-pins: position is the row's place in the pinned table. Pinned rows are in table order, positions 1 to N; rows from open pull requests follow them, and two pull requests can each propose a row at the same position. A proposal can also insert rows between pinned ones, and reword pinned rows, whose note then gives the proposed wording. A row with `proposal` is not in the pinned table: it comes from the named open spec pull request, is implemented provisionally, and its position is its place in that pull request's table. A row the pinned table no longer has is listed under `retired` with the commit and reason; its id is never reused, and no test cites it.",
   "spec": {
     "repository": "aviarytech/originals-spec",
-    "commit": "940c6d4",
+    "commit": "a2b5013",
     "section": "12",
     "openProposals": []
   },
@@ -844,8 +844,10 @@
       ],
       "status": "covered",
       "coveredBy": [
-        "packages/vh/tests/originals.test.ts"
-      ]
+        "packages/vh/tests/originals.test.ts",
+        "packages/vh/tests/signer-sets.test.ts"
+      ],
+      "note": "At a2b5013 (originals-spec #66) the row's text is unchanged, but P5.2 and P14.8 now read it for an entry with one signer reference: an Original without `authors`, or any editor entry. A set Original's author entry carries one proof per signer reference (C12-386)."
     },
     {
       "id": "C12-64",
@@ -3892,6 +3894,501 @@
         "packages/vh/tests/originals.test.ts"
       ],
       "note": "PROVISIONAL: P14.2's value (three fractional digits, at least 1 ms apart) is open under D5; the test checks the current value."
+    },
+    {
+      "id": "C12-382",
+      "position": 285,
+      "test": "Genesis of a set Original signed by every member / with one member’s proof or reference missing",
+      "requiredResult": "Accepted / rejected (P5.19)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/signer-sets.test.ts",
+        "packages/vh/tests/signer-sets.test.ts"
+      ],
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W1 (signer sets)."
+    },
+    {
+      "id": "C12-383",
+      "position": 286,
+      "test": "Author entry of a set Original signed by exactly the threshold of its parent entry’s set / by one member fewer",
+      "requiredResult": "Accepted / rejected (P5.20)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/signer-sets.test.ts",
+        "packages/vh/tests/signer-sets.test.ts"
+      ],
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W1 (signer sets)."
+    },
+    {
+      "id": "C12-384",
+      "position": 287,
+      "test": "Author entry of a set Original whose `author` array names a DID outside the parent entry’s set that the entry does not add, even with a valid proof",
+      "requiredResult": "Rejected (P5.20, P5.4)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/signer-sets.test.ts"
+      ],
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W1 (signer sets)."
+    },
+    {
+      "id": "C12-385",
+      "position": 288,
+      "test": "Author entry that adds a member to `authors` without that member’s proof / with it, and the threshold of the parent entry’s set",
+      "requiredResult": "Rejected / accepted; the added member does not count toward the threshold (P5.20)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/signer-sets.test.ts"
+      ],
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W1 (signer sets)."
+    },
+    {
+      "id": "C12-386",
+      "position": 289,
+      "test": "Entry with a proof too many or too few for its signer references, proofs out of `author` order, a proof whose `verificationMethod` differs from its reference, or one invalid proof beside a threshold of valid ones",
+      "requiredResult": "Rejected (P5.2, P5.22, P14.8)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/signer-sets.test.ts"
+      ],
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W1 (signer sets)."
+    },
+    {
+      "id": "C12-387",
+      "position": 290,
+      "test": "Grant whose editor DID is a member of `authors` in the same state, or a did:webvh with the same SCID as a member",
+      "requiredResult": "Rejected (P5.15)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/signer-sets.test.ts"
+      ],
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W1 (signer sets)."
+    },
+    {
+      "id": "C12-388",
+      "position": 291,
+      "test": "Conversion of a single-author Original signed by the author and every other new member / whose `authors` omits the author / missing a new member’s proof",
+      "requiredResult": "Accepted, a set Original from that entry on / rejected / rejected (P5.21)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/signer-sets.test.ts",
+        "packages/vh/tests/signer-sets.test.ts"
+      ],
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W1 (signer sets)."
+    },
+    {
+      "id": "C12-389",
+      "position": 292,
+      "test": "Unanchored author entry of a set Original, one of whose signers’ keys is later removed from its DID: signers still passing P7.9 at or above the threshold / below it",
+      "requiredResult": "Not labelled for the removal / historically authorized only (P5.23, P7.9)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/signer-sets.test.ts"
+      ],
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W1 (signer sets)."
+    },
+    {
+      "id": "C12-390",
+      "position": 293,
+      "test": "Anchoring entry of a set Original signed by fewer members than the threshold, including one inscribed and paid for by the sat holder",
+      "requiredResult": "Rejected; not an anchor (P5.20, P9.10, P9.12)",
+      "phases": [
+        1,
+        4
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/signer-sets.test.ts"
+      ],
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W1 (signer sets)."
+    },
+    {
+      "id": "C12-391",
+      "position": 294,
+      "test": "Derived DID document of a set Original, including a set of one",
+      "requiredResult": "`controller` is the array `authors.dids` at that version (P14.9)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/signer-sets.test.ts"
+      ],
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W1 (signer sets)."
+    },
+    {
+      "id": "C12-392",
+      "position": 295,
+      "test": "Original without `authors`, including every existing test vector",
+      "requiredResult": "`author` is one object, each entry has one proof, `controller` is a string; entries and results byte-identical to before (P5.2, P14.4, P14.8, P14.9)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/signer-sets.test.ts"
+      ],
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W1 (signer sets)."
+    },
+    {
+      "id": "C12-393",
+      "position": 296,
+      "test": "`authors` with unsorted or duplicate `dids`, threshold 0 or above the member count, more than 32 members, or a member that is the Original’s did:vh, an alias, or a did:btco DID whose sat is the anchoring sat; a later entry that removes `authors`",
+      "requiredResult": "Rejected (P5.19, P14.5, P14.13)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/signer-sets.test.ts"
+      ],
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W1 (signer sets)."
+    },
+    {
+      "id": "C12-394",
+      "position": 297,
+      "test": "`author` that is an array in an Original without `authors`, or an object in a set Original; an array unsorted, with a DID twice, or not listing every member in a genesis entry",
+      "requiredResult": "Rejected (P5.19, P14.4)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/signer-sets.test.ts"
+      ],
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W1 (signer sets)."
+    },
+    {
+      "id": "C12-395",
+      "position": 298,
+      "test": "Editor entry of a set Original whose `author` array differs from its parent entry’s",
+      "requiredResult": "Rejected (P5.16)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/signer-sets.test.ts"
+      ],
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W1 (signer sets)."
+    },
+    {
+      "id": "C12-396",
+      "position": 299,
+      "test": "Author entry of a set Original inscribed after the anchor, one of whose signers’ keys was removed before its inscription time though the others meet the threshold / one of whose signers’ named versions cannot be verified",
+      "requiredResult": "Rejected / unverifiable (P5.23, P9.15)",
+      "phases": [
+        1,
+        4
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/signer-sets.test.ts"
+      ],
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W1 (signer sets)."
+    },
+    {
+      "id": "C12-397",
+      "position": 300,
+      "test": "Editor entry of a set Original when fewer than the threshold of members’ DIDs are not deactivated: unanchored / inscribed after the anchor",
+      "requiredResult": "Historically authorized only / rejected (P5.23, P5.18)",
+      "phases": [
+        1
+      ],
+      "status": "covered",
+      "coveredBy": [
+        "packages/vh/tests/signer-sets.test.ts"
+      ],
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W1 (signer sets)."
+    },
+    {
+      "id": "C12-398",
+      "position": 301,
+      "test": "Editor entry of a child Original with no direct grant, allowed by a grant in the parent Original’s `editors` at the version the entry pins",
+      "requiredResult": "Accepted; reported as authorized by an inherited grant, with the parent version (P5.24)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W2 (parent authority, pinned)."
+    },
+    {
+      "id": "C12-399",
+      "position": 302,
+      "test": "Child editor entry allowed by an inherited grant that the parent Original’s latest verified state later removes or narrows",
+      "requiredResult": "Valid; historically authorized only (P5.26)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W2 (parent authority, pinned)."
+    },
+    {
+      "id": "C12-400",
+      "position": 303,
+      "test": "Child entry whose pin is older than its parent entry’s pin, or on another branch of the parent’s log",
+      "requiredResult": "Rejected (P5.24)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W2 (parent authority, pinned)."
+    },
+    {
+      "id": "C12-401",
+      "position": 304,
+      "test": "Child Original verified without the parent Original’s log through a pin",
+      "requiredResult": "Incomplete; parent evidence reported missing; never a pass (P5.25)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W2 (parent authority, pinned)."
+    },
+    {
+      "id": "C12-402",
+      "position": 305,
+      "test": "Pin naming a versionId absent from the parent’s verified log, which reaches that version number: parent not anchored / parent anchored, pin outside its accepted history",
+      "requiredResult": "Incomplete, the pinned parent version reported missing, never a pass / rejected (P5.25)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W2 (parent authority, pinned)."
+    },
+    {
+      "id": "C12-403",
+      "position": 306,
+      "test": "Child editor entry relying on an inherited grant at a pin that names the parent’s deactivation",
+      "requiredResult": "Rejected; the parent grants nothing there (P5.25)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W2 (parent authority, pinned)."
+    },
+    {
+      "id": "C12-404",
+      "position": 307,
+      "test": "Child editor entry authorized only by an inherited grant when the parent Original has divergent valid branches",
+      "requiredResult": "Historically authorized only (P5.26)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W2 (parent authority, pinned)."
+    },
+    {
+      "id": "C12-405",
+      "position": 308,
+      "test": "`parent.did` equal to the child’s own did:vh; a later entry that adds or removes `parent` or changes `parent.did`",
+      "requiredResult": "Rejected (P5.24)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W2 (parent authority, pinned)."
+    },
+    {
+      "id": "C12-406",
+      "position": 309,
+      "test": "Child entry inscribed after the child’s anchor, while the parent is anchored, pinning a parent version older than the parent’s accepted head at the inscription / pinning that head",
+      "requiredResult": "Rejected / accepted (P5.27)",
+      "phases": [
+        2,
+        4
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W2 (parent authority, pinned)."
+    },
+    {
+      "id": "C12-407",
+      "position": 310,
+      "test": "Inherited grant naming the child’s author DID, a member of its signer set, or a did:btco DID whose sat is the child’s anchoring sat",
+      "requiredResult": "Authorizes nothing (P5.24)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W2 (parent authority, pinned)."
+    },
+    {
+      "id": "C12-408",
+      "position": 311,
+      "test": "Child entry signed by the parent Original’s author, a member of its signer set or its sat holder, with no grant covering the change",
+      "requiredResult": "Rejected; the parent contributes grants only (P5.24)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W2 (parent authority, pinned)."
+    },
+    {
+      "id": "C12-409",
+      "position": 312,
+      "test": "Child editor entry relying on a grant that the parent itself inherits from its own parent",
+      "requiredResult": "Rejected; only the parent’s own `editors` are inherited (P5.24)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W2 (parent authority, pinned)."
+    },
+    {
+      "id": "C12-410",
+      "position": 313,
+      "test": "Child editor entry under a metadata-only grant that also advances the pin",
+      "requiredResult": "Accepted; advancing the pin needs no grant (P5.16, P5.24)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W2 (parent authority, pinned)."
+    },
+    {
+      "id": "C12-411",
+      "position": 314,
+      "test": "Evidence package of a child Original that omits the parent’s log through the highest pin",
+      "requiredResult": "Partial; lists a `parent` missing item (P7.1, P14.10)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W2 (parent authority, pinned)."
+    },
+    {
+      "id": "C12-412",
+      "position": 315,
+      "test": "Editor entry under a `paths` scope whose changed paths all match a pattern / one changed path matches none",
+      "requiredResult": "Accepted / rejected, listing the path (P5.28, P5.29)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+    },
+    {
+      "id": "C12-413",
+      "position": 316,
+      "test": "Rename from a path inside a `paths` scope to one outside it",
+      "requiredResult": "Rejected; both paths are touched (P5.29)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+    },
+    {
+      "id": "C12-414",
+      "position": 317,
+      "test": "Change of a path’s file mode only, in a media type whose path view records the mode",
+      "requiredResult": "The path is touched (P5.29)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+    },
+    {
+      "id": "C12-415",
+      "position": 318,
+      "test": "Editor entry under an `items` scope that adds, edits or removes an item, with that operation listed / not listed",
+      "requiredResult": "Accepted / rejected (P5.29)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+    },
+    {
+      "id": "C12-416",
+      "position": 319,
+      "test": "Scope of an unknown type; a known type for a media type whose view the verifier lacks; or missing bytes the check needs",
+      "requiredResult": "Scope unchecked; not verified as authorized; result incomplete, neither a pass nor a rejection (P5.28)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+    },
+    {
+      "id": "C12-417",
+      "position": 320,
+      "test": "Entry inscribed after the anchor whose scope is unchecked",
+      "requiredResult": "Unverifiable (P5.28, P9.15)",
+      "phases": [
+        2,
+        4
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+    },
+    {
+      "id": "C12-418",
+      "position": 321,
+      "test": "Grant with `scope` and `resource: false`",
+      "requiredResult": "Rejected (P5.28, P14.5)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+    },
+    {
+      "id": "C12-419",
+      "position": 322,
+      "test": "Editor entry under a scoped grant that changes only the name or metadata",
+      "requiredResult": "Scope not checked (P5.28)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+    },
+    {
+      "id": "C12-420",
+      "position": 323,
+      "test": "`paths` scope with no patterns or more than 64, unsorted or duplicate patterns, a leading or trailing `/`, an empty, `.` or `..` segment, or a segment such as `a**`; `items` scope with no ops, an unknown op, or unsorted or duplicate ops",
+      "requiredResult": "Rejected (P14.23, P5.28)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+    },
+    {
+      "id": "C12-421",
+      "position": 324,
+      "test": "Pattern `docs/**` against `docs`, `docs/a` and `docs/a/b`; pattern `*.md` against `a.md` and `d/a.md`",
+      "requiredResult": "No match, match, match; match, no match (P14.23)",
+      "phases": [
+        2
+      ],
+      "status": "todo",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
     }
   ],
   "retired": [

@@ -29,6 +29,11 @@ export const ORIGINALS_LIMITS = Object.freeze({
   editors: 32,
   /** Bytes in a preview (P9.30, P14.13; owner decision, 18 November 2026). */
   previewBytes: 8_192,
+  /**
+   * Members of a signer set (`authors.dids`; P5.19, P7.7,
+   * P14.13).
+   */
+  authors: 32,
 });
 
 export type Operation = "create" | "update" | "deactivate";
@@ -70,6 +75,18 @@ export interface EditorGrant {
  */
 export type PreviewDescriptor = ResourceDescriptor;
 
+/**
+ * A signer set (P5.19; owner decision of 19 November 2026). The
+ * Original is governed by these DIDs, `threshold` of them together, instead of
+ * one author. `dids` are sorted by code unit order and unique, each of a P5.8
+ * method, at most `ORIGINALS_LIMITS.authors`; 1 ≤ threshold ≤ dids.length.
+ * PROVISIONAL member names (P14.5, D4).
+ */
+export interface AuthorSet {
+  threshold: number;
+  dids: string[];
+}
+
 export interface AssetState {
   name: string;
   metadata?: JsonObject;
@@ -84,6 +101,12 @@ export interface AssetState {
    * P9.30), allowed only once `aliases` list a did:btco DID (P14.5).
    */
   preview?: PreviewDescriptor;
+  /**
+   * The signer set of a set Original (P5.19). Absent for a
+   * single-author Original. Once present it is never removed, and only an
+   * author entry changes it (P5.16, P5.20; PROVISIONAL).
+   */
+  authors?: AuthorSet;
 }
 
 /** The author DID, its verification method and its exact versionId (P5.1). */
@@ -109,16 +132,51 @@ export interface Transition {
 export interface EntryState {
   id: string;
   operation: Operation;
-  author: AuthorRef;
+  /**
+   * The author reference (P5.1), or, exactly when `asset.authors` is present,
+   * the signer references of a set Original: sorted by `did`, unique, one per
+   * proof in the same order (P5.22; PROVISIONAL). An editor
+   * entry carries its parent's unchanged (P5.16).
+   */
+  author: AuthorRef | AuthorRef[];
   /** Present only in an editor entry (P5.16). */
   editor?: EditorRef;
   asset: AssetState;
   transitions: Transition[];
 }
 
-/** The identity that signs an entry: its editor for an editor entry, otherwise its author (P5.2, P5.16). */
+/** The author references an entry names: its one author, or each signer of a set Original (P5.19). */
+export function authorRefsOf(state: Pick<EntryState, "author">): AuthorRef[] {
+  return Array.isArray(state.author) ? state.author : [state.author];
+}
+
+/**
+ * The identities that sign an entry, in proof order: its editor for an editor
+ * entry, otherwise its author, or each signer of a set Original's author entry
+ * (P5.2, P5.16; P5.22).
+ */
+export function signersOf(state: Pick<EntryState, "author" | "editor">): { role: "author" | "editor"; refs: AuthorRef[] } {
+  return state.editor ? { role: "editor", refs: [state.editor] } : { role: "author", refs: authorRefsOf(state) };
+}
+
+/**
+ * The identity that signs an entry: its editor for an editor entry, otherwise
+ * its author (P5.2, P5.16). An author entry of a set Original has several
+ * signers: use `signersOf`; this names the first.
+ */
 export function signerOf(state: EntryState): { role: "author" | "editor"; ref: AuthorRef } {
-  return state.editor ? { role: "editor", ref: state.editor } : { role: "author", ref: state.author };
+  const { role, refs } = signersOf(state);
+  return { role, ref: refs[0] };
+}
+
+/**
+ * The members that govern an Original at an entry: its signer set, or its one
+ * author as a set of one with threshold 1, which behaves exactly like it (W1).
+ */
+export function governingSet(state: Pick<EntryState, "author" | "asset">): AuthorSet {
+  if (state.asset.authors) return state.asset.authors;
+  const refs = authorRefsOf(state);
+  return { threshold: 1, dids: refs.map((r) => r.did) };
 }
 
 function invalid(code: string, message: string): never {
@@ -204,6 +262,26 @@ export function checkAuthorRef(value: unknown): AuthorRef {
   return checkRef(value, "author");
 }
 
+/**
+ * A set Original's signer references (P5.19, P14.4): a non-empty
+ * array of author references, sorted by `did` in code unit order, each DID
+ * once, at most `ORIGINALS_LIMITS.authors`.
+ */
+export function checkAuthorRefs(value: unknown): AuthorRef[] {
+  if (!Array.isArray(value) || value.length === 0) invalid("STATE_AUTHOR", "state.author of a set Original is a non-empty array of signer references");
+  if (value.length > ORIGINALS_LIMITS.authors) fail("limit-exceeded", "STATE_TOO_MANY_AUTHORS", `at most ${ORIGINALS_LIMITS.authors} signers (P7.7)`);
+  const refs = value.map((v) => checkRef(v, "author"));
+  for (let i = 1; i < refs.length; i++) {
+    if (!(refs[i - 1].did < refs[i].did)) invalid("STATE_AUTHOR", "a set Original's signer references are sorted by did and name each DID once (P5.22)");
+  }
+  return refs;
+}
+
+/** The author member of an entry's state: one reference, or a set Original's array (P5.19). */
+export function checkAuthorMember(value: unknown): AuthorRef | AuthorRef[] {
+  return Array.isArray(value) ? checkAuthorRefs(value) : checkAuthorRef(value);
+}
+
 export function checkEditorRef(value: unknown): EditorRef {
   return checkRef(value, "editor");
 }
@@ -244,13 +322,13 @@ function wellFormedSigner(did: string): boolean {
  * `resource` allows new versions of the Original's one resource (P5.15;
  * originals-spec #53). The number of grants is limited (P7.7).
  */
-function checkEditors(value: unknown, authorDid: string | undefined): EditorGrant[] {
+function checkEditors(value: unknown, authorDids: readonly string[], set = false): EditorGrant[] {
   const bad: (message: string) => never = (message) => invalid("STATE_EDITORS", message);
   if (!Array.isArray(value)) bad("state.asset.editors must be an array of grants");
   if (value.length === 0) bad("state.asset.editors is omitted when there are no editors (PROVISIONAL)");
   if (value.length > ORIGINALS_LIMITS.editors) fail("limit-exceeded", "STATE_TOO_MANY_EDITORS", `at most ${ORIGINALS_LIMITS.editors} editor grants (P7.7)`);
   const seen = new Set<string>();
-  const authorScid = authorDid?.startsWith("did:webvh:") ? scidOfWebvh(authorDid) : undefined;
+  const authorScids = authorDids.filter((d) => d.startsWith("did:webvh:")).map(scidOfWebvh).filter((x) => x !== undefined);
   return value.map((item, i) => {
     let g: JsonObject;
     try {
@@ -263,7 +341,10 @@ function checkEditors(value: unknown, authorDid: string | undefined): EditorGran
     const did = g.did;
     // The author's DID with a path, query or fragment still names the author's identity.
     const bare = did.replace(/[?#/].*$/, "");
-    if (bare === authorDid || (authorScid !== undefined && scidOfWebvh(bare) === authorScid)) bad("an editor cannot be the author DID or a DID of the author's identity (P5.14, P5.15)");
+    // A set Original's members are its authors: an editor is not a member at the same entry (P5.19).
+    if (authorDids.includes(bare) || authorScids.includes(scidOfWebvh(bare) ?? "\u0000")) {
+      bad(set ? "an editor cannot be a member of the signer set or a DID of a member's identity (P5.14, P5.15)" : "an editor cannot be the author DID or a DID of the author's identity (P5.14, P5.15)");
+    }
     if (!LISTED_METHODS.some((m) => did.startsWith(m))) bad(`editor DID ${did} uses a method the profile does not list (P5.8)`);
     if (!wellFormedSigner(did)) bad(`editor DID ${did} is not a well-formed DID of its method, with no path, query or fragment`);
     // One identity, one grant: a did:webvh at two locations is one identity (P5.14).
@@ -277,9 +358,45 @@ function checkEditors(value: unknown, authorDid: string | undefined): EditorGran
   });
 }
 
-/** Check an asset state. `authorDid` enables the grant rules that depend on it (P5.15). */
-export function checkAsset(value: unknown, authorDid?: string): AssetState {
-  const a = members(value, ["name", "status", "resource", "aliases"], ["metadata", "editors", "preview"], "state.asset");
+/**
+ * A signer set (P5.19; PROVISIONAL member names, P14.5): exactly
+ * `{threshold, dids}`; `dids` sorted by code unit order, unique by identity
+ * (a did:webvh at two locations is one, P5.14), each a well-formed DID of a
+ * listed method (P5.8), 1 to `ORIGINALS_LIMITS.authors` of them (P7.7); and
+ * an integer threshold from 1 to their number.
+ */
+export function checkAuthors(value: unknown): AuthorSet {
+  const bad: (message: string) => never = (message) => invalid("STATE_AUTHORS", message);
+  let a: JsonObject;
+  try {
+    a = members(value, ["threshold", "dids"], [], "state.asset.authors");
+  } catch (error) {
+    if (error instanceof OriginalsError) bad(`${error.message}: a signer set is exactly {threshold, dids} (P5.19)`);
+    throw error;
+  }
+  const dids = a.dids;
+  if (!Array.isArray(dids) || dids.length === 0 || !dids.every((d) => typeof d === "string")) bad("state.asset.authors.dids is a non-empty array of DIDs");
+  if (dids.length > ORIGINALS_LIMITS.authors) fail("limit-exceeded", "STATE_TOO_MANY_AUTHORS", `at most ${ORIGINALS_LIMITS.authors} members in a signer set (P7.7)`);
+  const seen = new Set<string>();
+  dids.forEach((did, i) => {
+    if (!LISTED_METHODS.some((m) => did.startsWith(m))) bad(`member DID ${did} uses a method the profile does not list (P5.8)`);
+    if (!wellFormedSigner(did)) bad(`member DID ${did} is not a well-formed DID of its method, with no path, query or fragment`);
+    if (i > 0 && !(dids[i - 1] < did)) bad("state.asset.authors.dids are sorted by code unit order and unique (P5.19)");
+    const identity = did.startsWith("did:webvh:") ? `did:webvh:${scidOfWebvh(did)}` : did;
+    if (seen.has(identity)) bad(`member DID ${did} is listed twice (one identity, P5.14)`);
+    seen.add(identity);
+  });
+  const t = a.threshold;
+  if (typeof t !== "number" || !Number.isInteger(t) || t < 1 || t > dids.length) bad("state.asset.authors.threshold is an integer from 1 to the number of members (P5.19)");
+  return a as unknown as AuthorSet;
+}
+
+/**
+ * Check an asset state. `authorDid` enables the grant rules that depend on it
+ * (P5.15); for a set Original the members in `authors` are used instead.
+ */
+export function checkAsset(value: unknown, authorDid?: string | readonly string[]): AssetState {
+  const a = members(value, ["name", "status", "resource", "aliases"], ["metadata", "editors", "preview", "authors"], "state.asset");
   if (typeof a.name !== "string" || a.name.length === 0 || a.name.length > ORIGINALS_LIMITS.nameLength) {
     invalid("STATE_NAME", `the name must be a string of 1 to ${ORIGINALS_LIMITS.nameLength} UTF-16 code units (P14.5)`);
   }
@@ -308,7 +425,9 @@ export function checkAsset(value: unknown, authorDid?: string): AssetState {
     webvh++;
   }
   if (webvh > 1 || btco > 1) invalid("STATE_ALIASES", "an Original lists at most one did:webvh and one did:btco alias");
-  if (a.editors !== undefined) checkEditors(a.editors, authorDid);
+  const set = a.authors === undefined ? undefined : checkAuthors(a.authors);
+  const given = authorDid === undefined ? [] : typeof authorDid === "string" ? [authorDid] : [...authorDid];
+  if (a.editors !== undefined) checkEditors(a.editors, set ? [...set.dids, ...given] : given, set !== undefined);
   if (a.preview !== undefined) checkPreview(a.preview, a.resource as unknown as ResourceDescriptor, btco > 0);
   return a as unknown as AssetState;
 }
@@ -360,7 +479,7 @@ const same = (a: JsonValue | undefined, b: JsonValue | undefined) => canonicaliz
  * update; and only the name, metadata and resource descriptor the grant
  * allows change. Grants, aliases and lifecycle are the author's.
  */
-export function checkEditorEntry(editor: EditorRef, operation: string, author: AuthorRef, asset: AssetState, previous: EntryState | undefined): void {
+export function checkEditorEntry(editor: EditorRef, operation: string, author: AuthorRef | AuthorRef[], asset: AssetState, previous: EntryState | undefined): void {
   const authorOnly: (message: string) => never = (message) => fail("outside-grant", "EDITOR_AUTHOR_ONLY", `${message}; only an author entry may (P5.16)`);
   if (!previous) authorOnly("an editor entry cannot be the genesis entry");
   if (operation !== "update") authorOnly("an editor entry is an update; it cannot deactivate");
@@ -372,6 +491,7 @@ export function checkEditorEntry(editor: EditorRef, operation: string, author: A
   const before = previous.asset;
   if (!same(asset.editors as unknown as JsonValue, before.editors as unknown as JsonValue)) authorOnly("an editor entry cannot change the editor grants");
   if (!same(asset.aliases, before.aliases)) authorOnly("an editor entry cannot change aliases");
+  if (!same(asset.authors as unknown as JsonValue, before.authors as unknown as JsonValue)) authorOnly("an editor entry cannot change the signer set");
   if (asset.status !== before.status) authorOnly("an editor entry cannot change the lifecycle status");
   const outside: (what: string) => never = (what) => fail("outside-grant", "EDITOR_OUTSIDE_GRANT", `${editor.did} is not granted ${what} (P5.16)`);
   if (asset.name !== before.name && !grant.name) outside("the name");
@@ -412,6 +532,69 @@ export function checkPreviewTransition(asset: AssetState, previous: AssetState |
   }
 }
 
+function unauthorized(code: string, message: string): never {
+  return fail("unauthorized-key", code, message);
+}
+
+/**
+ * Who may sign an author entry (P5.19–P5.21),
+ * judged on the state alone, before any signer evidence is looked up, so a
+ * signer outside the set is rejected, never reported as missing evidence:
+ *
+ * - P5.19: the genesis of a set Original names every member as a signer.
+ * - P5.20: a later author entry is signed by at least the parent's threshold
+ *   of the parent's members, and by every member it adds; no one else signs.
+ * - P5.21: an author entry of a single-author Original may introduce
+ *   `authors`, which must contain the author; the author's set of one, with
+ *   threshold 1, is the parent's.
+ * - `authors` is never removed once present.
+ *
+ * A single-author entry after a single-author parent changes nothing here:
+ * its author DID is fixed at genesis (P5.8), checked with its key.
+ */
+export function checkSigners(author: AuthorRef | AuthorRef[], asset: AssetState, previous: EntryState | undefined): void {
+  if (previous?.asset.authors && !asset.authors) invalid("STATE_AUTHORS", "a set Original's `authors` is never removed (P5.19)");
+  if (Array.isArray(author) !== (asset.authors !== undefined)) {
+    invalid("STATE_AUTHOR", "state.author is an array of signer references exactly when the asset has `authors` (P5.19)");
+  }
+  const signers = (Array.isArray(author) ? author : [author]).map((r) => r.did);
+  const next = asset.authors;
+  if (!previous) {
+    if (!next) return;
+    const outside = signers.find((d) => !next.dids.includes(d));
+    if (outside) unauthorized("SIGNER_NOT_MEMBER", `${outside} is not a member of the signer set (P5.19)`);
+    const missing = next.dids.filter((d) => !signers.includes(d));
+    if (missing.length > 0) unauthorized("AUTHORS_MEMBER_NOT_SIGNED", `the genesis of a set Original is signed by every member; ${missing.join(", ")} did not sign (P5.19)`);
+    return;
+  }
+  const before = previous.asset.authors;
+  if (!before && !next) return;
+  if (before && !next) invalid("STATE_AUTHORS", "a set Original's `authors` is never removed (P5.19)");
+  const parent = governingSet(previous);
+  if (!before && !next!.dids.includes(parent.dids[0])) {
+    invalid("STATE_AUTHORS", "converting a single-author Original: the signer set must contain the author (P5.21)");
+  }
+  const added = next!.dids.filter((d) => !parent.dids.includes(d));
+  const outside = signers.find((d) => !parent.dids.includes(d) && !added.includes(d));
+  if (outside) unauthorized("SIGNER_NOT_MEMBER", `${outside} is not a member of the parent's signer set, nor added by this entry (P5.20)`);
+  const counted = signers.filter((d) => parent.dids.includes(d)).length;
+  if (counted < parent.threshold) {
+    unauthorized("AUTHORS_THRESHOLD_NOT_MET", `an author entry is signed by at least ${parent.threshold} of the parent's members; ${counted} signed (P5.20)`);
+  }
+  const unsigned = added.filter((d) => !signers.includes(d));
+  if (unsigned.length > 0) unauthorized("AUTHORS_MEMBER_NOT_SIGNED", `every member an entry adds signs it; ${unsigned.join(", ")} did not (P5.20, P5.21)`);
+}
+
+/**
+ * `checkSigners` on an entry's raw state, for the profile's key hook: the
+ * author member, the asset and the parent's state, checked as they are read.
+ */
+export function checkEntrySigners(state: JsonObject, previous: EntryState | undefined): void {
+  const author = checkAuthorMember(state.author);
+  const single = Array.isArray(author) ? undefined : author.did;
+  checkSigners(author, checkAsset(state.asset, single), previous);
+}
+
 /**
  * The transitions an entry must list (P4.2, P4.4, P14.4; originals-spec #53):
  * `[{from: null, to}]` in the genesis entry, `[{from, to}]` in a later entry
@@ -437,7 +620,7 @@ export interface EntryStateContext {
 }
 
 /** The members, id, operation, author reference and asset of an entry's state: what every later rule reads. */
-function entryHead(state: JsonObject, ctx: EntryStateContext): { s: JsonObject; operation: string; author: AuthorRef; asset: AssetState } {
+function entryHead(state: JsonObject, ctx: EntryStateContext): { s: JsonObject; operation: string; author: AuthorRef | AuthorRef[]; asset: AssetState } {
   const s = members(state, ["id", "operation", "author", "asset", "transitions"], ["editor"], "state");
   if (s.id !== `did:vh:${ctx.scid}`) invalid("STATE_ID", "state.id must be the Original's did:vh");
   const operation = s.operation;
@@ -445,8 +628,13 @@ function entryHead(state: JsonObject, ctx: EntryStateContext): { s: JsonObject; 
   if (ctx.index === 0 ? operation !== "create" : operation !== "update" && operation !== "deactivate") {
     invalid("STATE_OPERATION", ctx.index === 0 ? "the first entry must be a create" : "a later entry is an update or a deactivate");
   }
-  const author = checkAuthorRef(s.author);
-  return { s, operation, author, asset: checkAsset(s.asset, author.did) };
+  const author = checkAuthorMember(s.author);
+  const asset = checkAsset(s.asset, Array.isArray(author) ? undefined : author.did);
+  if (ctx.previous?.asset.authors && !asset.authors) invalid("STATE_AUTHORS", "a set Original's `authors` is never removed (P5.19)");
+  if (Array.isArray(author) !== (asset.authors !== undefined)) {
+    invalid("STATE_AUTHOR", "state.author is an array of signer references exactly when the asset has `authors` (P5.19)");
+  }
+  return { s, operation, author, asset };
 }
 
 /**
@@ -473,6 +661,14 @@ export function checkEntryState(state: JsonObject, ctx: EntryStateContext): Entr
   for (const g of asset.editors ?? []) {
     if (g.did === s.id || asset.aliases.includes(g.did)) invalid("STATE_EDITORS", `editor DID ${g.did} names this Original itself (P5.15, P9.12)`);
   }
+  // P5.19 (C12-393): no member of the signer set is the Original's did:vh or any of its aliases; a
+  // did:btco member whose sat is the anchoring sat is refused below with the author DIDs (P5.13).
+  for (const did of asset.authors?.dids ?? []) {
+    if (did === s.id || asset.aliases.includes(did)) invalid("STATE_AUTHORS", `member DID ${did} names this Original itself (P5.19, P9.12)`);
+  }
+  // P5.19–P5.21: who may sign an author entry of a set Original. An
+  // editor entry carries its parent's author member and set unchanged (checkEditorEntry).
+  if (s.editor === undefined) checkSigners(author, asset, ctx.previous);
 
   // PROVISIONAL (plan 011, PR 7b): layers move one way. An Original starts local, and
   // once published keeps a did:webvh alias, moving only within that alias's SCID (P9.3).
@@ -483,8 +679,10 @@ export function checkEntryState(state: JsonObject, ctx: EntryStateContext): Entr
   const now = webOf(asset.aliases);
   // A did:btco author DID's own sat is never the anchoring sat of an Original naming it (P5.13).
   const anchoring = satOf(asset.aliases);
-  const authorDid = (s.author as { did?: unknown }).did;
-  if (anchoring !== undefined && typeof authorDid === "string" && authorDid.startsWith("did:btco:")) {
+  // For a set Original, every member and every signer is an author DID (P5.19).
+  const authorDids = [...new Set([...authorRefsOf({ author }).map((r) => r.did), ...(asset.authors?.dids ?? [])])];
+  for (const authorDid of authorDids) {
+    if (anchoring === undefined || !authorDid.startsWith("did:btco:")) continue;
     const a = parseBtcoAlias(anchoring);
     try {
       const b = parseBtcoAlias(authorDid);

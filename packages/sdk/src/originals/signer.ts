@@ -14,12 +14,31 @@
  * shows from the entry and that parent, never from the caller's summary, and
  * refuses a summary that differs (editors PR review A3). Without a parent it
  * cannot tell what changed, so it shows the name, metadata and every grant.
+ *
+ * Signer sets (P5.19–P5.23): an author entry of a set
+ * Original names several signers. Each signs the same entry with its own key
+ * and is asked separately; its request's summary names it as `signer`, and
+ * lists every signer and the signer set after the entry, so each member sees
+ * who else signs and what the set becomes.
  */
 import { OriginalsError } from "@originals/vh";
 import { localSigner, proofHashData, type CryptosuiteName, type DataIntegrityProof, type KeyType } from "@originals/vh/crypto";
 import { canonicalize, isJsonObject, type JsonObject, type JsonValue } from "@originals/vh/json";
 import { parseVersionTime, vhHash, type UnsignedEntry } from "@originals/vh/log";
-import { ORIGINALS_METHOD, checkAsset, checkAuthorRef, checkDigest, checkEditorRef, type AuthorRef, type EditorGrant, type EntryState, type Operation, type Transition } from "@originals/vh/originals";
+import {
+  ORIGINALS_METHOD,
+  authorRefsOf,
+  checkAsset,
+  checkAuthorMember,
+  checkDigest,
+  checkEditorRef,
+  type AuthorRef,
+  type AuthorSet,
+  type EditorGrant,
+  type EntryState,
+  type Operation,
+  type Transition,
+} from "@originals/vh/originals";
 
 /** Who signs an entry: the author, or a granted editor (P5.16). */
 export interface SignerIdentity extends AuthorRef {
@@ -30,10 +49,19 @@ export interface EntrySummary {
   original: string;
   operation: Operation;
   name: string;
-  /** The Original's author, which every entry names (P5.8). */
-  author: AuthorRef;
-  /** The identity whose key signs this entry (P5.11): the author, or the editor of an editor entry. */
+  /**
+   * The Original's author, which every entry names (P5.8); for a set
+   * Original, the entry's signer references (P5.19).
+   */
+  author: AuthorRef | AuthorRef[];
+  /** The identity whose key signs this entry (P5.11): the author, the editor of an editor entry, or this member of a set Original's signers. */
   signer: SignerIdentity;
+  /** Every identity that signs this entry, in proof order (P5.19): one, except a set Original's author entry. */
+  signers?: AuthorRef[];
+  /** The signer set after this entry, for a set Original (P5.19). */
+  authors?: AuthorSet;
+  /** The signer set changes, or is introduced (author entries only; P5.16, P5.20). */
+  authorsChanged?: boolean;
   /**
    * The resource change, as the entry's transitions: at most one, the prior
    * and new digest of the Original's one resource, `from: null` at genesis
@@ -80,15 +108,28 @@ export interface OriginalsSigner {
 
 const same = (a: unknown, b: unknown) => canonicalize((a ?? null) as JsonValue) === canonicalize((b ?? null) as JsonValue);
 
-export function summarize(entry: UnsignedEntry, previous?: EntryState): EntrySummary {
+/**
+ * What an entry changes, for the person whose key signs it (P5.11). For a set
+ * Original's author entry, `verificationMethod` picks which signer the
+ * summary is for; by default the first.
+ */
+export function summarize(entry: UnsignedEntry, previous?: EntryState, verificationMethod?: string): EntrySummary {
   const state = entry.state as unknown as EntryState;
-  const signer = state.editor ?? state.author;
+  const refs = state.editor ? [state.editor] : authorRefsOf(state);
+  const signer = refs.find((r) => r.verificationMethod === verificationMethod) ?? refs[0];
+  const set = state.asset.authors !== undefined || previous?.asset.authors !== undefined;
   return {
     original: state.id,
     operation: state.operation,
     name: state.asset.name,
     author: state.author,
     signer: { role: state.editor ? "editor" : "author", did: signer.did, verificationMethod: signer.verificationMethod, versionId: signer.versionId },
+    // Only a set Original's summary carries these, so a single-author one is exactly as before.
+    ...(set ? {
+      signers: refs,
+      ...(state.asset.authors ? { authors: state.asset.authors } : {}),
+      authorsChanged: previous ? !same(previous.asset.authors, state.asset.authors) : true,
+    } : {}),
     changes: state.transitions,
     nameChanged: previous ? previous.asset.name !== state.asset.name : true,
     metadataChanged: previous ? !same(previous.asset.metadata, state.asset.metadata) : state.asset.metadata !== undefined,
@@ -110,8 +151,18 @@ export function describeEntry(summary: EntrySummary): string {
     `Signing as ${s.role} ${s.did} with ${s.verificationMethod} (DID version ${s.versionId})`,
     `Original: ${summary.original} "${summary.name}"`,
     `Operation: ${summary.operation}`,
-    `Author: ${summary.author.did}${s.role === "editor" ? " (unchanged; an editor entry carries its parent's author)" : ""}`,
   ];
+  // A set Original (P5.19): who signs this entry, and the set it governs by.
+  if (Array.isArray(summary.author)) {
+    const signers = summary.author.map((r) => r.did).join(", ");
+    lines.push(s.role === "editor" ? `Authors: ${signers} (unchanged; an editor entry carries its parent's signers)` : `Signers: ${signers}`);
+  } else {
+    lines.push(`Author: ${summary.author.did}${s.role === "editor" ? " (unchanged; an editor entry carries its parent's author)" : ""}`);
+  }
+  if (summary.authors) {
+    const set = `${summary.authors.threshold} of ${summary.authors.dids.length}: ${summary.authors.dids.join(", ")}`;
+    lines.push(summary.authorsChanged ? `Signer set: changed to ${set}` : `Signer set: ${set}`);
+  }
   // One resource per Original (P4.1, P14.4; originals-spec #53): at most one transition.
   if (summary.changes.length === 0) lines.push("Resource: no new version");
   for (const c of summary.changes) {
@@ -206,9 +257,11 @@ function checkWellFormed(entry: UnsignedEntry, number: number): void {
   if (genesis ? state.operation !== "create" || state.id !== `did:vh:${parameters.scid as string}` : state.operation === "create") refuse("the operation does not fit the entry's place in the log");
   if ((state.operation === "deactivate") !== (parameters.deactivated === true)) refuse("operation deactivate and deactivated: true go together (P6.5)");
   try {
-    const author = checkAuthorRef(state.author);
+    const author = checkAuthorMember(state.author);
     if (state.editor !== undefined) checkEditorRef(state.editor);
-    const asset = checkAsset(state.asset, author.did);
+    const asset = checkAsset(state.asset, Array.isArray(author) ? undefined : author.did);
+    // A set Original names its signers as an array exactly when its asset has `authors` (P5.19).
+    if (Array.isArray(author) !== (asset.authors !== undefined)) refuse("the author member does not fit the asset's signer set (P5.19)");
     if (genesis && asset.aliases.length > 0) refuse("a genesis entry lists no alias");
     if (!Array.isArray(state.transitions) || state.transitions.length > 1) refuse("an entry lists at most one resource transition (P14.4)");
     for (const t of state.transitions) {
@@ -237,13 +290,13 @@ function checkRequest(request: SigningRequest, verificationMethod: string, crypt
   if (!Number.isInteger(number) || number < 1 || typeof entry.versionTime !== "string") refuse("not a VH log entry");
   checkWellFormed(entry, number);
   const state = entry.state;
-  const author = state?.author as JsonObject | undefined;
+  const author = state?.author as JsonObject | JsonObject[] | undefined;
   const editor = state?.editor as JsonObject | undefined;
   if (typeof state?.id !== "string" || !state.id.startsWith("did:vh:") || !["create", "update", "deactivate"].includes(state.operation as string)) {
     refuse("not an Originals asset state");
   }
-  // P5.2: the key signs as the identity the entry names for its signer.
-  const signer = editor ?? author;
+  // P5.2: the key signs as the identity the entry names for its signer; one of a set Original's signers (P5.22).
+  const signer = editor ?? (Array.isArray(author) ? author.find((r) => isJsonObject(r) && r.verificationMethod === verificationMethod) : author);
   if (signer?.verificationMethod !== verificationMethod) refuse(`the entry names another ${editor ? "editor" : "author"} key`);
   const summary = request.summary as Partial<EntrySummary> | undefined;
   const role = editor ? "editor" : "author";
@@ -256,13 +309,16 @@ function checkRequest(request: SigningRequest, verificationMethod: string, crypt
   }
   // Everything else is derived from the entry and its bound parent, and the summary must agree.
   const parent = parentState(request, number);
-  const derived = summarize(entry, parent === "unknown" ? undefined : parent);
-  const checked: Array<keyof EntrySummary> = ["name", "editors", "versionTime", ...(parent === "unknown" ? [] : (["nameChanged", "metadataChanged", "editorsChanged"] as const))];
+  const derived = summarize(entry, parent === "unknown" ? undefined : parent, verificationMethod);
+  const checked: Array<keyof EntrySummary> = [
+    "name", "editors", "versionTime", "signers", "authors",
+    ...(parent === "unknown" ? [] : (["nameChanged", "metadataChanged", "editorsChanged", "authorsChanged"] as const)),
+  ];
   for (const field of checked) {
     if (!same(summary[field], derived[field])) refuse(`the summary does not state this entry: ${field}`);
   }
   // With no parent, what changed is unknown: show it all.
-  return parent === "unknown" ? { ...derived, nameChanged: true, metadataChanged: true, editorsChanged: true } : derived;
+  return parent === "unknown" ? { ...derived, nameChanged: true, metadataChanged: true, editorsChanged: true, ...(derived.authorsChanged !== undefined ? { authorsChanged: true } : {}) } : derived;
 }
 
 export interface KeySignerOptions {

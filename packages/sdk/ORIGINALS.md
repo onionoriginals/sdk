@@ -24,12 +24,15 @@ This contract replaces the CEL 3 guide, deleted with the CEL 3 code in plan
   owner decision of 1 November 2026, originals-spec #53). The resource is
   never added, removed or replaced by another: new bytes are its next
   version. Descriptive values such as a title or style belong in `metadata`.
-- The author is a DID fixed at genesis. The baseline profile lists did:vh,
-  did:webvh and did:btco. Every entry carries exactly one proof, by an
-  `assertionMethod` key of the author DID at the author DID version the entry
-  names. That key must not also be an update key of the author DID's own log.
-  Asset logs do not use witnesses (owner decision Q14). Accepted
-  cryptosuites are `eddsa-jcs-2022` and `bip340-jcs-2025`.
+- The author is a DID fixed at genesis, or a signer set: several DIDs with a
+  threshold (P5.19–P5.23, P5.30; see [Signer sets](#signer-sets-p519p523)).
+  The baseline profile lists did:vh, did:webvh and did:btco. A single-author
+  entry carries exactly one proof, by an `assertionMethod` key of the author
+  DID at the author DID version the entry names; a set Original's author
+  entry carries one such proof per signer, in signer order. That key must not
+  also be an update key of the signer DID's own log. Asset logs do not use
+  witnesses (owner decision Q14). Accepted cryptosuites are `eddsa-jcs-2022`
+  and `bip340-jcs-2025`.
 - The author can grant editors (P5.15–P5.18): each editor signs its own
   entries with its own DID, only for the content its grant allows.
 - Keys rotate in the author DID only. The asset log has no update keys.
@@ -261,7 +264,7 @@ so the bytes hashed, sized and kept are always the same bytes.
 |---|---|
 | `history` | valid · invalid (with the first failing entry) · limit-exceeded |
 | `authorBinding` | valid · failed (per entry) |
-| `identityEvidence` | complete · incomplete, with the latest author DID versionId used, whether it is deactivated (P6.5), and its freshness: established (the log was obtained at the DID's location and its own witnesses approve its latest version) · not-established · stale against the retained versionId (P7.8), with `obtained`: where (`location`, the URL it was retrieved from, or null), when (`obtainedAt`), from what `source`, as of which `latestVersionId`, and whether that version is `witnessed`. `editors` lists the same for each editor DID relied on (P7.8, P5.18); `status` is incomplete when any signer's evidence is |
+| `identityEvidence` | complete · incomplete, with the latest author DID versionId used, whether it is deactivated (P6.5), and its freshness: established (the log was obtained at the DID's location and its own witnesses approve its latest version) · not-established · stale against the retained versionId (P7.8), with `obtained`: where (`location`, the URL it was retrieved from, or null), when (`obtainedAt`), from what `source`, as of which `latestVersionId`, and whether that version is `witnessed`. `editors` lists the same for each editor DID relied on (P7.8, P5.18), and `authors` for each author DID that signed: the one author, or each member of a set Original, whose single-author fields above are then null (P5.19); `status` is incomplete when any signer's evidence is |
 | `assetFreshness` | not-established · stale against the retained versionId · anchored (the sat's log, as of the read's tip, P9.13), with every compared copy of the asset log (P7.6) |
 | `resources` | available · partial (the resource version and checkpoint missing) · digest failure, over every version of the Original's one resource. Content availability is reported here and nowhere else: missing bytes, current or historical, leave the log verified and are never a verification failure (P7.3, P7.4, P9.18); bytes that are supplied, or read from an accepted inscription's body, are always checked, and a mismatch fails |
 | `ordering` | claimed · anchored (P7.6). Asset logs have no witnesses (Q14), so an unanchored Original's ordering is claimed only |
@@ -269,7 +272,8 @@ so the bytes hashed, sized and kept are always the same bytes.
 | `anchors` | every anchoring entry (phase 4) |
 | `ownership` | none · provisional, with confirmation depth and index agreement (P9.11, P9.16): no index lists every sat, so ownership is never more than provisional |
 | `validAsOf` | for a valid result, anchored or not, `{ checkpoint, signers: [{ did, role, versionId, obtainedAt, source, location }] }`: the checkpoint the result is valid as of, and for the author and each editor that signed through it, the latest DID versionId relied on and when and where that history was obtained (P7.8, P7.10). Null when the checkpoint does not verify (failed or limit-exceeded history, failed binding, incomplete identity evidence, a failed digest) or the Original is forked. A stale prefix is still valid as of its own checkpoint |
-| `historicallyAuthorizedOnly` | each entry through the checkpoint whose key the latest verified state of its signer's DID no longer lists (`key-not-in-latest-signer-document`), whose editor DID is deactivated (`signer-did-deactivated`), or any entry once the author DID is deactivated (`author-did-deactivated`) (P7.9, P6.5, P5.18). It does not invalidate the checkpoint; any result including such an entry lists it |
+| `historicallyAuthorizedOnly` | each entry through the checkpoint whose key the latest verified state of its signer's DID no longer lists (`key-not-in-latest-signer-document`), whose editor DID is deactivated (`signer-did-deactivated`), or any entry once the author DID is deactivated (`author-did-deactivated`) (P7.9, P6.5, P5.18). For a set Original's author entry, when fewer than the parent's threshold of its signers are still current, with `threshold` and the `signers` that are not (P5.23). It does not invalidate the checkpoint; any result including such an entry lists it |
+| `signedBy` | each verified entry through the checkpoint with its `role` and signer `dids`, in proof order: the author, the editor, or each signer of a set Original (P5.19) |
 | `current` | never true for an Original that is not anchored, however fresh the evidence (P7.10): off Bitcoin nothing shows that a newer entry or another branch does not exist. Only an anchored Original's state from its sat can be current |
 | `reasons`, `retain` | why the result is not current (`not-anchored` for every unanchored Original, then anything else that applies); the highest versionIds to keep for the Original and each author DID, never lower than those supplied |
 
@@ -471,6 +475,87 @@ await sdk.edit(did, { parent, resource: { bytes }, editor: bobRef, signer: bobSi
   unchanged and carries one proof by its editor; the Originals profile
   supplies the grants, the `editor` reference, the editor key rules and the
   grant's scope. No signer is required to use did:btco.
+
+## Signer sets (P5.19–P5.23)
+
+An Original can be governed by a set of DIDs with a threshold instead of one
+author (owner decision of 19 November 2026, reversing S8). It is part of
+`originals:1.0` itself: a single-author Original is unchanged, byte for byte,
+and a set of one behaves like one author (originals-spec #66, P5.19–P5.23,
+P5.30, D8). The member names stay PROVISIONAL (P14.5, D4).
+
+```ts
+// Genesis: every member signs (P5.19).
+const created = await sdk.create({
+  name, resource,
+  authors: { threshold: 2, members: [aliceRef, bobRef, carolRef] }, // AuthorRefs; sorted by DID for you
+  signers: [aliceSigner, bobSigner, carolSigner],                     // any order
+});
+// An author entry: at least the parent's threshold of the parent's members (P5.20).
+await sdk.edit(did, { parent, name: "Renamed", author: [aliceRef, carolRef], signers: [aliceSigner, carolSigner] });
+// Change the set: every added member also signs. A set may shrink to one member, never go away.
+await sdk.edit(did, { parent, authors: { threshold: 2, dids }, author: [aliceRef, bobRef, daveRef], signers: [...] });
+// Convert a single-author Original: the set contains the author; the author and every new member sign (P5.21).
+await sdk.edit(did, { parent, authors: { threshold: 1, dids: [aliceDid, bobDid] }, author: [aliceRef, bobRef], signers: [...] });
+
+// Signers who are not all present: prepare, cosign one at a time, then commit.
+let draft = await sdk.prepareEdit(did, { parent, name: "Renamed", author: [aliceRef, carolRef] });
+draft = await sdk.cosign(draft, carolSigner); // later, elsewhere: each is shown the entry as itself
+draft = await sdk.cosign(draft, aliceSigner);
+await sdk.commitDraft(draft);                 // or sdk.finalizeDraft(draft) for a shared host's submit
+```
+
+- State: the asset's `authors` is `{threshold, dids}`: DIDs sorted by code
+  unit order, unique by identity, each of a listed method (P5.8), at most 32
+  (`ORIGINALS_LIMITS.authors`), and `1 ≤ threshold ≤ n` (`STATE_AUTHORS`,
+  `STATE_TOO_MANY_AUTHORS`). An entry's `author` is an array of signer
+  references `{did, verificationMethod, versionId}`, sorted by `did` and
+  unique, exactly when its asset has `authors` (`STATE_AUTHOR`).
+- Who signs is judged from the state before any signer evidence is looked
+  up, so a signer outside the set is rejected, never reported as missing
+  evidence: `SIGNER_NOT_MEMBER`, `AUTHORS_THRESHOLD_NOT_MET` (only the
+  parent's members count toward the parent's threshold) and
+  `AUTHORS_MEMBER_NOT_SIGNED` (a genesis or added member that did not sign),
+  all `unauthorized-key`. Genesis, deactivation, publication and the
+  anchoring entry are author entries, so a threshold signs them; paying for
+  or holding the sat gives no authority (P9.10–P9.12).
+- Proofs: VH-Log's `proof` array, one per signer reference, in the same order
+  (`PROOF_COUNT`), each `verificationMethod` byte-identical to its reference
+  (`AUTHOR_VM_MISMATCH`). P5.3 and P5.11 apply to each signer against its own
+  DID, and P5.8's versionId order holds per identity. In `@originals/vh`,
+  builders take `sign: EntrySigner[]`, and `cosignEntry` / `finalizeEntry`
+  collect proofs in any order and sort them by DID.
+- Only an author entry changes `authors`, and it is never removed. An editor
+  is never a member at the same entry (`STATE_EDITORS`); an editor entry
+  carries its parent's `author` array unchanged and one proof by its editor.
+- Currency (P5.23): an unanchored set entry is historically authorized only
+  when fewer than the parent's threshold of the parent's members that signed
+  it still meet P7.9 (`historicallyAuthorizedOnly[].threshold` and
+  `.signers` say which no longer do and why). Genesis is judged against its
+  own threshold. A set whose non-deactivated members fall below the
+  threshold of the parent entry's set is treated like a deactivated author
+  (`author-did-deactivated`, P5.23).
+- Bitcoin (P5.23, P9.15): an inscribed set entry is checked per signer at
+  its inscription, and every signer must pass there. One that fails refuses
+  the entry for its reason (for example
+  `author-key-not-valid-at-inscription-time`), even when the others meet the
+  threshold; otherwise a signer whose named version is not verified here
+  makes it `author-version-unavailable` (unverifiable; PROVISIONAL in P5.23).
+- Reports: `signedBy` lists the signer DIDs of each entry through the
+  checkpoint; `identityEvidence.authors` gives each author DID that signed
+  (one for a single-author Original). For a set Original the single-author
+  fields of `identityEvidence` (`author`, `latestVersionId`, ...) are null and
+  `status` is incomplete when any member's evidence is. `validAsOf.signers`
+  lists every member that signed. The derived DID document's `controller` is
+  the member array at that version (P14.9).
+- Evidence packages carry the DID history of every member that signed an
+  entry (P7.1); one missing is a `{ kind: "identity", role: "author" }` item
+  and incomplete identity evidence, never a pass.
+- Each signer's `SigningRequest.summary` names it as `signer` and lists
+  `signers` and `authors` (with `authorsChanged`); `describeEntry` shows
+  `Signers:` and `Signer set:` lines. A single-author summary is unchanged.
+- Shared hosts check every signer of a set entry, and a caller whose landing
+  DID is a member may save.
 
 ## Custody roles: devices and agents under one author
 

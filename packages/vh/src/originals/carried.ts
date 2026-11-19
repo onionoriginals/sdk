@@ -746,8 +746,10 @@ function signerDids(entries: unknown[]): string[] {
   for (const e of entries) {
     const state = entryState(e);
     if (!state) continue;
-    for (const ref of [state.author, state.editor] as Array<AuthorRef | undefined>) {
-      if (ref && typeof ref.did === "string" && !out.includes(ref.did)) out.push(ref.did);
+    // A set Original's author member is an array of signer references (P5.19).
+    const authors = (Array.isArray(state.author) ? state.author : [state.author]) as Array<AuthorRef | undefined>;
+    for (const ref of [...authors, state.editor] as Array<AuthorRef | undefined>) {
+      if (isJsonObject(ref) && typeof ref.did === "string" && !out.includes(ref.did)) out.push(ref.did);
     }
   }
   return out;
