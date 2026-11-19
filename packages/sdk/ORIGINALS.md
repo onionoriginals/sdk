@@ -662,6 +662,20 @@ editors: [{ did: erin, name: false, metadata: false, resource: true, scope: { ty
   entry that keeps the resource's digest is not checked.
 - Reports: `grants[].scope` gives the type, and `checked` or `not-required`.
   `scopeObjects` lists the objects the checks read and those they lacked.
+- Before signing: `edit`, `prepareEdit`, `sign`, `cosign` and
+  `finalizeDraft` check an editor entry that changes the resource against
+  the scope of the grant the verifier would rely on (a direct grant allowing
+  the change first, then the one inherited at the pin), reading objects from
+  the draft and the store. A change outside is refused as `SCOPE_OUTSIDE`
+  (`outside-grant`, `details.outside` names the paths or operations, and
+  `details.source` the grant), and no signer is asked. A scope the SDK cannot
+  check (bytes not held, an unknown type, a media type with no view) is
+  refused as `SCOPE_UNCHECKED` (`incomplete-evidence`, `details.reason`,
+  `details.missing`) unless the edit passes `uncheckedScope: "allow"`. Then
+  `sign` returns a candidate with `scope: { status: "unchecked", ... }` whose
+  `line` is for a verifier that holds what the check needs; this SDK cannot
+  verify it, so `commit`, `commitDraft` and `submit` refuse it
+  (`SCOPE_UNCHECKED`).
 - SDK: verification reads the objects from the store (put a tree's subtrees
   with `store.putResource`). `package` carries them under `resources/`, or
   lists `{ kind: "object", digest }` missing items. One grant, direct or
