@@ -1215,9 +1215,6 @@ export class OriginalsSDK {
       verifyOriginal({
         log,
         ...(bitcoin ? { bitcoin } : {}),
-        // This store's own committed log: with no Bitcoin evidence the writer checks it whole, as a
-        // local copy, never current (P9.18).
-        localCopy: true,
         aliases,
         authors,
         bytes,
@@ -1875,19 +1872,8 @@ export class OriginalsSDK {
       completeness: missing.length === 0 ? "complete" : "partial",
       missing,
     };
-    const zip = writeEvidence({ manifest, log: prefix, authors, bytes });
-    this.ownPackages.add(zip);
-    return { bytes: zip, manifest };
+    return { bytes: writeEvidence({ manifest, log: prefix, authors, bytes }), manifest };
   }
-
-  /**
-   * The packages this SDK wrote of its own committed logs, by identity: loading
-   * one of them is the writer's own check, which verifies an anchored log whole
-   * as a local copy with no Bitcoin evidence (P9.18). Any other package is a
-   * copy not read from the anchor: without Bitcoin evidence it yields at most
-   * the entries before the anchoring entry (P7.1, P7.14).
-   */
-  private readonly ownPackages = new WeakSet<Uint8Array>();
 
   /**
    * Verify an evidence package without storing it. Needs no key (P7.3), and
@@ -1919,7 +1905,6 @@ export class OriginalsSDK {
     const run = (authors: AuthorDidEvidence[]) =>
       verifyOriginal({
         ...(bitcoin ? { bitcoin } : {}),
-        ...(localCopy ? { localCopy } : {}),
         aliases: aliasEvidence,
         log: k > 0 ? serializeLines(all.slice(0, k)) : contents.log,
         authors,

@@ -1456,12 +1456,6 @@ configurePreviewCodecs({ resvgWasm: new URL("/assets/resvg.wasm", location.href)
   resolves once the caller's rate source is at or below a ceiling; the
   caller decides whether to wait. By default nothing waits: the SDK
   inscribes at the fee rate given, and tells the author the cost first.
-- **A copy without the anchor (P7.1, P7.14).** A package (or any copy) of an
-  anchored Original read with no Bitcoin evidence reports missing evidence
-  and at most the entries before the anchoring entry (`load`). The writer's
-  own committed log, packages it wrote itself, and an imported package, which
-  becomes the store's committed log, are checked whole as a local copy, never
-  current (P9.18; `verifyOriginal`'s `localCopy`).
 
 ### Inscription time at scale (#973)
 

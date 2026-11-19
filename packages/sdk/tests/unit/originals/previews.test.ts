@@ -461,29 +461,3 @@ describe("the body chosen when an entry is committed is the body inscribed (P9.1
       .rejects.toMatchObject({ code: "PAIR_BODY_MISMATCH" });
   });
 });
-
-describe("an evidence package of an anchored Original read without its anchor (P7.1, P7.14)", () => {
-  test("C12-297: missing evidence, at most the entries before the anchoring entry, and the package not preferred to the anchor", async () => {
-    const { sdk, did, head, asAlice, alice } = await made("text/plain", bytes("note"));
-    const anchored = await sdk.anchor(did, { parent: head, sat: ALIAS, ...asAlice });
-    const anchorPair = await pairFor(sdk, did, []);
-    const renamed = await sdk.edit(did, { parent: anchored.original.checkpoint, name: "Renamed", ...asAlice });
-    const pkg = await sdk.package(did);
-    expect(pkg.manifest.completeness).toBe("complete");
-    // A reader with the package and no Bitcoin evidence.
-    const reader = OriginalsSDK.create({ store: new MemoryStore(), authors: [alice.evidence()], freshness: "asserted", clock: clock() });
-    const received = await reader.load(new Uint8Array(pkg.bytes));
-    expect(received.report.head).toBe(head);
-    expect(received.report.anchoring?.status).toBe("unverified");
-    expect(received.reasons).toContain("bitcoin-evidence-missing");
-    expect(received.report.current).toBe(false);
-    // With the anchor read, the anchor decides: the package's later entry is not on the sat, so not current.
-    const read = await reader.load(new Uint8Array(pkg.bytes), { bitcoin: [await satEvidence(snapshot([anchorPair.prepared]), { clock: blocks(), ownerConfirmations: 3, index: INDEX })] });
-    expect(read.report.head).toBe(anchored.original.checkpoint);
-    expect(read.report.anchoring?.superseded).toBe(1);
-    // The writer's own package, checked by the writer before inscribing, is verified whole as a local copy (P9.18).
-    const own = await sdk.load(pkg.bytes);
-    expect(own.report.head).toBe(renamed.original.checkpoint);
-    expect(own.report.current).toBe(false);
-  });
-});

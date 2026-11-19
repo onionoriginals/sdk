@@ -594,7 +594,8 @@ describe("C12-112: the anchoring inscription is the log through the anchoring en
     const writer = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: clock() });
     expect((await writer.importCarried(file.bytes, { resolveSigners: true })).status).toBe("imported");
     const head = (await writer.get(did, { resolveSigners: true })).checkpoint;
-    await writer.anchor(did, { parent: head, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) });
+    // The full version as the body (P9.30), so the writer must take the version's bytes from the carried file.
+    await writer.anchor(did, { parent: head, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT), body: "full" });
     const pair = await pairFor(writer, did, node(snapshot([])).provider);
     // With the carrier the bytes would not match the descriptor; the body is the version alone.
     expect(bodyOf(pair.prepared)).toEqual({ body: bytes("one"), contentType: "image/jpeg", contentEncoding: undefined });

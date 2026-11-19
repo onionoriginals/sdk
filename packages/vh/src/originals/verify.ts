@@ -90,17 +90,6 @@ export interface VerifyOriginalOptions {
    * compared and otherwise ignored.
    */
   bitcoin?: SatEvidence[];
-  /**
-   * The log is the writer's own committed log, checked before it publishes
-   * (P9.18; owner decision, 13 November 2026): with no Bitcoin evidence, an
-   * anchored Original's log is verified whole as a local copy, unverified on
-   * Bitcoin and never current. Such a result is the writer's alone and never
-   * goes in a report given to anyone else. Otherwise, as for any copy of an
-   * anchored Original's log not read from its anchor (an evidence package or
-   * a carried log), a reader with no Bitcoin evidence reports missing
-   * evidence and at most the entries before the anchoring entry (P7.14).
-   */
-  localCopy?: boolean;
   now?: number | Date;
   limits?: LogLimits & { maxAuthorVersions?: number };
 }
@@ -563,7 +552,6 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     assembly = await assembleFromBitcoin(raw, options.bitcoin ?? [], (entries, o) => verifyLog(entries, { ...verifyOptions, ...o }), histories, {
       ...(previousAnchor ? { previousAnchor } : {}),
       ...(previousHead !== undefined ? { previousHead } : {}),
-      ...(options.localCopy === true ? { localCopy: true } : {}),
     });
     input = assembly.entries;
   }

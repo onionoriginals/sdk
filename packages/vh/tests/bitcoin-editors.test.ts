@@ -142,7 +142,7 @@ describe("C12-115 (anchoring): only an author entry anchors (P5.16, P9.10)", () 
     await expect(updateOriginal(genesis, { versionTime: time(9), aliases: [SAT], ...asBob() })).rejects.toMatchObject({ code: "EDITOR_AUTHOR_ONLY" });
     const asset = genesis.state.asset as JsonObject;
     const forged = await forge(genesis, { ...genesis.state, operation: "update", transitions: [], editor: bob.ref("edit") as unknown as JsonObject, asset: { ...asset, aliases: [SAT] } }, asBob().sign);
-    const inLog = await verifyOriginal({ log: [genesis, forged], authors: [alice.evidence(), bob.evidence()], now: NOW, bytes: allBytes, localCopy: true });
+    const inLog = await verifyOriginal({ log: [genesis, forged], authors: [alice.evidence(), bob.evidence()], now: NOW, bytes: allBytes });
     expect(inLog.history.failure?.code).toBe("EDITOR_AUTHOR_ONLY");
     const r = await verify([alice, bob], [sat([inscribe([genesis, forged], 10)])]);
     expect(r.anchoring?.status).toBe("not-anchored");
@@ -326,8 +326,7 @@ describe("C12-118 (anchored): an editor entry and the revocation of its grant wi
     const { alice, bob, copy, edit, revoke } = await siblings();
     const r = await verifyOriginal({
       log: [...copy, edit], copies: [{ source: "other", log: serializeLog([...copy, revoke]) }],
-      // The writer's own log, checked whole against another copy (P9.18).
-      authors: [alice.evidence(), bob.evidence()], now: NOW, bytes: allBytes, localCopy: true,
+      authors: [alice.evidence(), bob.evidence()], now: NOW, bytes: allBytes,
     });
     expect(r.fork).not.toBeNull();
     expect(r.current).toBe(false);

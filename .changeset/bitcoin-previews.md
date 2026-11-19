@@ -21,9 +21,7 @@ name and shape).
   (delegates rejected, PROVISIONAL); `Placed.body` says what each accepted
   inscription carries. A preview never counts as the version's bytes, is not
   in the derived DID document, and a carried file is never made from one
-  (`CARRIER_PREVIEW`). `verifyOriginal` takes `localCopy`: without it, a copy
-  of an anchored Original's log read with no Bitcoin evidence reports at most
-  the entries before the anchoring entry (P7.14).
+  (`CARRIER_PREVIEW`).
 - `@originals/sdk`: `anchor`, `edit` and `deactivate` take `body: "preview" |
   "full"` and, for a non-image version, the author's `preview`; for an image
   version the SDK generates a deterministic WebP preview with one scalar WASM

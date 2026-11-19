@@ -522,13 +522,6 @@ export interface AssembleOptions {
   previousAnchor?: RetainedAnchor;
   /** The head reported before, for `headChange` (P9.15). */
   previousHead?: string;
-  /**
-   * The copy is the writer's own committed log (P9.18): with no Bitcoin
-   * evidence it is verified whole, not current. Otherwise a copy read with no
-   * Bitcoin evidence yields at most the entries before its anchoring entry
-   * (P7.14).
-   */
-  localCopy?: boolean;
 }
 
 /**
@@ -687,11 +680,10 @@ export async function assembleFromBitcoin(
     const status = evidence.length === 0 || disputed.length > 0 ? "unverified" : "not-anchored";
     const copyAnchor = copy ? anchoringIndex(copy) : -1;
     // Without an anchor on Bitcoin the copy's anchoring entry and what follows are not established,
-    // so the head is the last entry before it (claimed ordering, P7.6), as for not-anchored, and so
-    // for any copy read with no Bitcoin evidence (P7.14). Only the writer's own committed log, with
-    // no Bitcoin evidence at all, is reported whole and not current (bitcoin-evidence-missing): the
-    // SDK extends it locally before inscribing (P9.18).
-    const local = status === "unverified" && evidence.length === 0 && options.localCopy === true;
+    // so the head is the last entry before it (claimed ordering, P7.6), as for not-anchored. With no
+    // Bitcoin evidence at all the copy is the local committed log, reported whole and not current
+    // (bitcoin-evidence-missing): the SDK extends it locally before inscribing (P9.18).
+    const local = status === "unverified" && evidence.length === 0;
     const entries = !copy ? [] : local || copyAnchor < 0 ? copy : copy.slice(0, copyAnchor);
     const change = status === "not-anchored" && options.previousAnchor ? { previous: options.previousAnchor, current: null } : null;
     inChainOrder();

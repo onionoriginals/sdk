@@ -73,7 +73,7 @@ async function anchored(preview: ResourceDescriptor | null = P1, resource = v1, 
 
 const verify = (alice: VhAuthor | VhAuthor[], bitcoin?: SatEvidence[], log?: LogEntry[], held: Record<string, Uint8Array> = {}): Promise<OriginalsReport> =>
   // With no Bitcoin evidence, the log is checked whole, as the writer checks its own (P9.18).
-  verifyOriginal({ ...(log ? { log } : {}), authors: (Array.isArray(alice) ? alice : [alice]).map((a) => a.evidence()), now: NOW, bytes: held, ...(bitcoin ? { bitcoin } : { localCopy: true }) });
+  verifyOriginal({ ...(log ? { log } : {}), authors: (Array.isArray(alice) ? alice : [alice]).map((a) => a.evidence()), now: NOW, bytes: held, ...(bitcoin ? { bitcoin } : {}) });
 
 /** Sign a state after `previous`, bypassing the builder's checks, as a writer that breaks the rules would. */
 const forge = (previous: LogEntry, asset: JsonObject, sign: EntrySigner, extra: JsonObject = {}) => {
