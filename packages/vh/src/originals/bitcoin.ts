@@ -570,7 +570,8 @@ export interface Assembly {
 type Verify = (entries: unknown[], options?: { unauthorized?: ReadonlySet<number> }) => Promise<LogVerification>;
 
 /** Failures that mean the signer DID version the entry names is not verified here (P9.15). */
-const UNVERIFIED_CODES = new Set(["AUTHOR_VERSION_UNAVAILABLE", "AUTHOR_HISTORY_MISSING", "EDITOR_HISTORY_MISSING"]);
+// P5.28 (PROVISIONAL): an inscription whose scope is unchecked is unverifiable too.
+const UNVERIFIED_CODES = new Set(["AUTHOR_VERSION_UNAVAILABLE", "AUTHOR_HISTORY_MISSING", "EDITOR_HISTORY_MISSING", "SCOPE_UNCHECKED"]);
 
 const passes = (v: LogVerification, length: number) => !v.failure && v.entries.length === length;
 const CHAIN_CODES = new Set(["ENTRY_HASH_MISMATCH", "VERSION_NUMBER", "SCID_MISMATCH"]);
@@ -597,6 +598,8 @@ export interface AssembleOptions {
    * it is rejected, or the evidence it waits on, which makes it unverifiable.
    */
   atInscription?: (entry: LogEntry, inscription: SatInscription) => IgnoredReason | { unverifiable: { did: string; versionId: string } } | null;
+  /** Called with the full-version bodies read so far, by digest, before entries after the anchor are judged (P9.17, P5.28). */
+  onBodies?: (bodies: ReadonlyMap<string, Uint8Array>) => void;
 }
 
 /**
@@ -675,6 +678,9 @@ export async function assembleFromBitcoin(
     const body = bodyOf(i, carried.entries[carried.entries.length - 1]);
     if (body !== "preview" && body !== "version" && body !== "none") return void ignore(sat, i, body, carried.entries[carried.entries.length - 1]);
     bodies.set(i, body);
+    // A full version's body, checked against its descriptor, is bytes a scope check may read (P5.28).
+    const named = descriptorOf(carried.entries[carried.entries.length - 1]);
+    if (body === "version" && named) options.onBodies?.(new Map([[named.digest, i.content]]));
     return carried.entries;
   };
 
@@ -836,7 +842,7 @@ export async function assembleFromBitcoin(
       if (code !== undefined && UNVERIFIED_CODES.has(code)) {
         // Rejected, not unverifiable, when it fails a rule not depending on that version.
         const rest = await verify([...base, entry], { unauthorized: range(head.length, base.length + 1) });
-        if (!passes(rest, base.length + 1)) {
+        if (!passes(rest, base.length + 1) && !(rest.failure?.error.code !== undefined && UNVERIFIED_CODES.has(rest.failure.error.code))) {
           const c = rest.failure?.error.code;
           return { kind: "rejected", reason: c === "ENTRY_HASH_MISMATCH" ? "does-not-extend-head" : "invalid-entry", ...(c ? { code: c } : {}) };
         }

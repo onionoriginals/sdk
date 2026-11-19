@@ -8,6 +8,7 @@ import { multibaseDecode, multibaseEncode, sha256Multihash, sha256MultihashAsync
 import { OriginalsError, fail } from "../errors.js";
 import { canonicalize, isJsonObject, type JsonObject, type JsonValue } from "../json/index.js";
 import { parseDidWebvh } from "../webvh/index.js";
+import { checkScope, type GrantScope } from "./scope.js";
 import { parseBtcoAlias } from "./btco.js";
 
 /** PROVISIONAL (D1): the extension's method value; it implies vh-log:1.0. */
@@ -66,6 +67,11 @@ export interface EditorGrant {
   name: boolean;
   metadata: boolean;
   resource: boolean;
+  /**
+   * Narrows what `resource: true` allows (P5.28, P14.5): a `type` and the
+   * members its scope type defines (P14.23). Never with `resource: false`.
+   */
+  scope?: GrantScope;
 }
 
 /**
@@ -346,7 +352,7 @@ function checkEditors(value: unknown, authorDids: readonly string[], set = false
   return value.map((item, i) => {
     let g: JsonObject;
     try {
-      g = members(item, ["did", "name", "metadata", "resource"], [], `state.asset.editors[${i}]`);
+      g = members(item, ["did", "name", "metadata", "resource"], ["scope"], `state.asset.editors[${i}]`);
     } catch (error) {
       if (error instanceof OriginalsError) bad(`state.asset.editors[${i}]: ${error.message}`);
       throw error;
@@ -367,6 +373,11 @@ function checkEditors(value: unknown, authorDids: readonly string[], set = false
     seen.add(identity);
     if (typeof g.name !== "boolean" || typeof g.metadata !== "boolean" || typeof g.resource !== "boolean") {
       bad(`state.asset.editors[${i}].name, .metadata and .resource are booleans (P14.5)`);
+    }
+    // P5.28 (C12-418): a scope narrows `resource: true`, so it never comes with `resource: false`.
+    if (g.scope !== undefined) {
+      if (g.resource !== true) bad(`state.asset.editors[${i}] has a scope with resource: false (P5.28, P14.5)`);
+      checkScope(g.scope);
     }
     return g as unknown as EditorGrant;
   });

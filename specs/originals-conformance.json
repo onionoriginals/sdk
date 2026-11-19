@@ -4332,8 +4332,12 @@
       "phases": [
         2
       ],
-      "status": "todo",
-      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+      "status": "covered",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants).",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/scopes.test.ts",
+        "packages/vh/tests/scopes.test.ts"
+      ]
     },
     {
       "id": "C12-413",
@@ -4343,8 +4347,11 @@
       "phases": [
         2
       ],
-      "status": "todo",
-      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+      "status": "covered",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants).",
+      "coveredBy": [
+        "packages/vh/tests/scopes.test.ts"
+      ]
     },
     {
       "id": "C12-414",
@@ -4354,8 +4361,11 @@
       "phases": [
         2
       ],
-      "status": "todo",
-      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+      "status": "covered",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants).",
+      "coveredBy": [
+        "packages/vh/tests/scopes.test.ts"
+      ]
     },
     {
       "id": "C12-415",
@@ -4365,8 +4375,11 @@
       "phases": [
         2
       ],
-      "status": "todo",
-      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+      "status": "covered",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants).",
+      "coveredBy": [
+        "packages/vh/tests/scopes.test.ts"
+      ]
     },
     {
       "id": "C12-416",
@@ -4376,8 +4389,12 @@
       "phases": [
         2
       ],
-      "status": "todo",
-      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+      "status": "covered",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants).",
+      "coveredBy": [
+        "packages/sdk/tests/unit/originals/scopes.test.ts",
+        "packages/vh/tests/scopes.test.ts"
+      ]
     },
     {
       "id": "C12-417",
@@ -4388,8 +4405,11 @@
         2,
         4
       ],
-      "status": "todo",
-      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+      "status": "covered",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants).",
+      "coveredBy": [
+        "packages/vh/tests/scopes.test.ts"
+      ]
     },
     {
       "id": "C12-418",
@@ -4399,8 +4419,11 @@
       "phases": [
         2
       ],
-      "status": "todo",
-      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+      "status": "covered",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants).",
+      "coveredBy": [
+        "packages/vh/tests/scopes.test.ts"
+      ]
     },
     {
       "id": "C12-419",
@@ -4410,8 +4433,11 @@
       "phases": [
         2
       ],
-      "status": "todo",
-      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+      "status": "covered",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants).",
+      "coveredBy": [
+        "packages/vh/tests/scopes.test.ts"
+      ]
     },
     {
       "id": "C12-420",
@@ -4421,8 +4447,11 @@
       "phases": [
         2
       ],
-      "status": "todo",
-      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+      "status": "covered",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants).",
+      "coveredBy": [
+        "packages/vh/tests/scopes.test.ts"
+      ]
     },
     {
       "id": "C12-421",
@@ -4432,8 +4461,11 @@
       "phases": [
         2
       ],
-      "status": "todo",
-      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants)."
+      "status": "covered",
+      "note": "Added at a2b5013 (originals-spec #66: signer sets, parent Originals and scoped grants; P5.19–P5.30, P14.23, D8). Delivered in plan 050 W3 (scoped grants).",
+      "coveredBy": [
+        "packages/vh/tests/scopes.test.ts"
+      ]
     }
   ],
   "retired": [

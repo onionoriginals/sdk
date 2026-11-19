@@ -619,6 +619,47 @@ await sdk.edit(did, { parent, name: "Renamed", pin, author: bobRef, signer: bobS
 - Not yet: shared-host saves (`submit`) do not carry parent evidence, so a
   host cannot accept a child Original's entries yet.
 
+## Scoped grants (P5.28, P5.29)
+
+A grant's optional `scope` narrows what `resource: true` allows
+(originals-spec #66; P14.23 gives the syntax). It never comes with
+`resource: false` and never affects `name` or `metadata`. The member names
+stay PROVISIONAL (P14.5, D4).
+
+```ts
+// Dana may change only the documentation of this code tree.
+editors: [{ did: dana, name: false, metadata: false, resource: true, scope: { type: "paths", paths: ["docs/**"] } }]
+// Erin may add and edit items of a list, never remove one.
+editors: [{ did: erin, name: false, metadata: false, resource: true, scope: { type: "items", ops: ["add", "edit"] } }]
+```
+
+- `paths`: every path a change touches (added, removed, or with a new
+  digest of its content and mode, so a rename touches both paths) must match
+  a pattern. Patterns: 1 to 64, sorted and unique; `*` matches within a
+  segment, `**` matches whole segments, and a final `/**` matches one or more
+  (`docs/**` matches `docs/a`, not `docs`).
+- `items`: every add, edit or remove in the item view must be listed.
+- Views (`@originals/vh/originals`): a media type's path or item view is a
+  `MediaTypeView`, `view(bytes, objects)` → path or item id → digest. A view
+  that needs objects the version references reads them through `objects`
+  and reports any not held as missing. `DEFAULT_SCOPE_VIEWS` holds the code
+  tree's path view (`application/vnd.originals.code-tree+json`, which reads
+  only changed subtrees) and a reference item view
+  (`application/vnd.originals.items+json`, `{items: {<id>: value}}`;
+  PROVISIONAL). Pass `scopeViews` to `verifyOriginal` to add your media types.
+- Unchecked: an unknown scope type, a media type with no view here (both
+  versions need one), or missing bytes is `SCOPE_UNCHECKED`
+  (`incomplete-evidence`). It is never a pass and never a rejection. After
+  the anchor such an inscription is unverifiable. A change outside the
+  scope is `SCOPE_OUTSIDE` (`outside-grant`), naming the paths or items. An
+  entry that keeps the resource's digest is not checked.
+- Reports: `grants[].scope` gives the type, and `checked` or `not-required`.
+  `scopeObjects` lists the objects the checks read and those they lacked.
+- SDK: verification reads the objects from the store (put a tree's subtrees
+  with `store.putResource`). `package` carries them under `resources/`, or
+  lists `{ kind: "object", digest }` missing items. One grant, direct or
+  inherited, must allow the whole change within its own scope.
+
 ## Custody roles: devices and agents under one author
 
 Key custody is outside the protocol (originals-spec #46), but a consumer

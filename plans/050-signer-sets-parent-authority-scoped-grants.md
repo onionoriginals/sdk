@@ -1,6 +1,15 @@
 # 050 — Signer sets, parent authority and scoped grants
 
-Status: **design contract, 2026-11-19.** The owner decided these changes on
+Status: **delivered against originals-spec #66 (`a2b5013`), 2026-11-19.**
+The spec assigned the final IDs: signer sets P5.19–P5.23 and P5.30, parent
+Originals P5.24–P5.27, scoped grants P5.28, P5.29 and P14.23, decision D8;
+section 12 rows 285–324 are registered as C12-382 to C12-421. Where the spec
+differs from this plan, the spec governs (for example P5.25: an unknown pin
+is incomplete for an unanchored parent; P5.23: every signer of an inscribed
+set entry passes P9.15; packages put parent logs under `parents/`).
+SDK PRs: W1 #1071, W2 #1072, W3 `feat/scoped-grants` (this PR).
+
+Original status: **design contract, 2026-11-19.** The owner decided these changes on
 2026-11-19, in a grilling session (plan 049 thread) and a Boop design session.
 The spec PR (aviarytech/originals-spec) and the SDK implementation follow this
 document and land together ("both in parallel"). Rule IDs below marked
