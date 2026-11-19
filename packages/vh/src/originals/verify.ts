@@ -34,6 +34,7 @@ import {
   verifyLogText,
   type CopyReport,
   type LogCopy,
+  type LogEntry,
   type LogLimits,
   type LogVerification,
   type VerifiedEntry,
@@ -44,8 +45,9 @@ import { chainOrder, type ChainPosition, type SatEvidence } from "./btco.js";
 import { authorKey, stillAuthorized, verifyAuthorHistory, versionNumberOf, type AuthorDidEvidence, type AuthorHistory, type EvidenceSource } from "./author.js";
 import { didWebvhLogUrl } from "../webvh/index.js";
 import { NATIVE_SHA256_MIN_BYTES, bytesView } from "../crypto/index.js";
-import { deriveDocument, exactNumberError, originalsSpecialisation } from "./profile.js";
-import { ORIGINALS_LIMITS, ORIGINALS_METHOD, authorRefsOf, governingSet, resourceDigest, resourceDigestAsync, signersOf, type AssetState, type EntryState } from "./state.js";
+import { deriveDocument, exactNumberError, originalsSpecialisation, type GrantUse } from "./profile.js";
+import { acceptedHeadAt, inheritedGrant, pinNumber, type ParentView } from "./parent.js";
+import { ORIGINALS_LIMITS, ORIGINALS_METHOD, authorRefsOf, governingSet, outsideGrant, resourceDigest, resourceDigestAsync, signersOf, type AssetState, type EntryState, type GrantSource, type ParentRef } from "./state.js";
 
 export interface VerifyOriginalOptions {
   /**
@@ -90,8 +92,54 @@ export interface VerifyOriginalOptions {
    * compared and otherwise ignored.
    */
   bitcoin?: SatEvidence[];
+  /**
+   * The parent Originals' evidence (P5.25, P7.1): for a child Original, its
+   * parent's log through the highest pin, and that parent's own parent in
+   * turn. Their signers' histories go in `authors` with the child's. Without
+   * it, a child's result is incomplete, never a pass.
+   */
+  parents?: ParentEvidence[];
   now?: number | Date;
   limits?: LogLimits & { maxAuthorVersions?: number };
+}
+
+/**
+ * One parent Original's evidence (P5.25): its asset log and any other copies,
+ * or for an anchored parent what indexes read from its anchoring sat (P5.27).
+ */
+export interface ParentEvidence {
+  /** The parent Original's did:vh. */
+  did: string;
+  log?: string | unknown[];
+  copies?: LogCopy[];
+  bitcoin?: SatEvidence[];
+}
+
+/** Which grant authorized an editor entry (P5.24): direct or inherited, and for an inherited one the parent version it relied on. */
+export interface GrantReport {
+  versionId: string;
+  editor: string;
+  source: GrantSource;
+  parent?: ParentRef;
+}
+
+/**
+ * The parent Original a child names, and what the verifier knows of it
+ * (P5.24–P5.27). `status` is `missing` when the parent's log was not supplied
+ * and `incomplete` when it was but does not reach a pin, or its own evidence
+ * is incomplete. `anchoring` says whether P5.27 was checked for the child's
+ * inscriptions: `not-checked` when no held parent state names its sat.
+ */
+export interface ParentAuthorityReport {
+  did: string;
+  status: "verified" | "missing" | "incomplete" | "invalid" | "limit-exceeded";
+  /** The distinct pins of the checkpoint's prefix, oldest first. */
+  pins: string[];
+  anchored: boolean;
+  forked: boolean;
+  /** The parent's latest verified versionId, null when it is forked or none verified (P5.26). */
+  latestVersionId: string | null;
+  anchoring: "checked" | "not-checked" | "not-applicable";
 }
 
 export interface RetainedVersions {
@@ -185,9 +233,20 @@ export interface HistoricalAuthorization {
    */
   threshold?: number;
   signers?: Array<{ did: string; reason: HistoricalReason }>;
+  /** An editor entry authorized only by an inherited grant (P5.26): the parent and the pin it relied on. */
+  parent?: ParentRef;
 }
 
-export type HistoricalReason = "key-not-in-latest-signer-document" | "author-did-deactivated" | "signer-did-deactivated";
+export type HistoricalReason =
+  | "key-not-in-latest-signer-document"
+  | "author-did-deactivated"
+  | "signer-did-deactivated"
+  /** P5.26: an inherited grant the parent's latest verified state no longer grants (removed or narrowed). */
+  | "inherited-grant-revoked"
+  /** P5.26: the parent Original is deactivated in its latest verified state. */
+  | "parent-deactivated"
+  /** P5.26: the parent Original has divergent valid branches, so no latest state. */
+  | "parent-forked";
 
 /** Who signed an entry (P5.19): its author, each signer of a set Original's author entry, or its editor. */
 export interface SignedBy {
@@ -279,6 +338,10 @@ export interface OriginalsReport {
   };
   /** Who signed each verified entry through the checkpoint, oldest first (P5.19). */
   signedBy: SignedBy[];
+  /** For each editor entry through the checkpoint, the grant that authorized it, direct or inherited (P5.24). */
+  grants: GrantReport[];
+  /** The parent Original a child names (P5.24–P5.27); null for an Original with no parent. */
+  parentAuthority: ParentAuthorityReport | null;
   /**
    * Content availability, reported separately (P7.4): `partial` lists the missing resource
    * versions and is not a verification failure (P7.3, P9.18); `digest-failure` is.
@@ -513,6 +576,78 @@ function retainOriginal(head: string | undefined, retained: string | undefined, 
  * decision, 10 November 2026).
  */
 export async function verifyOriginal(options: VerifyOriginalOptions): Promise<OriginalsReport> {
+  return (await verifyWith(options, { views: new Map(), building: new Set() })).report;
+}
+
+/** The parent views built for one verification, shared by its nested parents (P5.25). */
+interface ParentCache {
+  views: Map<string, ParentView>;
+  building: Set<string>;
+}
+
+/** The did:vh a parent's evidence names in its genesis, when its log is supplied. */
+function genesisParent(log: VerifiedEntry[]): string | undefined {
+  const asset = (log[0]?.entry.state as unknown as EntryState | undefined)?.asset;
+  return asset?.parent?.did;
+}
+
+/**
+ * P5.25: verify each parent Original's evidence as an Original under this
+ * profile, with its own signer evidence and its own parents, once per
+ * verification. A cycle leaves the parent it returns to unheld (missing).
+ */
+async function buildParentViews(options: VerifyOriginalOptions, cache: ParentCache): Promise<void> {
+  for (const ev of options.parents ?? []) {
+    if (cache.views.has(ev.did) || cache.building.has(ev.did)) continue;
+    cache.building.add(ev.did);
+    try {
+      const base = { authors: options.authors, ...(options.parents ? { parents: options.parents } : {}), ...(options.now !== undefined ? { now: options.now } : {}), ...(options.limits ? { limits: options.limits } : {}) };
+      const main = await verifyWith({ ...base, ...(ev.log !== undefined ? { log: ev.log } : {}), ...(ev.copies ? { copies: ev.copies } : {}), ...(ev.bitcoin ? { bitcoin: ev.bitcoin } : {}) }, cache);
+      if (main.report.original !== ev.did) continue;
+      const anchored = main.report.anchoring?.status === "anchored";
+      const branches = [main.entries];
+      if (!anchored) {
+        for (const copy of ev.copies ?? []) {
+          const other = await verifyWith({ ...base, log: copy.log }, cache);
+          if (other.report.original === ev.did && other.entries.length > 0) branches.push(other.entries);
+        }
+      }
+      const forked = main.report.fork !== null;
+      const longest = anchored ? main.entries : branches.reduce((a, b) => (b.length > a.length ? b : a));
+      const positions = new Map((ev.bitcoin ?? []).flatMap((e) => e.inscriptions.map((i) => [i.id, i] as const)));
+      const anchoring = main.report.anchoring;
+      const accepted = anchored && anchoring?.anchor
+        ? [anchoring.anchor, ...anchoring.accepted].flatMap((p) => {
+          const at = positions.get(p.inscription);
+          return at ? [{ versionId: p.versionId, position: at }] : [];
+        })
+        : undefined;
+      const sat = branches.flat().map((v) => (v.entry.state as unknown as EntryState).asset?.aliases?.find((a) => a.startsWith("did:btco:"))).find((x) => x !== undefined);
+      const above = genesisParent(main.entries);
+      const status = main.report.history.status;
+      cache.views.set(ev.did, {
+        did: ev.did,
+        branches,
+        anchored,
+        forked,
+        latest: forked || longest.length === 0 ? null : (longest[longest.length - 1].entry.state as unknown as EntryState),
+        status: status === "valid" ? "verified" : status,
+        depth: 1 + (above ? (cache.views.get(above)?.depth ?? 0) : 0),
+        ...(sat ? { sat } : {}),
+        ...(accepted ? { accepted } : {}),
+      });
+    } finally {
+      cache.building.delete(ev.did);
+    }
+  }
+}
+
+async function verifyWith(options: VerifyOriginalOptions, cache: ParentCache): Promise<{ report: OriginalsReport; entries: VerifiedEntry[] }> {
+  await buildParentViews(options, cache);
+  const grants = new WeakMap<object, GrantUse>();
+  /** Child entries whose pin P5.27 checked at their inscription; P5.26 does not apply to them. */
+  const pinChecked = new Set<string>();
+  let parentAnchoring: ParentAuthorityReport["anchoring"] = "not-applicable";
   const reasons: string[] = [];
   const histories: AuthorHistory[] = [];
   const identityFailures: Array<{ code: string; message: string }> = [];
@@ -556,7 +691,7 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   }
 
   const verifyOptions = {
-    specialisation: originalsSpecialisation(histories),
+    specialisation: originalsSpecialisation(histories, { parents: (did) => cache.views.get(did), grants }),
     now: options.now,
     limits: { maxEntries: ORIGINALS_LIMITS.entries, maxEntryBytes: ORIGINALS_LIMITS.entryBytes, ...options.limits },
   };
@@ -576,9 +711,34 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   if (onSats || (raw && anchoringIndex(raw) >= 0)) {
     const previousAnchor = options.retained?.anchor;
     const previousHead = options.retained?.original;
+    // P5.27: a child entry inscribed while its parent is anchored pins no older than the parent's
+    // accepted head at that inscription. Without a held parent state naming the parent's sat, the
+    // parent's anchoring is not checked and P5.26 applies instead.
+    const atInscription = (entry: LogEntry, at: ChainPosition) => {
+      const asset = (entry.state as unknown as EntryState).asset;
+      const pin = isJsonObject(asset) ? asset.parent : undefined;
+      if (!pin) return null;
+      const view = cache.views.get(pin.did);
+      if (!view?.sat) {
+        if (parentAnchoring === "not-applicable") parentAnchoring = "not-checked";
+        return null;
+      }
+      const waits = { unverifiable: { did: pin.did, versionId: pin.versionId } };
+      if (!view.anchored || !view.accepted) return waits;
+      const head = acceptedHeadAt(view, at);
+      if (head === undefined) return null;
+      parentAnchoring = "checked";
+      const log = view.branches[0];
+      const k = log.findIndex((v) => v.entry.versionId === pin.versionId);
+      if (k < 0) return pinNumber(pin.versionId) <= log.length ? "parent-pin-not-accepted" as const : waits;
+      if (k + 1 < head) return "parent-pin-behind-parent-head" as const;
+      pinChecked.add(entry.versionId);
+      return null;
+    };
     assembly = await assembleFromBitcoin(raw, options.bitcoin ?? [], (entries, o) => verifyLog(entries, { ...verifyOptions, ...o }), histories, {
       ...(previousAnchor ? { previousAnchor } : {}),
       ...(previousHead !== undefined ? { previousHead } : {}),
+      atInscription,
     });
     input = assembly.entries;
   }
@@ -776,11 +936,17 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
     validAsOf: null,
     // P7.9 is for entries not inscribed on an anchoring sat; those are checked at their inscription
     // time instead, and entries the anchoring inscription carries against the version they name (P9.15).
-    historicallyAuthorizedOnly: onBitcoin === null ? historicallyAuthorizedOnly(prefix, histories, authorDid) : [],
+    historicallyAuthorizedOnly: withInherited(onBitcoin === null ? historicallyAuthorizedOnly(prefix, histories, authorDid) : [], prefix, grants, pinChecked, cache),
     signedBy: prefix.map((v) => {
       const { role, refs } = signersOf(v.entry.state as unknown as EntryState);
       return { versionId: v.entry.versionId, role, dids: refs.map((r) => r.did) };
     }),
+    grants: prefix.flatMap((v) => {
+      const use = grants.get(v.entry);
+      const editor = (v.entry.state as unknown as EntryState).editor;
+      return use && editor ? [{ versionId: v.entry.versionId, editor: editor.did, source: use.source, ...(use.parent ? { parent: use.parent } : {}) }] : [];
+    }),
+    parentAuthority: parentAuthorityOf(log, prefix, failure, cache, parentAnchoring),
     current: false,
     notices: [],
     reasons,
@@ -840,10 +1006,66 @@ export async function verifyOriginal(options: VerifyOriginalOptions): Promise<Or
   if (valid && selected) report.validAsOf = { checkpoint: selected.entry.versionId, signers: reliedOn(prefix, histories, options.authors) };
   // P7.10: only an anchored Original's state derived from its sat can be current (P9.13).
   report.current = valid && selected === head && anchored(head) && reasons.length === 0;
+  if (report.parentAuthority && report.parentAuthority.status !== "verified") reasons.push("parent-evidence-incomplete");
   if (headChange) report.notices.push("head-changed");
   if (onBitcoin && onBitcoin.unverifiable.length > 0) report.notices.push("unverifiable-inscriptions");
   if (onBitcoin && onBitcoin.ignored.some((i) => i.reason === "waiting-for-earlier-unverifiable")) report.notices.push("publications-waiting");
-  return report;
+  return { report, entries: log.entries };
+}
+
+/**
+ * The parent Original a child names, as the report states it (P5.24, P5.25):
+ * whether the verifier held its evidence, the pins of the prefix, and the
+ * parent's latest verified version.
+ */
+function parentAuthorityOf(log: LogVerification, prefix: VerifiedEntry[], failure: ReportFailure | undefined, cache: ParentCache, anchoring: ParentAuthorityReport["anchoring"]): ParentAuthorityReport | null {
+  const first = (log.entries[0]?.entry.state as unknown as EntryState | undefined)?.asset.parent;
+  const stoppedOn = failure?.code.startsWith("PARENT_") ? (log.failure?.error.details?.did as string | undefined) : undefined;
+  const did = first?.did ?? stoppedOn;
+  if (!did) return null;
+  const view = cache.views.get(did);
+  const pins: string[] = [];
+  for (const v of prefix) {
+    const pin = (v.entry.state as unknown as EntryState).asset.parent?.versionId;
+    if (pin && !pins.includes(pin)) pins.push(pin);
+  }
+  const status: ParentAuthorityReport["status"] = !view ? "missing"
+    : failure?.code === "PARENT_VERSION_MISSING" || failure?.code === "PARENT_EVIDENCE_MISSING" ? "incomplete"
+      : failure?.code === "PARENT_DEPTH" ? "limit-exceeded"
+        : view.status;
+  const latest = view?.latest;
+  const latestVersionId = latest && view ? view.branches.flatMap((b) => b).find((v) => v.entry.state === (latest as unknown))?.entry.versionId ?? null : null;
+  return { did, status, pins, anchored: view?.anchored ?? false, forked: view?.forked ?? false, latestVersionId, anchoring };
+}
+
+/**
+ * P5.26: an editor entry of a child that only an inherited grant authorizes,
+ * and whose pin P5.27 did not check at an inscription, is historically
+ * authorized only when the parent's latest verified state does not grant the
+ * same change: the grant is gone or narrowed there, that state is
+ * deactivated, or the parent is forked and has none. Its validity is
+ * unchanged; only its label is.
+ */
+function withInherited(list: HistoricalAuthorization[], prefix: VerifiedEntry[], grants: WeakMap<object, GrantUse>, checked: Set<string>, cache: ParentCache): HistoricalAuthorization[] {
+  const out = [...list];
+  prefix.forEach((v, i) => {
+    const use = grants.get(v.entry);
+    const state = v.entry.state as unknown as EntryState;
+    if (use?.source !== "inherited" || !use.parent || !state.editor || checked.has(v.entry.versionId)) return;
+    const view = cache.views.get(use.parent.did);
+    const latest = view && !view.forked ? view.latest : null;
+    let reason: HistoricalReason | null = null;
+    if (!latest) reason = "parent-forked";
+    else if (latest.asset.status === "deactivated") reason = "parent-deactivated";
+    else {
+      const grant = inheritedGrant(latest, state.editor.did, { id: state.id, author: state.author, asset: state.asset });
+      const before = (prefix[i - 1].entry.state as unknown as EntryState).asset;
+      if (!grant || outsideGrant(grant, state.asset, before) !== null) reason = "inherited-grant-revoked";
+    }
+    if (reason) out.push({ versionId: v.entry.versionId, did: state.editor.did, role: "editor", reason, parent: use.parent });
+  });
+  const order = new Map(prefix.map((v, i) => [v.entry.versionId, i]));
+  return out.sort((a, b) => (order.get(a.versionId) ?? 0) - (order.get(b.versionId) ?? 0));
 }
 
 /** The latest verified version of `did`, if any. */

@@ -30,6 +30,7 @@ import {
   type EditorGrant,
   type EditorRef,
   type EntryState,
+  type ParentRef,
   type PreviewDescriptor,
   type ResourceDescriptor,
 } from "./state.js";
@@ -49,6 +50,11 @@ export interface PrepareCreateInput {
   authors?: AuthorSet;
   /** Editor grants from genesis (P5.15). Genesis is always an author entry (P5.16). */
   editors?: EditorGrant[];
+  /**
+   * A parent Original whose editor grants this one inherits, and the pin, a
+   * versionId of its log (P5.24). Set only at genesis; only the pin moves.
+   */
+  parent?: ParentRef;
 }
 
 /** One signer, or one per signer reference of a set Original's author entry, in any order (P5.22). */
@@ -98,6 +104,18 @@ export interface PrepareUpdateInput {
    * version, or with the anchoring entry.
    */
   preview?: PreviewDescriptor | null;
+  /**
+   * Move the pin to this versionId of the parent Original's log (P5.24): the
+   * same or a later version. Author and editor entries alike may advance it,
+   * which no grant needs to allow (P5.16). Omitted keeps the parent entry's.
+   */
+  pin?: string;
+  /**
+   * For an editor entry relying on an inherited grant (P5.24): the grant the
+   * parent Original's state at the pin holds for this editor. A verifier
+   * finds it in the parent's log; the builder is given it.
+   */
+  inherited?: EditorGrant;
 }
 
 export interface UpdateOriginalInput extends PrepareUpdateInput {
@@ -138,6 +156,7 @@ export function prepareCreateOriginal(input: PrepareCreateInput): UnsignedEntry 
     aliases: [],
     ...(input.editors !== undefined && input.editors.length > 0 ? { editors: input.editors } : {}),
     ...(input.authors !== undefined ? { authors: sortedSet(input.authors) } : {}),
+    ...(input.parent !== undefined ? { parent: { did: input.parent.did, versionId: input.parent.versionId } } : {}),
   };
   const state = {
     id: `did:vh:${SCID_PLACEHOLDER}`,
@@ -169,6 +188,8 @@ function nextAsset(previous: AssetState, input: Omit<PrepareUpdateInput, "versio
   // P9.30: by default a new version drops the parent's preview, and the same version keeps it.
   const preview = input.preview === undefined ? (resource.digest === previous.resource.digest ? previous.preview : undefined) : input.preview;
   const authors = input.authors === undefined ? previous.authors : sortedSet(input.authors);
+  if (input.pin !== undefined && previous.parent === undefined) invalidInput("STATE_PARENT", "only an Original that names a parent pins a version of it (P5.24)");
+  const parent = previous.parent && input.pin !== undefined ? { did: previous.parent.did, versionId: input.pin } : previous.parent;
   return {
     ...rest,
     name: input.name ?? previous.name,
@@ -178,6 +199,7 @@ function nextAsset(previous: AssetState, input: Omit<PrepareUpdateInput, "versio
     ...(editors !== null && editors !== undefined && editors.length > 0 ? { editors } : {}),
     ...(preview !== null && preview !== undefined ? { preview } : {}),
     ...(authors !== undefined ? { authors } : {}),
+    ...(parent !== undefined ? { parent } : {}),
   };
 }
 
@@ -188,6 +210,7 @@ interface NextInput {
   aliases?: string[];
   editors?: EditorGrant[] | null;
   authors?: AuthorSet;
+  inherited?: EditorGrant;
 }
 
 function next(previous: UnsignedEntry, operation: "update" | "deactivate", asset: AssetState, input: NextInput): UnsignedEntry {
@@ -211,7 +234,7 @@ function next(previous: UnsignedEntry, operation: "update" | "deactivate", asset
     transitions: expectedTransitions(before.asset, asset),
   } as unknown as JsonObject;
   const scid = before.id.slice("did:vh:".length);
-  checkEntryState(state, { scid, index: 1, previous: before, deactivatedParameter: operation === "deactivate" });
+  checkEntryState(state, { scid, index: 1, previous: before, deactivatedParameter: operation === "deactivate", ...(input.inherited ? { inherited: input.inherited } : {}) });
   const parameters: JsonObject = operation === "deactivate" ? { deactivated: true } : {};
   return prepareNext(previous, { versionTime: input.versionTime, parameters, state });
 }

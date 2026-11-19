@@ -129,8 +129,13 @@ export interface ControllerEditors {
    * the controller signs may change. Compared by JCS; undefined when absent.
    */
   recordOf(entry: LogEntry): JsonValue | undefined;
-  /** Whether `record`, the previous entry's, lists `editor`. */
-  lists(record: JsonValue | undefined, editor: string): boolean;
+  /**
+   * Whether `record`, the previous entry's, lists `editor`. `context` is the
+   * entry being checked, for a specialisation whose editors may also be
+   * recorded outside the log (Originals' inherited grants, P5.24); it may
+   * reject with an `OriginalsError`, for example `incomplete-evidence`.
+   */
+  lists(record: JsonValue | undefined, editor: string, context: Pick<EntryContext, "index" | "entry" | "previous" | "history">): boolean;
   /**
    * The Multikey that may verify `proof` by `editor`, under the editor's own
    * history rules (the version it relies on, which keys are authorized, how
@@ -525,7 +530,7 @@ async function verifyEntry(
       fail("outside-grant", "EDITOR_PARAMETERS", "an editor entry's parameters must be empty: it cannot change keys, editors, witnesses, the version or deactivation (VH-Log PR 11)");
     }
     const record = editors.recordOf(previous.entry);
-    if (!editors.lists(record, editor)) fail("unauthorized-key", "EDITOR_NOT_GRANTED", `${editor} is not an editor in the previous entry (VH-Log PR 11)`);
+    if (!editors.lists(record, editor, { index, entry, previous, history })) fail("unauthorized-key", "EDITOR_NOT_GRANTED", `${editor} is not an editor in the previous entry (VH-Log PR 11)`);
     if (canonicalize(editors.recordOf(entry) ?? null) !== canonicalize(record ?? null)) only("an editor entry cannot change the editors");
   }
   let authorizedKeys: string[] = [];

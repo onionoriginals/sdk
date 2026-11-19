@@ -18,6 +18,7 @@ import type { LogEntry, Specialisation, VerifiedEntry, VersionRules } from "../l
 import type { DidVhExtension } from "../didvh/index.js";
 import { parseDidWebvh } from "../webvh/index.js";
 import { authorKey, authorMethod, namedVersion, versionNumberOf, type AuthorHistory } from "./author.js";
+import { checkPin, inheritedGrant, lookupPin, pinFailure, type ParentViews } from "./parent.js";
 import {
   ORIGINALS_LIMITS,
   ORIGINALS_METHOD,
@@ -27,9 +28,28 @@ import {
   checkEditorRef,
   checkEntrySigners,
   checkEntryState,
+  checkParent,
   type AuthorRef,
+  type EditorGrant,
   type EntryState,
+  type GrantSource,
+  type ParentRef,
 } from "./state.js";
+
+/** The grant an editor entry relied on (P5.24): direct or inherited, and for an inherited one the parent version. */
+export interface GrantUse {
+  source: GrantSource;
+  grant: EditorGrant;
+  parent?: ParentRef;
+}
+
+/** What the profile's rules read beyond the signer histories. */
+export interface OriginalsRulesContext {
+  /** The parent Originals the verifier holds evidence of (P5.24, P5.25). Without it, a child's entries are incomplete. */
+  parents?: ParentViews;
+  /** Filled with the grant each editor entry relied on, for the report (P5.24). */
+  grants?: WeakMap<object, GrantUse>;
+}
 
 export const ORIGINALS_1_0: VersionRules = Object.freeze({
   vhLog: "vh-log:1.0",
@@ -96,9 +116,32 @@ function namedThrough(record: WeakMap<LogEntry, Named>, previous: VerifiedEntry 
  * at its inscription time (P9.15), in `assembleFromBitcoin` through the same
  * `signerOf`.
  */
-export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialisation, "versions" | "versionParameter"> {
+export function originalsRules(authors: Iterable<AuthorHistory>, context: OriginalsRulesContext = {}): Omit<Specialisation, "versions" | "versionParameter"> {
   const byDid = histories(authors);
   const named = new WeakMap<LogEntry, Named>();
+  const parents: ParentViews = context.parents ?? (() => undefined);
+
+  /** The entry's `parent` member, when it names one (checked with the state). */
+  const parentOf = (entry: LogEntry): ParentRef | undefined => {
+    const asset = entry.state.asset;
+    return isJsonObject(asset) && asset.parent !== undefined ? checkParent(asset.parent) : undefined;
+  };
+
+  /**
+   * P5.24: the grant `editor` inherits from the parent Original at the entry's pin, or undefined.
+   * Needing it without the parent's log through the pin is incomplete evidence (P5.25), and a pin
+   * at the parent's deactivation grants nothing, rejected when the entry relies on it.
+   */
+  const inherited = (entry: LogEntry, editor: string): { grant?: EditorGrant; parent?: ParentRef; deactivated?: boolean } => {
+    const parent = parentOf(entry);
+    if (!parent) return {};
+    const found = lookupPin(parents(parent.did), parent.versionId);
+    if (found.kind !== "found") pinFailure(found, parent);
+    if (found.state.asset.status === "deactivated") return { parent, deactivated: true };
+    const state = entry.state as unknown as EntryState;
+    const grant = inheritedGrant(found.state, editor, { id: state.id, author: state.author, asset: state.asset });
+    return { parent, ...(grant ? { grant } : {}) };
+  };
 
   /**
    * The author reference `proof` is by: the author's, or for a set Original the signer reference
@@ -192,15 +235,26 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
         recordOf: (entry) => (isJsonObject(entry.state.asset) ? entry.state.asset.editors : undefined),
         // P5.16, P5.17: the grant in the parent's state decides before any editor evidence is looked up,
         // so an editor with no grant is rejected, never reported as missing evidence (C12-05).
-        lists: (record, editor) => Array.isArray(record) && record.some((g) => isJsonObject(g) && g.did === editor),
+        // P5.24: or an inherited grant from the parent Original at the version the entry pins.
+        lists: (record, editor, { entry }) => {
+          if (Array.isArray(record) && record.some((g) => isJsonObject(g) && g.did === editor)) return true;
+          const found = inherited(entry, editor);
+          if (found.deactivated) fail("unauthorized-key", "PARENT_DEACTIVATED_AT_PIN", `the pin ${found.parent!.versionId} names the parent Original's deactivation, where it grants nothing (P5.25)`);
+          return found.grant !== undefined;
+        },
         authorize: ({ entry, previous, proof }) => signerKey(entry, previous, proof, "editor"),
         // P5.16: only the name, metadata and resource descriptor the grant allows change; the author
         // reference is the parent's and the operation is update. Judged
         // before the state's other rules, so a change outside the grant is reported as that.
-        limit: ({ entry, previous, scid, index }) => {
-          checkEditorChange(entry.state, {
-            scid, index, previous: previous?.entry.state as unknown as EntryState | undefined, deactivatedParameter: entry.parameters.deactivated === true,
+        limit: ({ entry, previous, scid, index, editor }) => {
+          const parentState = previous?.entry.state as unknown as EntryState | undefined;
+          const direct = parentState?.asset.editors?.find((g) => g.did === editor);
+          const from = inherited(entry, editor);
+          const source = checkEditorChange(entry.state, {
+            scid, index, previous: parentState, deactivatedParameter: entry.parameters.deactivated === true,
+            ...(from.grant ? { inherited: from.grant } : {}),
           });
+          if (source) context.grants?.set(entry, source === "direct" ? { source, grant: direct! } : { source, grant: from.grant!, parent: from.parent! });
         },
       },
     },
@@ -219,6 +273,9 @@ export function originalsRules(authors: Iterable<AuthorHistory>): Omit<Specialis
         // The editor rules run through the engine's editor hook (`keys.editors.limit`).
         editorRules: false,
       });
+      // P5.24, P5.25: every entry's pin is checked, not only those relying on an inherited grant.
+      const parent = parentOf(entry);
+      if (parent) checkPin(parents(parent.did), parent, previous ? parentOf(previous.entry) : undefined);
       // P5.2, P5.22 (P5.19): one proof per signer, also when the signers' authorization is set aside.
       if (entry.state.editor === undefined && entry.proof.length !== authorRefsOf(entry.state as unknown as EntryState).length) {
         fail("invalid-evidence", "PROOF_COUNT", "an author entry carries one proof per signer reference (P5.2, P5.22)");
@@ -326,8 +383,8 @@ function checkProofMembers(proof: unknown): void {
   }
 }
 
-export function originalsSpecialisation(authors: Iterable<AuthorHistory>): Specialisation {
-  return { ...originalsRules(authors), versionParameter: "method", versions: { [ORIGINALS_METHOD]: ORIGINALS_1_0 } };
+export function originalsSpecialisation(authors: Iterable<AuthorHistory>, context: OriginalsRulesContext = {}): Specialisation {
+  return { ...originalsRules(authors, context), versionParameter: "method", versions: { [ORIGINALS_METHOD]: ORIGINALS_1_0 } };
 }
 
 /**

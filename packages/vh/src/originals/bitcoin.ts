@@ -166,6 +166,12 @@ export type IgnoredReason =
   /** Its last entry names no preview, and it has a content type but no body (P9.17, P14.12). */
   | "content-type-without-body"
   | "another-original"
+  /** P5.27: a child entry inscribed while its parent Original is anchored pins a parent version older than the parent's accepted head then. */
+  | "parent-pin-behind-parent-head"
+  /** P5.27 (PROVISIONAL): the pinned parent version can no longer be in the parent's accepted log. */
+  | "parent-pin-not-accepted"
+  /** P5.27 (PROVISIONAL): a child's anchoring inscription whose pin cannot yet be checked against the parent's sat. */
+  | "parent-anchoring-unverifiable"
   | "does-not-start-at-genesis"
   | "not-one-log"
   | "last-entry-not-anchoring"
@@ -585,6 +591,12 @@ export interface AssembleOptions {
   previousAnchor?: RetainedAnchor;
   /** The head reported before, for `headChange` (P9.15). */
   previousHead?: string;
+  /**
+   * A further rule for an entry inscribed on the anchoring sat, judged at its
+   * inscription after the signer checks (P5.27): null when it holds, a reason
+   * it is rejected, or the evidence it waits on, which makes it unverifiable.
+   */
+  atInscription?: (entry: LogEntry, inscription: SatInscription) => IgnoredReason | { unverifiable: { did: string; versionId: string } } | null;
 }
 
 /**
@@ -687,7 +699,10 @@ export async function assembleFromBitcoin(
       if (before) return [before];
     }
     const author = checkAtInscriptionTime(last, i, histories);
-    return author ? [author] : entries;
+    if (author) return [author];
+    const further = options.atInscription?.(last, i) ?? null;
+    if (further) return [typeof further === "string" ? further : "parent-anchoring-unverifiable"];
+    return entries;
   };
 
   const originalOf = (entries: unknown[]) => stateOf(entries[0]).id;
@@ -829,7 +844,11 @@ export async function assembleFromBitcoin(
       return asUnverified(entry, i, "invalid-entry", code);
     }
     const author = checkAtInscriptionTime(entry, i, histories);
-    return author ? asUnverified(entry, i, author) : { kind: "valid" };
+    if (author) return asUnverified(entry, i, author);
+    const further = options.atInscription?.(entry, i) ?? null;
+    if (further === null) return { kind: "valid" };
+    if (typeof further === "string") return { kind: "rejected", reason: further };
+    return { kind: "unverifiable", ref: { did: further.unverifiable.did, verificationMethod: "", versionId: further.unverifiable.versionId } };
   };
   const listUnverifiable = (i: SatInscription, entry: LogEntry, ref?: AuthorRef) =>
     unverifiable.push({ sat, inscription: i.id, ...(entry.versionId ? { versionId: entry.versionId } : {}), signer: ref?.did ?? "", signerVersionId: ref?.versionId ?? "" });
