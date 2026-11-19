@@ -173,7 +173,7 @@ async function main(mode: string): Promise<Record<string, unknown>> {
     const out = tx.vout[Number(vout)];
     const holding: Utxo = { txid, vout: out.n, value: Math.round(out.value * 100_000_000), scriptPubKey: out.scriptPubKey.hex };
     const fee = JSON.parse(need('ORIGINALS_CHILD_FEE_UTXO')) as Utxo;
-    const pair = await prepareEntryInscription({ sdk, did, fundingUtxos: [holding, fee], satSigner, changeAddress: address, feeRate: 2, network: 'regtest', provider, clock, index: ORD_INDEX, recoveryStore });
+    const pair = await prepareEntryInscription({ body: 'full', sdk, did, fundingUtxos: [holding, fee], satSigner, changeAddress: address, feeRate: 2, network: 'regtest', provider, clock, index: ORD_INDEX, recoveryStore });
     // The kill point: the state machine asks to broadcast the reveal only after the
     // commit is out and `reveal_broadcast_unknown` is durably saved. Here the process
     // reports that, from a fresh read of the record file, and never sends the reveal.

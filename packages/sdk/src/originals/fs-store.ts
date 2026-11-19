@@ -688,6 +688,28 @@ export class FileStore implements OriginalsStore {
     return (JSON.parse(text) as { did?: unknown }).did === did;
   }
 
+  /** One file per entry under the Original's `bodies/`, named by its versionId (`<n>-<hash>`). */
+  private bodyFile(versionId: string): string {
+    if (!/^[1-9][0-9]*-[A-Za-z0-9]+$/.test(versionId)) throw new Error(`not a versionId: ${versionId}`);
+    return `${versionId}.json`;
+  }
+
+  async putBodyChoice(did: string, versionId: string, body: "full"): Promise<void> {
+    const name = this.bodyFile(versionId);
+    return this.track(async () => {
+      const dir = join(this.dirOf(did), "bodies");
+      await fs.mkdir(dir, { recursive: true });
+      await this.writeAtomically(dir, name, JSON.stringify({ did, versionId, body }));
+    });
+  }
+
+  async getBodyChoice(did: string, versionId: string): Promise<"full" | undefined> {
+    const text = await this.readText(join(this.dirOf(did), "bodies", this.bodyFile(versionId)));
+    if (text === undefined) return undefined;
+    const record = JSON.parse(text) as { did?: unknown; versionId?: unknown; body?: unknown };
+    return record.did === did && record.versionId === versionId && record.body === "full" ? "full" : undefined;
+  }
+
   async putBranch(did: string, log: string): Promise<void> {
     return this.track(async () => {
       const dir = join(this.dirOf(did), "branches");

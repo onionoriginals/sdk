@@ -17,7 +17,7 @@ function fixture(kind: 'quicknode' | 'regtest', options: {
   info?: Record<string, unknown>; status?: Record<string, unknown>; statusAfter?: Record<string, unknown>; sat?: Record<string, unknown>;
   rawContent?: boolean; missingMethod?: string; wrapContent?: boolean; blockTxs?: string[]; coreAfterHash?: string; indexAfterHash?: string;
   snapshotBudget?: { timeoutMs?: number; maxRequests?: number }; delayStatusMs?: number;
-  metadataHttpStatus?: number; metadataHttpBody?: string; delayMetadataMs?: number; maxJsonBytes?: number;
+  metadataHttpStatus?: number; metadataHttpBody?: string; delayMetadataMs?: number; maxJsonBytes?: number; noBody?: boolean;
 } = {}) {
   const calls: Array<{ method: string; params: unknown[] }> = [];
   let statuses = 0, tips = 0, indexHashes = 0;
@@ -60,7 +60,7 @@ function fixture(kind: 'quicknode' | 'regtest', options: {
     if (path.startsWith('/blockhash/')) return new Response(++indexHashes > 1 ? options.indexAfterHash ?? hash : hash);
     if (path === '/sat/123') return Response.json(sat);
     if (path === '/inscription/' + id) return Response.json(info);
-    if (path === '/content/' + id) return new Response(content);
+    if (path === '/content/' + id) return options.noBody ? new Response(`inscription ${id} content not found`, { status: 404 }) : new Response(content);
     if (path === '/r/metadata/' + id) {
       if (options.delayMetadataMs) await Bun.sleep(options.delayMetadataMs);
       if (options.metadataHttpStatus) return new Response(options.metadataHttpBody ?? '', { status: options.metadataHttpStatus });
@@ -181,6 +181,15 @@ for (const kind of ['quicknode', 'regtest'] as const) describe(`${kind} sat snap
     const result = await provider.getSatSnapshot('123');
     expect(result.publications[0].body).toMatchObject({ status: 'complete', bytes: new Uint8Array(), metadata: null });
   });
+});
+
+test('an inscription with no body (a null content length) is read as one, apart from an empty body (P9.17, P14.12)', async () => {
+  const { provider } = fixture('regtest', { info: { content_length: null, content_type: null }, noBody: true });
+  const result = await provider.getSatSnapshot('123');
+  expect(result.publications[0].body).toMatchObject({ status: 'complete', mediaType: '', bytes: new Uint8Array(), noBody: true });
+  server?.stop(true);
+  const empty = await (fixture('regtest', { info: { content_length: 0 }, content: new Uint8Array() }).provider).getSatSnapshot('123');
+  expect(empty.publications[0].body).not.toHaveProperty('noBody');
 });
 
 test('QuickNode snapshots refuse heuristic content encoding before RPC', async () => {

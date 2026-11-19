@@ -1348,7 +1348,8 @@ describe("an inscription's body is the resource version its last entry names (P9
       inscribe(next, 21, { content: new Uint8Array(), unsupported: "delegated" }),
     ])]);
     expect(r.head).toBe(anchor.versionId);
-    expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["unsupported-encoding", "unsupported-encoding"]);
+    // C12-380: a delegate is its own reason, with or without a body (P9.17, P14.12).
+    expect(r.anchoring?.ignored.map((i) => i.reason)).toEqual(["unsupported-encoding", "names-a-delegate"]);
     expect(r.current, JSON.stringify(r.reasons)).toBe(true);
   });
 

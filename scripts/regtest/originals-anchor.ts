@@ -62,6 +62,10 @@
  *     a recipient of the sat verifies the sender's handoff (resource bytes and
  *     DID histories) against the sat with an empty store.
  *
+ * Every inscription here carries the full version (`body: "full"`), as before
+ * previews (P9.30 lets a writer choose it); previews and inscriptions with no
+ * body are scripts/regtest/originals-preview.ts.
+ *
  * Writes a JSON evidence summary to stdout (and to $ORIGINALS_REGTEST_EVIDENCE
  * when set).
  */
@@ -191,10 +195,10 @@ try {
   const satUtxo = await fundUtxo(0.001);
   const sat = await provider.getFirstSatOfOutput!(satUtxo);
   const satDid = btcoAlias('regtest', sat);
-  const anchored = await sdk.anchor(did, { parent: created.original.checkpoint, author, signer, sat: satDid });
+  const anchored = await sdk.anchor(did, { parent: created.original.checkpoint, author, signer, sat: satDid, body: 'full' });
   assert.equal(anchored.original.report.anchoring?.status, 'unverified');
 
-  const anchorPair = await prepareEntryInscription({ sdk, did, fundingUtxos: [satUtxo, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
+  const anchorPair = await prepareEntryInscription({ body: 'full', sdk, did, fundingUtxos: [satUtxo, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
   assert.equal(anchorPair.versionId, anchored.original.checkpoint);
   // The anchoring inscription carries the whole stored log through the anchoring entry (P9.17).
   const lines1 = await storedLines(did);
@@ -238,7 +242,7 @@ try {
   // 2. Edit, and reinscribe on the same sat by spending the output that holds it.
   const edit = await sdk.edit(did, { parent: v1.checkpoint, name: 'Harbor at dawn, on Bitcoin', author, signer });
   const holding = await outputOf(anchorPair.prepared.revealTxId, 0);
-  const editPair = await prepareEntryInscription({ sdk, did, fundingUtxos: [holding, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
+  const editPair = await prepareEntryInscription({ body: 'full', sdk, did, fundingUtxos: [holding, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
   assert.deepEqual(editPair.carries, [edit.original.checkpoint], 'after the anchor, one entry per inscription (P9.17)');
   assert.equal((await submitEntryInscription({ sdk, did, pair: editPair, provider, clock, index: ORD, recoveryStore })).broadcast, 'reveal_broadcast');
   const editBlock = (await env.mine())[0];
@@ -252,7 +256,7 @@ try {
   step('3: already inscribed');
   // 3. The head Bitcoin already shows is not inscribed again (P9.13).
   await assert.rejects(
-    prepareEntryInscription({ sdk, did, versionId: edit.original.checkpoint, fundingUtxos: [await outputOf(editPair.prepared.revealTxId, 0), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore: null }),
+    prepareEntryInscription({ body: 'full', sdk, did, versionId: edit.original.checkpoint, fundingUtxos: [await outputOf(editPair.prepared.revealTxId, 0), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore: null }),
     (error: unknown) => (error as { code?: string }).code === 'HEAD_NOT_NEXT',
   );
 
@@ -280,10 +284,10 @@ try {
   const third = await sdk.edit(did, { parent: restored.checkpoint, name: 'Harbor at dusk', author, signer });
   // A pair whose first funding UTXO holds another sat is refused, so only the holder extends it.
   await assert.rejects(
-    prepareEntryInscription({ sdk, did, fundingUtxos: [await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore: null }),
+    prepareEntryInscription({ body: 'full', sdk, did, fundingUtxos: [await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore: null }),
     (error: unknown) => (error as { code?: string }).code === 'WRONG_SAT',
   );
-  const thirdPair = await prepareEntryInscription({ sdk, did, fundingUtxos: [await outputOf(editPair.prepared.revealTxId, 0), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
+  const thirdPair = await prepareEntryInscription({ body: 'full', sdk, did, fundingUtxos: [await outputOf(editPair.prepared.revealTxId, 0), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
   const crashing = Object.create(provider) as RegtestProvider;
   crashing.broadcastTransaction = (raw: unknown) => (raw === thirdPair.prepared.revealTxHex ? Promise.reject(new Error('process died before the reveal')) : provider.broadcastTransaction(raw));
   // The checked send, through a node that dies before the reveal: the record is saved before each broadcast,
@@ -317,7 +321,7 @@ try {
   // An entry after it cannot be inscribed first: Bitcoin would never accept it (P9.13).
   const skips = await sdk.edit(did, { parent: local.original.checkpoint, name: 'Skips one', author, signer });
   await assert.rejects(
-    prepareEntryInscription({ sdk, did, versionId: skips.original.checkpoint, fundingUtxos: [await outputOf(thirdPair.prepared.revealTxId, 0), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore: null }),
+    prepareEntryInscription({ body: 'full', sdk, did, versionId: skips.original.checkpoint, fundingUtxos: [await outputOf(thirdPair.prepared.revealTxId, 0), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore: null }),
     (error: unknown) => (error as { code?: string }).code === 'HEAD_NOT_NEXT',
   );
   evidence.uninscribed = { signed: local.original.checkpoint, head: v4.head, superseded: v4.report.anchoring?.superseded, skipRefused: 'HEAD_NOT_NEXT' };
@@ -341,7 +345,7 @@ try {
   assert.equal(start.pending.committed, skips.original.checkpoint);
   assert.equal(start.pending.accepted, third.original.checkpoint);
   assert.deepEqual(start.pending.queue, [local.original.checkpoint, skips.original.checkpoint]);
-  const catch1 = await prepareEntryInscription({ sdk, did, fundingUtxos: [await holdingOf(start.pending.view), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
+  const catch1 = await prepareEntryInscription({ body: 'full', sdk, did, fundingUtxos: [await holdingOf(start.pending.view), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
   assert.equal(catch1.versionId, local.original.checkpoint);
   assert.equal(catch1.remaining, 1);
   // The process dies after the commit broadcast, before the reveal.
@@ -359,7 +363,7 @@ try {
   const after1 = await expectStep(did, 'prepare', skips.original.checkpoint);
   assert.equal(after1.pending.accepted, local.original.checkpoint, 'the accepted head is re-read before advancing');
   assert.deepEqual(after1.replaces, []);
-  const catch2 = await prepareEntryInscription({ sdk, did, fundingUtxos: [await holdingOf(after1.pending.view), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
+  const catch2 = await prepareEntryInscription({ body: 'full', sdk, did, fundingUtxos: [await holdingOf(after1.pending.view), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
   assert.equal(catch2.versionId, skips.original.checkpoint);
   assert.equal((await submitEntryInscription({ sdk, did, pair: catch2, provider, clock, index: ORD, recoveryStore })).broadcast, 'reveal_broadcast');
   const waiting2 = await expectStep(did, 'wait-for-confirmation', skips.original.checkpoint);
@@ -374,7 +378,7 @@ try {
   assert.deepEqual(tail.map((a) => a.inscription), [catch1.prepared.inscriptionId, catch2.prepared.inscriptionId]);
   assert.ok(tail[0].height > v3.report.anchoring!.accepted.at(-1)!.height && tail[1].height > tail[0].height, 'one accepted entry per later block (P9.13)');
   await assert.rejects(
-    prepareEntryInscription({ sdk, did, fundingUtxos: [await holdingOf(v5), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore: null }),
+    prepareEntryInscription({ body: 'full', sdk, did, fundingUtxos: [await holdingOf(v5), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore: null }),
     (error: unknown) => (error as { code?: string }).code === 'NOTHING_TO_INSCRIBE',
   );
   evidence.catchUp = {
@@ -396,7 +400,7 @@ try {
   const bobBefore = await sdk.edit(did2, { parent: lighthouse.original.checkpoint, resource: { bytes: bytes('regtest lighthouse, Bob\'s crop') }, ...asBob });
   const sat2Utxo = await fundUtxo(0.001);
   const sat2 = btcoAlias('regtest', await provider.getFirstSatOfOutput!(sat2Utxo));
-  const anchored2 = await sdk.anchor(did2, { parent: bobBefore.original.checkpoint, author, signer, sat: sat2 });
+  const anchored2 = await sdk.anchor(did2, { parent: bobBefore.original.checkpoint, author, signer, sat: sat2, body: 'full' });
   const early = await sdk.edit(did2, { parent: anchored2.original.checkpoint, name: 'Lighthouse, edited before publishing', author, signer });
   const bobAfter = await sdk.edit(did2, { parent: early.original.checkpoint, resource: { bytes: bytes('regtest lighthouse, Bob\'s second crop') }, ...asBob });
   const lines2 = await storedLines(did2);
@@ -406,15 +410,15 @@ try {
   assert.equal(first2.pending.publication, 'not-anchored');
   assert.deepEqual(first2.pending.queue, [anchored2.original.checkpoint, early.original.checkpoint, bobAfter.original.checkpoint]);
   await assert.rejects(
-    prepareEntryInscription({ sdk, did: did2, versionId: early.original.checkpoint, fundingUtxos: [sat2Utxo, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore: null }),
+    prepareEntryInscription({ body: 'full', sdk, did: did2, versionId: early.original.checkpoint, fundingUtxos: [sat2Utxo, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore: null }),
     (error: unknown) => (error as { code?: string }).code === 'HEAD_NOT_NEXT',
   );
   // Without Bob's DID history the log through the anchoring entry does not verify: nothing is inscribed (P9.18).
   const forgetful = OriginalsSDK.create({ store: originals, authors: [alice.evidence] });
-  const refusedWithoutBob = await prepareEntryInscription({ sdk: forgetful, did: did2, fundingUtxos: [sat2Utxo, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore: null })
+  const refusedWithoutBob = await prepareEntryInscription({ body: 'full', sdk: forgetful, did: did2, fundingUtxos: [sat2Utxo, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore: null })
     .then(() => 'prepared', (error: unknown) => (error as { code?: string }).code ?? String(error));
   assert.equal(refusedWithoutBob, 'ANCHORING_NOT_VERIFIED', 'the same store without the editor\'s DID history refuses to inscribe');
-  const anchor2Pair = await prepareEntryInscription({ sdk, did: did2, fundingUtxos: [sat2Utxo, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
+  const anchor2Pair = await prepareEntryInscription({ body: 'full', sdk, did: did2, fundingUtxos: [sat2Utxo, await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
   assert.equal(anchor2Pair.versionId, anchored2.original.checkpoint);
   assert.deepEqual(anchor2Pair.carries, [lighthouse.original.checkpoint, bobBefore.original.checkpoint, anchored2.original.checkpoint]);
   assert.deepEqual(anchor2Pair.offChain.identities, [{ did: authorDid, role: 'author', held: true }, { did: bob.did, role: 'editor', held: true }]);
@@ -429,7 +433,7 @@ try {
   const second2 = await expectStep(did2, 'prepare', early.original.checkpoint);
   assert.equal(second2.pending.accepted, anchored2.original.checkpoint);
   assert.equal(second2.pending.publication, 'anchored');
-  const early2Pair = await prepareEntryInscription({ sdk, did: did2, fundingUtxos: [await holdingOf(second2.pending.view), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
+  const early2Pair = await prepareEntryInscription({ body: 'full', sdk, did: did2, fundingUtxos: [await holdingOf(second2.pending.view), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
   assert.deepEqual(early2Pair.carries, [early.original.checkpoint]);
   assert.equal((await submitEntryInscription({ sdk, did: did2, pair: early2Pair, provider, clock, index: ORD, recoveryStore })).broadcast, 'reveal_broadcast');
   const early2Block = (await env.mine())[0];
@@ -456,7 +460,7 @@ try {
   // The holder inscribes Bob's editor entry like any other (P9.12, P5.16).
   const third2 = await expectStep(did2, 'prepare', bobAfter.original.checkpoint);
   assert.equal(third2.pending.accepted, early.original.checkpoint);
-  const bob2Pair = await prepareEntryInscription({ sdk, did: did2, fundingUtxos: [await holdingOf(third2.pending.view), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
+  const bob2Pair = await prepareEntryInscription({ body: 'full', sdk, did: did2, fundingUtxos: [await holdingOf(third2.pending.view), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
   assert.deepEqual(bob2Pair.carries, [bobAfter.original.checkpoint]);
   assert.equal((await submitEntryInscription({ sdk, did: did2, pair: bob2Pair, provider, clock, index: ORD, recoveryStore })).broadcast, 'reveal_broadcast');
   await env.mine();
@@ -489,7 +493,7 @@ try {
   await elsewhere.putResource(current, (await sdk.resourceBytes(current))!);
   const informed = OriginalsSDK.create({ store: elsewhere, authors: [aliceV2.evidence, bob.evidence] });
   const named = await informed.edit(did, { parent: v5.checkpoint, name: 'Names Alice\'s version 2', author: { ...author, versionId: aliceV2.versionId }, signer });
-  const firstPair = await prepareEntryInscription({ sdk: informed, did, fundingUtxos: [await holdingOf(v5), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
+  const firstPair = await prepareEntryInscription({ body: 'full', sdk: informed, did, fundingUtxos: [await holdingOf(v5), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
   assert.deepEqual(firstPair.carries, [named.original.checkpoint]);
   assert.equal((await submitEntryInscription({ sdk: informed, did, pair: firstPair, provider, clock, index: ORD, recoveryStore })).broadcast, 'reveal_broadcast');
   const blockA = (await env.mine())[0];
@@ -502,7 +506,7 @@ try {
   // Its own edit from the same head, inscribed a block later, waits on it (chain order decides).
   const own = await sdk.edit(did, { parent: v5.checkpoint, name: 'Harbor, edited here', author, signer });
   const ownStart = await expectStep(did, 'prepare', own.original.checkpoint);
-  const ownPair = await prepareEntryInscription({ sdk, did, fundingUtxos: [await holdingOf(ownStart.pending.view), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
+  const ownPair = await prepareEntryInscription({ body: 'full', sdk, did, fundingUtxos: [await holdingOf(ownStart.pending.view), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore });
   assert.equal((await submitEntryInscription({ sdk, did, pair: ownPair, provider, clock, index: ORD, recoveryStore })).broadcast, 'reveal_broadcast');
   const blockB = (await env.mine())[0];
   const waitingOwn = await expectStep(did, 'wait-for-evidence', own.original.checkpoint);
@@ -516,7 +520,7 @@ try {
   assert.deepEqual(seenB.report.notices, ['unverifiable-inscriptions', 'publications-waiting']);
   assert.equal(seenB.current, true, JSON.stringify(seenB.report.reasons));
   await assert.rejects(
-    prepareEntryInscription({ sdk, did, fundingUtxos: [await holdingOf(seenB), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore, recoveryIds: [...records.keys()] }),
+    prepareEntryInscription({ body: 'full', sdk, did, fundingUtxos: [await holdingOf(seenB), await fundUtxo()], satSigner, changeAddress: wallet.address!, feeRate: 2, network: 'regtest', provider, clock, index: ORD, recoveryStore, recoveryIds: [...records.keys()] }),
     (error: unknown) => (error as { code?: string }).code === 'PAIR_IN_FLIGHT',
     'nothing is prepared over a waiting pair (P9.6)',
   );

@@ -84,10 +84,16 @@ export function getScureNetwork(network: BitcoinNetwork): typeof btc.NETWORK {
  * Parameters for creating a commit transaction
  */
 export interface CommitTransactionParams {
-  /** Inscription content bytes */
-  content: Uint8Array;
-  /** MIME type of the content (e.g., 'text/plain', 'image/png') */
-  contentType: string;
+  /**
+   * Inscription content bytes. `null` writes an inscription with no body at
+   * all: no body push in the envelope, as ord defines one (an Originals
+   * inscription whose entry names no preview may have none; P9.17, P14.12).
+   */
+  content: Uint8Array | null;
+  /** MIME type of the content (e.g., 'text/plain', 'image/png'). Required with a body; omitted with none. */
+  contentType?: string;
+  /** Allow a body of zero bytes, which is a body, not an absent one (P14.12). Default false. */
+  allowEmptyBody?: boolean;
   /** Available UTXOs to fund the transaction */
   utxos: Utxo[];
   /** Address to send change back to */
@@ -293,6 +299,21 @@ export async function createRevealTransaction(
 }
 
 /**
+ * The reveal leaf of an inscription with no body: `<pubkey> CHECKSIG OP_FALSE
+ * OP_IF "ord" [tag data]* OP_ENDIF`, ord's envelope without the empty data
+ * push that begins a body (P14.12). The tags are micro-ordinals' own encoding
+ * of them, so they read back as they do in an envelope with a body.
+ */
+function noBodyRevealScript(pubkey: Uint8Array, tags: ordinals.Tags): { type: 'tr'; script: Uint8Array } {
+  const withBody = btc.Script.decode(ordinals.p2tr_ord_reveal(pubkey, [{ tags, body: new Uint8Array() }]).script);
+  // [pubkey, CHECKSIG, 0, IF, "ord", ...tags, 0, ENDIF]: drop the body's empty push before ENDIF.
+  if (withBody[withBody.length - 1] !== 'ENDIF' || withBody[withBody.length - 2] !== 0) {
+    throw new Error('Invalid inscription: unexpected envelope layout.');
+  }
+  return { type: 'tr', script: btc.Script.encode([...withBody.slice(0, -2), 'ENDIF']) };
+}
+
+/**
  * Estimates the size of a commit transaction.
  *
  * Inputs are sized by script class (P2WPKH 68 vB, P2TR 57.5 vB, P2WSH a
@@ -447,12 +468,16 @@ export async function createCommitTransaction(
     throw new Error('No UTXOs provided to fund the transaction.');
   }
 
-  if (!content || content.length === 0) {
-    throw new Error('Invalid inscription: missing content.');
-  }
-
-  if (!contentType) {
-    throw new Error('Invalid inscription: missing content type.');
+  if (content === null) {
+    // No body: no content type either (P14.12).
+    if (contentType !== undefined) throw new Error('Invalid inscription: a content type needs a body.');
+  } else {
+    if (!(content instanceof Uint8Array) || (content.length === 0 && params.allowEmptyBody !== true)) {
+      throw new Error('Invalid inscription: missing content.');
+    }
+    if (!contentType) {
+      throw new Error('Invalid inscription: missing content type.');
+    }
   }
 
   if (!changeAddress) {
@@ -584,9 +609,7 @@ export async function createCommitTransaction(
   }
 
   // Step 1: Create the inscription object
-  const tags: ordinals.Tags = {
-    contentType
-  };
+  const tags: ordinals.Tags = contentType !== undefined ? { contentType } : {};
 
   // Add metadata if provided. Pre-encoded bytes are written as raw `unknown` tag/data pushes,
   // never through `tags.metadata`: micro-ordinals' own CBOR encoder cannot encode a JS `number`
@@ -605,18 +628,17 @@ export async function createCommitTransaction(
     tags.pointer = BigInt(pointer);
   }
 
-  const inscription: ordinals.Inscription = {
-    tags,
-    body: new Uint8Array(content)
-  };
-
   // Step 2: Generate a reveal keypair
   // Use random private key for reveal transaction
   const revealPrivateKey = schnorr.utils.randomSecretKey();
   const revealPublicKey = schnorr.getPublicKey(revealPrivateKey);
 
-  // Step 3: Create the inscription script tree using micro-ordinals
-  const scriptTree = ordinals.p2tr_ord_reveal(revealPublicKey, [inscription]);
+  // Step 3: Create the inscription script tree using micro-ordinals. micro-ordinals always writes
+  // the empty push that begins a body, so an inscription with no body is written as its envelope
+  // with that push left out (P14.12): ord indexes it as an inscription with no body.
+  const scriptTree = content === null
+    ? noBodyRevealScript(revealPublicKey, tags)
+    : ordinals.p2tr_ord_reveal(revealPublicKey, [{ tags, body: new Uint8Array(content) }]);
 
   // Step 4: Create P2TR address for the commit output
   const scureNetwork = getScureNetwork(network);

@@ -586,8 +586,11 @@ export class DemoEngine {
     if (this.publicationState() === "incomplete") throw new Error("Finish publishing this Original first, then keep editing.");
     // A save whose answer was lost is sent again first, byte for byte (P6.4).
     await this.retryPending();
-    const input = this.changeFor(title, style, source, ref);
-    if (!input) return this.snapshot();
+    const change = this.changeFor(title, style, source, ref);
+    if (!change) return this.snapshot();
+    // The landing inscribes the full version, as before previews (P9.30 lets a writer choose it): its
+    // copy and the SVG rasteriser's browser WASM are a follow-up to plan 011 phase 12b.
+    const input: EditInput = this.btcoAlias() ? { ...change, body: "full" } : change;
     this.view = this.published() ? await this.saveThroughHost(input, signer) : (await this.sdk!.edit(this.did, { ...input, signer })).original;
     await this.refresh();
     this.emit("asset:updated", `Revised ${short(this.did)} at ${short(this.view.checkpoint)}`, { checkpoint: this.view.checkpoint });
@@ -935,7 +938,8 @@ export class DemoEngine {
     if (!alias) {
       // The anchoring entry: the author key names the sat (P9.10). Once committed it is never signed again.
       const sat = await transport.provider.getFirstSatOfOutput!(fundingUtxos[0]);
-      const anchored = await guardedSign(guard, () => this.sdk!.anchor(this.did!, { parent: this.view!.checkpoint, author: ref, signer, sat: btcoAlias(network, sat) }));
+      // The full version, not a preview, for now (see `update`; P9.30).
+      const anchored = await guardedSign(guard, () => this.sdk!.anchor(this.did!, { parent: this.view!.checkpoint, author: ref, signer, sat: btcoAlias(network, sat), body: "full" }));
       this.view = anchored.original;
       await this.refresh();
       this.emit("asset:anchoring", `Anchoring ${short(this.did)} to sat ${sat}`, { sat, checkpoint: this.view.checkpoint });

@@ -62,3 +62,23 @@ export function rawMetadataPerEnvelope(script: ScriptType, count: number): (Uint
   }
   return results;
 }
+
+/**
+ * Whether each sequential inscription envelope in a script has a body: the
+ * empty data push that begins ord's body after its tags, even with no bytes
+ * after it (P14.12). An envelope without that push has no body. Same
+ * precondition as `rawMetadataPerEnvelope`.
+ */
+export function envelopeBodiesPresent(script: ScriptType, count: number): boolean[] {
+  const results: boolean[] = [];
+  let pos = 5;
+  for (let n = 0; n < count; n++) {
+    let end = pos;
+    while (script[end] !== 'ENDIF') end++;
+    let i = pos;
+    while (i < end && script[i] !== 0) i += 2;
+    results.push(i < end && script[i] === 0);
+    pos = end + 4;
+  }
+  return results;
+}

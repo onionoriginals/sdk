@@ -43,7 +43,7 @@ describe("section 12 conformance registry", () => {
   // The pinned table has 284 rows. It is originals-spec 940c6d4, the head of open PR 64 on master
   // 5c42958: EVM anchoring is withdrawn (owner decision, 18 November 2026) and its 90 rows retired,
   // carried logs stay, 15 rows are reworded, and the 27 Bitcoin preview rows are new, C12-355 to
-  // C12-381 (todo until plan 011 phase 12b). Ids are stable across re-pins, so they need not equal
+  // C12-381, covered in plan 011 phase 12b. Ids are stable across re-pins, so they need not equal
   // table positions; each row records its position in the pinned table. A row from an open spec pull
   // request would carry `proposal`.
   test("registers all 284 pinned rows with unique ids, in table order", () => {

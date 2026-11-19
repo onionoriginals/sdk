@@ -922,6 +922,8 @@ export interface WriteCarriedOptions {
  *   Whether a signed checkpoint is accepted, and after anchoring accepted on
  *   the anchor, is for the caller holding the history to decide (the SDK does).
  * - CARRIER_VERSION_MISMATCH: `version` is not the last entry's version.
+ * - CARRIER_PREVIEW: `version` is the last entry's preview, which is not a
+ *   resource version and never has a carrier (P7.16, P9.30).
  * - CARRIER_NONE_FOR_MEDIA_TYPE: P14.14 assigns that media type no carrier.
  * - CARRIER_CANNOT_ADD (`details.reason`): P14.16 or P14.17 forbids it, or
  *   the carrier would exceed 16 MiB.
@@ -943,7 +945,13 @@ export async function writeCarriedFile(version: Uint8Array, entries: LogEntry[],
     fail("invalid-evidence", "CARRIER_DISCLOSURE_REQUIRED", "tell the user what the file discloses first, and pass that disclosure (P7.15)");
   }
   const descriptor = lastDescriptor(entries);
-  if (bytes.length !== descriptor.size || (await resourceDigestAsync(bytes)) !== descriptor.digest) {
+  const digest = bytes.length === descriptor.size ? await resourceDigestAsync(bytes) : undefined;
+  if (digest !== descriptor.digest) {
+    // P7.16, P9.30: a preview is not a resource version; it never has a carrier.
+    const preview = (entryState(entries[entries.length - 1])?.asset as { preview?: { digest?: unknown; size?: unknown } } | undefined)?.preview;
+    if (preview && preview.size === bytes.length && (digest ?? (await resourceDigestAsync(bytes))) === preview.digest) {
+      fail("invalid-evidence", "CARRIER_PREVIEW", "the bytes are the entry's preview, which is not a resource version: a carried file is never made from a preview (P7.16, P9.30)");
+    }
     fail("invalid-evidence", "CARRIER_VERSION_MISMATCH", "the file's bytes must be the version the last entry names (P7.15)");
   }
   const carrier = disclosure.carrier;

@@ -300,3 +300,35 @@ describe('fork checks against Bitcoin fail safe (round-2 review; P6.6, P9.16)', 
   });
 
 });
+
+describe('hosted copies of anchored Originals are read against Bitcoin (P7.14, P9.13; C12-297)', () => {
+  test('with a sat reader, a hosted copy shows the state Bitcoin accepted, not only the entries before the anchoring entry', async () => {
+    const { postAnchorFork } = await import('./post-anchor-fork-fixture');
+    const f = await postAnchorFork();
+    const dataDir = await mkdtemp(join(tmpdir(), 'library-'));
+    // Only a hosted snapshot of B's inscribed branch: no durable record of it in this account.
+    const roots = [files(f.branchB)];
+    let reads = 0;
+    const library = createAnchoringLibrary(dataDir, hosting(roots), { bitcoin: (alias) => { reads++; return f.landing.anchoring.bitcoinEvidence(alias); } });
+    const rows = await library.list('alice');
+    expect(rows).toEqual([expect.objectContaining({ did: f.did, availability: 'server', bitcoin: true, title: 'Harbor from B' })]);
+    expect(rows[0].problem).toBeUndefined();
+    expect(reads).toBe(1);
+    // The evidence served is the hosted copy itself, whatever was read.
+    expect(readZip((await library.evidence('alice', f.did))!).get('asset/did.jsonl')).toEqual(roots[0].get('asset/did.jsonl'));
+  });
+
+  test('without a sat reader, or when it fails, a hosted copy of an anchored Original reports at most the entries before its anchoring entry', async () => {
+    const { postAnchorFork } = await import('./post-anchor-fork-fixture');
+    const f = await postAnchorFork();
+    const dataDir = await mkdtemp(join(tmpdir(), 'library-'));
+    for (const options of [{}, { bitcoin: async () => { throw new Error('index down'); } }]) {
+      const rows = await createAnchoringLibrary(dataDir, hosting([files(f.branchB)]), options).list('alice');
+      // Never the copy's later name: an entry Bitcoin was not read for is not shown as the state (P7.14).
+      expect(rows).toEqual([expect.objectContaining({ did: f.did, availability: 'server', bitcoin: true, title: 'Harbor' })]);
+      // Said plainly, never a pass (section 7).
+      expect(rows[0].problem).toMatch(/Bitcoin could not be read/);
+    }
+  });
+});
+

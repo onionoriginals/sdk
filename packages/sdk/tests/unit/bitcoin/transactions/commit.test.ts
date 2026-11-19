@@ -8,6 +8,9 @@ import {
   type CommitTransactionResult
 } from '../../../../src/bitcoin/transactions/commit.js';
 import type { Utxo, ResourceUtxo } from '../../../../src/types/bitcoin.js';
+import * as btc from '@scure/btc-signer';
+import { parseInscriptions } from 'micro-ordinals';
+import { envelopeBodiesPresent, rawMetadataPerEnvelope } from '../../../../src/bitcoin/ordinals-tags.js';
 
 // Helper to create test UTXOs
 const createUtxo = (value: number, index: number = 0, network: 'mainnet' | 'testnet' | 'signet' | 'regtest' = 'mainnet'): Utxo => {
@@ -383,6 +386,25 @@ describe('createCommitTransaction', () => {
     test('throws when content is empty', async () => {
       const params = createCommitParams({ content: Buffer.from([]) });
       await expect(createCommitTransaction(params)).rejects.toThrow(/missing content/);
+    });
+
+    test('writes an inscription with no body: no body push and no content type (P9.17, P14.12)', async () => {
+      const metadata = new Uint8Array([0x81, 0xa1, 0x61, 0x61, 0x01]); // [{a: 1}]
+      const result = await createCommitTransaction(createCommitParams({ content: null, contentType: undefined, metadata }));
+      const script = btc.Script.decode(result.inscriptionScript.script);
+      expect(script[script.length - 1]).toBe('ENDIF');
+      expect(envelopeBodiesPresent(script, 1)).toEqual([false]);
+      const [parsed] = parseInscriptions(script, true)!;
+      expect(parsed.tags.contentType).toBeUndefined();
+      expect(parsed.body.length).toBe(0);
+      expect(rawMetadataPerEnvelope(script, 1)[0]).toEqual(metadata);
+      // A content type needs a body.
+      await expect(createCommitTransaction(createCommitParams({ content: null, contentType: 'text/plain' }))).rejects.toThrow(/content type needs a body/);
+    });
+
+    test('an empty body is written only when allowed, and is a body (P14.12)', async () => {
+      const result = await createCommitTransaction(createCommitParams({ content: new Uint8Array(), allowEmptyBody: true }));
+      expect(envelopeBodiesPresent(btc.Script.decode(result.inscriptionScript.script), 1)).toEqual([true]);
     });
 
     test('throws when contentType is missing', async () => {

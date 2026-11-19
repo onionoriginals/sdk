@@ -28,7 +28,7 @@ type Author = Awaited<ReturnType<typeof authorWithOriginal>>;
 
 /** The browser's prepare: verified as a fresh reader would (P9.18), signed by the holder, nothing sent. */
 const prepare = (a: Author, chain: ReturnType<typeof fakeChain>, fundingUtxos = [chain.satUtxo, chain.fund(50_000)]) =>
-  prepareEntryInscription({
+  prepareEntryInscription({ body: 'full',
     sdk: a.sdk, did: a.did, fundingUtxos, satSigner: walletSigner, changeAddress: WALLET_ADDRESS, feeRate: 2, network: NETWORK,
     provider: chain.provider, clock: headerClock(), index: INDEX, recoveryStore: null,
   });

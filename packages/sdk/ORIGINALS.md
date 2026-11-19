@@ -863,13 +863,17 @@ The representation is [plan 012](../../plans/012-bitcoin-representation.md)
 layer, once, terminally, to one sat (P9.10):
 
 ```ts
-await sdk.anchor(did, { parent, author, signer, sat: "did:btco:reg:5000000000" }); // the anchoring entry
+const anchored = await sdk.anchor(did, { parent, author, signer, sat: "did:btco:reg:5000000000" }); // the anchoring entry
+anchored.preview; // the preview it names, or why none: show `message` to the author (P9.30; see "Bitcoin previews")
 // (refused with ANCHORING_LOG_TOO_LARGE, nothing committed, if the log through it, as CBOR metadata, and the
-// current version together would exceed 350,000 bytes)
+// body it sets, its preview or the full version when `body: "full"`, together would exceed 350,000 bytes)
 // Publish the next committed entry on the anchoring sat (`@originals/sdk/originals/bitcoin`, kept out
 // of the browser-first entry). The first funding UTXO must hold the sat at offset 0. Until Bitcoin shows
 // the anchor, the inscription's metadata is the whole stored log from genesis through the anchoring entry; then
-// one entry, the one after Bitcoin's head. Its body is the resource version the last entry names.
+// one entry, the one after Bitcoin's head. Its body is the preview the last entry names; with none named, no
+// body at all, or the full version with `body: "full"` (P9.17, P9.30). An entry committed with `body: "full"`
+// keeps that choice (`sdk.chosenBody`, kept by the store): it is inscribed in full by default, and another
+// body is refused (BODY_CHOICE_CONFLICT; a pair without it is not sent, PAIR_BODY_MISMATCH).
 // `versionId` names the entry explicitly; it is refused unless it is next (HEAD_NOT_NEXT). Every read names the index serving it (`index`, P9.11); `indexes` adds independent
 // ones, whose reads are compared (P9.10 SHOULD: an index you run, or two independent ones):
 const read = { provider, clock, index: "ord@node-a", indexes: [{ provider: other, index: "ord@node-b" }] };
@@ -878,7 +882,8 @@ const read = { provider, clock, index: "ord@node-a", indexes: [{ provider: other
 // `recoveryStore: null` skips that check deliberately (pair.inFlightGuard: "skipped").
 const pair = await prepareEntryInscription({ sdk, did, fundingUtxos: [satUtxo, feeUtxo], satSigner, changeAddress, feeRate, network, ...read, recoveryStore });
 pair.carries;   // the versionIds in the metadata: genesis..anchoring entry, or the one entry
-pair.notice;    // show the author before sending (P9.18): { version, entries, permanent: true, activeContent, text }
+pair.notice;    // show the author before sending (P9.18): { version, body, entries, permanent: true, activeContent, cost, text }
+pair.body;      // "preview" | "full" | "none"; pair.cost: { feeRate, commitFee, revealFee, total, postage } in sats
 pair.offChain;  // what Bitcoin will not hold: { resources, identities (did:vh/did:webvh signers), onBitcoin, replication: "not-guaranteed" }
 // Send it: re-reads the sat and verifies through the entry again (still next, no other pair in flight, the indexes
 // agree, the sat still in the pair's funding input; P9.6, P9.10, P9.18), then persists before each broadcast.
@@ -970,47 +975,54 @@ received.report.ownership?.output;                           // compare with the
   signed spending transactions: keep the directory private. The regtest
   restart journey kills a writer between commit and reveal and resumes the
   identical pair in a fresh process (#975).
-- **What is inscribed (P9.17, P14.12; owner decision of 1 November 2026,
-  originals-spec #53).** An Originals inscription has three parts:
+- **What is inscribed (P9.17, P14.12; owner decisions of 1 and 18 November
+  2026, originals-spec #53 and PR 64).** An Originals inscription has three
+  parts:
   - **Metadata** (ord tag 5): the CBOR encoding of a JSON array of the
     entries it carries, each parsed from its exact stored line, split into
     data pushes of at most 520 bytes. The JSON-to-CBOR mapping is ord's for
     `--json-metadata` and is PROVISIONAL: objects are maps with text keys in
     the object's order, integers in shortest form.
-  - **Content type** (ord tag 1): the `mediaType` of the resource in the last
-    entry.
-  - **Body**: the exact stored bytes of the resource version the last entry's
-    descriptor names, with no content encoding.
+  - **Content type** (ord tag 1) and **body**, set by the last entry: the
+    exact bytes of the preview it names, under the preview's media type (the
+    default); or, when it names none, the exact stored bytes of the resource
+    version its descriptor names under that version's media type
+    (`body: "full"`), or no body at all and no content type (the default
+    with no preview). Never a content encoding, never a delegate.
 
   Until Bitcoin shows the anchor, the next inscription's metadata is the
   whole stored log from genesis through the anchoring entry, in order, the
-  anchoring entry last (`pair.carries`), and its body is the current
-  version. After the anchor, each inscription carries exactly one entry, the
-  successor of Bitcoin's accepted head, with the version that entry names as
-  its body. An entry that changes only the name or metadata inscribes the
-  current version again, so the sat's newest accepted inscription always
-  shows the Original's current version. Entries committed after the
-  anchoring entry before the anchor is accepted are not in the anchoring
-  inscription; they go one per later block once it is accepted. Metadata and
-  body together are at most 350,000 bytes. An Original whose log through the
-  anchoring entry and current version exceed that is refused
-  (`ANCHORING_LOG_TOO_LARGE`, also by `sdk.anchor` before it commits). After
-  anchoring, an entry whose inscription would exceed it is refused when it is
-  signed and when it is prepared (`INSCRIPTION_TOO_LARGE`), so it never
-  blocks later publications. A large resource leaves little room for the
-  log: anchor early. The writer needs the bytes it inscribes; if this SDK
-  does not hold the version the entry names, the pair is refused
-  (`incomplete-evidence`, `RESOURCE_BYTES_MISSING`). Non-integer numbers in
+  anchoring entry last (`pair.carries`). After the anchor, each inscription
+  carries exactly one entry, the successor of Bitcoin's accepted head. An
+  entry that changes only the name or metadata keeps its parent's preview, so
+  the sat's newest accepted inscription shows the Original's current version
+  again. Entries committed after the anchoring entry before the anchor is
+  accepted are not in the anchoring inscription; they go one per later block
+  once it is accepted. Metadata and body together are at most 350,000 bytes.
+  An Original whose log through the anchoring entry and the body it sets
+  exceed that is refused (`ANCHORING_LOG_TOO_LARGE`, also by `sdk.anchor`
+  before it commits). After anchoring, an entry whose inscription would
+  exceed it is refused when it is signed and when it is prepared
+  (`INSCRIPTION_TOO_LARGE`), so it never blocks later publications; an entry
+  with no preview can always go with no body, so only the full version, when
+  chosen, counts. Anchor early, while the log is short. The writer needs the
+  bytes it inscribes; if this SDK does not hold them, the pair is refused
+  (`incomplete-evidence`, `PREVIEW_BYTES_MISSING` or
+  `RESOURCE_BYTES_MISSING`). Non-integer numbers in
   metadata, such as `4.5`, are inscribed as the narrowest exact CBOR float,
   as ord writes them; a reader accepts any width and rejects NaN, infinities,
   negative zero and magnitudes above 2^53 − 1 (P14.3, P14.12;
   originals-spec #54).
 - **Told before inscribing (P9.18).** `pair.notice` is what the caller shows
-  the author before sending: the resource version the inscription carries,
-  and the log with its name and metadata, become public and permanent on
-  Bitcoin, and no later entry can remove them (P8.3). For active content it
-  adds that Bitcoin explorers may render the version outside this profile's
-  isolation rules (P9.7; `activeContent: true`). The active types are
+  the author before sending: whether the inscription carries the preview, the
+  full version or no body (`notice.body`); that the body, and the log with
+  its name and metadata, become public and permanent on Bitcoin, and no later
+  entry can remove them (P8.3); that the version itself stays off Bitcoin
+  unless inscribed in full; and what the pair costs at its fee rate
+  (`notice.cost`, from the built transactions: commit and reveal fees, and
+  the postage the sat keeps). For active content in the body it adds that
+  Bitcoin explorers may render it outside this profile's isolation rules
+  (P9.7; `activeContent: true`); a generated preview is WebP, never active. The active types are
   PROVISIONAL: HTML, XHTML, SVG and other `image/*+xml`, JavaScript and
   ECMAScript, XML, PDF and WASM (`isActiveContent`).
 - **Verified before inscribing (P9.18).** `prepareEntryInscription` packages
@@ -1338,6 +1350,112 @@ received.report.ownership?.output;                           // compare with the
   identity evidence. Spending requires the
   owner's explicit approval, and release evidence comes from real Core/ord
   regtest.
+
+### Bitcoin previews (P9.17, P9.18, P9.30, P14.5, P14.10, P14.12, P14.13; originals-spec PR 64)
+
+Creators pay for anchoring, and only Bitcoin is permanent. At 1 sat/vB an
+inscription with a preview of about 8 kB costs about 2,500 sats in fees,
+about US$1.50 when the owner decided it (18 November 2026), whatever the
+size of the resource. So by default an inscription's body is a **preview**
+of the version its last entry names, at most 8,192 bytes and at least 1, and
+that entry signs it: its asset state has a `preview` member, exactly
+`{mediaType, size, digest}` like a resource descriptor (the name and shape are
+PROVISIONAL, D4).
+
+```ts
+// The anchoring entry, and every later entry with a new version, may name a new preview:
+const a = await sdk.anchor(did, { parent, author, signer, sat });            // image: a generated WebP preview
+a.preview; // { status: "generated" | "supplied" | "kept" | "none", body: "preview" | "full" | "none", reason?, message, descriptor? }
+await sdk.anchor(did, { parent, author, signer, sat, preview: { bytes, mediaType: "text/plain" } }); // not an image: the author's
+await sdk.anchor(did, { parent, author, signer, sat, body: "full" });         // no preview: inscribe the full version
+await sdk.edit(did, { parent, resource: { bytes }, author, signer });          // a new version: a new preview, or none
+await sdk.edit(did, { parent, name, author, signer });                         // the same version: the parent's preview
+await sdk.edit(did, { parent, name, author, signer, body: "full" });          // ...or none, until the version next changes
+// Inscribing: the preview the entry names; with none, no body, or the full version when the entry was
+// committed with `body: "full"` (kept with it, so a resumed or delegated inscription keeps it) or when passed:
+await prepareEntryInscription({ ...params, body: "full" });
+// The generator alone (browser and Node): deterministic, WASM loaded only when called.
+const r = await generateImagePreview(bytes, "image/png");                   // { status: "generated", preview } | { status: "failed", failure }
+configurePreviewCodecs({ resvgWasm: new URL("/assets/resvg.wasm", location.href) }); // SVG in a browser
+```
+
+- **Images (P9.30).** For a version whose `mediaType` is an `image/` type,
+  compared case-insensitively (`Image/PNG` too, and `image/svg+xml`), the
+  writer generates the preview as `image/webp`; the author never supplies it
+  (`PREVIEW_OF_IMAGE_SUPPLIED`). `generateImagePreview` decodes by signature,
+  not by declared type: PNG (an APNG's default image), JPEG (EXIF
+  orientation applied), WebP (an animated WebP's first frame), AVIF, GIF (its
+  first frame) and SVG (rasterised with resvg, so a preview of an SVG is never
+  active content; no fonts are loaded, so text is not drawn). It scales the
+  longest edge through 512, 384, 256, 192, 128, 96, 64, 48 and 32 pixels,
+  never up, and encodes at quality 80 down to 40 at each size, largest first,
+  then at 30 down to 5, until the WebP fits 8,192 bytes. One WASM build of
+  libwebp, the scalar one, encodes in browsers and in Node alike, so the same
+  bytes give the same preview everywhere. Codecs: `@jsquash/webp` (encode and
+  decode), `@jsquash/png`, `@jsquash/jpeg`, `@jsquash/avif`,
+  `@resvg/resvg-wasm` and `omggif`, each a dynamic import: nothing loads
+  until a preview is made. In a browser the jsquash codecs fetch their WASM
+  next to themselves (bundlers emit it as an asset); resvg's WASM has no such
+  default, so give it with `configurePreviewCodecs({ resvgWasm })`, or an SVG
+  gets no preview there. Sizes, qualities and settings are PROVISIONAL.
+- **No preview (P9.30).** An image the writer cannot decode (BMP, TIFF,
+  HEIC, ICO, damaged bytes, or more than 50 million pixels, counting the
+  first frame of an animation and every image an SVG embeds, or no size in
+  its header), or cannot fit in 8,192 bytes, or whose bytes the
+  SDK does not hold, gets none: the commit's `preview` says so
+  (`status: "none"`, `reason: "undecodable" | "too-large" |
+  "version-bytes-missing"`), and the caller must tell the author. A version of
+  any other type gets the author's `preview` (any media type, 1 to 8,192
+  bytes: `PREVIEW_EMPTY`, `PREVIEW_TOO_LARGE`) or none (`not-an-image`).
+  With none, the inscription has no body unless the full version is chosen:
+  with `body: "full"` when the entry is committed, a choice the SDK keeps
+  with the entry (`chosenBody`; the store's optional `putBodyChoice`, which
+  `MemoryStore` and `FileStore` implement), so every later
+  `prepareEntryInscription` inscribes it in full and refuses another body
+  (`BODY_CHOICE_CONFLICT`), and `submitEntryInscription` sends no pair without
+  it (`PAIR_BODY_MISMATCH`); or with `body: "full"` passed to
+  `prepareEntryInscription`. An entry that names a preview cannot be
+  inscribed in full (`PREVIEW_NAMED`).
+- **Where previews go (P9.30, P14.5).** Previews are made only for Bitcoin:
+  an entry whose aliases list no did:btco DID never names one, and a choice
+  for one is refused (`PREVIEW_NOT_FOR_BITCOIN`). The anchoring entry may
+  name one. An entry with a new version names a new preview or none, never
+  its parent's: if the regenerated WebP is byte-identical to the parent's
+  (the same pixels in other bytes), the search goes on to another size or
+  quality. An entry that keeps the version, a deactivation included, keeps
+  its parent's preview, or with `body: "full"` names none, which lasts until
+  the version next changes; a new preview for it is refused
+  (`PREVIEW_NEEDS_NEW_VERSION`). An editor whose grant allows the resource
+  names the preview of its new version; it cannot change or drop a preview
+  otherwise (`outside-grant`, P5.16). The signer is shown the preview it
+  signs (`describeEntry`: "Preview for Bitcoin").
+- **Verifying (P9.17, P14.12).** `verifyOriginal` rejects, and `@originals/vh`'s
+  builders refuse, a `preview` before the anchoring entry, of 0 bytes or over
+  8,192 (`limit-exceeded`), of another media type than `image/webp` for an
+  image version, with a parameter, a non-canonical digest or another member,
+  or that breaks the version rules above. An inscription whose last entry
+  names a preview is rejected as a whole unless its body is exactly that
+  preview under its media type (`body-not-the-preview`,
+  `content-type-mismatch`), the full version and no body included; with none
+  named, unless its body is the version or absent with no content type
+  (`body-not-the-resource`, `content-type-without-body`). An empty body is a
+  body, the version only when its size is 0. An Originals inscription that
+  names a delegate is rejected (`names-a-delegate`, PROVISIONAL). Each
+  accepted inscription reports its `body`: `"preview"`, `"version"` or
+  `"none"`. A preview verifies the preview only: the version is reported
+  unavailable unless its bytes are obtained elsewhere, never verified because
+  the preview matched (P7.4). A preview is not a version (P4.4) and is not in
+  the derived DID document (P14.9). Readers tell a body of no bytes from no
+  body by ord's null content length (`SatInscription.noBody`).
+- **Packages and carried files (P14.10, P7.16).** An evidence package holds
+  no preview under `resources/` and never lists one as missing: a package
+  without previews is complete. A carried file is never made from a preview
+  (`CARRIER_PREVIEW`).
+- **Not normative: waiting for fees.** `waitForFeeRate({ currentFeeRate,
+  maxFeeRate, intervalMs, signal })` (`@originals/sdk/originals/bitcoin`)
+  resolves once the caller's rate source is at or below a ceiling; the
+  caller decides whether to wait. By default nothing waits: the SDK
+  inscribes at the fee rate given, and tells the author the cost first.
 
 ### Inscription time at scale (#973)
 

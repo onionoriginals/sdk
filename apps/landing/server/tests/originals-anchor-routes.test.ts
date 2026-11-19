@@ -50,7 +50,7 @@ type Harness = ReturnType<typeof harness>;
 type Author = Awaited<ReturnType<typeof authorWithOriginal>>;
 
 const prepare = (a: Author, chain: Harness['chain'], fundingUtxos = [chain.satUtxo, chain.fund(50_000)]) =>
-  prepareEntryInscription({
+  prepareEntryInscription({ body: 'full',
     sdk: a.sdk, did: a.did, fundingUtxos, satSigner: walletSigner, changeAddress: WALLET_ADDRESS, feeRate: 2, network: NETWORK,
     provider: chain.provider, clock: headerClock(), index: INDEX, recoveryStore: null,
   });

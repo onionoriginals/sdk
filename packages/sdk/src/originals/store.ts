@@ -110,6 +110,16 @@ export interface OriginalsStore {
    */
   putCarriedImport?(did: string): Promise<void>;
   getCarriedImport?(did: string): Promise<boolean>;
+  /**
+   * Optional. Keep, and read back, the body the author chose when the entry
+   * `versionId` was committed with `body: "full"`: its inscription carries the
+   * full version, not no body (P9.17, P9.18, P9.30). Written before the entry
+   * is committed, so a resumed, replaced or delegated inscription of it cannot
+   * inscribe another body than the author chose. A store without these keeps
+   * the choice only for the life of the SDK instance that committed it.
+   */
+  putBodyChoice?(did: string, versionId: string, body: "full"): Promise<void>;
+  getBodyChoice?(did: string, versionId: string): Promise<"full" | undefined>;
   /** Keep a valid branch of an Original that diverges from its committed log. */
   putBranch(did: string, log: string): Promise<void>;
   getBranches(did: string): Promise<string[]>;
@@ -164,6 +174,7 @@ export class MemoryStore implements OriginalsStore {
   private readonly refused = new Map<string, StoredRefused[]>();
   private readonly pending = new Map<string, StoredPending>();
   private readonly carriedImports = new Set<string>();
+  private readonly bodyChoices = new Map<string, "full">();
 
   get(did: string): Promise<StoredOriginal | undefined> {
     return Promise.resolve(this.originals.get(did));
@@ -245,6 +256,15 @@ export class MemoryStore implements OriginalsStore {
 
   getCarriedImport(did: string): Promise<boolean> {
     return Promise.resolve(this.carriedImports.has(did));
+  }
+
+  putBodyChoice(did: string, versionId: string, body: "full"): Promise<void> {
+    this.bodyChoices.set(`${did} ${versionId}`, body);
+    return Promise.resolve();
+  }
+
+  getBodyChoice(did: string, versionId: string): Promise<"full" | undefined> {
+    return Promise.resolve(this.bodyChoices.get(`${did} ${versionId}`));
   }
 
   putBranch(did: string, log: string): Promise<void> {

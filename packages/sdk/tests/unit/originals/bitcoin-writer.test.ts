@@ -12,7 +12,7 @@ import { hex } from "@scure/base";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { parseWitness } from "micro-ordinals";
 import { ORIGINALS_INSCRIPTION_MAX_BYTES, decodeCbor, encodeCbor, resourceDigest, type EditorGrant } from "@originals/vh/originals";
-import { rawMetadataPerEnvelope } from "../../../src/bitcoin/ordinals-tags.js";
+import { envelopeBodiesPresent, rawMetadataPerEnvelope } from "../../../src/bitcoin/ordinals-tags.js";
 import { prepareInscriptionOnSat } from "../../../src/bitcoin/inscribe-on-sat.js";
 import { inscriptionMetadata, inscriptionNotice } from "../../../src/originals/inscription.js";
 import type { InscriptionRecoveryRecord, InscriptionRecoveryStore, PreparedInscriptionOnSat } from "../../../src/bitcoin/inscription-recovery.js";
@@ -187,6 +187,8 @@ const scriptOf = (p: PreparedInscriptionOnSat) => btc.Script.decode(parse(p.reve
 const inscribed = (p: PreparedInscriptionOnSat) =>
   (decodeCbor(rawMetadataPerEnvelope(scriptOf(p), 1)[0]!) as unknown[]).map((e) => `${JSON.stringify(e)}\n`).join("");
 /** A prepared reveal's body and content type: the resource version its last entry names (P9.17). */
+/** Whether a prepared reveal's envelope has a body push at all (P14.12). */
+const hasBody = (p: PreparedInscriptionOnSat) => envelopeBodiesPresent(scriptOf(p), 1)[0];
 const bodyOf = (p: PreparedInscriptionOnSat) => {
   const [i] = parseWitness(parse(p.revealTxHex).getInput(0).finalScriptWitness!)!;
   return { body: i.body, contentType: i.tags.contentType, contentEncoding: i.tags.contentEncoding };
@@ -488,13 +490,14 @@ describe("C12-112: the anchoring inscription is the log through the anchoring en
     expect((await store.get(c.original.did))!.log).toBe(before); // nothing committed: the Original is not anchored
   });
 
-  test("the writer refuses an anchoring inscription whose log and current version pass the limit, before reading Bitcoin or signing", async () => {
+  test("the writer refuses an anchoring inscription whose log and the preview it names pass the limit, before reading Bitcoin or signing (P9.17, P9.30)", async () => {
     const pad = (n: number) => "y".repeat(n);
     const resource = { mediaType: "image/jpeg", size: 150_000, digest: resourceDigest(bytes("one")) };
-    const genesis = JSON.stringify({ versionId: "1-a", state: { asset: { aliases: [], resource } }, pad: pad(200_000) });
-    const anchoring = JSON.stringify({ versionId: "2-b", state: { asset: { aliases: [btcoAlias("regtest", SAT)], resource } } });
+    const preview = { mediaType: "image/webp", size: 8_192, digest: resourceDigest(bytes("preview")) };
+    const genesis = JSON.stringify({ versionId: "1-a", state: { asset: { aliases: [], resource } }, pad: pad(345_000) });
+    const anchoring = JSON.stringify({ versionId: "2-b", state: { asset: { aliases: [btcoAlias("regtest", SAT)], resource, preview } } });
     const log = `${genesis}\n${anchoring}\n`;
-    // The log alone fits; with the version it names as the body, it does not.
+    // The log alone fits; with the preview it names as the body, it does not.
     expect(new TextEncoder().encode(log).length).toBeLessThan(ORIGINALS_INSCRIPTION_MAX_BYTES);
     const sdk = { committedLog: () => Promise.resolve(log) } as unknown as OriginalsSDK;
     await expect(prepare(sdk, "did:vh:x", "regtest", provider(SAT))).rejects.toMatchObject({ category: "limit-exceeded", code: "ANCHORING_LOG_TOO_LARGE" });
@@ -508,7 +511,7 @@ describe("C12-112: the anchoring inscription is the log through the anchoring en
   test("C12-196: the entries are the metadata, in pushes of at most 520 bytes that a reader concatenates before decoding; the body is the current version (P9.17, P14.12)", async () => {
     const { sdk, did, lines } = await original(btcoAlias("regtest", SAT));
     const all = await lines();
-    const pair = await pairFor(sdk, did, node(snapshot([])).provider);
+    const pair = await pairFor(sdk, did, node(snapshot([])).provider, undefined, { body: "full" });
     const script = scriptOf(pair.prepared);
     const pushes: Uint8Array[] = [];
     for (let i = 5; script[i] !== 0 && script[i] !== "ENDIF"; i += 2) {
@@ -524,7 +527,7 @@ describe("C12-112: the anchoring inscription is the log through the anchoring en
     expect(bodyOf(pair.prepared)).toEqual({ body: bytes("one"), contentType: "image/jpeg", contentEncoding: undefined });
   });
 
-  test("C12-112: an Original whose log and current version together would pass the limit is not anchored; an entry after the anchor whose inscription would pass it is not signed (P9.17)", async () => {
+  test("C12-112: an Original whose log and the full version it chose together would pass the limit is not anchored; an entry after the anchor whose inscription would pass it is not signed (P9.17)", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
     const store = new MemoryStore();
     const sdk = OriginalsSDK.create({ store, authors: async () => alice.evidence(), freshness: "asserted", clock: clock() });
@@ -533,9 +536,12 @@ describe("C12-112: the anchoring inscription is the log through the anchoring en
     const c = await sdk.create({ name: "Large", resource: { mediaType: "application/octet-stream", bytes: new Uint8Array(ORIGINALS_INSCRIPTION_MAX_BYTES - 100) }, author: alice.ref("orig"), signer });
     if (c.kind !== "original") throw new Error("expected an Original");
     const before = (await store.get(c.original.did))!.log;
-    await expect(sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) }))
+    await expect(sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT), body: "full" }))
       .rejects.toMatchObject({ category: "limit-exceeded", code: "ANCHORING_LOG_TOO_LARGE" });
     expect((await store.get(c.original.did))!.log).toBe(before);
+    // With no preview and no body, the version does not count: it is anchored, its version off Bitcoin (P9.30).
+    const plain = await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) });
+    expect(plain.preview).toMatchObject({ status: "none", body: "none", reason: "not-an-image" });
     // Anchored small, then a version too large to go in an inscription with its entry.
     const small = await original(btcoAlias("regtest", SAT));
     const did = small.did;
@@ -546,10 +552,13 @@ describe("C12-112: the anchoring inscription is the log through the anchoring en
     const counting = Object.assign(Object.create(Object.getPrototypeOf(small.signer)), small.signer, {
       sign: (input: Parameters<typeof small.signer.sign>[0]) => { prompts++; return small.signer.sign(input); },
     }) as typeof small.signer;
-    await expect(small.sdk.edit(did, { parent: head, resource: { bytes: new Uint8Array(ORIGINALS_INSCRIPTION_MAX_BYTES - 100) }, author: small.alice.ref("orig"), signer: counting }))
+    await expect(small.sdk.edit(did, { parent: head, resource: { bytes: new Uint8Array(ORIGINALS_INSCRIPTION_MAX_BYTES - 100), mediaType: "application/octet-stream" }, author: small.alice.ref("orig"), signer: counting, body: "full" }))
       .rejects.toMatchObject({ category: "limit-exceeded", code: "INSCRIPTION_TOO_LARGE" });
     expect(prompts).toBe(0);
     expect(await small.sdk.committedLog(did)).toBe(committed);
+    // Without the full version chosen it can be inscribed with no body, so it is signed (P9.30).
+    const huge = await small.sdk.edit(did, { parent: head, resource: { bytes: new Uint8Array(ORIGINALS_INSCRIPTION_MAX_BYTES - 100), mediaType: "application/octet-stream" }, author: small.alice.ref("orig"), signer: counting });
+    expect(huge.preview).toMatchObject({ status: "none", body: "none" });
   });
 
   test("C12-193: before inscribing, the author is told the version, name and metadata become public and permanent, and warned about active content (P9.18, P8.3, P9.7)", async () => {
@@ -560,10 +569,11 @@ describe("C12-112: the anchoring inscription is the log through the anchoring en
       const content = bytes(active ? "<svg onload=alert(1)>" : "one");
       const c = await sdk.create({ name: "Harbor", metadata: { caption: "dawn" }, resource: { mediaType, bytes: content }, author: alice.ref("orig"), signer });
       if (c.kind !== "original") throw new Error("expected an Original");
-      const anchored = await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) });
-      const pair = await pairFor(sdk, c.original.did, node(snapshot([])).provider);
+      const anchored = await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT), body: "full" });
+      const pair = await pairFor(sdk, c.original.did, node(snapshot([])).provider, undefined, { body: "full" });
       expect(pair.notice).toMatchObject({
         version: { digest: resourceDigest(content), mediaType, size: content.length },
+        body: { kind: "full", digest: resourceDigest(content) },
         entries: [c.original.checkpoint, anchored.original.checkpoint],
         permanent: true,
         activeContent: active,
@@ -584,7 +594,8 @@ describe("C12-112: the anchoring inscription is the log through the anchoring en
     const writer = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), freshness: "asserted", clock: clock() });
     expect((await writer.importCarried(file.bytes, { resolveSigners: true })).status).toBe("imported");
     const head = (await writer.get(did, { resolveSigners: true })).checkpoint;
-    await writer.anchor(did, { parent: head, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) });
+    // The full version as the body (P9.30), so the writer must take the version's bytes from the carried file.
+    await writer.anchor(did, { parent: head, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT), body: "full" });
     const pair = await pairFor(writer, did, node(snapshot([])).provider);
     // With the carrier the bytes would not match the descriptor; the body is the version alone.
     expect(bodyOf(pair.prepared)).toEqual({ body: bytes("one"), contentType: "image/jpeg", contentEncoding: undefined });
@@ -593,10 +604,14 @@ describe("C12-112: the anchoring inscription is the log through the anchoring en
   test("C12-194: after a name-only edit, the next inscription carries the unchanged current version again", async () => {
     const { sdk, did, lines } = await original(btcoAlias("regtest", SAT), 1);
     const all = await lines();
-    const pair = await pairFor(sdk, did, node(snapshot([anchorBody(all)])).provider);
+    const pair = await pairFor(sdk, did, node(snapshot([anchorBody(all)])).provider, undefined, { body: "full" });
     expect(pair.versionId).toBe(idOf(all[2]));
     expect(inscribed(pair.prepared)).toBe(`${all[2]}\n`);
     expect(bodyOf(pair.prepared)).toEqual({ body: bytes("one"), contentType: "image/jpeg", contentEncoding: undefined });
+    // Or no body at all, the default when its entry names no preview (P9.30).
+    const none = await pairFor(sdk, did, node(snapshot([anchorBody(all)])).provider);
+    expect(none.body).toBe("none");
+    expect(hasBody(none.prepared)).toBe(false);
     // Bitcoin accepts it: the sat's newest accepted inscription shows the current version (P9.17).
     const shown = await readAnchored(sdk, did, { provider: node(snapshot([anchorBody(all), { line: all[2], id: pair.prepared.inscriptionId }])).provider, clock: blocks(), index: INDEX });
     expect(shown.report.anchoring?.accepted.map((a) => a.inscription)).toEqual([pair.prepared.inscriptionId]);
@@ -612,7 +627,7 @@ describe("C12-112: the anchoring inscription is the log through the anchoring en
     if (c.kind !== "original") throw new Error("expected an Original");
     await sdk.anchor(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, sat: btcoAlias("regtest", SAT) });
     store.deleteResource(resourceDigest(bytes("one")));
-    await expect(pairFor(sdk, c.original.did, node(snapshot([])).provider)).rejects.toMatchObject({ category: "incomplete-evidence", code: "RESOURCE_BYTES_MISSING", details: { digest: resourceDigest(bytes("one")) } });
+    await expect(pairFor(sdk, c.original.did, node(snapshot([])).provider, undefined, { body: "full" })).rejects.toMatchObject({ category: "incomplete-evidence", code: "RESOURCE_BYTES_MISSING", details: { digest: resourceDigest(bytes("one")) } });
   });
 
   test("a prepared pair is submitted without a stored copy of its body: the reveal is checked against the descriptor (P9.6, P9.17)", async () => {
@@ -747,7 +762,7 @@ describe("C12-100: before inscribing the anchoring entry the SDK verifies it; th
   test("a verified anchoring entry is prepared, with what Bitcoin will not hold: versions before the anchoring entry's, and did:vh signer histories", async () => {
     const { alice, bob, sdk, did, anchored, lines } = await edited();
     const all = await lines();
-    const pair = await pairFor(sdk, did, node(snapshot([])).provider);
+    const pair = await pairFor(sdk, did, node(snapshot([])).provider, undefined, { body: "full" });
     expect(pair.versionId).toBe(anchored);
     expect(inscribed(pair.prepared)).toBe(`${all.join("\n")}\n`);
     expect(pair.offChain.replication).toBe("not-guaranteed");
@@ -755,6 +770,9 @@ describe("C12-100: before inscribing the anchoring entry the SDK verifies it; th
     // Version 2 is the anchoring inscription's body; only version 1 stays off Bitcoin (P9.18).
     expect(pair.offChain.resources.map((r) => [r.version, r.digest, r.held])).toEqual([[1, resourceDigest(bytes("one")), true]]);
     expect(bodyOf(pair.prepared).body).toEqual(bytes("two"));
+    // With no body, the current version stays off Bitcoin too (P9.18, P9.30).
+    const bare = await pairFor(sdk, did, node(snapshot([])).provider);
+    expect(bare.offChain.resources.map((r) => r.version)).toEqual([1, 2]);
   });
 
   test("broadcast, the anchor is labelled pending Bitcoin acceptance until it is confirmed; then it is anchored", async () => {

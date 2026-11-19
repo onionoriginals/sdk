@@ -520,6 +520,8 @@ export async function publishNextEntry(p: PublishNextParams): Promise<PublishNex
     sdk: p.sdk, did: p.did, fundingUtxos: p.fundingUtxos, satSigner, changeAddress: p.changeAddress, feeRate: p.feeRate, network: p.network,
     provider: p.transport.provider as OrdinalsProvider, clock: serverClock(p.transport), index: p.index,
     recoveryStore: null,
+    // The full version, as the landing's entries name no preview (engine.ts; P9.17, P9.30).
+    body: "full",
   });
   // Signed but not sent: a cancel here discards it, and nothing was spent.
   p.guard.checkCancelled();

@@ -69,6 +69,12 @@ export interface PublicationObservation {
         mediaType: string;
         bytes: Uint8Array;
         metadata: Uint8Array | null;
+        /**
+         * True when the inscription has no body at all (the index reports a
+         * null content length): its envelope has no body push (P14.12).
+         * `bytes` is then empty. Absent, it has a body, possibly empty.
+         */
+        noBody?: true;
       };
 }
 

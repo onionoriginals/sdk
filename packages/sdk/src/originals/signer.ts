@@ -47,6 +47,11 @@ export interface EntrySummary {
   /** The editor grants after this entry: each editor DID and what it may change (P5.15). */
   editors: EditorGrant[];
   versionTime: string;
+  /**
+   * The preview the entry names for its inscription, when it names one
+   * (P9.30): it is signed with the entry. Absent when it names none.
+   */
+  preview?: { mediaType: string; size: number; digest: string; changed: boolean };
 }
 
 export type ProofOptions = Omit<DataIntegrityProof, "proofValue">;
@@ -90,6 +95,7 @@ export function summarize(entry: UnsignedEntry, previous?: EntryState): EntrySum
     editorsChanged: previous ? !same(previous.asset.editors, state.asset.editors) : state.asset.editors !== undefined,
     editors: state.asset.editors ?? [],
     versionTime: entry.versionTime,
+    ...(state.asset.preview ? { preview: { ...state.asset.preview, changed: !same(previous?.asset.preview, state.asset.preview) } } : {}),
   };
 }
 
@@ -118,6 +124,10 @@ export function describeEntry(summary: EntrySummary): string {
     const grants = summary.editors ?? [];
     lines.push(`Editor grants: changed${grants.length === 0 ? " (none remain)" : ""}`);
     for (const g of grants) lines.push(`  ${g.did}: name ${g.name ? "yes" : "no"}, metadata ${g.metadata ? "yes" : "no"}, resource ${g.resource ? "yes" : "no"}`);
+  }
+  if (summary.preview) {
+    const p = summary.preview;
+    lines.push(`Preview for Bitcoin: ${p.changed ? "" : "unchanged, "}${p.mediaType}, ${p.size} bytes, ${p.digest}`);
   }
   return lines.join("\n");
 }
