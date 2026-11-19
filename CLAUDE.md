@@ -34,11 +34,18 @@ terminology. Cite spec rules by ID (P5.3, D4) in code comments, tests and PRs.
 
 ## Contracts to preserve
 
-- **One author, one signature.** Each entry is signed once, by a key that the
-  author DID embeds under `assertionMethod` at the version the entry names, and
-  that is not an update key of the author DID's own log (P5.2, P5.3, P5.11;
-  owner decision S8). The author DID is fixed at genesis. Rotation happens only
-  in the author DID, never in the asset log (P5.8–P5.10).
+- **One signature per signer.** An Original has one author, or a signer set
+  (`authors: {threshold, dids}`; plan 050 W1, owner decision of 19 November
+  2026, reversing S8). Each entry carries one proof per signer it names, in
+  signer order, by a key that the signer's DID embeds under `assertionMethod`
+  at the version the entry names, and that is not an update key of that DID's
+  own log (P5.2, P5.3, P5.11). A single-author entry is signed exactly once,
+  byte-identical to before signer sets. A set's genesis is signed by every
+  member; a later author entry by the parent's threshold of the parent's
+  members plus every added member; the set changes only in author entries and
+  is never removed. A single author is fixed at genesis; a set changes only
+  under its own threshold. Rotation happens only in the signer DIDs, never in
+  the asset log (P5.8–P5.10).
 - **Forks stay unresolved off-chain.** Divergent valid branches are reported as
   a conflict with no current branch. Only anchoring on Bitcoin settles a fork
   (owner decision S1, P9.16).
