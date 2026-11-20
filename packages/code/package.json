@@ -36,13 +36,15 @@
   },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit -p .",
+    "typecheck": "tsc --noEmit -p . && tsc -p tsconfig.viewer.json",
     "test": "bun test tests/",
     "test:coverage": "bun test tests/ --coverage",
-    "lint": "eslint \"src/**/*.ts\"",
+    "lint": "eslint \"src/**/*.ts\" \"viewer/src/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\"",
     "acceptance": "bun scripts/acceptance.ts",
-    "release:regtest": "bun scripts/release-regtest.ts"
+    "release:regtest": "bun scripts/release-regtest.ts",
+    "build:viewer": "bun viewer/build.ts",
+    "smoke:viewer": "bun viewer/smoke.ts"
   },
   "keywords": [
     "originals",

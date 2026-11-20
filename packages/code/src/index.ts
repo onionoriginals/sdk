@@ -15,3 +15,4 @@ export * from "./bundle.js";
 export * from "./verify.js";
 export * from "./workspace.js";
 export * from "./clone.js";
+export * from "./split.js";

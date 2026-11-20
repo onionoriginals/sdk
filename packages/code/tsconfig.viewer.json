@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
+    "types": ["bun-types"]
+  },
+  "include": ["viewer/src/**/*.ts", "viewer/*.ts", "src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "viewer/dist"]
+}

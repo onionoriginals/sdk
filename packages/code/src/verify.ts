@@ -14,7 +14,7 @@
 import { parseLog, type LogEntry } from "@originals/vh/log";
 import { signerOf, type AuthorSet, type EditorGrant, type EntryState, type HistoricalReason, type OriginalsReport } from "@originals/vh/originals";
 import { MemoryStore, OriginalsSDK, type ZipLimits } from "@originals/sdk/originals";
-import { readBundle, type BundleLimits, type BundleManifest } from "./bundle.js";
+import { readBundle, type BundleContents, type BundleLimits, type BundleManifest } from "./bundle.js";
 import { canonicalHead, type CanonicalResult, type DelegateHead } from "./canonical.js";
 import { CODE_PROFILE, RELEASE_MEDIA_TYPE, REPO_MEDIA_TYPE, checkBranchMetadata, checkReleasesMetadata, checkRepoMetadata, decodeReleaseManifest, decodeRepoDocument, type PathGrant, type ReleaseManifest, type RepoDocument } from "./documents.js";
 import { StructuredError } from "@originals/vh";
@@ -643,6 +643,26 @@ export async function verifyRepository(bundle: Uint8Array, options: VerifyReposi
  */
 export async function openRepository(bundle: Uint8Array, options: VerifyRepositoryOptions = {}): Promise<OpenedRepository> {
   const contents = await readBundle(bundle, options.limits);
+  return openEvidence({ manifest: contents.manifest, packages: contents.packages, objects: (d) => contents.objects.get(d), failed: contents.failed }, options);
+}
+
+/** A bundle's evidence however it was read: the zip layout, or the split layout (`./split.ts`). */
+export interface RepositoryEvidence {
+  manifest: BundleManifest;
+  packages: BundleContents["packages"];
+  /** The objects the checks may use, each already checked against its digest; undefined when not held. */
+  objects: ObjectSource;
+  /** Digests whose bytes were supplied and did not match. */
+  failed?: ReadonlySet<string>;
+}
+
+/**
+ * {@link openRepository} over evidence already read: each Original through
+ * the SDK, unchanged, then the code checks and the canonical heads, each
+ * reported separately. Objects `evidence.objects` does not hold are reported
+ * missing (content partial, git trees unchecked), never as a pass.
+ */
+export async function openEvidence(contents: RepositoryEvidence, options: VerifyRepositoryOptions = {}): Promise<OpenedRepository> {
   const now = options.now === undefined ? undefined : typeof options.now === "number" ? options.now : options.now.getTime();
   const store = new MemoryStore();
   const sdk = OriginalsSDK.create({ store, authors: [], ...(now !== undefined ? { clock: () => now } : {}), ...(options.limits?.packages ? { archiveLimits: options.limits.packages } : {}) });
@@ -679,8 +699,8 @@ export async function openRepository(bundle: Uint8Array, options: VerifyReposito
 
   const resources: ObjectSource = (d) => store.getResource(d);
   const objects: Objects = {
-    get: async (d) => contents.objects.get(d) ?? (await store.getResource(d)),
-    failed: contents.failed,
+    get: async (d) => (await contents.objects(d)) ?? (await store.getResource(d)),
+    ...(contents.failed ? { failed: contents.failed } : {}),
   };
   const logOf = async (did: string) => (await store.get(did))?.log;
 

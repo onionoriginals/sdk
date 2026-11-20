@@ -1,0 +1,76 @@
+name: Pages
+
+# The one GitHub Pages site of this repository. A Pages deployment replaces the
+# whole site, so every part is assembled here and deployed together:
+#
+#   /        the SDK API reference (typedoc)
+#   /code/   the Originals for code static viewer (plan 049 §6 milestone 1),
+#            which verifies repo bundles in the visitor's browser; the host
+#            only serves bytes. No server code and no secrets reach the site.
+#
+# Called by docs.yml (and the code dogfood workflow); can be run by hand.
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build the site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+
+      - name: Install dependencies
+        run: bun install
+
+      # typedoc and the viewer both resolve workspace packages through their
+      # built dist (package.json `exports`), so build them first.
+      - name: Build workspace packages
+        run: bun run build
+
+      - name: Generate API docs
+        run: cd packages/sdk && bunx typedoc
+
+      - name: Build the code viewer
+        run: bun run --cwd packages/code build:viewer -- --out "$GITHUB_WORKSPACE/_site-code"
+
+      - name: Assemble the site
+        run: |
+          mkdir -p _site
+          cp -R docs/api-reference/. _site/
+          mkdir -p _site/code
+          cp -R _site-code/. _site/code/
+          touch _site/.nojekyll
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
