@@ -68,7 +68,7 @@
     "@originals/auth": "^4.0.4",
     "@originals/sdk": "^6.1.0",
     "@originals/vh": "^0.4.0",
-    "@turnkey/sdk-server": "^8.8.0",
+    "@turnkey/sdk-server": "^8.9.1",
     "fflate": "^0.8.3"
   },
   "devDependencies": {
