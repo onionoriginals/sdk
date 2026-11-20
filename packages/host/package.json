@@ -20,7 +20,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit -p .",
+    "typecheck": "tsc --noEmit -p . && tsc -p examples",
     "test": "bun test tests/",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\""
