@@ -1,5 +1,299 @@
 # @originals/vh
 
+## 0.5.0
+
+### Minor Changes
+
+- fd15702: Signed Bitcoin previews, built to originals-spec PR 64 (`940c6d4`, open;
+  owner decision, 18 November 2026; P9.17, P9.18, P9.30, P14.5, P14.10,
+  P14.12, P14.13). By default an inscription's body is a preview of the
+  version its last entry names, at most 8,192 bytes, which that entry signs in
+  its asset state's `preview` member (`{mediaType, size, digest}`, PROVISIONAL
+  name and shape).
+
+  - `@originals/vh`: the `preview` member and its rules (only from the
+    anchoring entry on; 1 to 8,192 bytes; `image/webp` for an `image/` version;
+    a new version names a new preview or none, the same version keeps its
+    parent's or none; editors per P5.16). The Bitcoin verifier checks the body
+    against the named preview, or with none against the version or no body
+    (`SatInscription.noBody`); an empty body is a body. New ignored reasons
+    `body-not-the-preview`, `content-type-without-body` and `names-a-delegate`
+    (delegates rejected, PROVISIONAL); `Placed.body` says what each accepted
+    inscription carries. A preview never counts as the version's bytes, is not
+    in the derived DID document, and a carried file is never made from one
+    (`CARRIER_PREVIEW`).
+  - `@originals/sdk`: `anchor`, `edit` and `deactivate` take `body: "preview" |
+"full"` and, for a non-image version, the author's `preview`; for an image
+    version the SDK generates a deterministic WebP preview with one scalar WASM
+    libwebp in browsers and Node (`generateImagePreview`; PNG, JPEG, WebP, AVIF,
+    GIF and SVG; codecs loaded only when a preview is made;
+    `configurePreviewCodecs` for SVG in a browser). The commit reports the
+    preview or why none (`CommitResult.preview`). `prepareEntryInscription`
+    inscribes the preview, or with none no body (no ord body push), or the full
+    version with `body: "full"`, which an entry committed with `body: "full"`
+    keeps (`chosenBody`, the store's optional `putBodyChoice`;
+    `BODY_CHOICE_CONFLICT`); its notice says which, what the pair costs and what
+    Bitcoin will not hold (`notice.body`, `notice.cost`, `pair.cost`). `waitForFeeRate` is an
+    optional, caller-driven wait for a lower fee rate. The sat reader reports an
+    inscription with no body (`noBody`). Packages never carry a preview.
+  - Behaviour change: an entry naming no preview is inscribed with no body
+    unless `body: "full"` is passed; an entry after the anchor is no longer
+    refused for a large version unless the full version is chosen.
+  - `@originals/host`: the account library reads a hosted copy of an anchored
+    Original against its sat with the host's sat reader, since such a copy read
+    without Bitcoin evidence yields only the entries before its anchoring entry
+    (P7.14, C12-297); without a reader, or when the read fails, the row shows
+    the Original as it was before anchoring and says its later versions are not
+    checked, instead of listing it as needing recovery.
+
+- 874555b: Carried logs and the P14.13 entry limit, built to originals-spec PR 64
+  (`940c6d4`, open), which keeps both after the owner withdrew EVM anchoring
+  on 18 November 2026. Bitcoin is the only anchor.
+
+  - Carried logs (P7.11–P7.16, P14.14–P14.17; PROVISIONAL): `readCarriedFile`,
+    `writeCarriedFile`, `carriedDisclosure`, `locateCarrier` and
+    `removeCarrier` in `@originals/vh/originals`, and `carry`,
+    `carriedDisclosure`, `readCarried` and `importCarried` on the SDK. A file
+    carries its Original's log in a trailer, a text block in a comment or a
+    JSON member. A reader resolves signer DIDs only on an explicit
+    `resolveSigners` opt-in, which applies to that single read: there is no
+    standing opt-in, and importing never counts as one (P7.13). A carried log
+    with no anchoring entry is a historical checkpoint; an anchored Original's
+    state comes from its sat, never from the carried copy (P7.14). The
+    text-block writer places a block only where the version's own parser reads
+    it as a comment, and refuses a syntax it has no parser for (`no-parser`,
+    P14.16).
+  - Breaking: the 65,536-byte entry limit is measured over the entry's JCS form
+    in UTF-8 in every format (P14.13), not over the stored line. `verifyLog` no
+    longer takes `lineBytes`, and `parseLog` no longer records line sizes. A
+    stored line within 65,536 bytes whose JCS form is over it is now rejected.
+  - `@originals/sdk`: the SDK refuses to sign an entry over the limit (P14.13).
+    One over it even with the shortest proof fails with `ENTRY_TOO_LARGE`
+    (`limit-exceeded`) before the signer is asked; before, it was signed and
+    then refused (`COMMIT_VERIFICATION_FAILED`), which still happens only when
+    the actual proof takes it over.
+  - `@originals/sdk`: a package is a copy not read from the anchor (P7.1,
+    P7.14). `load` of an anchored Original's package without `bitcoin`
+    evidence reports `bitcoin-evidence-missing` and verifies at most the
+    entries before the first anchoring entry; before, it verified the whole
+    log. `LoadedEvidence.notCheckedAgainstAnchor` lists the anchoring entry and
+    later ones. `import`, and the Bitcoin writer's own check of its committed
+    log, still verify the copy whole, never current without the anchor (P7.5,
+    P9.18).
+
+- f5de8cd: Hash resource versions with the platform's native SHA-256.
+
+  - `@originals/vh` adds `sha256Async`, `sha256MultihashAsync`,
+    `resourceDigestAsync`, `bytesView` (a fresh view over exactly a
+    Uint8Array's memory, from any realm, built from its internal slots: no
+    own property such as `length`, `byteLength`, `buffer` or `slice` is
+    consulted, and nothing is copied) and `snapshotBytes` (a private copy of
+    that view). Supplied bytes are size-checked before any copy is made. They use WebCrypto (`crypto.subtle.digest`) for
+    inputs of 16 KiB and up, and noble otherwise or where WebCrypto is missing
+    or refuses the input. The digest is SHA-256 either way, so every value is
+    byte-identical to `resourceDigest`. The bytes are read when it is called:
+    an input WebCrypto hashes is copied first, so changing it afterwards does
+    not change the digest.
+  - `verifyOriginal` checks supplied resource bytes with it (P4.3). Every
+    version's bytes are looked up and read before any digest is awaited, and
+    everything the report reads from its options alongside them is read before
+    it too; the digests are awaited where the aliases already were. Reports are
+    unchanged: the same `verified`, `missing` and `mismatch` per version and the
+    same reasons. Native hashing adds at most 64 MiB of memory per
+    verification, counting each version twice (the private copy and
+    WebCrypto's own); past that, versions are hashed with noble from a view,
+    without a copy, as before.
+  - `@originals/sdk` hashes packaged bytes, imported bytes, pending and
+    refused drafts' bytes and `resourceBytes` with it. Each takes a private copy
+    of the bytes a store or host hands over when it reads them, at every size,
+    hashes that copy and returns, archives or keeps exactly it: a store that
+    reuses its buffer afterwards changes neither the answer nor the bytes.
+    `prepareCreate` and `prepareEdit` hash the caller's new resource
+    synchronously, as before, so they read their input exactly as they did; both
+    keep a private copy of the caller's bytes (a real copy, also of a Node
+    `Buffer`). `@originals/host` checks shared-save resources with it.
+
+  Contract (owner decision, 10 November 2026): a caller must not change the
+  options, inputs or stored buffers it hands to `verifyOriginal` or an SDK
+  call until that call settles. A change made while hashing runs may or may
+  not be seen. Bytes the SDK archives, keeps or returns are always exactly the
+  bytes it hashed.
+
+  With 25 versions of a 680 KB resource, an edit drops from 281 ms to 119 ms
+  and `get` from 135 ms to 59 ms (Bun, `packages/sdk/scripts/bench-originals.ts`).
+
+- b021bd3: Parent Originals: authority from a parent, pinned (originals-spec #66,
+  `a2b5013`: P5.24–P5.27). The member names stay PROVISIONAL (P14.5, D4).
+
+  - `@originals/vh`: an optional `asset.parent`, `{did, versionId}`, set at
+    genesis. Every entry's pin is checked against the parent's log and never
+    goes backwards or to another branch. An editor entry may rely on a grant in
+    the parent's `editors` at its pin; one grant, direct or inherited, allows
+    the whole change. `verifyOriginal` takes `parents` evidence. Without it a
+    child is incomplete. The report adds `grants` (direct or inherited, with
+    the parent version) and `parentAuthority`, and labels entries
+    historically authorized only once the parent's latest state no longer
+    grants them (P5.26). Inscribed child entries pin no older than the
+    anchored parent's accepted head (P5.27). Builders take `parent`, `pin`
+    and, for an editor, the `inherited` grant. `ORIGINALS_LIMITS.parents` is 8.
+    The VH-Log engine's editor `lists` hook now receives the entry context.
+  - `@originals/sdk`: `create({ parent })` and `edit({ pin })`, which by
+    default advances to the newest parent version held, with an editor's
+    inherited grant found in the held parent log. Packages carry
+    `parents/<sha256(did)>/did.jsonl` through the highest pin, with its
+    signers, or list a `{ kind: "parent", did, versionId }` missing item.
+    `load` and `import` verify against them.
+
+- 1aad0f3: Scoped grants (originals-spec #66, `a2b5013`: P5.28, P5.29, P14.23). The
+  member names stay PROVISIONAL (P14.5, D4).
+
+  - `@originals/vh`: an editor grant's optional `scope`, never with
+    `resource: false`. A scope-type registry with `paths` (P14.23 patterns:
+    `checkPathPattern`, `matchPathPattern`) and `items` (`add`, `edit`,
+    `remove`), checked over a media type's path or item view
+    (`MediaTypeView`, `ScopeViews`, `checkScopeChange`). A view may read
+    objects the version references and report missing ones. The defaults are
+    the code tree's path view (`application/vnd.originals.code-tree+json`,
+    reading only changed subtrees, digests over mode and content) and a
+    reference item view (`application/vnd.originals.items+json`). An unknown
+    type, a missing view or missing bytes is `SCOPE_UNCHECKED`, incomplete and
+    unverifiable after the anchor; a change outside is `SCOPE_OUTSIDE`. The
+    report adds `grants[].scope` and `scopeObjects`.
+  - `@originals/sdk`: verification reads the objects scope checks need from
+    the store. Packages carry them, or list `{ kind: "object", digest }`
+    missing items.
+  - `@originals/code`: path grants reuse the vh pattern matcher and code tree
+    constants instead of a copy.
+
+- ebc6308: Cache signature checks by their exact inputs.
+
+  Verifying a log again (every `get`, `prepareEdit`, `sign`, `load` and
+  `import` in `@originals/sdk`) re-checked every entry's Ed25519 or BIP340
+  signature. `verifyProof` now remembers the result of each check, keyed by the
+  key type, public key, signed bytes and signature. A signature check is a pure
+  function of those, so the cache returns the result checking again would give,
+  and verification results are unchanged. The cache holds at most
+  `SIGNATURE_CACHE_ENTRIES` (8192) results, dropping the oldest first, and only
+  checks over at most `SIGNATURE_CACHE_MAX_DATA` (128) signed bytes with
+  signatures up to 64 bytes and keys up to 33 bytes, so a caller cannot make it
+  hold large messages (every proof's hash data fits). At most a few MiB is
+  held. `clearSignatureCache()` empties it.
+
+  `checkSignature(key, data, signature)` is exported: the raw check
+  `verifyProof` makes, with the cache. It trusts `key` to come from
+  `decodeMultikey`, which validates it; `verifyProof` refuses invalid keys
+  (`MULTIKEY_INVALID`) before it gets that far.
+
+  With 100 versions of a 680 KB resource, an edit drops from 1710 ms to 728 ms
+  and `get` from 720 ms to 373 ms (Bun, `packages/sdk/scripts/bench-originals.ts`).
+
+- 296a969: Signer sets (originals-spec #66, `a2b5013`: P5.19–P5.23, P5.30, D8; owner
+  decision of 19 November 2026, reversing S8). An Original can be governed by a
+  set of DIDs with a threshold instead of one author. Single-author Originals
+  are unchanged, byte for byte. The member names stay PROVISIONAL (P14.5, D4).
+  The conformance registry is re-pinned to `a2b5013`, with its 40 new rows
+  registered as C12-382 to C12-421.
+
+  - `@originals/vh`: the asset's optional `authors: {threshold, dids}`
+    (`checkAuthors`, `ORIGINALS_LIMITS.authors` = 32). An entry's `author` is an
+    array of signer references exactly when its asset has `authors`, with one
+    proof per signer in the same order. Genesis is signed by every member; an
+    author entry by the parent's threshold of the parent's members plus every
+    added member; a single-author Original converts when the author and every
+    new member sign. A member is never the Original's own did:vh, an alias or
+    its anchoring sat. P5.8 holds per identity; P7.9 currency holds by
+    threshold, and every signer of an inscribed set entry must pass P9.15 at
+    its inscription (P5.23). The derived DID document's `controller` is
+    the member array. Builders take `authors` and `sign: EntrySigner[]`;
+    `cosignEntry` and `finalizeEntry` collect proofs in any order. The report
+    adds `signedBy` and `identityEvidence.authors`; for a set Original the
+    single-author `identityEvidence` fields are null.
+    `EntryState.author` is now `AuthorRef | AuthorRef[]`: use `authorRefsOf`
+    or `signersOf` to read it.
+  - `@originals/sdk`: `create({ authors: { threshold, members }, signers })`,
+    and `edit`, `deactivate`, `publish`, `anchor` and `reconcile` take a set
+    Original's signer references and `signers`. A draft flow for signers who
+    are not all present: `prepare*`, `cosign(draft, signer)`, then
+    `commitDraft(draft)` (or `finalizeDraft` for a shared host). Each signer is
+    shown the entry as itself, with `summary.signers` and `summary.authors`.
+    Evidence packages carry every signing member's DID history.
+  - `@originals/host`: shared-host saves check every signer of a set entry, and
+    a member's account may save.
+  - `@originals/code`: code Originals stay single-author until the code profile
+    moves onto signer sets (plan 050 §5, step 3): a set Original as a repo or
+    branch is refused (`SIGNER_SET_UNSUPPORTED`), never read as one author.
+
+- e5a3e3d: Stop re-hashing resource bytes the store already checked when it stored them.
+
+  - `verifyOriginal` takes `checked(digest) → size | undefined`: held resource
+    versions whose bytes were checked against their digest when stored (P4.3)
+    and have not changed since. Each such version is reported `verified` when
+    that size matches its descriptor and `mismatch` otherwise, exactly as if
+    its bytes had been supplied. Supplied bytes and bytes from an anchoring sat
+    take precedence and are still hashed.
+  - `OriginalsStore.checkedResource?(digest)` is optional. A store may
+    implement it only if its bytes cannot change outside it.
+    - `MemoryStore` hashes bytes when they are put and reports only those that
+      matched. It keeps real copies (also of a Node `Buffer`, whose `slice`
+      would share the caller's memory) in private fields and hands out only
+      copies, so they never change. A subclass or patch that replaces its
+      `getResource` gets no answers unless it implements `checkedResource`
+      itself; an answer must cover exactly the bytes `getResource` serves, so a
+      wrapper serving other bytes must not forward the wrapped store's.
+    - `FileStore` does not implement it: a file can change with no change to
+      its size, times or inode (a shared writable mapping), so no cheap check
+      proves it unchanged. Its bytes are read and hashed on every verification,
+      with native SHA-256.
+    - The SDK passes checked sizes to verification instead of reading and
+      hashing every stored version on every `get`, `prepareEdit` and `sign`.
+
+  Owner decision, 9 November 2026: bytes checked when stored count as checked.
+  Reports are the same as from a store without the capability. Together with
+  the native SHA-256 and signature-cache changes, an edit at 100 versions of a
+  680 KB resource drops from 1710 ms to 31 ms in Bun, and from 682 ms to 24 ms
+  in headless Chromium.
+
+### Patch Changes
+
+- 874555b: Fixes found while closing section 12 rows:
+
+  - `@originals/vh`: an asset state whose `aliases` list the same DID twice is
+    rejected (`STATE_ALIASES`, P14.5; C12-299).
+  - `@originals/sdk`: `keySigner` refuses input that is not a well-formed
+    Originals entry (P5.11; C12-302): an entry with members other than
+    `versionId`, `versionTime`, `parameters` and `state`, or one that already
+    carries a proof; a `versionTime` that is not P14.2's; parameters other than
+    P14.1 allows, or a null parameter value; and a state with undefined
+    members, a malformed author or editor reference, asset or resource
+    descriptor, an alias of another DID method, or transitions that do not name
+    the resource's version (P14.4–P14.6). Before, it signed such entries.
+  - `@originals/sdk`: a did:btco signer's history is read from Bitcoin and is
+    never packaged, so a package no longer lists it as a missing item and can
+    be complete (P7.1, P14.10; C12-298).
+
+- 900ed2a: Add `@originals/sdk/did`, a browser entry for DIDs that needs no bundler shims.
+
+  - It exports `createDIDOriginal`, `updateDIDOriginal`,
+    `prepareDIDDataForSigning` and `verifyDIDSignature`, plus the identity
+    shape originals.build mints:
+    - `createWebvhIdentity` / `ensureWebvhIdentity`: `#key-0` is the identity
+      and update key, `#key-1` the authorship key. It refuses an authorship key
+      that is the update key (P5.11).
+    - `identityFromLog`: keeps the genesis DID after a move (P5.14).
+    - `createWebvhAlias`, `aliasFromLog`.
+    - `localWebvhSigner`, `userPathSegment`, `aliasPathSegment`.
+  - A Vite app that imports only this entry, `@originals/sdk/originals` and
+    `@originals/vh/*` builds with no shims and runs in Chromium. CI checks this
+    with `verify:browser-bundle`. The root `@originals/sdk` still reaches
+    `fs`, `path` and `fs/promises`.
+  - The did:webvh input rules (domain, paths, update keys) moved to
+    `did/webvh-rules`. The modules they came from re-export them, so nothing
+    changes for callers.
+  - `didwebvh-ts` is imported once, statically.
+  - `@originals/vh/fetch` loads `node:https` and `node:dns/promises` by a name
+    bundlers do not follow. A browser bundle no longer warns that they were
+    externalized; they still load only when `safeFetch`'s Node defaults run.
+
 ## 0.4.0
 
 ### Minor Changes
