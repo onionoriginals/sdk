@@ -18,6 +18,8 @@ const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "modu
 let ready = false;
 let status: Status | undefined;
 let seq = 0;
+/** True when the page opens `bundle/` beside it, not a `?bundle=` it was given. */
+let defaultSource = false;
 const pending = new Map<number, (m: FromWorker) => void>();
 
 const send = (m: ToWorker, transfer: Transferable[] = []) => worker.postMessage(m, transfer);
@@ -214,7 +216,7 @@ worker.onmessage = (ev: MessageEvent<FromWorker>) => {
       void show();
       return;
     case "failed":
-      if (!ready) picker(`The bundle could not be verified or read: ${m.message}`);
+      if (!ready) picker(defaultSource && /originals-code\.json is required/.test(m.message) ? "No bundle is published beside this viewer yet. Open one below." : `The bundle could not be verified or read: ${m.message}`);
       else progress(`Error: ${m.message}`);
       return;
     case "objects":
@@ -233,6 +235,7 @@ worker.onmessage = (ev: MessageEvent<FromWorker>) => {
 
 try {
   const source = bundleSource(location.search, location.href);
+  defaultSource = !source.explicit;
   progress("Starting…");
   if (!location.hash) history.replaceState(null, "", hashOf("/"));
   send({ type: "open-url", kind: source.kind, url: source.url });

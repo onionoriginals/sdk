@@ -16,3 +16,5 @@ export * from "./verify.js";
 export * from "./workspace.js";
 export * from "./clone.js";
 export * from "./split.js";
+export * from "./remote-identity.js";
+export * from "./rehydrate.js";

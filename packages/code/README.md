@@ -129,8 +129,82 @@ opened.split.counts();      // trees, loose, loaded, notLoaded, failed
 await opened.split.loadAll(); await opened.reverify();  // the full content check
 ```
 
+## Dogfood CI (this repository's `main`)
+
+`.github/workflows/originals-code-dogfood.yml` mirrors `main` into Originals
+on every push:
+
+1. It restores the workspace from the `originals-code-mirror` branch. The
+   branch holds the signed logs, root trees and public identities only;
+   objects are rebuilt from git with `originals-code rehydrate` (K22) and
+   checked against the logs.
+2. It mirrors the new first-parent commits as an **editor** of the owner's
+   branch under a `**` path grant. The CI key is held in Turnkey and signs
+   through `@originals/code/turnkey` (K21), and every signature is checked
+   against the DID's key before use.
+3. It pushes the extended logs back to the branch.
+4. It deploys the Pages site: the API docs at `/`, the viewer at `/code/`
+   and this repository's split bundle at `/code/bundle/`, published only if
+   it verifies.
+
+Without the `TURNKEY_*` secrets it skips step 2 with a notice and still
+deploys the viewer with the last mirrored bundle. On `release: published` it
+attaches `repo.zip` to the release and appends verify instructions to the
+notes. The owner signs release entries themselves (`originals-code release`);
+CI never does.
+
+### One-time setup (the owner)
+
+Do these on your own machine. No step creates anything on Bitcoin or npm.
+
+1. **Turnkey key for CI.** In your Turnkey organization, create an Ed25519
+   private key (or wallet account) for CI. Then create an API key for CI whose
+   policy allows only signing raw payloads with that key. Note
+   the key's id (or address) and its public key (64 hex digits).
+2. **Identities.**
+
+   ```sh
+   originals-code identity new owner.json            # yours: keep it private and offline
+   originals-code identity new-remote ci.identity.json \
+     --sign-with <turnkey key id> --public-key <hex public key> \
+     --update-key-out ci.update-key.json             # keep the update key private: it controls the CI DID
+   ```
+
+   `ci.identity.json` holds the DID, its log and the Turnkey key reference,
+   and no secret. The update key never goes to CI, so CI can sign entries but
+   never change its own DID (P5.11).
+3. **The repo, your branch and the CI grant.** From a checkout of this repo:
+
+   ```sh
+   originals-code init   --dir mirror/workspace --identity owner.json --name onionoriginals/sdk
+   originals-code mirror --dir mirror/workspace --identity owner.json --git . --rev origin/main   # prints your branch's did
+   originals-code identity add ci.identity.json --dir mirror/workspace
+   originals-code repo propose --dir mirror/workspace --signers <your did> --grant "<CI did>=**" --out grant.json
+   originals-code repo cosign grant.json --dir mirror/workspace --identity owner.json
+   originals-code repo commit grant.json --dir mirror/workspace
+   ```
+
+4. **The mirror branch.** It holds public data only:
+
+   ```sh
+   cp ci.identity.json mirror/
+   printf '{"ref":"refs/heads/main","branch":"<your branch did>"}\n' > mirror/dogfood.json
+   printf 'workspace/objects/\n.lock*\n' > mirror/.gitignore
+   cd mirror && git init -q -b originals-code-mirror && git add -A && git commit -qm "originals-code mirror workspace"
+   git push https://github.com/onionoriginals/sdk.git originals-code-mirror
+   ```
+
+   CI pushes to this branch with `GITHUB_TOKEN`. Keep it unprotected, or allow
+   `github-actions[bot]` to push.
+5. **Secrets** (repository → Settings → Secrets and variables → Actions):
+   `TURNKEY_API_PUBLIC_KEY`, `TURNKEY_API_PRIVATE_KEY` (the CI API key from
+   step 1) and `TURNKEY_ORGANIZATION_ID`.
+6. **Pages** must use "GitHub Actions" as its source. It already does, for the
+   API docs.
+
 Entry points: `@originals/code` (browser-safe), `@originals/code/fs` (a
-workspace on disk), `@originals/code/git` (reads a git repository).
+workspace on disk), `@originals/code/git` (reads a git repository),
+`@originals/code/turnkey` (Node: signs entries with a Turnkey-held key).
 
 Acceptance on this repository: `bun run acceptance` (in this package).
 Anchoring a release Original on disposable regtest: `bun run release:regtest`.

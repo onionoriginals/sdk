@@ -18,7 +18,7 @@
  * branch (K7); the release Original is a set Original with the repo's members
  * and threshold and a child of the repo (K15, K17).
  */
-import { parseLog, serializeLog, type LogEntry } from "@originals/vh/log";
+import { parseLog, serializeLog, type EntrySigner, type LogEntry } from "@originals/vh/log";
 import { ORIGINALS_LIMITS, codeTreePathView, signerOf, type AuthorDidEvidence, type AuthorRef, type EditorGrant, type EntryState } from "@originals/vh/originals";
 import { OriginalsSDK, keySigner, writeEvidence, type Draft, type EntrySummary, type OriginalsStore } from "@originals/sdk/originals";
 import type { DataIntegrityProof } from "@originals/vh/crypto";
@@ -365,7 +365,15 @@ export class CodeWorkspace {
   async mirror(input: {
     repo: string;
     ref: string;
-    identity: LocalIdentity;
+    /** The signer's identity: a local one with its keys, or its public part with `sign` (a key held elsewhere). */
+    identity: LocalIdentity | Pick<LocalIdentity, "did" | "log">;
+    /**
+     * Signs each entry with the identity's assertion key when that key is not
+     * local (a key-management service; `@originals/code/turnkey`). Required
+     * for a public identity; the proofs are verified with the whole log
+     * before anything is committed (P6.2).
+     */
+    sign?: EntrySigner;
     source: CommitSource;
     branch?: string;
     limit?: number;
@@ -387,6 +395,8 @@ export class CodeWorkspace {
     contribute?: boolean;
   }): Promise<MirrorResult> {
     const { repo, ref, identity } = input;
+    const local = "signingSecret" in identity ? identity : undefined;
+    const sign = input.sign ?? (local ? identitySigner(local) : codeError("invalid-evidence", "MIRROR_NO_SIGNER", `no signing key for ${identity.did}: pass a local identity or \`sign\``));
     this.addIdentity(identity);
     const repoDoc = await this.repoState(repo);
     const own = input.contribute ? undefined : repoDoc.document.refs[ref]?.branches[identity.did];
@@ -440,7 +450,7 @@ export class CodeWorkspace {
         repo,
         ref,
         pin: repoDoc.versionId,
-        signer: { role, ref: identityRef(identity), sign: identitySigner(identity) },
+        signer: { role, ref: identityRef(identity), sign },
         ...(inherited ? { inherited } : {}),
         clock: this.clock,
         maxEntries: this.maxEntries,
@@ -475,7 +485,7 @@ export class CodeWorkspace {
     } else if (currentDid !== branch) {
       // K5: a delegate lists its own new branch (segment) when it alone meets the repo's threshold;
       // otherwise the listing is a repo change the delegates propose and cosign.
-      if (repoDoc.document.delegates.includes(identity.did) && repoDoc.threshold === 1) await this.listBranch(repo, identity, { ref, delegate: identity.did, branch: currentDid });
+      if (local && repoDoc.document.delegates.includes(identity.did) && repoDoc.threshold === 1) await this.listBranch(repo, local, { ref, delegate: identity.did, branch: currentDid });
       else result.needsListing = true;
     }
     return result;

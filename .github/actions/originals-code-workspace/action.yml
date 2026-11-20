@@ -1,0 +1,52 @@
+name: Originals for code workspace
+description: >
+  Restore the dogfood mirror workspace (plan 049 §6 milestone 1) from the
+  `originals-code-mirror` branch into a git worktree, and rebuild its objects
+  from this repository's history (`originals-code rehydrate`, K22). The branch
+  holds only public data: the signed logs, root trees, public identities and
+  the CI identity's Turnkey key reference. Needs a full-history checkout and
+  built workspace packages.
+
+inputs:
+  path:
+    description: Where to put the mirror branch's worktree.
+    default: .originals-code-mirror
+
+outputs:
+  available:
+    description: "'true' when the mirror branch exists and its workspace was restored."
+    value: ${{ steps.restore.outputs.available }}
+  workspace:
+    description: The workspace directory inside the worktree.
+    value: ${{ steps.restore.outputs.workspace }}
+
+runs:
+  using: composite
+  steps:
+    - name: Restore the mirror workspace
+      id: restore
+      shell: bash
+      env:
+        WORKTREE: ${{ inputs.path }}
+      run: |
+        set -euo pipefail
+        if ! git ls-remote --exit-code --heads origin originals-code-mirror >/dev/null; then
+          echo "::notice title=Originals for code::No originals-code-mirror branch yet: nothing is mirrored or published. One-time setup: packages/code/README.md, 'Dogfood CI'."
+          echo "available=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        git fetch --no-tags origin "+refs/heads/originals-code-mirror:refs/remotes/origin/originals-code-mirror"
+        git worktree add --detach "$WORKTREE" origin/originals-code-mirror
+        if [ ! -f "$WORKTREE/workspace/workspace.json" ]; then
+          echo "::error title=Originals for code::originals-code-mirror has no workspace/workspace.json"
+          exit 1
+        fi
+        echo "available=true" >> "$GITHUB_OUTPUT"
+        echo "workspace=$WORKTREE/workspace" >> "$GITHUB_OUTPUT"
+
+    - name: Rebuild the objects from git
+      if: steps.restore.outputs.available == 'true'
+      shell: bash
+      env:
+        WORKSPACE: ${{ steps.restore.outputs.workspace }}
+      run: node packages/code/dist/cli.js rehydrate --dir "$WORKSPACE" --git .

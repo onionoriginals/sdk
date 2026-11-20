@@ -7,6 +7,10 @@ name: Pages
 #   /code/   the Originals for code static viewer (plan 049 §6 milestone 1),
 #            which verifies repo bundles in the visitor's browser; the host
 #            only serves bytes. No server code and no secrets reach the site.
+#   /code/bundle/  this repository's split bundle (K19), packaged from the
+#            `originals-code-mirror` branch's signed logs with objects rebuilt
+#            from git. Packaging signs nothing and needs no secret. It is
+#            published only if it verifies.
 #
 # Called by docs.yml (and the code dogfood workflow); can be run by hand.
 
@@ -30,6 +34,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # The bundle's objects are rebuilt from every mirrored commit.
+          fetch-depth: 0
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -49,6 +56,25 @@ jobs:
 
       - name: Build the code viewer
         run: bun run --cwd packages/code build:viewer -- --out "$GITHUB_WORKSPACE/_site-code"
+
+      - name: Restore the code mirror workspace
+        id: mirror
+        uses: ./.github/actions/originals-code-workspace
+
+      - name: Package and verify this repository's bundle
+        if: steps.mirror.outputs.available == 'true'
+        env:
+          WORKSPACE: ${{ steps.mirror.outputs.workspace }}
+        run: |
+          set -euo pipefail
+          cli=packages/code/dist/cli.js
+          node "$cli" package --dir "$WORKSPACE" --out "$RUNNER_TEMP/repo.zip" --split "$RUNNER_TEMP/code-bundle"
+          # Publish only what verifies: offline, no key (P7.3).
+          if node "$cli" verify "$RUNNER_TEMP/repo.zip"; then
+            mv "$RUNNER_TEMP/code-bundle" _site-code/bundle
+          else
+            echo "::warning title=Originals for code::the bundle did not verify; the viewer is published without it"
+          fi
 
       - name: Assemble the site
         run: |

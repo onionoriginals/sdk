@@ -471,6 +471,8 @@ URL of a repo bundle> <dir>` works.
 | K18 | Proposal files (`originals-code-proposal/0.1`): an unsigned or partly signed draft as JSON (entry, summary, display, bytes, proofs), cosigned in turn and committed once every named signer has signed; the SDK rechecks it at each step, and a moved repo makes it stale, never rebased |
 | K19 | The split bundle (`package --split`): the zip bundle's manifest and evidence packages as static files, plus one pack of every tree and commit object (`objects/index.json`, `objects/pack`) and each other object deflate-raw under `objects/<digest>`, listed in `objects/loose.json`. A reader verifies with the zip's code over what it holds; a loose object is fetched when asked and checked on arrival; one not loaded is missing, never verified |
 | K20 | The static viewer (`packages/code/viewer`): `createRepositoryView`'s pages rendered in a Web Worker in the visitor's browser, routed in the location hash so it works under any path prefix; the page parses each page inert, drops scripts, styles, frames, forms and event attributes, and rewrites links; CSP `default-src 'none'` with scripts, workers and styles from the site only, `connect-src 'self' https:` |
+| K21 | Remote identities (`originals-code-remote-identity/0.1`): a did:vh whose `#code-1` assertion key is held in Turnkey; the file holds the DID, its log and the key reference (`signWith`, public Multikey), never a secret; the update key stays with the creator (P5.11). `@originals/code/turnkey` signs through `turnkeySignBytes` and checks each signature against the key before use |
+| K22 | `rehydrate`: a workspace that keeps only its signed logs gets its objects back by converting, from git, every commit its listed branches name; each root tree and commit object must have the digest the entry names (`REHYDRATE_MISMATCH`) |
 
 ## 5. Acceptance tests (IDs cited by tests)
 
@@ -512,6 +514,9 @@ URL of a repo bundle> <dir>` works.
 | CODE-34 | Objects fetched by digest, once, and checked on arrival: a tampered, unserved or wrong-length object is refused and reported failed; a network error leaves it not loaded; an unlisted digest is never fetched |
 | CODE-35 | The split reader's bounds: required files, the loose index (sorted, unique, not in the pack, sizes and counts bounded), an inflate bomb; a bundle with a failing object is not split |
 | CODE-36 | The static viewer's router: routes in the hash; view links resolved against the current route; anchors, raw bytes and web links; other schemes and authorities dropped; the bundle URL from `?bundle=` |
+| CODE-37 | A CI identity whose key is in Turnkey: the file holds no secret and round-trips; a file with a secret, another key or a non-Ed25519 key is refused; credentials all or none |
+| CODE-38 | CI mirrors as an editor through Turnkey (a local double): entries verify under the inherited `**` grant and the head is agreed; a wrong Turnkey key fails before anything is committed; a public identity with no signer is refused |
+| CODE-39 | A workspace rebuilt from its logs and git: content partial before, complete with commit ids recomputed after; a git history that differs from the logs is refused |
 | CODE-VIEW | `bun run smoke:viewer` (CI): the built viewer under a path prefix in Chromium verifies a split bundle, opens files by digest, shows signer set, pins, inherited grants and commit messages, never runs repository markup, with no CSP violation |
 | CODE-ACC | Mirror `main` of this repository and verify it with no network (script, timings, store size vs. pack) |
 
@@ -539,7 +544,7 @@ The owner reviewed this plan in a grilling session on 2026-11-19 and decided:
 **Milestone 1 status.**
 
 - *Static viewer: built* (K19, K20; CODE-33 to CODE-36, CODE-VIEW). `originals-code package --split <dir>` writes the split bundle; `packages/code/viewer` is the static viewer, deployed by `.github/workflows/pages.yml` at `/code/` of the repository's Pages site, beside the API reference at `/`. On this repository (`main` at `174d3144`, 677 entries) the split bundle is 9,121 files: 3.2 MiB of evidence packages and 4.1 MiB of trees load first; 9,115 blobs (66 MiB compressed) load one by one when opened. Before any blob is fetched the viewer reports content `partial` and git trees `unchecked`, never a pass; "Fetch and check every file" loads them all and verifies again.
-- *Dogfood CI: in progress* (the Turnkey signer and the mirror workflow).
+- *Dogfood CI: built* (K21, K22; CODE-37 to CODE-39). `.github/workflows/originals-code-dogfood.yml` restores the workspace from the `originals-code-mirror` branch (public logs only; objects rehydrated from git), mirrors new first-parent commits as an editor with a `**` grant signing through Turnkey, pushes the logs back and deploys Pages (`pages.yml` now also publishes the split bundle at `/code/bundle/`, only if it verifies). On a published release it attaches `repo.zip` and appends verify instructions. Without `TURNKEY_*` secrets it skips mirroring with a notice and deploys the last bundle. *Not yet running:* it waits on the owner's one-time setup (packages/code/README.md, "Dogfood CI"): the Turnkey key and CI API key, the owner and CI identities, the repo with its `**` grant, the `originals-code-mirror` branch and three secrets. No real Turnkey resource or secret was created by this work.
 
 ## 7. Open questions
 
