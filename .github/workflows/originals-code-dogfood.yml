@@ -1,0 +1,183 @@
+name: Originals for code dogfood
+
+# Plan 049 §6 milestone 1: this repository's `main`, mirrored into Originals.
+#
+# On each push to main:
+#   1. restore the mirror workspace from the `originals-code-mirror` branch
+#      (signed logs and public identities; objects are rebuilt from git);
+#   2. mirror the new first-parent commits, signing as an editor of the
+#      owner's branch under its `**` path grant, with the CI key held in
+#      Turnkey (TURNKEY_* secrets). Without the secrets, mirroring is skipped
+#      with a notice and the last mirrored bundle is published as it is;
+#   3. push the extended logs back to `originals-code-mirror`;
+#   4. deploy the Pages site (pages.yml): the viewer and the split bundle.
+#
+# On a published release: attach repo.zip to the release and append how to
+# verify it to the release notes. Nothing here spends Bitcoin, publishes to
+# npm, or touches any network but GitHub and Turnkey.
+#
+# One-time setup by the owner: packages/code/README.md, "Dogfood CI".
+
+on:
+  push:
+    branches:
+      - main
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One mirror at a time: each run extends the logs the previous one pushed.
+concurrency:
+  group: originals-code-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: Mirror main into Originals
+    if: github.event_name != 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the extended logs to originals-code-mirror
+    outputs:
+      mirrored: ${{ steps.mirror.outputs.mirrored }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build workspace packages
+        run: bun run build
+
+      - name: Restore the mirror workspace
+        id: ws
+        uses: ./.github/actions/originals-code-workspace
+
+      - name: Mirror new first-parent commits (signed through Turnkey)
+        id: mirror
+        if: steps.ws.outputs.available == 'true'
+        env:
+          WORKSPACE: ${{ steps.ws.outputs.workspace }}
+          WORKTREE: .originals-code-mirror
+          REVISION: ${{ github.sha }}
+          TURNKEY_API_PUBLIC_KEY: ${{ secrets.TURNKEY_API_PUBLIC_KEY }}
+          TURNKEY_API_PRIVATE_KEY: ${{ secrets.TURNKEY_API_PRIVATE_KEY }}
+          TURNKEY_ORGANIZATION_ID: ${{ secrets.TURNKEY_ORGANIZATION_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TURNKEY_API_PUBLIC_KEY" ] || [ -z "$TURNKEY_API_PRIVATE_KEY" ] || [ -z "$TURNKEY_ORGANIZATION_ID" ]; then
+            echo "::notice title=Originals for code::TURNKEY_* secrets are not set: mirroring is skipped; Pages keeps the last mirrored bundle."
+            echo "mirrored=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # dogfood.json (set up by the owner): the ref and the owner's branch CI writes into as an editor.
+          ref=$(jq -er .ref "$WORKTREE/dogfood.json")
+          branch=$(jq -er .branch "$WORKTREE/dogfood.json")
+          node packages/code/dist/cli.js mirror --dir "$WORKSPACE" --identity "$WORKTREE/ci.identity.json" \
+            --git . --ref "$ref" --rev "$REVISION" --branch "$branch"
+          echo "mirrored=true" >> "$GITHUB_OUTPUT"
+
+      - name: Push the extended logs to originals-code-mirror
+        if: steps.mirror.outputs.mirrored == 'true'
+        working-directory: .originals-code-mirror
+        run: |
+          set -euo pipefail
+          # Public data only: the signed logs, root trees and public identities. Objects are rebuilt from git.
+          git add -A -- . ':(exclude)workspace/objects' ':(exclude,glob)**/.lock*'
+          if git diff --cached --quiet; then
+            echo "nothing new to mirror"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "mirror ${GITHUB_SHA}"
+          git push origin HEAD:refs/heads/originals-code-mirror
+
+  pages:
+    name: Deploy the viewer and bundle
+    needs: mirror
+    # Deploy even when mirroring was skipped or failed: the viewer, the API
+    # docs and the bundle of the logs last pushed to originals-code-mirror.
+    if: always() && github.event_name != 'release'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml
+
+  release:
+    name: Attach repo.zip to the release
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # upload the release asset and edit the notes
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.22
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build workspace packages
+        run: bun run build
+
+      - name: Restore the mirror workspace
+        id: ws
+        uses: ./.github/actions/originals-code-workspace
+
+      - name: Package, verify and attach repo.zip
+        if: steps.ws.outputs.available == 'true'
+        env:
+          WORKSPACE: ${{ steps.ws.outputs.workspace }}
+          TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cli=packages/code/dist/cli.js
+          node "$cli" package --dir "$WORKSPACE" --out repo.zip
+          node "$cli" verify repo.zip
+          checkpoint=$(unzip -p repo.zip originals-code.json | jq -r .checkpoint)
+          sha=$(sha256sum repo.zip | cut -d' ' -f1)
+          gh release upload "$TAG" repo.zip --clobber
+          gh release view "$TAG" --json body --jq .body > notes.md
+          if ! grep -q "<!-- originals-code-bundle -->" notes.md; then
+            cat >> notes.md <<NOTES
+
+          <!-- originals-code-bundle -->
+          ## Verify this release's history (Originals for code)
+
+          \`repo.zip\` is this repository's \`main\`, mirrored into signed Originals (plan 049): every first-parent commit is a signed entry, and the trees, files and commit objects are content-addressed. It verifies offline, with no key and no network.
+          Nothing in it is anchored, so it is valid as of its checkpoint (\`${checkpoint}\`), never "current".
+
+          sha256 \`${sha}\`
+
+          From a checkout of this repository at this release:
+
+          \`\`\`sh
+          bun install && bun run build
+          node packages/code/dist/cli.js verify repo.zip
+          # with packages/code's git-remote-originals on PATH: byte-identical first-parent commits
+          git clone originals::repo.zip sdk-verified
+          \`\`\`
+
+          Or verify it in your browser: open https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/code/ and pick repo.zip from your disk. The page verifies it client-side; the site only serves the viewer.
+          NOTES
+            gh release edit "$TAG" --notes-file notes.md
+          fi

@@ -83,13 +83,16 @@
       "name": "@originals/code",
       "version": "0.1.0",
       "bin": {
-        "originals-code": "./dist/cli.js"
+        "originals-code": "./dist/cli.js",
+        "git-remote-originals": "./dist/remote-helper.js",
       },
       "dependencies": {
         "@noble/hashes": "^2.0.1",
+        "@originals/auth": "^4.0.4",
         "@originals/sdk": "^6.1.0",
         "@originals/vh": "^0.4.0",
-        "fflate": "^0.8.3"
+        "@turnkey/sdk-server": "^8.8.0",
+        "fflate": "^0.8.3",
       },
       "devDependencies": {
         "@eslint/js": "^9.0.0",
@@ -101,8 +104,8 @@
         "eslint": "^10.14.0",
         "prettier": "^3.9.10",
         "typescript": "^6.0.3",
-        "typescript-eslint": "^8.0.0"
-      }
+        "typescript-eslint": "^8.0.0",
+      },
     },
     "packages/host": {
       "name": "@originals/host",

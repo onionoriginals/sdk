@@ -6,6 +6,9 @@
  *   originals-code identity new <file>
  *   originals-code identity public <file> [--out <public.json>]   (the DID and its log, to share)
  *   originals-code identity add <public.json> --dir <workspace>   (another delegate's or contributor's public identity)
+ *   originals-code identity new-remote <identity.json> --sign-with <turnkey key id> --public-key <z6Mk… or 64 hex> --update-key-out <private.json>
+ *                          (K21: a did:vh whose signing key is held in Turnkey; the file holds public data and the key reference only)
+ *   originals-code rehydrate --dir <workspace> --git <repo>   (K22: rebuild every listed branch's objects from git, checked against the logs)
  *   originals-code init    --dir <workspace> --identity <file>[,<file>…] --name <name> [--threshold <n>] [--private]
  *                          (K5: a set Original whose members are the delegates; every one signs its genesis, P5.19)
  *   originals-code repo propose --dir <workspace> --signers <did>[,<did>…] --out <proposal.json>
@@ -16,7 +19,8 @@
  *   originals-code repo commit <proposal.json> --dir <workspace>
  *                          (K5: a repo change is an author entry signed by the threshold of delegates, and by every
  *                          delegate it adds, P5.20; members who are not together sign the proposal file in turn)
- *   originals-code mirror  --dir <workspace> --identity <file> --git <repo> [--ref refs/heads/main] [--rev <revision>] [--limit <n>]
+ *   originals-code mirror  --dir <workspace> --identity <file> --git <repo> [--ref refs/heads/main] [--rev <revision>] [--limit <n>] [--branch <did>]
+ *                          (a remote identity file signs through Turnkey with TURNKEY_API_PUBLIC_KEY, TURNKEY_API_PRIVATE_KEY, TURNKEY_ORGANIZATION_ID)
  *                          [--include-commits | --no-commits]
  *
  * Raw git commit objects are mirrored by default (K12, plan 049 O3). They
@@ -45,6 +49,10 @@ import { createLocalIdentity, parseIdentity, parsePublicIdentity, publicIdentity
 import { parseProposal, serializeProposal } from "./workspace.js";
 import type { RepoDocument } from "./documents.js";
 import { splitBundle } from "./split.js";
+import { createRemoteIdentity, parseRemoteIdentity, REMOTE_IDENTITY_FORMAT, serializeRemoteIdentity, serializeUpdateKey } from "./remote-identity.js";
+import { rehydrateObjects } from "./rehydrate.js";
+import type { EntrySigner } from "@originals/vh/log";
+import { encodeMultikey } from "@originals/vh/crypto";
 import { openRepository, verifyRepository, type RepositoryReport } from "./verify.js";
 import { createRepositoryView } from "./view.js";
 
@@ -137,7 +145,18 @@ async function main(argv: string[]): Promise<number> {
         }
         return 0;
       }
-      if (positional[0] !== "new" || !positional[1]) throw new Error("usage: originals-code identity new <file> | identity public <file> [--out <file>] | identity add <public.json> --dir <workspace>");
+      if (positional[0] === "new-remote" && positional[1]) {
+        // Turnkey reports an Ed25519 public key as 64 hex digits; a Multikey (z6Mk…) is taken as is.
+        const given = need(opts, "public-key").replace(/^0x/, "");
+        const publicKeyMultibase = /^[0-9a-fA-F]{64}$/.test(given) ? encodeMultikey("Ed25519", Uint8Array.from(given.match(/../g)!.map((x) => parseInt(x, 16)))) : given;
+        const { identity, updateSecret } = await createRemoteIdentity({ kind: "turnkey", signWith: need(opts, "sign-with"), publicKeyMultibase });
+        // The update key first, private and never overwritten: it alone can change the DID (P5.11).
+        await writeFile(need(opts, "update-key-out"), serializeUpdateKey(identity.did, updateSecret), { mode: 0o600, flag: "wx" });
+        await writeFile(positional[1], serializeRemoteIdentity(identity), { flag: "wx" });
+        console.log(identity.did);
+        return 0;
+      }
+      if (positional[0] !== "new" || !positional[1]) throw new Error("usage: originals-code identity new <file> | identity new-remote <file> --sign-with <id> --public-key <z6Mk…> --update-key-out <file> | identity public <file> [--out <file>] | identity add <public.json> --dir <workspace>");
       const id = await createLocalIdentity();
       await writeFile(positional[1], serializeIdentity(id), { mode: 0o600, flag: "wx" });
       console.log(id.did);
@@ -214,7 +233,17 @@ async function main(argv: string[]): Promise<number> {
       const source = new GitSource(resolve(need(opts, "git")), typeof opts.rev === "string" ? { revisions: { [ref]: opts.rev } } : {});
       try {
         if (!ws.repo) throw new Error("run init first");
-        const identity = parseIdentity(await readFile(need(opts, "identity"), "utf8"));
+        const text = await readFile(need(opts, "identity"), "utf8");
+        // K21: a remote identity signs through Turnkey; its file holds no secret.
+        const remote = text.includes(REMOTE_IDENTITY_FORMAT) ? parseRemoteIdentity(text) : undefined;
+        let sign: EntrySigner | undefined;
+        if (remote) {
+          const { turnkeyCredentials, turnkeyEntrySigner, TURNKEY_ENV } = await import("./turnkey.js");
+          const credentials = turnkeyCredentials();
+          if (!credentials) throw new Error(`${remote.did} signs through Turnkey: set ${TURNKEY_ENV.join(", ")}`);
+          sign = turnkeyEntrySigner(remote, credentials);
+        }
+        const identity = remote ? { did: remote.did, log: remote.log } : parseIdentity(text);
         await ws.rememberIdentity(identity);
         const started = performance.now();
         if (opts["include-commits"] === true && opts["no-commits"] === true) throw new Error("--include-commits and --no-commits contradict each other");
@@ -225,6 +254,8 @@ async function main(argv: string[]): Promise<number> {
           repo: ws.repo,
           ref,
           identity,
+          ...(sign ? { sign } : {}),
+          ...(typeof opts.branch === "string" ? { branch: opts.branch } : {}),
           source,
           private: ws.private,
           ...(contribute ? { contribute, ...(mine ? { branch: mine } : {}) } : {}),
@@ -240,6 +271,21 @@ async function main(argv: string[]): Promise<number> {
           console.log("a contribution: verified with the repo's bundles, never voting for a canonical head (K14)");
         }
         if (r.needsListing) console.log(`the delegates list this branch with a repo change: originals-code repo propose --list ${ref}=${r.branch} --delegate ${identity.did} --signers <dids>`);
+      } finally {
+        source.close();
+        await ws.close();
+      }
+      return 0;
+    }
+    case "rehydrate": {
+      const ws = await openWorkspace(resolve(need(opts, "dir")));
+      const source = new GitSource(resolve(need(opts, "git")));
+      try {
+        if (!ws.repo) throw new Error("run init or import first");
+        const started = performance.now();
+        const r = await rehydrateObjects(ws.workspace, ws.repo, source);
+        const s = source.stats;
+        console.log(`rehydrated ${r.commits} commits of ${r.branches} branch Original(s) from git: ${s.trees} trees, ${s.blobs} blobs (${s.blobBytes} bytes) in ${((performance.now() - started) / 1000).toFixed(1)} s`);
       } finally {
         source.close();
         await ws.close();

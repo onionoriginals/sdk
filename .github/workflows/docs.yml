@@ -1,19 +1,8 @@
 name: Deploy API Docs
 
+# The Pages site is deployed on every push to main by
+# originals-code-dogfood.yml (through pages.yml). This runs it by hand.
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'packages/sdk/src/**'
-      - 'packages/sdk/typedoc.json'
-      # The docs build compiles this too — see the build step below.
-      - 'packages/vh/src/**'
-      - '.github/workflows/docs.yml'
-      - '.github/workflows/pages.yml'
-      # The code viewer is part of the same Pages site (pages.yml).
-      - 'packages/code/src/**'
-      - 'packages/code/viewer/**'
   workflow_dispatch:
 
 permissions:
