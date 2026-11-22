@@ -67,7 +67,9 @@ describe('hosted vector (T14-079, T14-063, P14.11)', () => {
         ...inputs,
       ],
     });
-    expect(axes(r)).toMatchObject({ outcome: 'verified', state: 'valid-as-of', availability: 'complete', offline: 'needs-external' });
+    // Every input the report depends on is supplied, so the set is self-contained wherever it came from (P7.21).
+    expect(axes(r)).toMatchObject({ outcome: 'verified', state: 'valid-as-of', availability: 'complete', offline: 'self-contained' });
+    expect(r.diagnostics).toEqual([]);
     expect(r.checkpoint).toBe(vjson('index.json').entries.e3);
   });
 });
