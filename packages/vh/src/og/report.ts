@@ -214,7 +214,10 @@ export function defaultCheck(report: Report): boolean {
 /**
  * P7.22: the transfer check, for a buyer or recipient of the anchoring sat: the default check,
  * anchored, nothing unverifiable or waiting, no conflicting anchor, and no `insufficient-depth`
- * diagnostic (every publication the head depends on has the transfer depth, P14.13).
+ * diagnostic (every publication the head depends on has the transfer depth, P14.13). It is a
+ * check on the Original's publication history only, never on the transaction that last moved the
+ * sat: the holder follows the adapter's confirmation policy (P9.11, P9.5), and an application that
+ * needs that transfer settled checks its depth separately (originals-spec 227bd2c, T7-074).
  */
 export function transferCheck(report: Report): boolean {
   const a = report.axes as Axes;
