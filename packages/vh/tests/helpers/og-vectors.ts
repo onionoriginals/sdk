@@ -55,11 +55,11 @@ export function bitcoinEvidence(): import('../../src/og/index.js').EvidenceSet {
   return e;
 }
 
-/** The prior-format fixture as an evidence set: its two reveal transactions, as mempool.space served them. */
+/** The prior-format fixture as an evidence set: its two reveal transactions' raw bytes, as mempool.space served them (hex decoded). */
 export function priorEvidence(): import('../../src/og/index.js').EvidenceSet {
   const chain = pjson('chain.json');
   return {
     original: null as never, checkpoint: null, network: 'mainnet', tip: null, depth: null, prior: null,
-    inputs: chain.inscriptions.map((x: any) => ({ kind: 'transaction', source: `mempool.space:${x.revealTxid}`, txid: x.revealTxid, bytes: new TextEncoder().encode(new TextDecoder().decode(pbytes(x.transaction)).trim()) })),
+    inputs: chain.inscriptions.map((x: any) => ({ kind: 'transaction', source: `mempool.space:${x.revealTxid}`, bytes: new Uint8Array(Buffer.from(new TextDecoder().decode(pbytes(x.transaction)).trim(), 'hex')) })),
   };
 }

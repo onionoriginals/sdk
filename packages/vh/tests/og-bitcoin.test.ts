@@ -31,15 +31,14 @@ describe('inscription bytes (T14-076, T14-078, F1)', () => {
 });
 
 describe('prior-format fixture (T14-085)', () => {
-  test('the mainnet acceptance Original of 1 November 2026 is unsupported', async () => {
+  test('the mainnet acceptance Original of 1 November 2026 is unsupported: the whole report (P14.25, P14.26)', async () => {
     const r = await verifyOriginal(priorEvidence());
     expect(r).toEqual(pjson('expected-report.json'));
   });
 
   test('each transaction\'s txid is recomputed from its bytes', () => {
     for (const x of pjson('chain.json').inscriptions) {
-      const hex = new TextDecoder().decode(priorEvidence().inputs.find((i) => i.source.endsWith(x.revealTxid))!.bytes);
-      expect(parseTransaction(hex).txid).toBe(x.revealTxid);
+      expect(parseTransaction(priorEvidence().inputs.find((i) => i.source.endsWith(x.revealTxid))!.bytes).txid).toBe(x.revealTxid);
     }
   });
 });

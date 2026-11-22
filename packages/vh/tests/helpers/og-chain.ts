@@ -40,6 +40,13 @@ export class Chain {
     return ids;
   }
 
+  /** An inscription the index lists but whose envelope and metadata the verifier did not read (P5.13). */
+  unread(sat: string, opts: Parameters<Chain['inscribe']>[2] = {}): string {
+    const [id] = this.inscribe(sat, [new Uint8Array()], opts);
+    this.sats.get(sat)!.at(-1)!.unread = true;
+    return id;
+  }
+
   publish(sat: string, parts: PublicationPart[], opts: Parameters<Chain['inscribe']>[2] = {}): string[] {
     return this.inscribe(sat, parts.map((p) => p.envelope), opts);
   }

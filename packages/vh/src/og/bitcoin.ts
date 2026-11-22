@@ -74,10 +74,16 @@ export function mergeSat(sat: string, reads: SatRead[], depth: number): MergedSa
 // did:btco signer histories (P5.13)
 
 /** A did:btco signer's versions from its own sat: inscriptions whose own metadata is a CBOR DID document for it. */
-export function btcoSignerHistory(did: string, sat: MergedSat): SignerHistory & { positions: Position[] } {
+export function btcoSignerHistory(did: string, sat: MergedSat): SignerHistory & { positions: Position[]; endsBefore?: Position } {
   const versions: SignerVersion[] = [];
   const positions: Position[] = [];
+  let endsBefore: Position | undefined;
   for (const i of sat.inscriptions) {
+    // Metadata not read could hold a version: the history ends before it, never skips it (P5.13).
+    if (i.unread) {
+      endsBefore = i;
+      break;
+    }
     const r = readInscription(i.envelope);
     const meta = r.kind === "other" ? r.metadata : null;
     if (!meta) continue;
@@ -94,7 +100,7 @@ export function btcoSignerHistory(did: string, sat: MergedSat): SignerHistory & 
     positions.push(i);
     if (deactivated) break; // terminal (P5.13)
   }
-  return { did, method: "did:btco", versions, limitExceeded: versions.length > OG_LIMITS.signerVersions, witnessed: false, positions };
+  return { did, method: "did:btco", versions, limitExceeded: versions.length > OG_LIMITS.signerVersions, witnessed: false, positions, endsBefore };
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +240,15 @@ interface JudgeContext {
   btco: Map<string, ReturnType<typeof btcoSignerHistory> & { complete: boolean }>;
 }
 
+/**
+ * P9.35: a did:btco signer's sat is read in full for an inscription when the
+ * evidence set holds its complete list at the tip and every inscription on it
+ * before the candidate was read (P5.13).
+ */
+function readInFull(h: (ReturnType<typeof btcoSignerHistory> & { complete: boolean }) | undefined, at: Position): boolean {
+  return !!h && h.complete && (!h.endsBefore || chainOrder(h.endsBefore, at) > 0);
+}
+
 /** The P9.15 table for one inscribed entry. */
 function judgeEntry(
   entry: OgEntry, ref: { did: string; versionId: string; verificationMethod: string }, preAnchor: boolean,
@@ -245,7 +260,8 @@ function judgeEntry(
   let stateAt: SignerVersion | undefined;
   if (method === "did:btco") {
     const h = c.btco.get(ref.did);
-    if (!h || !h.complete) return preAnchor ? { status: "incomplete", did: ref.did } : { status: "unverifiable", did: ref.did, versionId: ref.versionId }; // row 4
+    if (!readInFull(h, at)) return preAnchor ? { status: "incomplete", did: ref.did } : { status: "unverifiable", did: ref.did, versionId: ref.versionId }; // row 4
+    if (!h) return { status: "incomplete", did: ref.did };
     const before = h.versions.filter((_, k) => chainOrder(h.positions[k], at) < 0);
     version = before.find((v) => v.versionId === ref.versionId);
     if (!version) return { status: "rejected", rule: "P5.13" }; // row 5
@@ -264,8 +280,16 @@ function judgeEntry(
     if (error instanceof OgRuleError) return { status: "rejected", rule: error.rule, identity: true };
     throw error;
   }
-  if (preAnchor) return { status: "accepted" }; // row 6
-  // Row 7: the key in the signer's state at the inscription, not deactivated; an editor also needs the author's.
+  // Row 6 (ccf4a69): a post-anchor editor entry also needs the author DID's state at the
+  // inscription (P5.18); a did:btco author whose sat is not read in full leaves it undecided.
+  // Missing author evidence is never accepting.
+  if (!preAnchor && isEditorEntry(entry) && signerMethodOf(authorDid) === "did:btco") {
+    const a = c.btco.get(authorDid);
+    const authorRef = stateOf(entry).author;
+    if (!readInFull(a, at)) return { status: "unverifiable", did: authorDid, versionId: authorRef.versionId };
+  }
+  if (preAnchor) return { status: "accepted" }; // row 7
+  // Row 8: the key in the signer's state at the inscription, not deactivated; an editor also needs the author's.
   const key = (entry.proof[0] as JsonObject).verificationMethod as string;
   const vm = Array.isArray(version.document.verificationMethod) ? (version.document.verificationMethod as JsonObject[]).find((v) => v.id === key) : undefined;
   const pk = vm?.publicKeyMultibase as string | undefined;
@@ -275,7 +299,7 @@ function judgeEntry(
     const latest = am?.versions.filter((_, k) => !("positions" in am) || chainOrder((am as ReturnType<typeof btcoSignerHistory>).positions[k], at) < 0).pop();
     if (latest?.deactivated) return { status: "rejected", rule: "P5.18" };
   }
-  return { status: "accepted" }; // row 8
+  return { status: "accepted" }; // row 9
 }
 
 /** Judge an anchoring publication (head undefined) or a later one (P9.15, P9.17, P9.32, P9.33). */
@@ -388,9 +412,7 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
   const txs = evidence.inputs.filter((i) => i.kind === "transaction");
   if (txs.length) {
     for (const t of txs) {
-      // A block explorer serves the transaction as hex text.
-      const text = new TextDecoder().decode(t.bytes).trim();
-      const tx = parseTransaction(/^[0-9a-f]+$/i.test(text) ? text : t.bytes);
+      const tx = parseTransaction(t.bytes);
       for (const env of tx.inputs.flatMap((i) => envelopesInWitness(i.witness))) {
         const r = readInscription(env);
         if (r.kind === "other") {
@@ -399,7 +421,8 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
           const g = log?.values[0];
           const method = isJsonObject(g) && isJsonObject(g.parameters) ? g.parameters.method : undefined;
           if (typeof method === "string" && method !== OG_METHOD) {
-            return unsupportedReport(evidence, `The log’s method value is ${method}, which an implementation of ${OG_METHOD} does not implement (P14.1, P3.3); its inscriptions carry no og metaprotocol, so they are not Originals inscriptions under P9.31 either.`);
+            // The log's method value is not this draft's, and its inscriptions carry no og metaprotocol (P14.1, P9.31).
+            return unsupportedReport(evidence);
           }
         }
       }
@@ -424,19 +447,23 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
   // The anchor (P9.16): the first valid anchoring publication in chain order, over every sat read.
   const outcomes: Array<{ outcome: SatOutcome; publications: Publication[] }> = [];
   for (const m of merged.values()) {
-    if (m.disputed || !m.complete) continue;
+    // An anchoring sat must be read in full, every inscription on it read (P9.17); a sat that is not is missing evidence.
+    if (m.disputed || !m.complete || m.inscriptions.some((i) => i.unread)) continue;
     outcomes.push(await anchorOnSat(m, evidence.original, c));
   }
-  const disputedAnchoring = [...merged.values()].some((m) => m.disputed || !m.complete);
+  const disputedAnchoring = [...merged.values()].some((m) => m.disputed || !m.complete || m.inscriptions.some((i) => i.unread));
   const candidates = outcomes.filter((o) => o.outcome.anchor || o.outcome.undetermined)
     .sort((a, b) => chainOrder((a.outcome.anchor?.pub ?? a.outcome.undetermined)!.final, (b.outcome.anchor?.pub ?? b.outcome.undetermined)!.final));
   const first = candidates[0];
 
   if (!first || first.outcome.undetermined) {
     // Not anchored on any sat read, or missing evidence: what the copies show, with the Bitcoin result.
-    const report = await verifyOffChain(evidence, gathered, { bitcoinRead: true });
+    // An undetermined anchoring publication's entries are a copy of the log too (P7.14), read without the anchor.
+    const pending = first?.outcome.undetermined;
+    const withPending = pending ? { ...gathered, copies: [...gathered.copies, { source: `inscribed:${pending.final.id}`, values: pending.readings.flatMap((p) => p.reading.metadata.entries) }] } : gathered;
+    const report = await verifyOffChain(evidence, withPending, { bitcoinRead: true });
     const a = report.axes as Axes;
-    if (first?.outcome.undetermined) a.bitcoin = "undetermined";
+    if (pending) a.bitcoin = "undetermined";
     else if (disputedAnchoring) a.bitcoin = "missing-evidence";
     else if (a.bitcoin === "missing-evidence") {
       // The copies name an anchor, but no read sat carries one: not anchored (T9-121).
