@@ -677,6 +677,17 @@ describe('anchor absent and depth (P9.5, P7.22)', () => {
     expect(r).not.toHaveProperty('changes');
   });
 
+  test('T7-074: publications 6 or more deep and the sat then moved by a transaction with 1 confirmation: the new holder, no insufficient-depth, the transfer check passes', async () => {
+    const { w, chain } = await anchoredWorld();
+    // The anchoring publication is 11 deep at the tip; the transfer that moved the sat confirmed in the tip block,
+    // which only changes who the index reports as holding the sat (P9.11): the depth is the publications' (P7.22).
+    chain.holders.set(SAT, 'bcrt1pnewholderafteronetx');
+    const r = await verifyOriginal(chain.evidence(w.did));
+    expect(r.bitcoin?.holder.address).toBe('bcrt1pnewholderafteronetx');
+    expect(r.diagnostics.some((d) => d.code === 'insufficient-depth')).toBe(false);
+    expect(transferCheck(r)).toBe(true);
+  });
+
   test('T7-073: the anchoring publication deep enough and a later one with fewer than 6 confirmations: insufficient-depth for the later one; the transfer check fails', async () => {
     const { w, anchor, chain, ids } = await anchoredWorld();
     const e = await later(w, anchor, (s) => { s.asset.name = 'Three'; });
