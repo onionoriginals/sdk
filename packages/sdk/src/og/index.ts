@@ -1,6 +1,6 @@
 /**
  * @originals/sdk/og: the SDK's did:og writer and anchoring workflow on top of
- * @originals/vh/og (originals-spec PR 69, method value og:1.0-draft.1).
+ * @originals/vh/og (originals-spec 3c7b6db with PR 84, method value og:1.0-draft.1).
  */
 export * from "./author-did.js";
 export * from "./original.js";

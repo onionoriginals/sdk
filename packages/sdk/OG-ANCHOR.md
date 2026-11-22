@@ -1,6 +1,6 @@
 # `originals-og anchor`: anchoring a did:og Original on Bitcoin
 
-The command behind step b of the mainnet release gate (originals-spec PR 69,
+The command behind step b of the mainnet release gate (originals-spec 3c7b6db,
 section 13): a fresh mainnet inscription in the current format, made by the
 owner, verified from Bitcoin alone with exactly the P9.18 evidence set and
 through a public host. It creates a new did:webvh for the author, builds and
