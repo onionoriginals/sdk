@@ -345,9 +345,13 @@ function authorityOf(ev: Evaluated, histories: Histories): EntryAuthority {
 // ---------------------------------------------------------------------------
 // The report
 
-const UNSUPPORTED_NOTE = "Only the outcome is fixed: under outcome unsupported a verifier reports no history, state or Bitcoin result for the log.";
-
-export function unsupportedReport(evidence: EvidenceSet, reason: string): Report {
+/**
+ * P14.25 (ccf4a69): an `unsupported` report has `original` and `checkpoint`
+ * null, `axes` holding `outcome` only, and empty `entries`, `signers`,
+ * `missing` and `dependencies`. Why it is unsupported is not a report member;
+ * callers get it from `unsupportedReason`.
+ */
+export function unsupportedReport(evidence: EvidenceSet): Report {
   return {
     type: "OriginalsVerificationReport",
     profile: OG_METHOD,
@@ -355,8 +359,10 @@ export function unsupportedReport(evidence: EvidenceSet, reason: string): Report
     checkpoint: null,
     evidence: { inputs: reportInputs(evidence), network: evidence.network ?? null, tip: evidence.tip ?? null, depth: evidence.depth ?? null },
     axes: { outcome: "unsupported" },
-    reason,
-    note: UNSUPPORTED_NOTE,
+    entries: [],
+    signers: [],
+    missing: [],
+    dependencies: [],
   };
 }
 
@@ -376,9 +382,9 @@ export async function verifyOriginal(evidence: EvidenceSet): Promise<Report> {
   for (const t of evidence.inputs) if (t.kind === "transaction" && anchoredEvaluator) return anchoredEvaluator(evidence, gathered);
   for (const copy of gathered.copies) {
     const m = genesisMethod(copy);
-    if (m !== undefined && m !== OG_METHOD) return unsupportedReport(evidence, `The log’s method value is ${m}, which an implementation of ${OG_METHOD} does not implement (P14.1, P3.3).`);
+    if (m !== undefined && m !== OG_METHOD) return unsupportedReport(evidence);
   }
-  if (gathered.unsupported) return unsupportedReport(evidence, gathered.unsupported);
+  if (gathered.unsupported) return unsupportedReport(evidence);
   if (evidence.inputs.some((i) => i.kind === "inscription") || (evidence.sats?.length ?? 0) > 0) {
     if (!anchoredEvaluator) throw new OriginalsError("unsupported-profile", "BITCOIN_UNAVAILABLE", "the Bitcoin verifier is not loaded");
     return anchoredEvaluator(evidence, gathered);

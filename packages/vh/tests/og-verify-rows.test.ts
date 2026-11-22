@@ -419,6 +419,37 @@ describe('evidence and the report (§7)', () => {
     expect(labelOf(await w.verify({ signers: [w.author, ed] }), e)).toMatchObject({ authority: 'did-deactivated-since' });
   });
 
+  test('T7-065: an editor entry whose editor DID was then deactivated is did-deactivated-since, endorsed by a later current-key author entry; the default check passes', async () => {
+    const w = await World.create();
+    const ed = await webvhSigner();
+    await w.entry((s) => { s.asset.editors = [grant(ed.did, { name: true })]; });
+    const e = await w.entry((s) => { s.asset.name = 'by editor'; }, { by: ed, editor: true });
+    await web(ed).appendState(ed.handle.entries[ed.handle.entries.length - 1].state, { deactivated: true });
+    const before = await w.verify({ signers: [w.author, ed] });
+    expect(labelOf(before, e)).toMatchObject({ authority: 'did-deactivated-since', endorsed: false });
+    expect(axes(before).authority).toBe('historical');
+    expect(defaultCheck(before)).toBe(false);
+    await w.entry((s) => { s.asset.metadata = { reviewed: true }; delete s.asset.editors; });
+    const after = await w.verify({ signers: [w.author, ed] });
+    expect(labelOf(after, e)).toMatchObject({ authority: 'did-deactivated-since', endorsed: true });
+    expect(axes(after).authority).toBe('current');
+    expect(defaultCheck(after)).toBe(true);
+  });
+
+  test('T7-066: with the author DID deactivated after the editor entry, nothing endorses it and the default check fails', async () => {
+    const w = await World.create();
+    const ed = await webvhSigner();
+    await w.entry((s) => { s.asset.editors = [grant(ed.did, { name: true })]; });
+    const e = await w.entry((s) => { s.asset.name = 'by editor'; }, { by: ed, editor: true });
+    const later = await w.entry((s) => { s.asset.metadata = { reviewed: true }; });
+    await web(w.author).appendState(w.author.handle.entries[w.author.handle.entries.length - 1].state, { deactivated: true });
+    const r = await w.verify({ signers: [w.author, ed] });
+    expect(labelOf(r, e)).toMatchObject({ authority: 'did-deactivated-since', endorsed: false });
+    expect(labelOf(r, later)).toMatchObject({ authority: 'did-deactivated-since' });
+    expect(axes(r).authority).toBe('historical');
+    expect(defaultCheck(r)).toBe(false);
+  });
+
   test('T7-016, T7-047: a missing editor DID history leaves its entry unchecked, identity incomplete; nothing is fetched', async () => {
     const w = await World.create();
     const ed = await webvhSigner();
@@ -482,8 +513,7 @@ describe('evidence and the report (§7)', () => {
     const w = await World.create();
     const old = serializeLog(w.entries).replace('"og:1.0-draft.1"', '"originals:1.0"');
     const r = await verifyOriginal({ original: w.did, inputs: [{ kind: 'log', source: 'old.jsonl', bytes: enc(old) }] });
-    expect(r.axes).toEqual({ outcome: 'unsupported' });
-    expect(r.entries).toBeUndefined();
+    expect(r).toMatchObject({ original: null, checkpoint: null, axes: { outcome: 'unsupported' }, entries: [], signers: [], missing: [], dependencies: [] });
   });
 });
 

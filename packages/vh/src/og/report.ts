@@ -52,8 +52,8 @@ export type EvidenceInput =
   | { kind: "resource"; source: string; bytes: Uint8Array }
   /** One inscription; `source` is `index:<inscription id>`. The sat reads carry the placement. */
   | { kind: "inscription"; source: string; bytes: Uint8Array }
-  /** A raw transaction, as a block explorer serves it (prior-format fixture). */
-  | { kind: "transaction"; source: string; bytes: Uint8Array; txid: string };
+  /** A raw transaction's bytes, as a block explorer serves them (prior-format fixture). */
+  | { kind: "transaction"; source: string; bytes: Uint8Array };
 
 /** Metadata about a signer history in the evidence set: where and when it was obtained (P7.8). */
 export interface SignerHistoryNote {
@@ -114,8 +114,7 @@ export interface SignerLabel {
 export interface ReportInput {
   kind: string;
   source: string;
-  digest?: string;
-  txid?: string;
+  digest: string;
 }
 
 export interface Report {
@@ -138,14 +137,13 @@ export interface Report {
   };
   /** PROVISIONAL (finding F10): the change of head against a prior result (P9.36, P6.6). */
   headChange?: { from: string | null; to: string | null };
-  /** PROVISIONAL (finding F2): why the outcome is unsupported or no state is reported. */
+  /** PROVISIONAL (finding F7): why no checkpoint is reported, or that the report is a writer's local copy. */
   reason?: string;
-  note?: string;
 }
 
 /** P14.25: a report's `evidence.inputs`, each `{kind, source, digest}` with the input's bytes in P14.7's encoding. */
 export function reportInputs(evidence: EvidenceSet): ReportInput[] {
-  return evidence.inputs.map((i) => (i.kind === "transaction" ? { kind: i.kind, source: i.source, txid: i.txid } : { kind: i.kind, source: i.source, digest: resourceDigest(i.bytes) }));
+  return evidence.inputs.map((i) => ({ kind: i.kind, source: i.source, digest: resourceDigest(i.bytes) }));
 }
 
 /** P7.18: the outcome follows from the other axes. */
