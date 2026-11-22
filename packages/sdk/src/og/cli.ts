@@ -81,7 +81,7 @@ export async function main(argv: string[]): Promise<number> {
   }
   const network = need(flags, "network") as BitcoinNetwork;
   if (!["mainnet", "signet", "testnet", "regtest"].includes(network)) throw new Error(`unknown network ${network}`);
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const answers = confirmations(process.stdin, process.stdout, { mainnet: network === "mainnet" });
   const yes = flags.get("yes") === true;
   const ctx: Ctx = {
     stateDir: need(flags, "state"),
@@ -92,8 +92,7 @@ export async function main(argv: string[]): Promise<number> {
       say: (l) => console.log(l),
       confirm: async (q) => {
         if (yes && network !== "mainnet") return true;
-        const a = await rl.question(`${q} Type "yes" to continue: `);
-        return a.trim() === "yes";
+        return answers.confirm(q);
       },
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     },
@@ -122,8 +121,48 @@ export async function main(argv: string[]): Promise<number> {
     } else throw new Error(`unknown step ${step}`);
     return 0;
   } finally {
-    rl.close();
+    answers.close();
   }
+}
+
+/**
+ * Answers to the command's confirmations, one line each. Lines that arrive while a step is still
+ * waiting (for the funding output, say) are kept for the next question, and the end of input is a
+ * "no", never an error. On mainnet every answer has to be typed at a terminal after its question is
+ * shown: piped input and lines typed ahead are refused, so nothing confirms a mainnet broadcast but a
+ * person reading the question.
+ */
+export function confirmations(input: NodeJS.ReadableStream & { isTTY?: boolean }, output: NodeJS.WritableStream, options: { mainnet: boolean }) {
+  const rl = createInterface({ input, terminal: false });
+  const queued: string[] = [];
+  let waiting: ((line: string | null) => void) | undefined;
+  let ended = false;
+  rl.on("line", (line) => {
+    if (waiting) {
+      const w = waiting;
+      waiting = undefined;
+      w(line);
+    } else queued.push(line);
+  });
+  rl.on("close", () => {
+    ended = true;
+    waiting?.(null);
+    waiting = undefined;
+  });
+  return {
+    async confirm(question: string): Promise<boolean> {
+      if (options.mainnet && !input.isTTY) {
+        output.write(`${question}\nOn mainnet the answer has to be typed at a terminal; standard input is not one, so this is a no.\n`);
+        return false;
+      }
+      if (options.mainnet) queued.length = 0; // typed ahead of the question: not an answer to it
+      output.write(`${question} Type "yes" to continue: `);
+      const line = queued.length > 0 ? queued.shift()! : ended ? null : await new Promise<string | null>((r) => { waiting = r; });
+      if (line === null) output.write("\n(no answer: input ended)\n");
+      return line?.trim() === "yes";
+    },
+    close: () => rl.close(),
+  };
 }
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("/og/cli.js") || process.argv[1]?.endsWith("/og/cli.ts")) {

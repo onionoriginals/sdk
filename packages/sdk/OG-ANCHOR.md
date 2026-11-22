@@ -9,7 +9,10 @@ the exact amount, inscribes after the funding output confirms, and reads
 everything back from a public ord explorer.
 
 Nothing is broadcast without an explicit confirmation. On mainnet `--yes` is
-ignored: every confirmation needs `yes` typed at the prompt.
+ignored: every confirmation needs `yes` typed at a terminal after the question
+is shown. Piped input and lines typed ahead of the question are not answers
+there, and the step stops. On the other networks a piped answer is kept for
+the next question, and input that ends without one is a no.
 
 ## Keys and state
 

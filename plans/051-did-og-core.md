@@ -286,7 +286,31 @@ What the gaps are:
 
 `bun run --cwd packages/sdk regtest:og` (Bitcoin Core 32.1, ord 0.29.1) runs the
 anchoring command end to end four times on a disposable regtest chain and
-writes `packages/sdk/scripts/og-*.last-run*.json`. All four passed on
-21 November 2026. Signet was not run: getting signet coins needs a faucet
-behind a captcha, and the run needs no other change (`--network signet`, the
-default mempool.space and signet.ordinals.com backends).
+writes `packages/sdk/scripts/og-*.last-run*.json`. All four passed again at
+45dc624 on 22 November 2026, as did the vector run (T14-093).
+
+**CLI rehearsal (22 November 2026).** The owner's commands from `OG-ANCHOR.md`
+were run as written with `node dist/og/cli.js` (keygen, then `anchor author`,
+`prepare`, `fund`, `broadcast`, `verify`), on regtest with `--rpc-url`,
+`--rpc-auth` and `--ord`, the author's `did.jsonl` served over HTTPS from a
+local host (`--domain og-rehearsal.localhost:8444`, a self-signed certificate
+trusted through `NODE_EXTRA_CA_CERTS`), and a PNG with its generated WebP
+preview. Every step passed: `verify` exited 0 with `verified`, `current`,
+`anchored`, the transfer check passing and the host copy matching. It found
+one bug, fixed with tests (`og-cli-confirm.test.ts`): an answer piped on
+standard input was lost when input ended during `fund`'s wait for the funding
+output ("readline was closed"). On mainnet, confirmations now have to be
+typed at a terminal after the question.
+
+Signet was not run: every signet faucet found needs a captcha or an account
+login, which an unattended run cannot complete. The commands are the same
+with `--network signet` (default backends mempool.space/signet and
+signet.ordinals.com).
+
+**Mainnet dry run.** `anchor author` and `anchor prepare --network mainnet`
+were run with no funding, under a logger of every HTTP request. `prepare`
+printed 1 inscription, about 1,645 sats in fees at mempool.space's 1 sat/vB,
+and EXACTLY 2,645 sats to fund (fees plus 1,000 sats postage). The only
+requests were two GETs (the author's `did.jsonl` and
+`mempool.space/api/v1/fees/recommended`). Nothing is signed for the chain or
+broadcast before `fund` and `broadcast`.
