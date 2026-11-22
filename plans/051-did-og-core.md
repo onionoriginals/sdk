@@ -7,7 +7,8 @@ mainnet anchoring command.
 
 The spec is `aviarytech/originals-spec` master `3c7b6db`, where pull
 request 69 merged, with pull request 84 (branch `sdk-findings`, head
-`45dc624`, not yet merged), which resolves this plan's open findings.
+`5281746`, not yet merged), which resolves every finding of this plan. Its
+vectors are unchanged since `45dc624`.
 `spec/*.md` is the core and `spec/additions/` is out of scope. Method value `og:1.0-draft.1`. Its
 vectors are copied into `packages/vh/tests/fixtures/og-vectors/` (see `PIN.md`
 there); the spec repository's `vectors/tools/check.mjs` is the independent
@@ -29,13 +30,14 @@ The prior format (`originals:1.0`, `did:vh` identifiers) gets outcome
 
 ## Spec findings
 
-Status at `45dc624` (spec pull request 84): every finding below is resolved.
+Status at `5281746` (spec pull request 84): every finding below is resolved.
 F3, F5, F6, F7, F12, F13, F14 and F15 are resolved by adopting the SDK's
 provisional choices (P6.5, P5.8 and [S3], P7.18, P3.2 with `target-missing`,
 P6.7, the `sat-read` input in P14.25, and a fixed rule per diagnostic code);
 F1, F2, F4, F8–F11 were resolved earlier. The SDK now follows the spec text
-for each, and the code cites the rules instead of these findings. One new
-finding, F16, is below.
+for each, and the code cites the rules instead of these findings. F16 is
+resolved at `5281746` as proposed (P7.18, T7-076, and the section 13 ruling of
+22 November 2026).
 
 ### F16. P7.18: the `binding` axis when the evidence set holds no entry
 
@@ -46,6 +48,10 @@ SCID bind the `did:og`", which says nothing when there is no genesis entry.
 **Proposed fix:** P7.18 says that with no entry, `binding` is `bound` (nothing
 contradicts it) and the `target-missing` diagnostic carries the gap. The SDK
 reports `bound` in that case, so the T7-076 outcome holds.
+**Resolved at `5281746`:** P7.18 now says that with no log entry `binding` is
+`bound` and the `target-missing` diagnostic carries the gap, and T7-076
+expects `binding` `bound`. Section 13 records the ruling. The SDK already
+behaves this way.
 
 Status at `227bd2c`: the transfer depth covers the Original's publication
 history only, never the transaction that last moved the sat, whose holder
@@ -246,7 +252,7 @@ and `complete`), with envelopes as `inscription` inputs. The SDK reads that
 form, with `complete` true by default and an inscription with no envelope
 input counted as unread (P5.13).
 
-## Matrix coverage (section 12 at 45dc624)
+## Matrix coverage (section 12 at 5281746)
 
 A row counts as covered when a test cites its ID: the vh, host and SDK test
 suites, plus `packages/sdk/scripts/og-vector-regtest.ts` and
