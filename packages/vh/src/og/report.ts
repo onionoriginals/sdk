@@ -53,8 +53,6 @@ export type EvidenceInput = (
   | { kind: "inscription"; source: string; bytes: Uint8Array }
   /** A raw transaction's bytes, as a block explorer serves them (prior-format fixture). */
   | { kind: "transaction"; source: string; bytes: Uint8Array }
-  /** A prior result for the same Original, as report JSON (P7.17). */
-  | { kind: "prior-result"; source: string; bytes: Uint8Array }
   /** An index read of one sat at the tip, as JSON `{network, sat, tip, inscriptions, holder?}` (P9.31). */
   | { kind: "sat-read"; source: string; bytes: Uint8Array }
 ) & {
@@ -81,8 +79,6 @@ export interface EvidenceSet {
   depth?: number | null;
   /** The sats the index read (P9.18): the anchoring sat and each did:btco signer's. */
   sats?: SatRead[];
-  /** A prior result for the same Original (P7.17). */
-  prior?: Report | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,7 +121,7 @@ export interface SignerLabel {
 export const DIAGNOSTIC_CODES = [
   "resource-missing", "resource-mismatch", "signer-history-missing", "signer-version-missing",
   "proof-unchecked", "entry-rejected", "anchoring-sat-not-read", "signer-sat-not-read",
-  "inscription-unverifiable", "publication-waiting", "input-unusable",
+  "inscription-unverifiable", "publication-waiting", "input-unusable", "insufficient-depth",
 ] as const;
 export type DiagnosticCode = (typeof DIAGNOSTIC_CODES)[number];
 
@@ -139,13 +135,6 @@ export interface Diagnostic {
   item: { kind: "resource" | "signer" | "entry" | "sat" | "inscription" | "input"; id: string; versionId?: string };
   /** Text for people; not compared (P14.25). */
   reason: string;
-}
-
-export interface ChangeRecord {
-  kind: "head" | "holder";
-  from: string | { sat: string; address: string | null } | null;
-  to: string | { sat: string; address: string | null } | null;
-  cause: "publication" | "resolved" | "reorganization" | "earlier-anchor" | "evidence";
 }
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -165,28 +154,7 @@ export function sortDiagnostics(ds: Diagnostic[]): Diagnostic[] {
 /** P7.21: `offline` is derived from the diagnostics, never declared. */
 export const offlineFrom = (ds: readonly Diagnostic[]): "self-contained" | "needs-external" => (ds.some((d) => DEPENDENCY_CODES.has(d.code)) ? "needs-external" : "self-contained");
 
-export interface ReportedHolder {
-  sat: string;
-  address: string | null;
-}
-
-/** The holder a report gives: `{sat, address}` when anchored, else null. */
-export const holderOf = (r: Report | null | undefined): ReportedHolder | null => (r?.bitcoin ? { sat: r.bitcoin.sat, address: r.bitcoin.holder.address } : null);
-
-/**
- * P14.25: at most one `head` and one `holder` record against the prior result, head first,
- * none for a kind whose value did not change.
- */
-export function changeRecords(prior: Report | null | undefined, now: { checkpoint: string | null; holder: ReportedHolder | null }, causes: { head: ChangeRecord["cause"]; holder: ChangeRecord["cause"] }): ChangeRecord[] {
-  if (!prior) return [];
-  const out: ChangeRecord[] = [];
-  if (prior.checkpoint !== now.checkpoint) out.push({ kind: "head", from: prior.checkpoint, to: now.checkpoint, cause: causes.head });
-  const before = holderOf(prior);
-  if (JSON.stringify(before) !== JSON.stringify(now.holder)) out.push({ kind: "holder", from: before, to: now.holder, cause: causes.holder });
-  return out;
-}
-
-/** P14.25: two reports are the same when equal as JSON values, ignoring each diagnostic's reason. */
+/** P14.25: two reports are the same when their JCS forms are equal, ignoring each diagnostic's reason. */
 export function sameReport(a: Report, b: Report): boolean {
   const strip = (r: Report) => JSON.stringify(canonical({ ...r, diagnostics: (r.diagnostics ?? []).map(({ reason: _r, ...d }) => d) }));
   return strip(a) === strip(b);
@@ -214,7 +182,6 @@ export interface Report {
   entries?: EntryLabel[];
   signers?: SignerLabel[];
   diagnostics: Diagnostic[];
-  changes: ChangeRecord[];
   bitcoin?: {
     sat: string;
     holder: { address: string | null; uniqueness: "provisional" | { "established-through": number } };
@@ -244,11 +211,16 @@ export function defaultCheck(report: Report): boolean {
   return a.outcome === "verified" && a.history === "valid" && a.authority === "current" && (a.state === "current" || a.state === "valid-as-of");
 }
 
-/** P7.22: the transfer check, for a buyer or recipient of the anchoring sat. */
+/**
+ * P7.22: the transfer check, for a buyer or recipient of the anchoring sat: the default check,
+ * anchored, nothing unverifiable or waiting, no conflicting anchor, and no `insufficient-depth`
+ * diagnostic (every publication the head depends on has the transfer depth, P14.13).
+ */
 export function transferCheck(report: Report): boolean {
   const a = report.axes as Axes;
   return defaultCheck(report) && a.bitcoin === "anchored" && !!report.bitcoin &&
-    report.bitcoin.unverifiable.length === 0 && report.bitcoin.waiting.length === 0 && report.bitcoin.conflictingAnchors.length === 0;
+    report.bitcoin.unverifiable.length === 0 && report.bitcoin.waiting.length === 0 && report.bitcoin.conflictingAnchors.length === 0 &&
+    !report.diagnostics.some((d) => d.code === "insufficient-depth");
 }
 
 const AXIS_VALUES: Record<keyof Axes, readonly string[]> = {

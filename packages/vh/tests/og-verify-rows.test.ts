@@ -243,13 +243,13 @@ describe('operations and forks (§6)', () => {
     expect(axes(r).state).toBe('conflict');
   });
 
-  test('T6-017: with a prior result, a competing branch is a conflict stated against it', async () => {
+  test('T6-017: an evidence set holding a competing branch is a conflict, whatever an earlier report gave; no prior result is an input', async () => {
     const { w, a, b } = await fork();
-    const prior = await w.verify({ logs: [[w.entries[0], a]] });
-    expect(axes(prior).state).toBe('valid-as-of');
-    const r = await w.verify({ logs: [[w.entries[0], a], [w.entries[0], b]], prior });
+    const earlier = await w.verify({ logs: [[w.entries[0], a]] });
+    expect(axes(earlier).state).toBe('valid-as-of');
+    const r = await w.verify({ logs: [[w.entries[0], a], [w.entries[0], b]] });
     expect(axes(r).state).toBe('conflict');
-    expect(r.changes).toEqual([{ kind: 'head', from: a.versionId, to: w.entries[0].versionId, cause: 'evidence' }]);
+    expect(r).not.toHaveProperty('changes');
   });
 
   test('T6-018, T6-019: an author entry superseding an editor-only branch settles it; later editor entries on it are conflicting', async () => {
@@ -552,7 +552,8 @@ describe('evidence and the report (§7)', () => {
     const w = await World.create();
     const old = serializeLog(w.entries).replace('"og:1.0-draft.1"', '"originals:1.0"');
     const r = await verifyOriginal({ original: w.did, inputs: [{ kind: 'log', source: 'old.jsonl', bytes: enc(old) }] });
-    expect(r).toMatchObject({ original: null, checkpoint: null, axes: { outcome: 'unsupported' }, entries: [], signers: [], diagnostics: [], changes: [] });
+    expect(r).toMatchObject({ original: null, checkpoint: null, axes: { outcome: 'unsupported' }, entries: [], signers: [], diagnostics: [] });
+    expect(r).not.toHaveProperty('changes');
   });
 });
 

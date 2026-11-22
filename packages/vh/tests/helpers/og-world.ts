@@ -94,7 +94,7 @@ export class World {
   }
 
   /** The default evidence set: the log, every signer's history and every version's bytes. */
-  evidence(opts: { logs?: OgEntry[][]; signers?: Signer[]; histories?: Array<{ did: string; log: string; source?: string; obtained?: string }>; resources?: Uint8Array[] | false; checkpoint?: string; prior?: Report } = {}): EvidenceSet {
+  evidence(opts: { logs?: OgEntry[][]; signers?: Signer[]; histories?: Array<{ did: string; log: string; source?: string; obtained?: string }>; resources?: Uint8Array[] | false; checkpoint?: string } = {}): EvidenceSet {
     const inputs: EvidenceInput[] = [];
     (opts.logs ?? [this.entries]).forEach((log, i) => inputs.push({ kind: 'log', source: `log-${i}.jsonl`, bytes: enc(serializeLog(log)) }));
     const signers = opts.signers ?? [this.author];
@@ -102,7 +102,7 @@ export class World {
     const notes = histories.map((h, i) => ({ did: h.did, source: h.source ?? `signer-${i}.jsonl`, obtained: h.obtained ?? '2026-11-20T00:00:00Z' }));
     histories.forEach((h, i) => inputs.push({ kind: 'signer-history', source: notes[i].source, bytes: enc(h.log), did: h.did }));
     if (opts.resources !== false) for (const b of opts.resources ?? [...this.resources.values()]) inputs.push({ kind: 'resource', source: `res-${resourceDigest(b)}`, bytes: b });
-    return { original: this.did, checkpoint: opts.checkpoint ?? null, inputs, signerHistories: notes, network: null, tip: null, depth: null, prior: opts.prior ?? null };
+    return { original: this.did, checkpoint: opts.checkpoint ?? null, inputs, signerHistories: notes, network: null, tip: null, depth: null };
   }
 
   verify(opts: Parameters<World['evidence']>[0] = {}): Promise<Report> {

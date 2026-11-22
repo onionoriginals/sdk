@@ -33,7 +33,7 @@ export const utf8 = (s: string) => new TextEncoder().encode(s);
 export function vectorEvidence(dir: string): import('../../src/og/index.js').EvidenceSet {
   const e = vjson(`${dir}/evidence-set.json`);
   return {
-    original: e.original, checkpoint: e.checkpoint, network: e.network, tip: e.tip, depth: e.depth, prior: e.prior,
+    original: e.original, checkpoint: e.checkpoint, network: e.network, tip: e.tip, depth: e.depth,
     signerHistories: e.signerHistories,
     // Each input with the digest the evidence set states for it (P7.17).
     inputs: e.inputs.map((i: { kind: string; source: string; digest: string }) => ({ kind: i.kind, source: i.source, digest: i.digest, bytes: vbytes(i.source) })),

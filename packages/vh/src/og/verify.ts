@@ -10,7 +10,7 @@ import { OriginalsError } from "../errors.js";
 import { isJsonObject, parseJsonLines, type JsonValue } from "../json/index.js";
 import { checkLogStructure, parseLogFile, resourceDigest, versionNumber, isDeactivation, type OgEntry } from "./log.js";
 import { ASSET_LOG_NAME, MANIFEST_NAME, readManifest, readPackageZip, signerDirectory, type Manifest } from "./package.js";
-import { changeRecords, offlineFrom, outcomeOf, reportInputs, sortDiagnostics, type Axes, type ChangeRecord, type Diagnostic, type EntryAuthority, type EntryLabel, type EvidenceInput, type EvidenceSet, type Report, type ReportedHolder, type SignerLabel } from "./report.js";
+import { offlineFrom, outcomeOf, reportInputs, sortDiagnostics, type Axes, type Diagnostic, type EntryAuthority, type EntryLabel, type EvidenceInput, type EvidenceSet, type Report, type SignerLabel } from "./report.js";
 import { OG_METHOD, OgRuleError } from "./rules.js";
 import { checkBinding, latestVersion, listsKey, lookupVersion, verifySignerLog, type SignerHistory } from "./signers.js";
 import { advance, checkTransition, genesisContext, isAnchoringEntry, isEditorEntry, signerMethodOf, stateOf, type BranchContext, type SignerRef } from "./state.js";
@@ -47,8 +47,6 @@ export interface Gathered {
   unsupported?: string;
   /** Inputs that are not used: bytes that do not match their stated digest, or cannot be read as their kind (P7.17). */
   invalidInputs: Array<{ source: string; error: OriginalsError }>;
-  /** The prior result, from the evidence set's `prior` or its `prior-result` input (P7.17). */
-  prior?: Report | null;
 }
 
 const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -63,16 +61,12 @@ function gather(evidence: EvidenceSet): Gathered {
     else g.resources.set(d, bytes);
   };
   const pendingPackagedSigners: Array<{ dir: string; log: Uint8Array; witness?: Uint8Array }> = [];
-  g.prior = evidence.prior ?? null;
   for (const input of evidence.inputs) {
     try {
       if (input.digest !== undefined && input.digest !== resourceDigest(input.bytes)) {
         throw new OgRuleError("P7.17", "INPUT_DIGEST", `the bytes of ${input.source} do not match its stated digest`);
       }
       switch (input.kind) {
-        case "prior-result":
-          g.prior = JSON.parse(decoder.decode(input.bytes)) as Report;
-          break;
         case "log": {
           const parsed = parseLogFile(input.bytes);
           g.copies.push({ source: input.source, values: parsed.values, lineFailure: parsed.failure?.error });
@@ -361,7 +355,7 @@ function authorityOf(ev: Evaluated, histories: Histories): EntryAuthority {
 /**
  * P14.25 (ccf4a69): an `unsupported` report has `original` and `checkpoint`
  * null, `axes` holding `outcome` only, and empty `entries`, `signers`,
- * `diagnostics` and `changes`, and no `bitcoin` member. Why it is unsupported is not a report member;
+ * and `diagnostics`, and no `bitcoin` member. Why it is unsupported is not a report member;
  * callers get it from `unsupportedReason`.
  */
 export function unsupportedReport(evidence: EvidenceSet): Report {
@@ -375,7 +369,6 @@ export function unsupportedReport(evidence: EvidenceSet): Report {
     entries: [],
     signers: [],
     diagnostics: [],
-    changes: [],
   };
 }
 
@@ -418,8 +411,6 @@ export interface OffChainOptions {
    * entry after it, are `ignored`, and the state is valid as of the entry before.
    */
   readSats?: ReadonlySet<string>;
-  /** The causes of the change records against the prior result (P14.25); `evidence` by default. */
-  causes?: { head: ChangeRecord["cause"]; holder: ChangeRecord["cause"] };
 }
 
 export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, opts: OffChainOptions): Promise<Report> {
@@ -599,7 +590,6 @@ export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, 
     entries: labels,
     signers,
     diagnostics: sorted,
-    changes: changeRecords(gathered.prior, { checkpoint, holder: null as ReportedHolder | null }, opts.causes ?? { head: "evidence", holder: "evidence" }),
   };
   if (reason) report.reason = reason;
   return report;
