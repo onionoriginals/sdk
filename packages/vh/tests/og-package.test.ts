@@ -83,6 +83,20 @@ describe('local vector package (T14-076, T14-018)', () => {
   });
 });
 
+describe('signed bytes (P7.2)', () => {
+  test('T7-061: a package holds the signed lines exactly as given, never re-serialised, even when their key order is not JCS', () => {
+    const lines = new TextDecoder().decode(log).trimEnd().split('\n').map((l) => {
+      const e = JSON.parse(l);
+      // The same entry with its members in another order: the same JCS form, the same hashes and proof.
+      return JSON.stringify({ proof: e.proof, state: e.state, versionTime: e.versionTime, versionId: e.versionId, parameters: e.parameters });
+    });
+    const reordered = utf8(lines.join('\n') + '\n');
+    const p = buildPackage({ original: vjson('index.json').original, assetLog: reordered, versionIds, signers: [], resources: {}, missing: [] });
+    expect(bytesEqual(readPackageZip(p.archive)['asset/did.jsonl'], reordered)).toBe(true);
+    expect(bytesEqual(reordered, log)).toBe(false);
+  });
+});
+
 describe('manifest (P14.10)', () => {
   const files = readPackageZip(vbytes('local/package/evidence.zip'));
   const m = JSON.parse(new TextDecoder().decode(files['originals-evidence.json']));
