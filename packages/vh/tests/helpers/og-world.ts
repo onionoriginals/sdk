@@ -1,13 +1,14 @@
 // A small did:og world for verifier tests: did:webvh (or did:vh) signers built with the VH
 // engine, an asset log signed by them, and evidence sets over it.
-import type { ProofSigner } from '../../src/crypto/index.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { localSigner, type ProofSigner } from '../../src/crypto/index.js';
 import type { JsonObject } from '../../src/json/index.js';
 import { serializeLog as serializeVh } from '../../src/log/index.js';
 import {
   prepareGenesis, prepareNext, resourceDigest, serializeLog, signEntry, verifyOriginal,
   type EvidenceInput, type EvidenceSet, type OgEntry, type Report,
 } from '../../src/og/index.js';
-import { seeded, VhAuthor, WebvhAuthor } from './originals.js';
+import { VhAuthor, WebvhAuthor } from './originals.js';
 
 export const enc = (s: string) => new TextEncoder().encode(s);
 export const res = (text: string) => enc(text);
@@ -16,8 +17,10 @@ export const descOf = (b: Uint8Array, mediaType = 'text/plain') => ({ mediaType,
 export type Signer = { did: string; log: () => string; ref: (fragment?: string, versionId?: string) => { did: string; verificationMethod: string; versionId: string }; key: ProofSigner; kind: 'webvh' | 'vh'; handle: WebvhAuthor | VhAuthor };
 
 let seed = 10;
+/** A distinct test key per call, never equal to the helpers' fixed update keys (seeded 90, 91). */
+const freshKey = (): ProofSigner => localSigner('Ed25519', sha256(new TextEncoder().encode(`og-world key ${seed++}`)));
 /** A did:webvh signer with one assertionMethod key, `key-1`. */
-export async function webvhSigner(domain = `s${seed}.example.com`, key: ProofSigner = seeded(seed++)): Promise<Signer> {
+export async function webvhSigner(domain = `s${seed}.example.com`, key: ProofSigner = freshKey()): Promise<Signer> {
   const a = await WebvhAuthor.create([{ fragment: 'key-1', signer: key }], { domain });
   return {
     did: a.did, key, kind: 'webvh', handle: a,
@@ -27,7 +30,7 @@ export async function webvhSigner(domain = `s${seed}.example.com`, key: ProofSig
 }
 
 /** A DIF did:vh signer with one assertionMethod key, `key-1`. */
-export async function vhSigner(key: ProofSigner = seeded(seed++)): Promise<Signer> {
+export async function vhSigner(key: ProofSigner = freshKey()): Promise<Signer> {
   const a = await VhAuthor.create([{ fragment: 'key-1', signer: key }]);
   return {
     did: a.did, key, kind: 'vh', handle: a,
