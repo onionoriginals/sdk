@@ -5,9 +5,10 @@ mainnet anchoring command.
 
 ## Source of truth
 
-The spec is `aviarytech/originals-spec` pull request 69, branch
-`design-review-did-og-core`, head `227bd2c` (retargeted from `6e0e3f9`, then `ccf4a69`, `0c859c0` and `b4f3604`, on 22 November 2026; the vectors are unchanged since `b4f3604`): `spec/*.md` is the core and
-`spec/additions/` is out of scope. Method value `og:1.0-draft.1`. Its
+The spec is `aviarytech/originals-spec` master `3c7b6db`, where pull
+request 69 merged, with pull request 84 (branch `sdk-findings`, head
+`45dc624`, not yet merged), which resolves this plan's open findings.
+`spec/*.md` is the core and `spec/additions/` is out of scope. Method value `og:1.0-draft.1`. Its
 vectors are copied into `packages/vh/tests/fixtures/og-vectors/` (see `PIN.md`
 there); the spec repository's `vectors/tools/check.mjs` is the independent
 second implementation, so no code from the spec's generator is used here.
@@ -27,6 +28,24 @@ The prior format (`originals:1.0`, `did:vh` identifiers) gets outcome
 | 6 | `og/6-anchor-cli` | The SDK's did:og workflow and the mainnet anchoring command, with an end-to-end regtest run |
 
 ## Spec findings
+
+Status at `45dc624` (spec pull request 84): every finding below is resolved.
+F3, F5, F6, F7, F12, F13, F14 and F15 are resolved by adopting the SDK's
+provisional choices (P6.5, P5.8 and [S3], P7.18, P3.2 with `target-missing`,
+P6.7, the `sat-read` input in P14.25, and a fixed rule per diagnostic code);
+F1, F2, F4, F8–F11 were resolved earlier. The SDK now follows the spec text
+for each, and the code cites the rules instead of these findings. One new
+finding, F16, is below.
+
+### F16. P7.18: the `binding` axis when the evidence set holds no entry
+
+T7-076 expects `state` `none` and `outcome` `incomplete` for an evidence set
+with the `did:og` and no log entry. P7.18 makes `outcome` `invalid` whenever
+`binding` is `unbound`, and defines `binding` as "whether the genesis entry and
+SCID bind the `did:og`", which says nothing when there is no genesis entry.
+**Proposed fix:** P7.18 says that with no entry, `binding` is `bound` (nothing
+contradicts it) and the `target-missing` diagnostic carries the gap. The SDK
+reports `bound` in that case, so the T7-076 outcome holds.
 
 Status at `227bd2c`: the transfer depth covers the Original's publication
 history only, never the transaction that last moved the sat, whose holder

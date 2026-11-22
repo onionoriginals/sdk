@@ -5,7 +5,7 @@
  * confirmations, and the holder, all at one tip. Nothing else: no copy of the
  * log, no signer DID host and no resource bytes.
  */
-import { btcoDid, envelopesInWitness, parseTransaction, type BitcoinNetwork, type EvidenceSet, type InscriptionRead } from "@originals/vh/og";
+import { envelopesInWitness, parseTransaction, type BitcoinNetwork, type EvidenceSet, type InscriptionRead } from "@originals/vh/og";
 import type { ChainBackend, OrdExplorer } from "./chain.js";
 
 export interface SatReadBack {
@@ -42,15 +42,25 @@ export async function readSatEvidence(input: { original: string; network: Bitcoi
   }
   if ((await ord.height()) !== height) throw new Error("the explorer's tip moved during the read; read again (P9.31)");
   const tip = { height, hash: await ord.blockhash(height) };
-  const sat = btcoDid(input.network, input.sat);
+  // The index read as the sat-read evidence input P14.25 defines, with the envelopes as inscription inputs.
+  const satRead = {
+    network: input.network,
+    sat: Number(input.sat),
+    tip,
+    complete: true,
+    holder: holder === null ? null : { address: holder },
+    inscriptions: reads.map((r) => ({ id: r.id, height: r.height, txIndex: r.txIndex, inscriptionIndex: r.inscriptionIndex, confirmations: tip.height - r.height + 1 })),
+  };
   const evidence: EvidenceSet = {
     original: input.original,
     checkpoint: null,
-    inputs: reads.map((r) => ({ kind: "inscription" as const, source: `index:${r.id}`, bytes: r.envelope })),
+    inputs: [
+      { kind: "sat-read" as const, source: `ord:${ord.base}/sat/${input.sat}`, bytes: new TextEncoder().encode(JSON.stringify(satRead)) },
+      ...reads.map((r) => ({ kind: "inscription" as const, source: `index:${r.id}`, bytes: r.envelope })),
+    ],
     network: input.network,
     tip,
     depth: input.depth ?? 1,
-    sats: [{ sat, index: `ord ${ordVersion} at ${ord.base}`, complete: true, holder, inscriptions: reads }],
   };
   return { evidence, ordVersion, inscriptions: reads };
 }

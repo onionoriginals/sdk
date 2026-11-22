@@ -63,16 +63,19 @@ async function main() {
     // The expected report, with only chain-dependent values substituted.
     const expected = vjson('bitcoin/expected-report.json');
     const chain = vjson('bitcoin/chain.json');
+    const vectorRead = vjson('bitcoin/sat-read.json');
     const [part1, part2] = read.inscriptions;
     let text = JSON.stringify(expected)
-      .replaceAll(`did:btco:reg:${chain.sat}`, BTCO)
+      .replaceAll(`did:btco:reg:${vectorRead.sat}`, BTCO)
       .replaceAll(e4v.versionId, e4.versionId)
       .replaceAll(chain.inscriptions[0].id, part1.id)
       .replaceAll(chain.inscriptions[1].id, part2.id)
       .replaceAll(resourceDigest(env2v), resourceDigest(env2))
-      .replaceAll(chain.holder.address, holder);
+      .replaceAll(vectorRead.holder.address, holder);
     const want = JSON.parse(text);
     want.evidence.tip = read.evidence.tip;
+    // The sat-read input is the index read on this chain: its source and digest are chain-dependent.
+    want.evidence.inputs = want.evidence.inputs.map((i: { kind: string }) => (i.kind === 'sat-read' ? report.evidence.inputs.find((x) => x.kind === 'sat-read') : i));
     for (const e of want.entries) e.block = part2.height;
     const diffs: string[] = [];
     const walk = (a: unknown, b: unknown, path: string) => {
