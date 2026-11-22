@@ -25,6 +25,6 @@
   },
   "entries": [],
   "signers": [],
-  "missing": [],
-  "dependencies": []
+  "diagnostics": [],
+  "changes": []
 }

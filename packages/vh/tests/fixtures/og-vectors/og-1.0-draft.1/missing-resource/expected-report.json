@@ -1,0 +1,78 @@
+{
+  "type": "OriginalsVerificationReport",
+  "profile": "og:1.0-draft.1",
+  "original": "did:og:QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW",
+  "checkpoint": "2-QmU36PtMBuoUaiC8To9eiE5ooy8xgEPBwjvptzdx27bHY2",
+  "evidence": {
+    "inputs": [
+      {
+        "kind": "log",
+        "source": "missing-resource/asset/did.jsonl",
+        "digest": "zQmUqGw6N8tPAsGS6DogBuU5iKVeaSvnwERUeKiiaKnuTRW"
+      },
+      {
+        "kind": "signer-history",
+        "source": "missing-resource/author/did.jsonl",
+        "digest": "zQmfXJB3kVg7jeL7HjvrTvwy5bcPEyPQP5bkLjTEEUJxorv"
+      },
+      {
+        "kind": "resource",
+        "source": "missing-resource/resources/v2.md",
+        "digest": "zQmQFt79upGpNBqAnKak3f3XaUrgy6gevkrvEoGbJJCGLTo"
+      }
+    ],
+    "network": null,
+    "tip": null,
+    "depth": null
+  },
+  "axes": {
+    "outcome": "verified",
+    "binding": "bound",
+    "history": "valid",
+    "identity": "complete",
+    "authority": "current",
+    "state": "valid-as-of",
+    "availability": "partial",
+    "offline": "needs-external",
+    "bitcoin": "not-read"
+  },
+  "entries": [
+    {
+      "versionId": "1-QmdXPmoxmFpAtqK3ZLVusnXZM422SAou6dRz1mg6i8HrrD",
+      "status": "accepted",
+      "authority": "current-key",
+      "endorsed": true,
+      "ordering": "claimed"
+    },
+    {
+      "versionId": "2-QmU36PtMBuoUaiC8To9eiE5ooy8xgEPBwjvptzdx27bHY2",
+      "status": "accepted",
+      "authority": "current-key",
+      "endorsed": false,
+      "ordering": "claimed"
+    }
+  ],
+  "signers": [
+    {
+      "did": "did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example",
+      "role": "author",
+      "latestVersionId": "1-QmNjhx8xG4JD9hCswSc1nSZncxuSGzex37ica8BoyHEmrq",
+      "source": "missing-resource/author/did.jsonl",
+      "obtained": "2026-01-06T00:00:00Z",
+      "freshness": "not-established"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "resource-missing",
+      "rule": "P7.4",
+      "item": {
+        "kind": "resource",
+        "id": "zQmdvFJ4gaexH7x5R8H7o6Zbykni8wMNyN1ezdMLrVEa9Ng",
+        "versionId": "1-QmdXPmoxmFpAtqK3ZLVusnXZM422SAou6dRz1mg6i8HrrD"
+      },
+      "reason": "The evidence set does not hold the bytes of this resource version."
+    }
+  ],
+  "changes": []
+}

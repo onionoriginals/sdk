@@ -1,0 +1,12 @@
+{
+  "synthetic": true,
+  "note": "Synthetic: a reorganization from block 101 replaced the blocks that held the anchoring publication. The index reads the sat in full at the new tip and lists no inscription on it (P9.31, P9.35).",
+  "network": "regtest",
+  "ordRelease": "0.29.1",
+  "sat": 1234567890,
+  "tip": {
+    "height": 111,
+    "hash": "219db0d5699548495cda093cf13a61e44c17c42028ad2ade4ac404191870d8c5"
+  },
+  "inscriptions": []
+}

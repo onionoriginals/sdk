@@ -77,20 +77,19 @@
       "freshness": "established"
     }
   ],
-  "missing": [
+  "diagnostics": [
     {
-      "kind": "resource",
-      "version": 1,
-      "digest": "zQmdvFJ4gaexH7x5R8H7o6Zbykni8wMNyN1ezdMLrVEa9Ng",
-      "versionId": "1-QmdXPmoxmFpAtqK3ZLVusnXZM422SAou6dRz1mg6i8HrrD"
+      "code": "resource-missing",
+      "rule": "P7.4",
+      "item": {
+        "kind": "resource",
+        "id": "zQmdvFJ4gaexH7x5R8H7o6Zbykni8wMNyN1ezdMLrVEa9Ng",
+        "versionId": "1-QmdXPmoxmFpAtqK3ZLVusnXZM422SAou6dRz1mg6i8HrrD"
+      },
+      "reason": "The evidence set does not hold the bytes of this resource version."
     }
   ],
-  "dependencies": [
-    {
-      "kind": "anchoring-sat",
-      "did": "did:btco:reg:1234567890"
-    }
-  ],
+  "changes": [],
   "bitcoin": {
     "sat": "did:btco:reg:1234567890",
     "holder": {

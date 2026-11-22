@@ -52,6 +52,6 @@
       "freshness": "not-established"
     }
   ],
-  "missing": [],
-  "dependencies": []
+  "diagnostics": [],
+  "changes": []
 }
