@@ -359,10 +359,11 @@ export function checkTransition(ctx: BranchContext, entry: OgEntry, index: numbe
     }
   }
 
-  // Previews (P9.30).
+  // Previews (P9.30): a new version is P4.4's predicate, a digest change or a mediaType change alone.
   const anchoring = isAnchoringEntry(ctx, entry);
-  if (!anchoring && !digestChanged && s.asset.preview && !same(s.asset.preview, p.asset.preview)) {
-    reject("P9.30", "PREVIEW_CHANGED", p.asset.preview ? "an entry that does not change the digest carries its parent's preview or none" : "no preview is named until an entry changes the digest");
+  const newVersion = digestChanged || typeChanged;
+  if (!anchoring && !newVersion && s.asset.preview && !same(s.asset.preview, p.asset.preview)) {
+    reject("P9.30", "PREVIEW_CHANGED", p.asset.preview ? "an entry that adds no version carries its parent's preview or none" : "no preview is named until an entry adds a version");
   }
 
   // Editor entries (P5.16).

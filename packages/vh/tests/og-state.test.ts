@@ -335,6 +335,17 @@ describe('body modes and previews (P9.30, P14.5)', () => {
     expect(walk([g, e2, a, dropped, await next(dropped, (s) => { s.asset.name = 'y'; s.asset.preview = p; s.asset.body = 'preview'; })])).toMatchObject({ code: 'PREVIEW_CHANGED' });
   });
 
+  test('T9-134: a mediaType-only change is a new version: its preview may differ from, equal or drop the parent\'s (P9.30, P4.4)', async () => {
+    const supplied = desc(utf8('author preview'), 'text/plain');
+    const g = await genesis(genesisState({}, { resource: desc(v1, 'text/plain') }));
+    const a = await next(g, (s) => { s.asset.aliases = [BTCO]; s.asset.body = 'preview'; s.asset.preview = supplied; });
+    const other = desc(utf8('new preview'), 'text/plain');
+    for (const preview of [other, supplied, undefined]) {
+      const e = await next(a, (s) => { newVersion(s, v1, 'text/markdown'); if (preview) s.asset.preview = preview; else { delete s.asset.preview; s.asset.body = 'none'; } });
+      expect(walk([g, a, e])).toBeUndefined();
+    }
+  });
+
   test('T5-027, T5-031: editors change preview or body only with a resource grant and a new version', async () => {
     const p = desc(webp, 'image/webp');
     const [g, e2, a] = await anchored((s) => { s.asset.body = 'preview'; s.asset.preview = p; s.asset.editors = [grant(EDITOR, { resource: true }), grant(EDITOR2, { metadata: true })]; });
