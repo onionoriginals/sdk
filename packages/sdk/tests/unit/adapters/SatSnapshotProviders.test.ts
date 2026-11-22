@@ -17,6 +17,8 @@ function fixture(kind: 'quicknode' | 'regtest', options: {
   info?: Record<string, unknown>; status?: Record<string, unknown>; statusAfter?: Record<string, unknown>; sat?: Record<string, unknown>;
   rawContent?: boolean; missingMethod?: string; wrapContent?: boolean; blockTxs?: string[]; coreAfterHash?: string; indexAfterHash?: string;
   snapshotBudget?: { timeoutMs?: number; maxRequests?: number }; delayStatusMs?: number;
+  /** Hold every index status call until this resolves: a dependency that stalls until the test releases it. */
+  stallStatus?: Promise<void>;
   metadataHttpStatus?: number; metadataHttpBody?: string; delayMetadataMs?: number; maxJsonBytes?: number; noBody?: boolean;
 } = {}) {
   const calls: Array<{ method: string; params: unknown[] }> = [];
@@ -33,6 +35,7 @@ function fixture(kind: 'quicknode' | 'regtest', options: {
       const { method, params } = await req.json() as { method: string; params: unknown[] };
       calls.push({ method, params });
       if (method === 'ord_getStatus' && options.delayStatusMs) await Bun.sleep(options.delayStatusMs);
+      if (method === 'ord_getStatus' && options.stallStatus) await options.stallStatus;
       if (method === options.missingMethod) return Response.json({ error: { code: -32601, message: 'Method not found' } });
       let result: unknown;
       switch (method) {
@@ -54,6 +57,7 @@ function fixture(kind: 'quicknode' | 'regtest', options: {
     if (path === '/status') {
       calls.push({ method: 'status', params: [] });
       if (options.delayStatusMs) await Bun.sleep(options.delayStatusMs);
+      if (options.stallStatus) await options.stallStatus;
       return Response.json(++statuses > 1 ? { ...status, ...options.statusAfter } : status);
     }
     calls.push({ method: path, params: [] });
@@ -102,14 +106,29 @@ for (const kind of ['quicknode', 'regtest'] as const) describe(`${kind} sat snap
     expect(calls).toHaveLength(4);
   });
   test('bounds a stalled dependency by the snapshot deadline and stops subsequent reads', async () => {
-    // The stalled call takes 1,000 ms; the 20 ms deadline must end the read well before it. The
-    // margins are wide so that a loaded CI runner's scheduling delay cannot fail the test.
-    const { provider, calls } = fixture(kind, { snapshotBudget: { timeoutMs: 20 }, delayStatusMs: 1_000 });
-    const started = performance.now();
-    await expect(provider.getSatSnapshot('123')).rejects.toMatchObject({ code: 'SAT_SNAPSHOT_BUDGET_EXCEEDED' });
-    expect(performance.now() - started).toBeLessThan(500);
-    await Bun.sleep(1_100);
-    expect(calls).toHaveLength(2);
+    // The index status call stalls until the test releases it, so the read can end only by its
+    // deadline. Whether the deadline fires before or after the stalled call is sent depends on the
+    // runner's scheduling, so the test asserts what holds either way: the read is rejected by the
+    // budget, and the calls made, before and after the stall is released, are a prefix of
+    // [first call, stalled call]: nothing past the stalled dependency is ever read.
+    let release!: () => void;
+    const stallStatus = new Promise<void>((r) => { release = r; });
+    const { provider, calls } = fixture(kind, { snapshotBudget: { timeoutMs: 20 }, stallStatus });
+    try {
+      await expect(provider.getSatSnapshot('123')).rejects.toMatchObject({ code: 'SAT_SNAPSHOT_BUDGET_EXCEEDED' });
+      const statusMethod = kind === 'quicknode' ? 'ord_getStatus' : 'status';
+      // A prefix of [first call, stalled call]: the deadline may fire before either is sent, and a
+      // request already in flight can reach the server after the rejection.
+      const isPrefix = (methods: string[]) => methods.length <= 2 && !methods.slice(0, -1).includes(statusMethod) && (methods.length < 2 || methods[1] === statusMethod);
+      expect(isPrefix(calls.map((c) => c.method))).toBe(true);
+      release();
+      // Let the released response and any follow-up work run: the read never goes past the stalled call.
+      for (let i = 0; i < 5; i++) await Bun.sleep(0);
+      await Bun.sleep(20);
+      expect(isPrefix(calls.map((c) => c.method))).toBe(true);
+    } finally {
+      release();
+    }
   });
   test('retains exact body and raw CBOR with Core creation order and ownership', async () => {
     const { provider, calls } = fixture(kind);
