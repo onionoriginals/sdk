@@ -61,12 +61,12 @@ export class Chain {
   }
 
   /** The P9.18 evidence set: every sat's inscriptions at the tip, read by one index; plus any extra inputs. */
-  evidence(original: string, opts: { sats?: string[]; reads?: SatRead[]; extra?: EvidenceSet['inputs']; network?: EvidenceSet['network']; prior?: EvidenceSet['prior']; originalsIndex?: EvidenceSet['originalsIndex'] } = {}): EvidenceSet {
+  evidence(original: string, opts: { sats?: string[]; reads?: SatRead[]; extra?: EvidenceSet['inputs']; network?: EvidenceSet['network']; originalsIndex?: EvidenceSet['originalsIndex']; tipHeight?: number } = {}): EvidenceSet {
     const reads = opts.reads ?? (opts.sats ?? [...this.sats.keys()]).map((s) => this.read(s));
     const inputs: EvidenceSet['inputs'] = reads.flatMap((r) => r.inscriptions.map((i) => ({ kind: 'inscription' as const, source: `index:${i.id}`, bytes: i.envelope })));
     return {
       original, checkpoint: null, inputs: [...inputs, ...(opts.extra ?? [])], network: opts.network ?? 'regtest',
-      tip: { height: this.height + 10, hash: 'f'.repeat(64) }, depth: 1, sats: reads, prior: opts.prior ?? null, originalsIndex: opts.originalsIndex ?? null,
+      tip: { height: opts.tipHeight ?? this.height + 10, hash: 'f'.repeat(64) }, depth: 1, sats: reads, originalsIndex: opts.originalsIndex ?? null,
     };
   }
 }

@@ -12,7 +12,7 @@ import { isJsonObject, type JsonObject } from "../json/index.js";
 import { decodeCbor } from "../originals/cbor.js";
 import { checkChainLink, checkEntryShape, checkParameters, checkStrictValue, parseLogFile, resourceDigest, versionNumber, type OgEntry } from "./log.js";
 import { envelopesInWitness, parseEnvelope, parseTransaction, readInscription, type InscriptionReading, type SignerHistoryItem } from "./inscription.js";
-import { changeRecords, offlineFrom, outcomeOf, reportInputs, sortDiagnostics, type Axes, type ChangeRecord, type Diagnostic, type EntryLabel, type EvidenceSet, type InscriptionRead, type Report, type SatRead, type SignerLabel } from "./report.js";
+import { offlineFrom, outcomeOf, reportInputs, sortDiagnostics, type Axes, type Diagnostic, type EntryLabel, type EvidenceSet, type InscriptionRead, type Report, type SatRead, type SignerLabel } from "./report.js";
 import { OG_LIMITS, OG_METHOD, OgRuleError, reject } from "./rules.js";
 import { checkBinding, listsKey, lookupVersion, verifySignerLog, type SignerHistory, type SignerVersion } from "./signers.js";
 import { advance, btcoDid, checkTransition, genesisContext, isEditorEntry, parseBtco, signerMethodOf, stateOf, type BitcoinNetwork, type BranchContext } from "./state.js";
@@ -455,7 +455,6 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
     .sort((a, b) => chainOrder((a.outcome.anchor?.pub ?? a.outcome.undetermined)!.final, (b.outcome.anchor?.pub ?? b.outcome.undetermined)!.final));
   const first = candidates[0];
 
-  const prior = gathered.prior ?? null;
   if (!first || first.outcome.undetermined) {
     // Not anchored on any sat read, or missing evidence: what the copies show, with the Bitcoin result.
     // An undetermined anchoring publication's entries are a copy of the log too (P7.14), read without the anchor.
@@ -463,9 +462,7 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
     const withPending = pending ? { ...gathered, copies: [...gathered.copies, { source: `inscribed:${pending.final.id}`, values: pending.readings.flatMap((p) => p.reading.metadata.entries) }] } : gathered;
     // Sats read in full at the tip with no anchoring publication of this Original (P9.5).
     const readSats = new Set([...merged.values()].filter((m) => !m.disputed && m.complete && !m.inscriptions.some((i) => i.unread)).map((m) => m.sat));
-    // The prior anchor's sat, read in full without it: a reorganization removed it (P9.5, P9.36).
-    const lost = !!prior?.bitcoin && readSats.has(prior.bitcoin.sat);
-    const report = await verifyOffChain(evidence, withPending, { bitcoinRead: true, readSats, causes: lost ? { head: "reorganization", holder: "reorganization" } : { head: "evidence", holder: "evidence" } });
+    const report = await verifyOffChain(evidence, withPending, { bitcoinRead: true, readSats });
     const a = report.axes as Axes;
     const extra: Diagnostic[] = [];
     // A sat whose indexes disagree, or that is not read in full, and that carries Originals inscriptions or an anchor the copies name.
@@ -481,8 +478,6 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
     else a.bitcoin = "not-anchored";
     a.offline = offlineFrom(report.diagnostics);
     a.outcome = outcomeOf(a);
-    // With the anchoring sat not read in full, no holder is claimed either way (T9-136).
-    if (a.bitcoin === "missing-evidence") report.changes = report.changes.filter((ch) => ch.kind !== "holder");
     return report;
   }
 
@@ -499,7 +494,8 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
   anchor.judged.entries.forEach((e, k) => inscribed.push({ entry: e, block: anchor.pub.final.height, ordering: k < anchor.judged.entries.length - 1 ? "existed-by-block" : "chain-ordered" }));
   if (anchor.judged.fullBody) bodies.set(resourceDigest(anchor.judged.fullBody), anchor.judged.fullBody);
   let blockedOn: { inscription: string; head: string } | undefined;
-  const acceptedInscriptions: string[] = anchor.pub.parts.map((p) => p.id);
+  // Every publication the reported head depends on, for the transfer depth (P7.22).
+  const headPublications: Publication[] = [anchor.pub];
   const afterAnchor = first.publications.filter((p) => chainOrder(p.final, anchor.pub.final) > 0);
   for (const pub of afterAnchor) {
     if (blockedOn) {
@@ -523,7 +519,7 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
     }
     signers = judged.signers;
     head = judged.head!;
-    acceptedInscriptions.push(...pub.parts.map((p) => p.id));
+    headPublications.push(pub);
     inscribed.push({ entry: judged.entries[0], block: pub.final.height, ordering: "chain-ordered" });
     if (judged.fullBody) bodies.set(resourceDigest(judged.fullBody), judged.fullBody);
   }
@@ -567,6 +563,11 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
   }
   for (const w of waiting) diagnostics.push({ code: "publication-waiting", rule: "P9.36", item: { kind: "inscription", id: w.inscription }, reason: `It waits on ${w.waitsOn}.` });
   for (const i of gathered.invalidInputs) diagnostics.push({ code: "input-unusable", rule: "P7.17", item: { kind: "input", id: i.source }, reason: i.error.message });
+  // P7.22, P14.13: a publication's confirmations are the tip's height less its final part's block height, plus one.
+  for (const pub of headPublications) {
+    const n = evidence.tip ? evidence.tip.height - pub.final.height + 1 : pub.final.confirmations;
+    if (n < OG_LIMITS.transferDepth) diagnostics.push({ code: "insufficient-depth", rule: "P7.22", item: { kind: "inscription", id: pub.parts[0].id }, reason: `The publication has ${n} confirmations at the tip, fewer than the transfer depth of ${OG_LIMITS.transferDepth}.` });
+  }
   const sortedDiagnostics = sortDiagnostics(diagnostics);
 
   // Signers relied on (P7.8): inscribed histories, freshness established by chain order.
@@ -604,32 +605,13 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
     entries: labels,
     signers: signerLabels,
     diagnostics: sortedDiagnostics,
-    changes: [],
     bitcoin: {
       sat: anchorSat.sat,
       holder: { address: anchorSat.holder, uniqueness },
       conflictingAnchors, unverifiable, waiting,
     },
   };
-  report.changes = changeRecords(prior, { checkpoint: report.checkpoint, holder: { sat: anchorSat.sat, address: anchorSat.holder } }, anchoredCauses(prior, anchorSat.sat, report, acceptedInscriptions, conflictingAnchors));
   return report;
-}
-
-/** The cause of each change against the prior result (P14.25, P9.36, P9.16, P9.5). */
-function anchoredCauses(prior: Report | null, sat: string, now: Report, accepted: string[], conflicting: Array<{ sat: string }>): { head: ChangeRecord["cause"]; holder: ChangeRecord["cause"] } {
-  if (!prior?.bitcoin) return { head: "evidence", holder: "evidence" };
-  if (prior.bitcoin.sat !== sat) {
-    // An earlier anchor on another sat now wins (P9.16).
-    const c = conflicting.some((x) => x.sat === prior.bitcoin!.sat) ? "earlier-anchor" : "evidence";
-    return { head: c, holder: c };
-  }
-  const priorHeadNow = now.entries.find((e) => e.versionId === prior.checkpoint);
-  let head: ChangeRecord["cause"];
-  if (prior.bitcoin.unverifiable.some((u) => accepted.includes(u.inscription))) head = "resolved";
-  else if (priorHeadNow?.status === "accepted") head = "publication";
-  else if (prior.checkpoint && !priorHeadNow) head = "reorganization";
-  else head = "evidence";
-  return { head, holder: head === "reorganization" ? "reorganization" : "evidence" };
 }
 
 /** `sat-read` inputs (P9.31): JSON `{network, sat, tip, inscriptions, holder?, complete?}`; envelopes come from the inscription inputs. */

@@ -46,10 +46,13 @@ export function jcsOrdered(value: JsonValue): JsonValue {
 }
 
 /**
- * The metadata's CBOR (P14.12): members in the order entries, signers, part;
- * each signers item in the order did, log, witness; each entry and signer log
- * entry with its members in the order of its JCS form. ord's JSON-to-CBOR
- * mapping (PROVISIONAL): text keys, shortest integers, narrowest exact floats.
+ * The metadata's CBOR (P14.12). Map members may be in any order at every
+ * level, and readers accept any order (originals-spec b4f3604); this writer
+ * writes the members in the order entries, signers, part, and each entry and
+ * signer log entry in JCS order, so the same publication gives the same
+ * bytes. Hashes and proofs never cover these bytes, only the JCS form of the
+ * decoded JSON. ord's JSON-to-CBOR mapping (PROVISIONAL): text keys,
+ * shortest integers, narrowest exact floats.
  */
 export function encodeMetadata(m: Metadata, options: { keepOrder?: boolean } = {}): Uint8Array {
   const order = options.keepOrder ? (v: JsonValue) => v : jcsOrdered;
