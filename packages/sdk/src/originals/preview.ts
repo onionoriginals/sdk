@@ -156,7 +156,10 @@ const fail = (reason: PreviewFailure["reason"], message: string): PreviewResult 
  * is retried with a fresh instance after the waits in `PREVIEW_CODEC_RETRY_DELAYS_MS`
  * (`PREVIEW_CODEC_ATTEMPTS` tries in all; `configurePreviewCodecs` can change them). If
  * memory is still short, this throws `limit-exceeded`
- * `PREVIEW_RUNTIME_EXHAUSTED`, so no caller silently names no preview.
+ * `PREVIEW_RUNTIME_EXHAUSTED`, so no caller silently names no preview. A WASM
+ * trap is treated the same way: retried on a fresh instance, and taken as the
+ * image's only when it recurs identically there; otherwise this throws
+ * `PREVIEW_RUNTIME_FAULT`. A `failed` result is only ever the image's.
  */
 export async function generateImagePreview(bytes: Uint8Array, mediaType: string, options: GeneratePreviewOptions = {}): Promise<PreviewResult> {
   if (!isImageMediaType(mediaType)) {
@@ -173,7 +176,7 @@ export async function generateImagePreview(bytes: Uint8Array, mediaType: string,
     if (format !== "svg") checkPixels(format.toUpperCase(), dimensions(bytes, format));
     decoded = await decode(bytes, format);
   } catch (error) {
-    if (error instanceof OriginalsError && error.code === "PREVIEW_RUNTIME_EXHAUSTED") throw error;
+    if (error instanceof OriginalsError && (error.code === "PREVIEW_RUNTIME_EXHAUSTED" || error.code === "PREVIEW_RUNTIME_FAULT")) throw error;
     if (exhausted(error)) throw runtimeExhausted(error);
     if (error instanceof TooLarge) return fail("undecodable", `${error.message}; no preview is named (P9.30)`);
     if (error instanceof OriginalsError && error.code === "PREVIEW_CODEC_UNAVAILABLE") return fail("undecodable", error.message);
@@ -438,13 +441,15 @@ function once<T>(key: string, load: () => Promise<T>): Promise<T> {
 }
 
 /**
- * The default waits before each retry of a codec step when WASM memory runs out: 250 ms, 1 s,
- * then 4 s, about 5 s in all. Generous for a loaded machine (a runtime that had run out was seen to
- * free memory about half a second after a collection), and never spent when memory is available.
+ * The default waits before each retry of a codec step on a fresh instance: 250 ms, 1 s, then 4 s,
+ * about 5 s in all. Generous for a loaded machine (a runtime that had run out of WASM memory was
+ * seen to free it about half a second after a collection), and never spent when a step succeeds.
  */
 export const PREVIEW_CODEC_RETRY_DELAYS_MS: readonly number[] = Object.freeze([250, 1000, 4000]);
-/** How many times a codec step is tried by default, each with a fresh instance, when WASM memory runs out. */
+/** How many times a codec step is tried by default, each retry on a fresh instance. */
 export const PREVIEW_CODEC_ATTEMPTS = PREVIEW_CODEC_RETRY_DELAYS_MS.length + 1;
+
+const messageOf = (error: unknown) => (error instanceof Error ? `${error.name}: ${error.message}` : String(error));
 
 /**
  * Whether an error is the WASM runtime running out of memory: no memory for a new
@@ -452,14 +457,17 @@ export const PREVIEW_CODEC_ATTEMPTS = PREVIEW_CODEC_RETRY_DELAYS_MS.length + 1;
  * process at that moment, never of the image.
  */
 export function exhausted(error: unknown): boolean {
-  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-  return /out of memory|cannot allocate|allocation failed|Aborted\(OOM\)|enlarge memory|Memory\.grow|WebAssembly\.Memory/i.test(message);
+  return /out of memory|cannot allocate|allocation failed|Aborted\(OOM\)|enlarge memory|Memory\.grow|WebAssembly\.Memory/i.test(messageOf(error));
 }
 
 const retryDelays = () => config.retryDelaysMs ?? PREVIEW_CODEC_RETRY_DELAYS_MS;
 
 function runtimeExhausted(error: unknown): OriginalsError {
   return new OriginalsError("limit-exceeded", "PREVIEW_RUNTIME_EXHAUSTED", `the WASM runtime ran out of memory making the preview (${error instanceof Error ? error.message : String(error)}), after ${retryDelays().length + 1} attempts with fresh codec instances; this is not a property of the image: try again with more memory free (P9.30)`);
+}
+
+function runtimeFault(errors: unknown[]): OriginalsError {
+  return new OriginalsError("unavailable-bytes", "PREVIEW_RUNTIME_FAULT", `the preview codec failed differently on ${errors.length} fresh instances (${errors.map(messageOf).join("; ")}), so the failure is not taken as the image's; no preview is chosen silently: try again (P9.30)`);
 }
 
 /** Collect garbage where the runtime allows it, then wait `ms`, so unreachable WASM instances are freed before a retry. */
@@ -478,29 +486,38 @@ export function setPreviewCodecFault(fault: ((key: string) => void) | undefined)
 }
 
 /**
- * Run `use` on the codec `key`. When WASM memory runs out, in loading the instance or in
- * using it, the instance is discarded and the step retried with a fresh one, after a
- * reclaim. Any other error is the image's: the instance is discarded too, and the error
- * thrown as it is.
+ * Run `use` on the codec `key`, so that the same input gives the same result whatever ran before.
+ *
+ * - An instance that threw, for any reason, is discarded: it may be left mid-call (an Emscripten
+ *   abort or a WASM trap leaves it unusable), so what one image did never reaches the next.
+ * - WASM memory running out is retried on a fresh instance after each wait in
+ *   `PREVIEW_CODEC_RETRY_DELAYS_MS`; still short after the last, it throws
+ *   `PREVIEW_RUNTIME_EXHAUSTED`.
+ * - Any other error, a trap included, is the image's only when it recurs identically on a fresh
+ *   instance: it is then thrown as it is (the caller reports the image undecodable). Errors that
+ *   differ on every fresh instance throw `PREVIEW_RUNTIME_FAULT`: no `failed` result is reported
+ *   for a fault that was never shown to be the image's.
  */
 async function withCodec<M, T>(key: string, load: () => Promise<M>, use: (codec: M) => T | Promise<T>): Promise<T> {
-  let last: unknown;
   const delays = retryDelays();
+  const errors: unknown[] = [];
   for (let attempt = 0; attempt <= delays.length; attempt++) {
+    const fresh = !codecs.has(key);
     try {
       const codec = await once(key, load);
       beforeCodecStep?.(key);
       return await use(codec);
     } catch (error) {
-      // An instance that threw may be left mid-call (an Emscripten abort leaves it unusable):
-      // it is never used again, so what one image does cannot change the next one's result.
       codecs.delete(key);
-      if (!exhausted(error)) throw error;
-      last = error;
+      const previous = errors[errors.length - 1];
+      errors.push(error);
+      if (!exhausted(error) && fresh && previous !== undefined && !exhausted(previous) && messageOf(previous) === messageOf(error)) throw error;
       if (attempt < delays.length) await reclaim(delays[attempt]);
     }
   }
-  throw runtimeExhausted(last);
+  const last = errors[errors.length - 1];
+  if (exhausted(last)) throw runtimeExhausted(last);
+  throw runtimeFault(errors);
 }
 
 type DecodeModule = { decode(data: ArrayBuffer | ArrayBufferView, ...rest: unknown[]): Rgba | null };
@@ -508,6 +525,8 @@ type DecodeModule = { decode(data: ArrayBuffer | ArrayBufferView, ...rest: unkno
 async function decode(bytes: Uint8Array, format: ImageFormat): Promise<{ image: Rgba; firstFrameOnly: boolean }> {
   const copy = new Uint8Array(bytes);
   if (format === "png") {
+    // wasm-bindgen keeps one PNG instance per process, so a retry here runs on that same instance;
+    // the Emscripten decoders (JPEG, WebP, AVIF) and the encoder get a fresh one each time.
     const load = async () => {
       const m = await import("@jsquash/png/decode.js");
       await m.init((await nodeWasm("@jsquash/png/codec/pkg/squoosh_png_bg.wasm")));
@@ -518,7 +537,7 @@ async function decode(bytes: Uint8Array, format: ImageFormat): Promise<{ image: 
   if (format === "jpeg") {
     const load = async () => emscripten<DecodeModule>((await import("@jsquash/jpeg/codec/dec/mozjpeg_dec.js")).default, "@jsquash/jpeg/codec/dec/mozjpeg_dec.wasm");
     // Honour the EXIF orientation, as a viewer shows it.
-    return { image: required(await withCodec("jpeg", load, (jpeg) => jpeg.decode(new Uint8Array(copy), true))), firstFrameOnly: false };
+    return { image: await withCodec("jpeg", load, (jpeg) => required(jpeg.decode(new Uint8Array(copy), true))), firstFrameOnly: false };
   }
   if (format === "webp") {
     const load = async () => emscripten<DecodeModule>((await import("@jsquash/webp/codec/dec/webp_dec.js")).default, "@jsquash/webp/codec/dec/webp_dec.wasm");
@@ -526,11 +545,11 @@ async function decode(bytes: Uint8Array, format: ImageFormat): Promise<{ image: 
     // The first frame is sized on its own: the canvas does not bound it.
     if (frame) checkPixels("WebP frame", dimensions(frame, "webp"));
     const input = frame ?? copy;
-    return { image: required(await withCodec("webp", load, (webp) => webp.decode(new Uint8Array(input)))), firstFrameOnly: frame !== undefined };
+    return { image: await withCodec("webp", load, (webp) => required(webp.decode(new Uint8Array(input)))), firstFrameOnly: frame !== undefined };
   }
   if (format === "avif") {
     const load = async () => emscripten<DecodeModule>((await import("@jsquash/avif/codec/dec/avif_dec.js")).default, "@jsquash/avif/codec/dec/avif_dec.wasm");
-    return { image: required(await withCodec("avif", load, (avif) => avif.decode(new Uint8Array(copy), 8))), firstFrameOnly: false };
+    return { image: await withCodec("avif", load, (avif) => required(avif.decode(new Uint8Array(copy), 8))), firstFrameOnly: false };
   }
   if (format === "gif") return decodeGif(copy);
   return rasteriseSvg(copy);

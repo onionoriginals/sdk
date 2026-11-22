@@ -15,6 +15,11 @@ jobs:
         with:
           bun-version: 1.3.5
       - run: bun install --frozen-lockfile
+      # The pinned Core and ord archives (scripts/regtest/install.ts), verified by digest on every use.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/originals-regtest
+          key: regtest-tools-${{ runner.os }}-${{ hashFiles('scripts/regtest/install.ts') }}
       # Run without the root SDK preload, which requires built workspace packages.
       - run: bun test download.test.ts environment.test.ts assert-stopped.test.ts
         working-directory: scripts/regtest
