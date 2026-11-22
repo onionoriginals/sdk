@@ -12,3 +12,4 @@ export * from "./report.js";
 export * from "./verify.js";
 export * from "./document.js";
 export * from "./carried.js";
+export * from "./fetch.js";
