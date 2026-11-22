@@ -9,8 +9,8 @@
 import { OriginalsError } from "../errors.js";
 import { isJsonObject, parseJsonLines, type JsonValue } from "../json/index.js";
 import { checkLogStructure, parseLogFile, resourceDigest, versionNumber, isDeactivation, type OgEntry } from "./log.js";
-import { ASSET_LOG_NAME, MANIFEST_NAME, readManifest, readPackageZip, signerDirectory, type Manifest, type MissingItem } from "./package.js";
-import { outcomeOf, reportInputs, type Axes, type EntryAuthority, type EntryLabel, type EvidenceInput, type EvidenceSet, type Report, type SignerLabel } from "./report.js";
+import { ASSET_LOG_NAME, MANIFEST_NAME, readManifest, readPackageZip, signerDirectory, type Manifest } from "./package.js";
+import { changeRecords, offlineFrom, outcomeOf, reportInputs, sortDiagnostics, type Axes, type ChangeRecord, type Diagnostic, type EntryAuthority, type EntryLabel, type EvidenceInput, type EvidenceSet, type Report, type ReportedHolder, type SignerLabel } from "./report.js";
 import { OG_METHOD, OgRuleError } from "./rules.js";
 import { checkBinding, latestVersion, listsKey, lookupVersion, verifySignerLog, type SignerHistory } from "./signers.js";
 import { advance, checkTransition, genesisContext, isAnchoringEntry, isEditorEntry, signerMethodOf, stateOf, type BranchContext, type SignerRef } from "./state.js";
@@ -45,7 +45,10 @@ export interface Gathered {
   mismatched: Array<{ digest: string; source: string }>;
   packages: Array<{ source: string; manifest: Manifest; files: Record<string, Uint8Array> }>;
   unsupported?: string;
+  /** Inputs that are not used: bytes that do not match their stated digest, or cannot be read as their kind (P7.17). */
   invalidInputs: Array<{ source: string; error: OriginalsError }>;
+  /** The prior result, from the evidence set's `prior` or its `prior-result` input (P7.17). */
+  prior?: Report | null;
 }
 
 const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -60,9 +63,16 @@ function gather(evidence: EvidenceSet): Gathered {
     else g.resources.set(d, bytes);
   };
   const pendingPackagedSigners: Array<{ dir: string; log: Uint8Array; witness?: Uint8Array }> = [];
+  g.prior = evidence.prior ?? null;
   for (const input of evidence.inputs) {
     try {
+      if (input.digest !== undefined && input.digest !== resourceDigest(input.bytes)) {
+        throw new OgRuleError("P7.17", "INPUT_DIGEST", `the bytes of ${input.source} do not match its stated digest`);
+      }
       switch (input.kind) {
+        case "prior-result":
+          g.prior = JSON.parse(decoder.decode(input.bytes)) as Report;
+          break;
         case "log": {
           const parsed = parseLogFile(input.bytes);
           g.copies.push({ source: input.source, values: parsed.values, lineFailure: parsed.failure?.error });
@@ -221,7 +231,7 @@ const BINDING_RULES = new Set(["P5.2", "P5.3", "P5.4", "P5.12", "P5.14", "P14.8"
 // ---------------------------------------------------------------------------
 // Evaluating entries off Bitcoin
 
-type Status = "accepted" | "rejected" | "unchecked" | "conflicting";
+type Status = "accepted" | "rejected" | "unchecked" | "conflicting" | "ignored";
 
 export interface Evaluated {
   node: Node;
@@ -234,6 +244,8 @@ export interface Evaluated {
   key?: string;
   /** Why the entry is unchecked: the missing signer DID. */
   missingDid?: string;
+  /** Set when that DID's history is supplied but does not reach the version the entry names (P7.8). */
+  missingVersion?: string;
   ctx: BranchContext;
 }
 
@@ -325,6 +337,7 @@ function bindSigner(ev: Evaluated, histories: Histories, lastVersions: Map<strin
   if ("beyond" in found) {
     ev.status = "unchecked";
     ev.missingDid = ref.did;
+    if (known.history.versions.length) ev.missingVersion = ref.versionId;
     return;
   }
   if ("mismatch" in found) throw new OgRuleError("P5.3", "SIGNER_VERSION_UNKNOWN", `${ref.did} has no version ${ref.versionId}: ${found.mismatch}`, "author-binding");
@@ -348,7 +361,7 @@ function authorityOf(ev: Evaluated, histories: Histories): EntryAuthority {
 /**
  * P14.25 (ccf4a69): an `unsupported` report has `original` and `checkpoint`
  * null, `axes` holding `outcome` only, and empty `entries`, `signers`,
- * `missing` and `dependencies`. Why it is unsupported is not a report member;
+ * `diagnostics` and `changes`, and no `bitcoin` member. Why it is unsupported is not a report member;
  * callers get it from `unsupportedReason`.
  */
 export function unsupportedReport(evidence: EvidenceSet): Report {
@@ -361,8 +374,8 @@ export function unsupportedReport(evidence: EvidenceSet): Report {
     axes: { outcome: "unsupported" },
     entries: [],
     signers: [],
-    missing: [],
-    dependencies: [],
+    diagnostics: [],
+    changes: [],
   };
 }
 
@@ -374,7 +387,7 @@ export function registerAnchoredEvaluator(f: AnchoredEvaluator): void {
 }
 
 /** Whether the evidence set holds any Bitcoin input (P7.18 `bitcoin`). */
-export const hasBitcoinInput = (e: EvidenceSet) => !!e.network || (e.sats?.length ?? 0) > 0 || e.inputs.some((i) => i.kind === "inscription");
+export const hasBitcoinInput = (e: EvidenceSet) => !!e.network || (e.sats?.length ?? 0) > 0 || e.inputs.some((i) => i.kind === "inscription" || i.kind === "sat-read");
 
 /** Verify an Original from exactly this evidence set (P7.17). */
 export async function verifyOriginal(evidence: EvidenceSet): Promise<Report> {
@@ -385,7 +398,7 @@ export async function verifyOriginal(evidence: EvidenceSet): Promise<Report> {
     if (m !== undefined && m !== OG_METHOD) return unsupportedReport(evidence);
   }
   if (gathered.unsupported) return unsupportedReport(evidence);
-  if (evidence.inputs.some((i) => i.kind === "inscription") || (evidence.sats?.length ?? 0) > 0) {
+  if (evidence.inputs.some((i) => i.kind === "inscription" || i.kind === "sat-read") || (evidence.sats?.length ?? 0) > 0) {
     if (!anchoredEvaluator) throw new OriginalsError("unsupported-profile", "BITCOIN_UNAVAILABLE", "the Bitcoin verifier is not loaded");
     return anchoredEvaluator(evidence, gathered);
   }
@@ -397,7 +410,19 @@ export async function verifyOriginal(evidence: EvidenceSet): Promise<Report> {
  * holding an anchoring entry is read as a historical checkpoint before it,
  * with `bitcoin` `missing-evidence`.
  */
-export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, opts: { bitcoinRead: boolean }): Promise<Report> {
+export interface OffChainOptions {
+  bitcoinRead: boolean;
+  /**
+   * did:btco sats the evidence set reads in full at its tip that hold no anchoring
+   * publication of this Original (P9.5): a copy's anchoring entry naming one, and every
+   * entry after it, are `ignored`, and the state is valid as of the entry before.
+   */
+  readSats?: ReadonlySet<string>;
+  /** The causes of the change records against the prior result (P14.25); `evidence` by default. */
+  causes?: { head: ChangeRecord["cause"]; holder: ChangeRecord["cause"] };
+}
+
+export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, opts: OffChainOptions): Promise<Report> {
   const histories = await verifyHistories(gathered.histories);
   const tree = buildTree(gathered.copies);
   const scid = evidence.original?.startsWith("did:og:") ? evidence.original.slice("did:og:".length) : undefined;
@@ -408,6 +433,15 @@ export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, 
   const anyAnchor = [...tree.nodes.values()].some((n) => stateOf(n.entry).asset?.aliases?.some?.((a: string) => a.startsWith("did:btco:")));
   const stopAtAnchor = anyAnchor;
   const evaluated = bound ? evaluateTree(tree, histories, { stopAtAnchor, target: evidence.checkpoint ?? undefined }) : new Map<string, Evaluated>();
+
+  // A copy's anchoring entry naming a sat read in full without an anchor, and every entry after it, are ignored (P9.5, P7.19).
+  if (opts.readSats?.size) {
+    for (const ev of evaluated.values()) {
+      if (ev.status !== "unchecked") continue;
+      const anchorOfBranch = branchAnchor(tree, ev.node);
+      if (anchorOfBranch && opts.readSats.has(anchorOfBranch)) ev.status = "ignored";
+    }
+  }
 
   // Authority labels and endorsement (P7.19, P7.20).
   for (const ev of evaluated.values()) if (ev.status === "accepted") ev.authority = authorityOf(ev, histories);
@@ -482,7 +516,7 @@ export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, 
   const structuralRules = tree.structureFailures.map((f) => f.error);
   const isBinding = (e: OriginalsError) => BINDING_RULES.has(ruleOfError(e)) || e.category === "author-binding";
   const historyInvalid = !bound || structuralRules.some((e) => e.category !== "limit-exceeded" && !isBinding(e)) ||
-    [...evaluated.values()].some((e) => e.status === "rejected" && !e.identityFailure) || gathered.invalidInputs.length > 0;
+    [...evaluated.values()].some((e) => e.status === "rejected" && !e.identityFailure);
   const limitExceeded = tree.limitExceeded || structuralRules.some((e) => e.category === "limit-exceeded") ||
     [...histories.byDid.values()].some((h) => h.history.limitExceeded);
   const identityFailed = [...evaluated.values()].some((e) => e.status === "rejected" && e.identityFailure) || structuralRules.some(isBinding);
@@ -491,23 +525,45 @@ export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, 
   const identity: Axes["identity"] = identityFailed ? "failed" : unchecked ? "incomplete" : "complete";
   const authority: Axes["authority"] = path.some((e) => e.status === "accepted" && e.authority !== "current-key" && !e.endorsed) ? "historical" : "current";
 
-  // Availability (P7.4): every resource version through the checkpoint.
-  const missing: MissingItem[] = [];
+  // Diagnostics (P14.25) and availability (P7.4): every resource version through the checkpoint.
+  const diagnostics: Diagnostic[] = [];
   let versions = 0;
+  let unavailable = 0;
   for (const ev of path) {
     for (const t of stateOf(ev.node.entry).transitions) {
       versions++;
       const bytes = gathered.resources.get(t.to);
       const desc = stateOf(ev.node.entry).asset.resource;
-      if (!bytes || bytes.length !== desc.size) missing.push({ kind: "resource", version: ev.ctx.version + 1, digest: t.to, versionId: ev.node.entry.versionId });
+      const versionId = ev.node.entry.versionId;
+      if (bytes && bytes.length === desc.size) continue;
+      unavailable++;
+      const mismatched = gathered.mismatched.some((m) => m.digest === t.to);
+      diagnostics.push(mismatched
+        ? { code: "resource-mismatch", rule: "P7.4", item: { kind: "resource", id: t.to, versionId }, reason: "The bytes supplied for this resource version do not match its descriptor." }
+        : { code: "resource-missing", rule: "P7.4", item: { kind: "resource", id: t.to, versionId }, reason: "The evidence set does not hold the bytes of this resource version." });
     }
   }
-  const availability: Axes["availability"] = missing.length === 0 ? "complete" : missing.length === versions ? "none" : "partial";
-  const missingIdentities = new Map<string, "author" | "editor">();
+  const availability: Axes["availability"] = unavailable === 0 ? "complete" : unavailable === versions ? "none" : "partial";
+  const satsNamed = new Set<string>();
   for (const ev of evaluated.values()) {
-    if (ev.missingDid && signerMethodOf(ev.missingDid) !== "did:btco" && !missingIdentities.has(ev.missingDid)) missingIdentities.set(ev.missingDid, isEditorEntry(ev.node.entry) ? "editor" : "author");
+    if (ev.status === "unchecked") diagnostics.push({ code: "proof-unchecked", rule: "P7.19", item: { kind: "entry", id: ev.node.entry.versionId }, reason: "The entry's proof could not be checked: the evidence it needs is not in the evidence set." });
+    if (ev.status === "rejected") diagnostics.push({ code: "entry-rejected", rule: ev.rule!, item: { kind: "entry", id: ev.node.entry.versionId }, reason: `The entry fails ${ev.rule}.` });
+    if (!ev.missingDid) continue;
+    if (signerMethodOf(ev.missingDid) === "did:btco") satsNamed.add(ev.missingDid);
+    else if (ev.missingVersion) diagnostics.push({ code: "signer-version-missing", rule: "P7.8", item: { kind: "signer", id: ev.missingDid, versionId: ev.missingVersion }, reason: "The supplied signer history does not reach the version the entry names." });
+    else diagnostics.push({ code: "signer-history-missing", rule: "P5.6", item: { kind: "signer", id: ev.missingDid }, reason: "The signer DID's history is not in the evidence set." });
   }
-  for (const [did, role] of missingIdentities) missing.push({ kind: "identity", did, role });
+  for (const f of tree.structureFailures) {
+    if (f.versionId && !evaluated.has(f.versionId) && (f.parent === null || evaluated.has(f.parent))) diagnostics.push({ code: "entry-rejected", rule: ruleOfError(f.error), item: { kind: "entry", id: f.versionId }, reason: f.error.message });
+  }
+  for (const did of satsNamed) diagnostics.push({ code: "signer-sat-not-read", rule: "P9.35", item: { kind: "sat", id: did }, reason: "The did:btco signer's sat is not read in full in the evidence set." });
+  const anchorAliases = new Set<string>();
+  for (const ev of evaluated.values()) if (ev.status === "unchecked") {
+    const a = branchAnchor(tree, ev.node);
+    if (a) anchorAliases.add(a);
+  }
+  for (const a of anchorAliases) if (!opts.readSats?.has(a)) diagnostics.push({ code: "anchoring-sat-not-read", rule: "P7.14", item: { kind: "sat", id: a }, reason: "The log names this anchoring sat, and the evidence set does not read it in full." });
+  for (const i of gathered.invalidInputs) diagnostics.push({ code: "input-unusable", rule: "P7.17", item: { kind: "input", id: i.source }, reason: i.error.message });
 
   // Signers relied on (P7.8).
   const signers: SignerLabel[] = [];
@@ -526,21 +582,12 @@ export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, 
     });
   }
 
-  // Offline and dependencies (P7.21). PROVISIONAL (finding F9): computed over every supplied input.
-  const dependencies: Array<{ kind: string; did: string }> = [];
-  const signerDids = new Set<string>();
-  for (const n of tree.nodes.values()) for (const d of signerDidsOf(n.entry)) signerDids.add(d);
-  for (const did of [...signerDids].sort()) {
-    if (signerMethodOf(did) === "did:btco") dependencies.push({ kind: "signer-sat", did });
-    else if (!histories.byDid.has(did)) dependencies.push({ kind: "signer-history", did });
-  }
-  const anchorAliases = new Set<string>();
-  for (const n of tree.nodes.values()) for (const a of stateOf(n.entry).asset?.aliases ?? []) if (a.startsWith("did:btco:")) anchorAliases.add(a);
-  for (const a of [...anchorAliases].sort()) dependencies.unshift({ kind: "anchoring-sat", did: a });
-  const external = evidence.inputs.some((i) => /^https?:/.test(i.source));
-  const offline: Axes["offline"] = availability === "complete" && dependencies.length === 0 && !external && !unchecked ? "self-contained" : "needs-external";
+  // Offline (P7.21): derived from the diagnostics.
+  const sorted = sortDiagnostics(diagnostics);
+  const offline = offlineFrom(sorted);
 
-  const bitcoin: Axes["bitcoin"] = anyAnchor ? "missing-evidence" : opts.bitcoinRead ? "not-anchored" : "not-read";
+  const anchorUnread = sorted.some((d) => d.code === "anchoring-sat-not-read");
+  const bitcoin: Axes["bitcoin"] = anchorUnread ? "missing-evidence" : opts.bitcoinRead || (anyAnchor && opts.readSats?.size) ? "not-anchored" : "not-read";
   const rest: Omit<Axes, "outcome"> = { binding: bound ? "bound" : "unbound", history, identity, authority, state, availability, offline, bitcoin };
   const report: Report = {
     type: "OriginalsVerificationReport",
@@ -551,13 +598,23 @@ export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, 
     axes: { outcome: outcomeOf(rest), ...rest },
     entries: labels,
     signers,
-    missing,
-    dependencies,
+    diagnostics: sorted,
+    changes: changeRecords(gathered.prior, { checkpoint, holder: null as ReportedHolder | null }, opts.causes ?? { head: "evidence", holder: "evidence" }),
   };
   if (reason) report.reason = reason;
-  const prior = evidence.prior;
-  if (prior && prior.checkpoint !== checkpoint) report.headChange = { from: prior.checkpoint, to: checkpoint };
   return report;
+}
+
+/** The did:btco alias named by the first anchoring entry on a node's branch, at or before it (P9.10). */
+function branchAnchor(tree: Tree, node: Node): string | undefined {
+  let found: string | undefined;
+  let at: Node | undefined = node;
+  while (at) {
+    const a = (stateOf(at.entry).asset?.aliases as string[] | undefined)?.find((x) => x.startsWith("did:btco:"));
+    if (a) found = a;
+    at = at.parent ? tree.nodes.get(at.parent) : undefined;
+  }
+  return found;
 }
 
 function commonAncestor(tree: Tree, heads: string[]): string | null {

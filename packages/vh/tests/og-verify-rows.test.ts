@@ -4,7 +4,7 @@ import { describe, expect, test } from 'bun:test';
 import { encodeMultikey, localSigner } from '../src/crypto/index.js';
 import { serializeLog as serializeVh } from '../src/log/index.js';
 import {
-  buildPackage, checkAxes, defaultCheck, deriveDocument, resourceDigest, serializeLog, verifyOriginal,
+  buildPackage, checkAxes, defaultCheck, sameReport, deriveDocument, resourceDigest, serializeLog, verifyOriginal,
   type EvidenceSet, type Report,
 } from '../src/og/index.js';
 import { seeded, WebvhAuthor } from './helpers/originals.js';
@@ -51,7 +51,7 @@ describe('identifiers (§3)', () => {
 });
 
 describe('the resource (§4)', () => {
-  test('T4-001: bytes changed at the same URL fail their digest; availability partial lists that version', async () => {
+  test('T4-001, T7-070: bytes changed at the same URL fail their digest: a resource-mismatch diagnostic, availability partial, needs-external', async () => {
     const w = await World.create();
     const v2 = res('version 2');
     await w.entry((s) => w.version(s, v2));
@@ -61,7 +61,8 @@ describe('the resource (§4)', () => {
     e.inputs.push({ kind: 'package', source: 'host.zip', bytes: tampered.archive });
     const r = await verifyOriginal(e);
     expect(axes(r).availability).toBe('partial');
-    expect(r.missing).toEqual([{ kind: 'resource', version: 2, digest: resourceDigest(v2), versionId: w.entries[1].versionId }]);
+    expect(r.diagnostics.map(({ reason: _r, ...d }) => d)).toEqual([{ code: 'resource-mismatch', rule: 'P7.4', item: { kind: 'resource', id: resourceDigest(v2), versionId: w.entries[1].versionId } }]);
+    expect(axes(r).offline).toBe('needs-external');
   });
 });
 
@@ -167,7 +168,7 @@ describe('signer binding (§5)', () => {
     const log = w.author.log().replaceAll('"did:vh:1.0"', '"did:vh:0.1"');
     const r = await w.verify({ histories: [{ did: w.author.did, log }] });
     expect(axes(r)).toMatchObject({ identity: 'incomplete', outcome: 'incomplete' });
-    expect(r.missing).toContainEqual({ kind: 'identity', did: w.author.did, role: 'author' });
+    expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'signer-history-missing', item: { kind: 'signer', id: w.author.did } }));
   });
 
   test('T5-039, T5-042: a moved and rotated author signs naming a version after the move; a method controlled by the old DID fails', async () => {
@@ -248,7 +249,7 @@ describe('operations and forks (§6)', () => {
     expect(axes(prior).state).toBe('valid-as-of');
     const r = await w.verify({ logs: [[w.entries[0], a], [w.entries[0], b]], prior });
     expect(axes(r).state).toBe('conflict');
-    expect(r.headChange).toEqual({ from: a.versionId, to: w.entries[0].versionId });
+    expect(r.changes).toEqual([{ kind: 'head', from: a.versionId, to: w.entries[0].versionId, cause: 'evidence' }]);
   });
 
   test('T6-018, T6-019: an author entry superseding an editor-only branch settles it; later editor entries on it are conflicting', async () => {
@@ -330,7 +331,7 @@ describe('evidence and the report (§7)', () => {
     await w.entry((s) => w.version(s, res('v2')));
     const r = await w.verify({ resources: [res('v2')] });
     expect(axes(r).availability).toBe('partial');
-    expect(r.missing).toEqual([{ kind: 'resource', version: 1, digest: resourceDigest(res('version 1')), versionId: w.entries[0].versionId }]);
+    expect(r.diagnostics.map(({ reason: _r, ...d }) => d)).toEqual([{ code: 'resource-missing', rule: 'P7.4', item: { kind: 'resource', id: resourceDigest(res('version 1')), versionId: w.entries[0].versionId } }]);
     expect(defaultCheck(r)).toBe(true);
     expect(axes(await w.verify({ resources: false })).availability).toBe('none');
   });
@@ -458,8 +459,9 @@ describe('evidence and the report (§7)', () => {
     const r = await w.verify();
     expect(labelOf(r, e)).toEqual({ versionId: e.versionId, status: 'unchecked' });
     expect(axes(r)).toMatchObject({ identity: 'incomplete', outcome: 'incomplete', offline: 'needs-external' });
-    expect(r.missing).toContainEqual({ kind: 'identity', did: ed.did, role: 'editor' });
-    expect(r.dependencies).toContainEqual({ kind: 'signer-history', did: ed.did });
+    expect(r.diagnostics.map((d) => d.code)).toEqual(['signer-history-missing', 'proof-unchecked']);
+    expect(r.diagnostics[0].item).toEqual({ kind: 'signer', id: ed.did });
+    expect(r.diagnostics[1].item).toEqual({ kind: 'entry', id: e.versionId });
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
@@ -487,7 +489,8 @@ describe('evidence and the report (§7)', () => {
     expect(axes(r)).toMatchObject({ state: 'historical-checkpoint', bitcoin: 'missing-evidence', outcome: 'incomplete', offline: 'needs-external' });
     expect(r.checkpoint).toBe(before.versionId);
     expect(labelOf(r, anchor)).toEqual({ versionId: anchor.versionId, status: 'unchecked' });
-    expect(r.dependencies).toContainEqual({ kind: 'anchoring-sat', did: 'did:btco:reg:42' });
+    expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'anchoring-sat-not-read', item: { kind: 'sat', id: 'did:btco:reg:42' } }));
+    expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'proof-unchecked', item: { kind: 'entry', id: anchor.versionId } }));
   });
 
   test('T7-040, T7-059: a package with a did:btco author is not self-contained and lists the author\'s sat', async () => {
@@ -498,7 +501,43 @@ describe('evidence and the report (§7)', () => {
     const g = await signEntry(prepareGenesis({ versionTime: '2026-11-01T00:00:00Z', state: { ...state, id: 'did:og:{SCID}' } }), btco.verificationMethod, w.author.key);
     const r = await verifyOriginal({ original: g.state.id as string, inputs: [{ kind: 'log', source: 'l', bytes: enc(serializeLog([g])) }, { kind: 'resource', source: 'r', bytes: res('version 1') }] });
     expect(axes(r)).toMatchObject({ identity: 'incomplete', offline: 'needs-external' });
-    expect(r.dependencies).toEqual([{ kind: 'signer-sat', did: 'did:btco:reg:777' }]);
+    expect(r.diagnostics.filter((d) => d.code === 'signer-sat-not-read').map((d) => d.item)).toEqual([{ kind: 'sat', id: 'did:btco:reg:777' }]);
+  });
+
+  test('T7-069 (off chain) and T14-095: diagnostics differing only in reason are the same report', async () => {
+    const w = await World.create();
+    const r = await w.verify({ resources: false });
+    const other = { ...r, diagnostics: r.diagnostics.map((d) => ({ ...d, reason: 'other words' })) };
+    expect(sameReport(r, other)).toBe(true);
+    expect(sameReport(r, { ...r, diagnostics: [] })).toBe(false);
+  });
+
+  test('T14-094: one diagnostic per code and item, in the code order of P14.25, then item id; no missing or dependencies members', async () => {
+    const w = await World.create();
+    const ed = await webvhSigner();
+    await w.entry((s) => { s.asset.editors = [grant(ed.did, { name: true })]; });
+    await w.entry((s) => w.version(s, res('v2')));
+    await w.entry((s) => { s.asset.name = 'by editor'; }, { by: ed, editor: true });
+    await w.entry((s) => { s.asset.name = 'by editor again'; }, { by: ed, editor: true });
+    const r = await w.verify({ resources: false });
+    expect(r).not.toHaveProperty('missing');
+    expect(r).not.toHaveProperty('dependencies');
+    const codes = r.diagnostics.map((d) => d.code);
+    expect(codes).toEqual(['resource-missing', 'resource-missing', 'signer-history-missing', 'proof-unchecked', 'proof-unchecked']);
+    const ids = r.diagnostics.filter((d) => d.code === 'resource-missing').map((d) => d.item.id);
+    expect(ids).toEqual([...ids].sort());
+    expect(r.diagnostics.filter((d) => d.code === 'signer-history-missing')).toHaveLength(1);
+  });
+
+  test('T14-096: an input whose bytes do not match its stated digest is unusable and not used', async () => {
+    const w = await World.create();
+    const e = w.evidence();
+    const res0 = e.inputs.find((i) => i.kind === 'resource')!;
+    res0.digest = resourceDigest(res('something else'));
+    const r = await verifyOriginal(e);
+    expect(r.diagnostics.map((d) => d.code)).toEqual(['resource-missing', 'input-unusable']);
+    expect(r.diagnostics[1].item).toEqual({ kind: 'input', id: res0.source });
+    expect(axes(r)).toMatchObject({ availability: 'none', offline: 'needs-external', outcome: 'verified' });
   });
 
   test('T7-048: every axis present, each from its list', async () => {
@@ -513,7 +552,7 @@ describe('evidence and the report (§7)', () => {
     const w = await World.create();
     const old = serializeLog(w.entries).replace('"og:1.0-draft.1"', '"originals:1.0"');
     const r = await verifyOriginal({ original: w.did, inputs: [{ kind: 'log', source: 'old.jsonl', bytes: enc(old) }] });
-    expect(r).toMatchObject({ original: null, checkpoint: null, axes: { outcome: 'unsupported' }, entries: [], signers: [], missing: [], dependencies: [] });
+    expect(r).toMatchObject({ original: null, checkpoint: null, axes: { outcome: 'unsupported' }, entries: [], signers: [], diagnostics: [], changes: [] });
   });
 });
 

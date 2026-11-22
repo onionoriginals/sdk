@@ -3,7 +3,6 @@
  * label here is PROVISIONAL (21 November 2026) with P14.25.
  */
 import { resourceDigest } from "./log.js";
-import type { MissingItem } from "./package.js";
 import type { BitcoinNetwork } from "./state.js";
 
 // ---------------------------------------------------------------------------
@@ -45,15 +44,23 @@ export interface SatRead {
   holder?: string | null;
 }
 
-export type EvidenceInput =
+export type EvidenceInput = (
   | { kind: "log"; source: string; bytes: Uint8Array }
   | { kind: "package"; source: string; bytes: Uint8Array }
   | { kind: "signer-history"; source: string; bytes: Uint8Array; did?: string; witness?: Uint8Array }
   | { kind: "resource"; source: string; bytes: Uint8Array }
-  /** One inscription; `source` is `index:<inscription id>`. The sat reads carry the placement. */
+  /** One inscription's envelope; `source` is `index:<inscription id>`. The sat reads carry the placement. */
   | { kind: "inscription"; source: string; bytes: Uint8Array }
   /** A raw transaction's bytes, as a block explorer serves them (prior-format fixture). */
-  | { kind: "transaction"; source: string; bytes: Uint8Array };
+  | { kind: "transaction"; source: string; bytes: Uint8Array }
+  /** A prior result for the same Original, as report JSON (P7.17). */
+  | { kind: "prior-result"; source: string; bytes: Uint8Array }
+  /** An index read of one sat at the tip, as JSON `{network, sat, tip, inscriptions, holder?}` (P9.31). */
+  | { kind: "sat-read"; source: string; bytes: Uint8Array }
+) & {
+  /** The digest the evidence set states for the input; bytes that do not match it make the input unusable (P7.17). */
+  digest?: string;
+};
 
 /** Metadata about a signer history in the evidence set: where and when it was obtained (P7.8). */
 export interface SignerHistoryNote {
@@ -111,6 +118,86 @@ export interface SignerLabel {
   freshness: "established" | "not-established";
 }
 
+// ---------------------------------------------------------------------------
+// Diagnostics and change records (P14.25, originals-spec 0c859c0)
+
+/** P14.25's closed list of diagnostic codes, in report order. */
+export const DIAGNOSTIC_CODES = [
+  "resource-missing", "resource-mismatch", "signer-history-missing", "signer-version-missing",
+  "proof-unchecked", "entry-rejected", "anchoring-sat-not-read", "signer-sat-not-read",
+  "inscription-unverifiable", "publication-waiting", "input-unusable",
+] as const;
+export type DiagnosticCode = (typeof DIAGNOSTIC_CODES)[number];
+
+/** The codes that make `offline` `needs-external` (P7.21). */
+export const DEPENDENCY_CODES: ReadonlySet<DiagnosticCode> = new Set(["resource-missing", "resource-mismatch", "signer-history-missing", "signer-version-missing", "anchoring-sat-not-read", "signer-sat-not-read"]);
+
+export interface Diagnostic {
+  code: DiagnosticCode;
+  /** The rule under which the item is missing or failed. PROVISIONAL (finding F14) except where the vectors fix it. */
+  rule: string;
+  item: { kind: "resource" | "signer" | "entry" | "sat" | "inscription" | "input"; id: string; versionId?: string };
+  /** Text for people; not compared (P14.25). */
+  reason: string;
+}
+
+export interface ChangeRecord {
+  kind: "head" | "holder";
+  from: string | { sat: string; address: string | null } | null;
+  to: string | { sat: string; address: string | null } | null;
+  cause: "publication" | "resolved" | "reorganization" | "earlier-anchor" | "evidence";
+}
+
+const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/** One diagnostic per code and item, ordered by code, then item id and versionId in code-point order (P14.25). */
+export function sortDiagnostics(ds: Diagnostic[]): Diagnostic[] {
+  const seen = new Set<string>();
+  const unique = ds.filter((d) => {
+    const k = `${d.code}\u0000${d.item.id}\u0000${d.item.versionId ?? ""}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  return unique.sort((a, b) => DIAGNOSTIC_CODES.indexOf(a.code) - DIAGNOSTIC_CODES.indexOf(b.code) || cmp(a.item.id, b.item.id) || cmp(a.item.versionId ?? "", b.item.versionId ?? ""));
+}
+
+/** P7.21: `offline` is derived from the diagnostics, never declared. */
+export const offlineFrom = (ds: readonly Diagnostic[]): "self-contained" | "needs-external" => (ds.some((d) => DEPENDENCY_CODES.has(d.code)) ? "needs-external" : "self-contained");
+
+export interface ReportedHolder {
+  sat: string;
+  address: string | null;
+}
+
+/** The holder a report gives: `{sat, address}` when anchored, else null. */
+export const holderOf = (r: Report | null | undefined): ReportedHolder | null => (r?.bitcoin ? { sat: r.bitcoin.sat, address: r.bitcoin.holder.address } : null);
+
+/**
+ * P14.25: at most one `head` and one `holder` record against the prior result, head first,
+ * none for a kind whose value did not change.
+ */
+export function changeRecords(prior: Report | null | undefined, now: { checkpoint: string | null; holder: ReportedHolder | null }, causes: { head: ChangeRecord["cause"]; holder: ChangeRecord["cause"] }): ChangeRecord[] {
+  if (!prior) return [];
+  const out: ChangeRecord[] = [];
+  if (prior.checkpoint !== now.checkpoint) out.push({ kind: "head", from: prior.checkpoint, to: now.checkpoint, cause: causes.head });
+  const before = holderOf(prior);
+  if (JSON.stringify(before) !== JSON.stringify(now.holder)) out.push({ kind: "holder", from: before, to: now.holder, cause: causes.holder });
+  return out;
+}
+
+/** P14.25: two reports are the same when equal as JSON values, ignoring each diagnostic's reason. */
+export function sameReport(a: Report, b: Report): boolean {
+  const strip = (r: Report) => JSON.stringify(canonical({ ...r, diagnostics: (r.diagnostics ?? []).map(({ reason: _r, ...d }) => d) }));
+  return strip(a) === strip(b);
+}
+
+function canonical(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(canonical);
+  if (v && typeof v === "object") return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical((v as Record<string, unknown>)[k])]));
+  return v;
+}
+
 export interface ReportInput {
   kind: string;
   source: string;
@@ -126,8 +213,8 @@ export interface Report {
   axes: Axes | { outcome: "unsupported" };
   entries?: EntryLabel[];
   signers?: SignerLabel[];
-  missing?: MissingItem[];
-  dependencies?: Array<{ kind: string; did: string }>;
+  diagnostics: Diagnostic[];
+  changes: ChangeRecord[];
   bitcoin?: {
     sat: string;
     holder: { address: string | null; uniqueness: "provisional" | { "established-through": number } };
@@ -135,8 +222,6 @@ export interface Report {
     unverifiable: Array<{ inscription: string; did: string; versionId: string }>;
     waiting: Array<{ inscription: string; waitsOn: string }>;
   };
-  /** PROVISIONAL (finding F10): the change of head against a prior result (P9.36, P6.6). */
-  headChange?: { from: string | null; to: string | null };
   /** PROVISIONAL (finding F7): why no checkpoint is reported, or that the report is a writer's local copy. */
   reason?: string;
 }
