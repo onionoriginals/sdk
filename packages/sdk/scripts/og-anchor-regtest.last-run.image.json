@@ -2,60 +2,60 @@
   "gate": "originals-og anchor on regtest (plan 051)",
   "date": "2026-11-22",
   "bitcoind": "Bitcoin Core daemon version v32.1.0 bitcoind",
-  "ord": "unknown at http://127.0.0.1:55246",
+  "ord": "unknown at http://127.0.0.1:55871",
   "image": true,
   "large": false,
   "command": "originals-og anchor",
   "profile": "og:1.0-draft.1",
   "network": "regtest",
-  "original": "did:og:QmZkkXosRVgwGMVTjGjD8iwJUs71Wnt7VpEpwDGVyXBe1i",
-  "author": "did:webvh:QmfBVL1S4LHvcFtVw44ZcBrd4pKzUKmTNbvj4kyjRHMTt1:og-regtest.localhost%3A55254:authors:regtest-author",
-  "authorUrl": "https://og-regtest.localhost:55254/authors/regtest-author/did.jsonl",
-  "sat": "69999991990",
-  "anchoringAlias": "did:btco:reg:69999991990",
-  "holder": "bcrt1p094wh553j5lujfykwxkaxtpxd9vtkwqx3lc8hm0w4rmhllcxhxtqcyvu4n",
+  "original": "did:og:QmTXhP2jTPMPaGNC21qWAEuc6k1B1nsHisUMzNUT1V2k4U",
+  "author": "did:webvh:QmdLVWVWyvRjdargy7vtw2gDJUgJrvJgjhMTJq6p7q3RKm:og-regtest.localhost%3A55899:authors:regtest-author",
+  "authorUrl": "https://og-regtest.localhost:55899/authors/regtest-author/did.jsonl",
+  "sat": "75000000000",
+  "anchoringAlias": "did:btco:reg:75000000000",
+  "holder": "bcrt1pzhks5kshga8y8equ458nu9sln9knkstkk5sqn75vay6mqwlp4hqqua3p3r",
   "transactions": {
-    "funding": "36e463a0589a1278a55e265579dd5edf580c67a7da1c832cdd53726ea0c336a1",
-    "commit": "006844f0c6c84a4711ab7f04a37acac12ce4566c54ac63d3420a4fb41394987c",
+    "funding": "2864f2d59e572f8cdfb6ff7b079257fa066bb6a25173ae3d40ee576b68cbe35e",
+    "commit": "1390af6c018f524ab8d63102ea8293c2496224b785cc8e3cadd8cdfe6957be9e",
     "reveals": [
-      "3eed9159189acc9903690ef5d4c06d4dcdd9b34fb1ffe226c7e4445344e7f2b8"
+      "5444a1b3c41fae4b396e69c623a30e424951fd155767e2e395cf1bb91935d292"
     ]
   },
   "inscriptions": [
     {
-      "id": "3eed9159189acc9903690ef5d4c06d4dcdd9b34fb1ffe226c7e4445344e7f2b8i0",
+      "id": "5444a1b3c41fae4b396e69c623a30e424951fd155767e2e395cf1bb91935d292i0",
       "height": 122,
       "txIndex": 2,
       "inscriptionIndex": 0,
-      "confirmations": 1,
+      "confirmations": 6,
       "metaprotocol": "og",
       "contentType": "image/webp",
-      "envelopeBytes": 6856,
-      "envelopeDigest": "zQmXY9bSVyVr4Jpt3aHim2xYotbnKf8VdcF27ykj3xTiT7f"
+      "envelopeBytes": 6855,
+      "envelopeDigest": "zQmbSMZSuST1LsebjmJ9vC41kFjAcRfG68MuAX8MBAr9tTH"
     }
   ],
   "tip": {
-    "height": 122,
-    "hash": "72649384a31a32b662bd3a02fec03d44de1e8d43d46debe3431ed91227ff2c6c"
+    "height": 127,
+    "hash": "66b1400821f88ae720eb22fce5b452489e56551a0928d443299c9a929fdd059e"
   },
-  "backend": "core-rpc:http://127.0.0.1:55244",
+  "backend": "core-rpc:http://127.0.0.1:55869",
   "report": {
     "type": "OriginalsVerificationReport",
     "profile": "og:1.0-draft.1",
-    "original": "did:og:QmZkkXosRVgwGMVTjGjD8iwJUs71Wnt7VpEpwDGVyXBe1i",
-    "checkpoint": "2-QmeBTVsk5tV9T9GgSXHCTmzC88adn1thh1bTWSTjGFTHHE",
+    "original": "did:og:QmTXhP2jTPMPaGNC21qWAEuc6k1B1nsHisUMzNUT1V2k4U",
+    "checkpoint": "2-QmUBdoPEGm7udUvbusPsbX6A6zz1D1GtQxv4aDgRp2P4MU",
     "evidence": {
       "inputs": [
         {
           "kind": "inscription",
-          "source": "index:3eed9159189acc9903690ef5d4c06d4dcdd9b34fb1ffe226c7e4445344e7f2b8i0",
-          "digest": "zQmXY9bSVyVr4Jpt3aHim2xYotbnKf8VdcF27ykj3xTiT7f"
+          "source": "index:5444a1b3c41fae4b396e69c623a30e424951fd155767e2e395cf1bb91935d292i0",
+          "digest": "zQmbSMZSuST1LsebjmJ9vC41kFjAcRfG68MuAX8MBAr9tTH"
         }
       ],
       "network": "regtest",
       "tip": {
-        "height": 122,
-        "hash": "72649384a31a32b662bd3a02fec03d44de1e8d43d46debe3431ed91227ff2c6c"
+        "height": 127,
+        "hash": "66b1400821f88ae720eb22fce5b452489e56551a0928d443299c9a929fdd059e"
       },
       "depth": 1
     },
@@ -72,7 +72,7 @@
     },
     "entries": [
       {
-        "versionId": "1-QmfT3gLfBMFtW6njKFaYgHmS1nxszZr3yCYDeCL4S26X1K",
+        "versionId": "1-QmWPeCtvW7GYVAHHcefHLgXJxRmvQtqpH3Z2hS6fmmrF72",
         "status": "accepted",
         "authority": "current-key",
         "endorsed": true,
@@ -80,7 +80,7 @@
         "block": 122
       },
       {
-        "versionId": "2-QmeBTVsk5tV9T9GgSXHCTmzC88adn1thh1bTWSTjGFTHHE",
+        "versionId": "2-QmUBdoPEGm7udUvbusPsbX6A6zz1D1GtQxv4aDgRp2P4MU",
         "status": "accepted",
         "authority": "current-key",
         "endorsed": false,
@@ -90,10 +90,10 @@
     ],
     "signers": [
       {
-        "did": "did:webvh:QmfBVL1S4LHvcFtVw44ZcBrd4pKzUKmTNbvj4kyjRHMTt1:og-regtest.localhost%3A55254:authors:regtest-author",
+        "did": "did:webvh:QmdLVWVWyvRjdargy7vtw2gDJUgJrvJgjhMTJq6p7q3RKm:og-regtest.localhost%3A55899:authors:regtest-author",
         "role": "author",
-        "latestVersionId": "1-QmNxhuMVVAgVUcP9xkWbaXmaFv6GeXH6JcocbUDoxyShpu",
-        "source": "inscribed:3eed9159189acc9903690ef5d4c06d4dcdd9b34fb1ffe226c7e4445344e7f2b8i0",
+        "latestVersionId": "1-QmdgQesx81ZYcjhVzvMs2KbDozvFbRjxxPzMANMF7u1MUV",
+        "source": "inscribed:5444a1b3c41fae4b396e69c623a30e424951fd155767e2e395cf1bb91935d292i0",
         "freshness": "established"
       }
     ],
@@ -104,16 +104,15 @@
         "item": {
           "kind": "resource",
           "id": "zQmTrb1baZzcKxSbt6kRYT2s1oL7K8PBMitHcWHFR8hzwP8",
-          "versionId": "1-QmfT3gLfBMFtW6njKFaYgHmS1nxszZr3yCYDeCL4S26X1K"
+          "versionId": "1-QmWPeCtvW7GYVAHHcefHLgXJxRmvQtqpH3Z2hS6fmmrF72"
         },
         "reason": "The evidence set does not hold the bytes of this resource version."
       }
     ],
-    "changes": [],
     "bitcoin": {
-      "sat": "did:btco:reg:69999991990",
+      "sat": "did:btco:reg:75000000000",
       "holder": {
-        "address": "bcrt1p094wh553j5lujfykwxkaxtpxd9vtkwqx3lc8hm0w4rmhllcxhxtqcyvu4n",
+        "address": "bcrt1pzhks5kshga8y8equ458nu9sln9knkstkk5sqn75vay6mqwlp4hqqua3p3r",
         "uniqueness": "provisional"
       },
       "conflictingAnchors": [],
@@ -122,11 +121,12 @@
     }
   },
   "defaultCheck": true,
+  "transferCheck": true,
   "publicHost": {
-    "url": "https://og-regtest.localhost:55254/authors/regtest-author/did.jsonl",
+    "url": "https://og-regtest.localhost:55899/authors/regtest-author/did.jsonl",
     "served": true,
     "matchesInscribed": true,
-    "latestVersionId": "1-QmNxhuMVVAgVUcP9xkWbaXmaFv6GeXH6JcocbUDoxyShpu"
+    "latestVersionId": "1-QmdgQesx81ZYcjhVzvMs2KbDozvFbRjxxPzMANMF7u1MUV"
   },
   "passed": true
 }

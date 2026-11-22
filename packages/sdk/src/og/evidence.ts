@@ -51,7 +51,6 @@ export async function readSatEvidence(input: { original: string; network: Bitcoi
     tip,
     depth: input.depth ?? 1,
     sats: [{ sat, index: `ord ${ordVersion} at ${ord.base}`, complete: true, holder, inscriptions: reads }],
-    prior: null,
   };
   return { evidence, ordVersion, inscriptions: reads };
 }

@@ -17,6 +17,7 @@
  *   --rpc-url <url> --rpc-auth <user:pass>   Bitcoin Core RPC instead of Esplora (regtest)
  *   --ord <url>                   ord 0.29.x explorer; default ordinals.com for the network
  *   --out <path>                  where verify writes last-run.json (default <state>/last-run.json)
+ *   --min-confirmations <n>       confirmations verify waits for (default 6, the transfer depth, P7.22)
  *   --yes                         do not ask before signing (never used for mainnet by default)
  */
 import { createInterface } from "node:readline/promises";
@@ -103,19 +104,20 @@ export async function main(argv: string[]): Promise<number> {
     holder: need(flags, "holder"), feeRate: flags.has("fee-rate") ? Number(flags.get("fee-rate")) : undefined,
     postage: flags.has("postage") ? BigInt(flags.get("postage") as string) : undefined,
   });
+  const verifyOpts = () => ({ out: flags.get("out") as string | undefined, minConfirmations: flags.has("min-confirmations") ? Number(flags.get("min-confirmations")) : undefined });
   const author = () => stepAuthor(ctx, { name: need(flags, "name"), domain: flags.get("domain") as string | undefined });
   try {
     if (step === "author") await author();
     else if (step === "prepare") await prepare();
     else if (step === "fund") await stepFund(ctx, { yes: yes && network !== "mainnet" });
     else if (step === "broadcast") await stepBroadcast(ctx);
-    else if (step === "verify") return (await stepVerify(ctx, { out: flags.get("out") as string | undefined })).passed ? 0 : 1;
+    else if (step === "verify") return (await stepVerify(ctx, verifyOpts())).passed ? 0 : 1;
     else if (step === "run") {
       await author();
       await prepare();
       await stepFund(ctx, { yes: yes && network !== "mainnet" });
       await stepBroadcast(ctx);
-      return (await stepVerify(ctx, { out: flags.get("out") as string | undefined })).passed ? 0 : 1;
+      return (await stepVerify(ctx, verifyOpts())).passed ? 0 : 1;
     } else throw new Error(`unknown step ${step}`);
     return 0;
   } finally {
