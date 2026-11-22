@@ -131,6 +131,12 @@ describe('deactivation (P6.5)', () => {
     expect(walk([g, await next(g, (s) => { s.asset.status = 'deactivated'; s.operation = 'deactivate'; }, { parameters: { deactivated: true } })])).toBeUndefined();
   });
 
+  test('T6-027, T6-028: a deactivation whose operation is update, or deactivate in an entry that is not a deactivation, is rejected (P6.5, P14.4)', async () => {
+    const g = await genesis();
+    expect(walk([g, await next(g, (s) => { s.asset.status = 'deactivated'; s.operation = 'update'; }, { parameters: { deactivated: true } })])).toMatchObject({ rule: 'P6.5' });
+    expect(walk([g, await next(g, (s) => { s.operation = 'deactivate'; s.asset.name = 'x'; })])).toMatchObject({ rule: 'P6.5' });
+  });
+
   test('T6-004, T6-008: an update after, or descending from, a deactivation is rejected', async () => {
     const g = await genesis();
     const d = await next(g, (s) => { s.asset.status = 'deactivated'; s.operation = 'deactivate'; }, { parameters: { deactivated: true } });
