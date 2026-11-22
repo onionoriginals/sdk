@@ -17,7 +17,8 @@
  *   --rpc-url <url> --rpc-auth <user:pass>   Bitcoin Core RPC instead of Esplora (regtest)
  *   --ord <url>                   ord 0.29.x explorer; default ordinals.com for the network
  *   --out <path>                  where verify writes last-run.json (default <state>/last-run.json)
- *   --min-confirmations <n>       confirmations verify waits for (default 6, the transfer depth, P7.22)
+ *   --min-confirmations <n>       confirmations of the final reveal verify waits for (default 6, so the publication
+ *                                 history meets the transfer check's depth, P7.22; the sat transfer is not checked)
  *   --yes                         do not ask before signing (never used for mainnet by default)
  */
 import { createInterface } from "node:readline/promises";

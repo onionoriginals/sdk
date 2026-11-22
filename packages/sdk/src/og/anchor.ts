@@ -23,7 +23,7 @@ import { checkAuthorLog, createAuthorDid, DEFAULT_AUTHOR_DOMAIN } from "./author
 import { readSatEvidence } from "./evidence.js";
 import { checkAddress, fundingAddress, hex, plan, signChain } from "./inscribe.js";
 import { readKeyFile } from "./keys.js";
-import { anchoringPublication, checkLocalCopy, choosePreview, createAnchoringEntry, createGenesis, disclosure, type AuthorRef } from "./original.js";
+import { anchoringPublication, checkLocalCopy, choosePreview, createAnchoringEntry, createGenesis, describeTransferCheck, disclosure, type AuthorRef } from "./original.js";
 import type { ChainBackend, OrdExplorer } from "./chain.js";
 
 export interface Io {
@@ -301,7 +301,7 @@ export interface LastRun {
   backend: string;
   report: Report;
   defaultCheck: boolean;
-  /** P7.22: the check for a buyer or recipient of the sat, which needs the transfer depth (P14.13). */
+  /** P7.22: the transfer check, on the Original's publication history (at least the transfer depth deep, P14.13), not on the sat transfer. */
   transferCheck: boolean;
   publicHost: { url: string; served: boolean; matchesInscribed: boolean; latestVersionId?: string; reason?: string };
   passed: boolean;
@@ -309,7 +309,8 @@ export interface LastRun {
 
 /**
  * Step 5. Waits until the final reveal has `minConfirmations` confirmations, by default the
- * transfer depth of 6 (P7.22, P14.13), so that the run's report can pass the transfer check.
+ * transfer depth of 6 (P7.22, P14.13), so that the publication history the report relies on can
+ * pass the transfer check.
  */
 export async function stepVerify(ctx: Ctx, opts: { out?: string; minConfirmations?: number } = {}): Promise<LastRun> {
   const s = loadState(ctx.stateDir, ctx.network);
@@ -370,7 +371,7 @@ export async function stepVerify(ctx: Ctx, opts: { out?: string; minConfirmation
   const out = opts.out ?? join(ctx.stateDir, "last-run.json");
   writeFileSync(out, JSON.stringify(run, null, 2) + "\n");
   ctx.io.say(`Report: outcome ${axes.outcome}, state ${axes.state}, bitcoin ${axes.bitcoin}, availability ${axes.availability}; holder ${report.bitcoin?.holder.address} (${JSON.stringify(report.bitcoin?.holder.uniqueness)}).`);
-  ctx.io.say(`Transfer check (${OG_LIMITS.transferDepth} confirmations): ${transferCheck(report) ? "passes" : `fails${report.diagnostics.some((d) => d.code === "insufficient-depth") ? " (insufficient depth)" : ""}`}.`);
+  ctx.io.say(describeTransferCheck(report));
   ctx.io.say(`Public host copy of the author's log: ${publicHost.served ? (publicHost.matchesInscribed ? "served and matches the inscribed history" : `served but does not match (${publicHost.reason ?? "differs"})`) : "not served"}.`);
   ctx.io.say(`Wrote ${out}. ${run.passed ? "PASS" : "NOT PASSED"}`);
   if (run.passed) {

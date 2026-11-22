@@ -11,7 +11,7 @@ import { parseJsonLines } from '@originals/vh/json';
 import { parseTransaction, readInscription, envelopesInWitness } from '@originals/vh/og';
 import { generateKeyFile, readKeyFile } from '../../../src/og/keys.js';
 import { checkAuthorLog, createAuthorDid, webvhLocation } from '../../../src/og/author-did.js';
-import { anchoringPublication, checkLocalCopy, choosePreview, createAnchoringEntry, createGenesis, disclosure, type AuthorRef } from '../../../src/og/original.js';
+import { anchoringPublication, checkLocalCopy, choosePreview, createAnchoringEntry, createGenesis, describeTransferCheck, disclosure, type AuthorRef } from '../../../src/og/original.js';
 import { checkAddress, fundingAddress, plan, scureNetwork, signChain } from '../../../src/og/inscribe.js';
 
 const dir = () => mkdtempSync(join(tmpdir(), 'og-sdk-'));
@@ -149,5 +149,27 @@ describe('commit and reveal (P14.12, P9.32)', () => {
 
   test('a holder address of another network is refused', () => {
     expect(() => checkAddress('bc1pqgmca7tc3vrl9mg2p309yc55ee4lpnvwja33jt9dmxjcptr7skgq4z35uq', 'regtest')).toThrow(/regtest/);
+  });
+});
+
+describe('describing the transfer check (P7.22, T7-074)', () => {
+  const report = (diagnostics: Array<{ code: string; item: { kind: string; id: string } }>) => ({
+    type: 'OriginalsVerificationReport', profile: 'og:1.0-draft.1', original: 'did:og:x', checkpoint: '2-x', evidence: { inputs: [], network: 'regtest', tip: { height: 120, hash: 'h' }, depth: 1 },
+    axes: { outcome: 'verified', binding: 'bound', history: 'valid', identity: 'complete', authority: 'current', state: 'current', availability: 'complete', offline: 'self-contained', bitcoin: 'anchored' },
+    entries: [], signers: [], diagnostics: diagnostics.map((d) => ({ ...d, rule: 'P7.22', reason: '' })),
+    bitcoin: { sat: 'did:btco:reg:5', holder: { address: 'bcrt1pnew', uniqueness: 'provisional' }, conflictingAnchors: [], unverifiable: [], waiting: [] },
+  }) as never;
+
+  test('it is a check on the publication history, never 6 confirmations of the transfer', () => {
+    const text = describeTransferCheck(report([]));
+    expect(text).toMatch(/^Transfer check on the Original's publication history/);
+    expect(text).toMatch(/passes/);
+    expect(text).toMatch(/does not check how deep the transaction that last moved the sat is/);
+    expect(text).not.toMatch(/confirmations of the transfer|transfer has \d+ confirmations|\(6 confirmations\)/i);
+  });
+
+  test('a shallow publication fails it and is named', () => {
+    const text = describeTransferCheck(report([{ code: 'insufficient-depth', item: { kind: 'inscription', id: 'abci0' } }]));
+    expect(text).toMatch(/fails: 1 publication\(s\) of the history are fewer than 6 blocks deep \(abci0\)/);
   });
 });

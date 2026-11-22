@@ -8,7 +8,7 @@
 import type { ProofSigner } from "@originals/vh/crypto";
 import { parseJsonLines, type JsonObject } from "@originals/vh/json";
 import {
-  OG_LIMITS, btcoDid, buildPublication, isActiveContent, prepareGenesis, prepareNext, resourceDigest, serializeLog, signEntry,
+  OG_LIMITS, btcoDid, transferCheck, buildPublication, isActiveContent, prepareGenesis, prepareNext, resourceDigest, serializeLog, signEntry,
   type BitcoinNetwork, type BodyMode, type Descriptor, type OgEntry, type PublicationPart, type Report, type SignerHistoryItem, verifyLocalCopy,
 } from "@originals/vh/og";
 import { generateImagePreview } from "../originals/preview.js";
@@ -131,4 +131,18 @@ export function disclosure(input: { name: string; mediaType: string; bytes: numb
   ];
   if (isActiveContent(input.body === "full" ? input.mediaType : "")) lines.push("Warning: the body is active content (HTML or SVG); Bitcoin explorers may render it outside the profile's isolation (P9.7).");
   return { lines };
+}
+
+/**
+ * How the SDK and its interfaces describe the transfer check (P7.22, T7-074): a check on the
+ * Original's publication history, which must be at least the transfer depth (6 blocks, P14.13)
+ * deep, never "6 confirmations of the transfer". The holder is the one the index reports under
+ * its own confirmation policy (P9.11), so the transaction that last moved the sat may have fewer
+ * confirmations; an application that needs that transfer settled checks its depth separately.
+ */
+export function describeTransferCheck(report: Report): string {
+  const passes = transferCheck(report);
+  const shallow = report.diagnostics.filter((d) => d.code === "insufficient-depth").map((d) => d.item.id);
+  const verdict = passes ? "passes" : shallow.length ? `fails: ${shallow.length} publication(s) of the history are fewer than ${OG_LIMITS.transferDepth} blocks deep (${shallow.join(", ")})` : "fails";
+  return `Transfer check on the Original's publication history (the anchoring publication and every publication the head depends on at least ${OG_LIMITS.transferDepth} blocks deep): ${verdict}. It does not check how deep the transaction that last moved the sat is; check that separately if you need the transfer itself settled.`;
 }
