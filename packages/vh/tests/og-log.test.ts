@@ -2,7 +2,8 @@
 // the matrix rows for P14.1–P14.3, P14.8 and P14.27–P14.29.
 import { describe, expect, test } from 'bun:test';
 import { canonicalize, type JsonObject } from '../src/json/index.js';
-import { computeScid, vhHash } from '../src/log/index.js';
+import { computeScid, verifyLog, vhHash, vhLog10 } from '../src/log/index.js';
+import { didVh } from '../src/didvh/index.js';
 import {
   OG_METHOD, OgRuleError, checkLogStructure, entryLine, exceedsNumberBound, ogHash, parseLogFile, prepareGenesis, prepareNext,
   resourceDigest, scidInput, entryHashInput, signEntry, serializeLog, type OgEntry,
@@ -66,6 +67,17 @@ describe('genesis vector (T14-091, P14.26–P14.29)', () => {
     expect(computeScid(JSON.parse(JSON.stringify(noProof).replaceAll(ge[0].parameters.scid as string, '{SCID}')))).toBe(ge[0].parameters.scid);
     const { proof: _q, ...e2 } = ge[1];
     expect(`2-${vhHash({ ...e2, versionId: ge[0].versionId })}`).toBe(ge[1].versionId);
+  });
+});
+
+describe('generic processors (P3.5)', () => {
+  test('T3-007, T3-002: a VH Log processor, or a resolver for the swcurran did:vh, rejects a did:og log by its method value; its empty updateKeys authorizes no key', async () => {
+    const values = parseLogFile(vbytes('local/asset/did.jsonl')).values;
+    for (const specialisation of [vhLog10, didVh]) {
+      const r = await verifyLog(values as never, { specialisation, now: Date.parse('2027-01-01T00:00:00Z') });
+      expect(r.entries).toHaveLength(0);
+      expect(r.failure).toBeDefined();
+    }
   });
 });
 
