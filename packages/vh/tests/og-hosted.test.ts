@@ -127,7 +127,7 @@ describe('host rows (§6, §7, §9)', () => {
     expect(await host.submit(submit(w, a))).toEqual({ result: 'already-accepted', checkpoint: a.versionId, head: b.versionId });
   });
 
-  test('a submission that does not verify, or brings bytes that do not match, is refused and not stored', async () => {
+  test('T6-029: a submission whose parent is the head but which does not verify, or brings bytes that do not match, is rejected with its rule and not stored', async () => {
     const { w, host, store } = await hosted();
     const mallory = await webvhSigner();
     const forged = await w.entry((s) => { s.asset.name = 'x'; }, { key: mallory.key, push: false });

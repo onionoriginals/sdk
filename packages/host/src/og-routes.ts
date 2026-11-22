@@ -7,7 +7,8 @@
  *   GET  /og/<SCID>/resources/<digest>      a resource version, with its signed media type (P9.7)
  *
  * The JSON body is `{original, entry, resources: [{digest, bytes}], identities: [{did, log}]}`,
- * with `bytes` in base64. PROVISIONAL: the spec fixes no transport.
+ * with `bytes` in base64 (the spec needs no particular transport). The four answers are
+ * 201 accepted, 200 already-accepted, 409 stale-parent and 422 rejected (P6.7, T6-030).
  */
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';

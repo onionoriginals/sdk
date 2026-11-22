@@ -17,7 +17,7 @@ import { verifyOriginal } from "./verify.js";
 // ---------------------------------------------------------------------------
 // Shared-host saves (P6.7)
 
-/** A submission (section 14, "Shared-host saves"): `entry` is the exact line. PROVISIONAL transport. */
+/** A submission (section 14, "Shared-host saves"): `entry` is the exact line. The spec needs no particular transport; this is its guide. */
 export interface Submission {
   original: string;
   entry: string;
@@ -31,7 +31,7 @@ export type SaveResponse =
   | { result: "accepted"; checkpoint: string; head: string }
   | { result: "already-accepted"; checkpoint: string; head: string }
   | { result: "stale-parent"; head: string }
-  /** PROVISIONAL: the spec names no response for a submission that does not verify. */
+  /** P6.7: a submission whose parent is the head but which does not verify, with the rule it fails (T6-029). */
   | { result: "rejected"; rule: string; reason: string };
 
 /** What a host keeps for each Original. Writes must be durable before they resolve (P6.2). */
