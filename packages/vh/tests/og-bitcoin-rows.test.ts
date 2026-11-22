@@ -78,7 +78,7 @@ describe('anchoring (P9.10, P9.16, P9.18)', () => {
     expect(axes(r).state).not.toBe('current');
   });
 
-  test('T9-013: two valid anchors on different sats: the first in chain order is the anchor; the other conflicts', async () => {
+  test('T9-013, T7-056: two valid anchors on different sats: the first in chain order is the anchor; the other conflicts', async () => {
     const w = await World.create();
     const base = w.head;
     const a = await w.entry((s) => { s.asset.aliases = [SAT]; s.asset.body = 'none'; }, { parent: base, push: false });
@@ -204,7 +204,7 @@ describe('after the anchor (P9.12, P9.13, P9.15, P9.36)', () => {
     expect(r.checkpoint).toBe(anchor.versionId);
   });
 
-  test('T9-078 / T9-079: a publication and the one extending it in one block, in order / in reverse order', async () => {
+  test('T9-078 / T9-079, T9-015: a publication and the one extending it in one block, in order / in reverse order', async () => {
     const { w, anchor, chain } = await anchoredWorld();
     const e3 = await later(w, anchor, (s) => { s.asset.name = 'Three'; });
     const e4 = await later(w, e3, (s) => { s.asset.name = 'Four'; });
@@ -222,7 +222,7 @@ describe('after the anchor (P9.12, P9.13, P9.15, P9.36)', () => {
     expect(labelOf(r, e4)).toEqual({ versionId: e4.versionId, status: 'ignored' });
   });
 
-  test('T9-017, T7-006, T9-072: a key removed off Bitcoin after anchoring does not affect inscribed entries', async () => {
+  test('T9-017, T7-006, T9-072, T9-021: a key removed off Bitcoin after anchoring does not affect inscribed entries', async () => {
     const { w, anchor, chain } = await anchoredWorld();
     await web(w).rotate([{ fragment: 'key-2', signer: seeded(220) }]);
     const r = await verifyOriginal(chain.evidence(w.did, { extra: [{ kind: 'signer-history', source: 'newer', bytes: enc(w.author.log()), did: w.author.did }] }));
@@ -230,7 +230,7 @@ describe('after the anchor (P9.12, P9.13, P9.15, P9.36)', () => {
     expect(axes(r).state).toBe('current');
   });
 
-  test('T9-036, T7-005 (anchored): a later inscribed version that removes the key refuses the next entry', async () => {
+  test('T9-036, T9-001, T7-005 (anchored): a later inscribed version that removes the key refuses the next entry', async () => {
     const { w, anchor, chain } = await anchoredWorld();
     await web(w).rotate([{ fragment: 'key-2', signer: seeded(221) }]);
     const e = await later(w, anchor, (s) => { s.asset.name = 'Three'; }, { ref: { ...w.author.ref('key-1', w.entries[0].state.author.versionId) } as never });
@@ -512,7 +512,7 @@ describe('did:btco signers (P5.13, P9.15 rows 4–5)', () => {
     expect(labelOf(await verifyOriginal(chain.evidence(w.did)), e)).toMatchObject({ status: 'rejected' });
   });
 
-  test('T9-108, T9-112, T9-117, T9-122, T7-055, T9-118, T9-123: an inscription whose did:btco signer\'s sat is not read in full is unverifiable; later ones wait; state stays current', async () => {
+  test('T9-108, T9-112, T9-117, T9-122, T7-055, T9-118, T9-123, T9-114: an inscription whose did:btco signer\'s sat is not read in full is unverifiable; later ones wait; state stays current', async () => {
     const chain = new Chain();
     const EDITOR_SAT = 'did:btco:reg:888';
     const ke = seeded(232);
