@@ -193,8 +193,8 @@ export interface Report {
   checkpoint: string | null;
   evidence: { inputs: ReportInput[]; network: BitcoinNetwork | null; tip: Tip | null; depth: number | null };
   axes: Axes | { outcome: "unsupported" };
-  entries?: EntryLabel[];
-  signers?: SignerLabel[];
+  entries: EntryLabel[];
+  signers: SignerLabel[];
   diagnostics: Diagnostic[];
   bitcoin?: {
     sat: string;

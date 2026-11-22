@@ -290,7 +290,8 @@ describe('bodies (P9.17, P9.30)', () => {
       const { w, chain } = await anchoredWorld(body);
       const r = await verifyOriginal(chain.evidence(w.did));
       expect(axes(r)).toMatchObject({ outcome: 'verified', availability: 'none' });
-      expect(r.missing).toHaveLength(1);
+      expect(r.diagnostics.map((d) => d.code)).toEqual(['resource-missing']);
+      expect(axes(r).offline).toBe('needs-external');
     }
   });
 
@@ -454,7 +455,8 @@ describe('did:btco signers (P5.13, P9.15 rows 4–5)', () => {
     chain.publish(SAT, buildPublication({ entries: w.entries, body: null }));
     const r = await verifyOriginal(chain.evidence(w.did));
     expect(axes(r)).toMatchObject({ bitcoin: 'anchored', identity: 'complete' });
-    expect(r.dependencies).toContainEqual({ kind: 'signer-sat', did: AUTHOR_SAT });
+    // The author's sat is read in full, so it is no missing dependency (P7.21).
+    expect(r.diagnostics.some((d) => d.code === 'signer-sat-not-read')).toBe(false);
   });
 
   test('T5-021, T5-022, T5-024: an entry naming a version inscribed after its own inscription is rejected', async () => {
@@ -510,7 +512,7 @@ describe('did:btco signers (P5.13, P9.15 rows 4–5)', () => {
     expect(labelOf(await verifyOriginal(chain.evidence(w.did)), e)).toMatchObject({ status: 'rejected' });
   });
 
-  test('T9-108, T9-112, T9-117, T9-122, T7-055, T9-118, T9-123: an inscription whose did:btco signer\'s sat is not read in full is unverifiable; later ones wait; state stays current', async () => {
+  test('T9-108, T9-112, T9-117, T9-122, T7-055, T9-118, T9-123, T9-138: an inscription whose did:btco signer\'s sat is not read in full is unverifiable; later ones wait; state stays current', async () => {
     const chain = new Chain();
     const EDITOR_SAT = 'did:btco:reg:888';
     const ke = seeded(232);
@@ -535,7 +537,8 @@ describe('did:btco signers (P5.13, P9.15 rows 4–5)', () => {
     const full = await verifyOriginal(chain.evidence(w.did, { reads: [chain.read(SAT), chain.read(EDITOR_SAT)], prior: partial }));
     expect(full.checkpoint).toBe(byEditor.versionId);
     expect(labelOf(full, byAuthor)).toEqual({ versionId: byAuthor.versionId, status: 'ignored' });
-    expect(full.headChange).toEqual({ from: anchor.versionId, to: byEditor.versionId });
+    expect(full.changes).toEqual([{ kind: 'head', from: anchor.versionId, to: byEditor.versionId, cause: 'resolved' }]);
+    expect(partial.diagnostics.map((d) => [d.code, d.item.id])).toEqual([['resource-missing', partial.diagnostics[0].item.id], ['signer-sat-not-read', 'did:btco:reg:888'], ['inscription-unverifiable', u], ['publication-waiting', wt]]);
   });
 
   async function editorUnderBtcoAuthor() {
@@ -625,12 +628,69 @@ describe('did:btco signers (P5.13, P9.15 rows 4–5)', () => {
 });
 
 describe('prior results (P9.36, P9.16)', () => {
+  test('T9-139: an evidence set with no prior result has no change records', async () => {
+    const { w, chain } = await anchoredWorld();
+    expect((await verifyOriginal(chain.evidence(w.did))).changes).toEqual([]);
+  });
+
+  test('T9-135: a reorganization removes the anchoring publication: not anchored, the anchoring entry ignored, head and holder records with cause reorganization', async () => {
+    const { w, before, anchor, chain } = await anchoredWorld('full');
+    const prior = await verifyOriginal(chain.evidence(w.did));
+    const reorged = new Chain();
+    reorged.height = chain.height + 5;
+    const r = await verifyOriginal(reorged.evidence(w.did, { reads: [{ sat: SAT, index: 'ord-a', complete: true, inscriptions: [], holder: null }], prior, extra: [
+      { kind: 'log', source: 'copy', bytes: enc(serializeLog(w.entries)) },
+      { kind: 'signer-history', source: 'author', bytes: enc(w.author.log()), did: w.author.did },
+      { kind: 'resource', source: 'v1', bytes: res('version 1') },
+    ] }));
+    expect(axes(r)).toMatchObject({ bitcoin: 'not-anchored', state: 'valid-as-of', offline: 'self-contained', outcome: 'verified' });
+    expect(r).not.toHaveProperty('bitcoin');
+    expect(r.checkpoint).toBe(before.versionId);
+    expect(labelOf(r, anchor)).toEqual({ versionId: anchor.versionId, status: 'ignored' });
+    expect(labelOf(r, before)).toMatchObject({ status: 'accepted', ordering: 'claimed' });
+    expect(r.changes).toEqual([
+      { kind: 'head', from: anchor.versionId, to: before.versionId, cause: 'reorganization' },
+      { kind: 'holder', from: { sat: SAT, address: prior.bitcoin!.holder.address }, to: null, cause: 'reorganization' },
+    ]);
+  });
+
+  test('T9-136: after the reorganization, the anchoring sat not read in full: missing evidence, the anchoring entry unchecked, no holder record', async () => {
+    const { w, anchor, chain } = await anchoredWorld('full');
+    const prior = await verifyOriginal(chain.evidence(w.did));
+    const r = await verifyOriginal(new Chain().evidence(w.did, { reads: [{ sat: SAT, index: 'ord-a', complete: false, inscriptions: [], holder: null }], prior, extra: [
+      { kind: 'log', source: 'copy', bytes: enc(serializeLog(w.entries)) },
+      { kind: 'signer-history', source: 'author', bytes: enc(w.author.log()), did: w.author.did },
+    ] }));
+    expect(axes(r).bitcoin).toBe('missing-evidence');
+    expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'anchoring-sat-not-read', item: { kind: 'sat', id: SAT } }));
+    expect(labelOf(r, anchor)).toEqual({ versionId: anchor.versionId, status: 'unchecked' });
+    expect(r.changes.some((c) => c.kind === 'holder')).toBe(false);
+  });
+
+  test('T9-137: an earlier valid anchor on another sat wins: holder and head records with cause earlier-anchor', async () => {
+    const w = await World.create();
+    const base = w.head;
+    const a = await w.entry((s) => { s.asset.aliases = [SAT]; s.asset.body = 'none'; }, { parent: base, push: false });
+    const b = await w.entry((s) => { s.asset.aliases = [SAT2]; s.asset.body = 'none'; }, { parent: base, push: false });
+    const chain = new Chain();
+    chain.publish(SAT2, anchoring(w, { entries: [base, b] }), { height: 150 });
+    chain.publish(SAT, anchoring(w, { entries: [base, a] }), { height: 160 });
+    const prior = await verifyOriginal(chain.evidence(w.did, { sats: [SAT] }));
+    expect(prior.bitcoin?.sat).toBe(SAT);
+    const r = await verifyOriginal(chain.evidence(w.did, { prior }));
+    expect(r.bitcoin?.sat).toBe(SAT2);
+    expect(r.changes).toEqual([
+      { kind: 'head', from: a.versionId, to: b.versionId, cause: 'earlier-anchor' },
+      { kind: 'holder', from: { sat: SAT, address: chain.holders.get(SAT) }, to: { sat: SAT2, address: chain.holders.get(SAT2) }, cause: 'earlier-anchor' },
+    ]);
+  });
+
   test('T9-037, T9-110: a head that changes against the prior result is stated', async () => {
     const { w, anchor, chain } = await anchoredWorld();
     const prior = await verifyOriginal(chain.evidence(w.did));
     const e = await later(w, anchor, (s) => { s.asset.name = 'Three'; });
     chain.publish(SAT, pub1(e));
     const r = await verifyOriginal(chain.evidence(w.did, { prior }));
-    expect(r.headChange).toEqual({ from: anchor.versionId, to: e.versionId });
+    expect(r.changes).toEqual([{ kind: 'head', from: anchor.versionId, to: e.versionId, cause: 'publication' }]);
   });
 });
