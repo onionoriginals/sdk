@@ -1,0 +1,25 @@
+{
+  "original": "did:og:QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW",
+  "checkpoint": null,
+  "inputs": [
+    {
+      "kind": "inscription",
+      "source": "index:bcbdc0375c141a6ae45685da65010aa15f92401baf8c3cdb36a290b97d3a08dbi0",
+      "digest": "zQmTwFMNvRhKoF3oB7E1s5SnJqdXXHkyeswFz7mVQyGVvoh"
+    },
+    {
+      "kind": "inscription",
+      "source": "index:53455ef2c9378bbc138bd1264b8ec7cfd50d8bb5bafade2e034c2eca22ddcdc5i0",
+      "digest": "zQmcgTvTsQco2KbDpvpecY7kcvSNYJ3weHqB1ikX9oYzgM8"
+    }
+  ],
+  "signerHistories": [],
+  "network": "regtest",
+  "tip": {
+    "height": 110,
+    "hash": "855a1c4b048aa241ea61a872b11f3b915048244a9841b5c501405ba268a20839"
+  },
+  "depth": 1,
+  "prior": null,
+  "note": "Exactly the P9.18 evidence set: the anchoring sat's inscriptions at the stated network and tip, and nothing else."
+}

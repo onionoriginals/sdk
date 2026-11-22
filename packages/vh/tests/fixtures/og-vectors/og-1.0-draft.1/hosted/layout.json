@@ -1,0 +1,22 @@
+{
+  "alias": "did:webvh:QmUg1fNtihPZVbFoxxo9ZEronC5j7vbNS5H9Uv9mcRGEEV:host.example:field-notes",
+  "aliasLog": "https://host.example/field-notes/did.jsonl",
+  "packageRoot": "https://host.example/field-notes/originals/",
+  "resources": [
+    {
+      "url": "https://host.example/field-notes/originals/resources/zQmdvFJ4gaexH7x5R8H7o6Zbykni8wMNyN1ezdMLrVEa9Ng",
+      "headers": {
+        "Content-Type": "text/markdown",
+        "X-Content-Type-Options": "nosniff"
+      }
+    },
+    {
+      "url": "https://host.example/field-notes/originals/resources/zQmQFt79upGpNBqAnKak3f3XaUrgy6gevkrvEoGbJJCGLTo",
+      "headers": {
+        "Content-Type": "text/markdown",
+        "X-Content-Type-Options": "nosniff"
+      }
+    }
+  ],
+  "note": "served/ is the state after the exchanges in exchanges.json. Headers beyond Content-Type follow P9.7; text/markdown is not active content."
+}

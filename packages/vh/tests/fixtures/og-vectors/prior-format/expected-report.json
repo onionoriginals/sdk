@@ -1,0 +1,28 @@
+{
+  "type": "OriginalsVerificationReport",
+  "profile": "og:1.0-draft.1",
+  "original": null,
+  "checkpoint": null,
+  "evidence": {
+    "inputs": [
+      {
+        "kind": "transaction",
+        "source": "mempool.space:f8c135cc047f1fdf37974f2a261511d9e1d48f5fd362cd912f958734096cecc7",
+        "txid": "f8c135cc047f1fdf37974f2a261511d9e1d48f5fd362cd912f958734096cecc7"
+      },
+      {
+        "kind": "transaction",
+        "source": "mempool.space:2706166ea3e0e75d33aebe7b2db044611784a1436f04c45635e0b79c09a55485",
+        "txid": "2706166ea3e0e75d33aebe7b2db044611784a1436f04c45635e0b79c09a55485"
+      }
+    ],
+    "network": "mainnet",
+    "tip": null,
+    "depth": null
+  },
+  "axes": {
+    "outcome": "unsupported"
+  },
+  "reason": "The log’s method value is originals:1.0, which an implementation of og:1.0-draft.1 does not implement (P14.1, P3.3); its inscriptions carry no og metaprotocol, so they are not Originals inscriptions under P9.31 either.",
+  "note": "Only the outcome is fixed: under outcome unsupported a verifier reports no history, state or Bitcoin result for the log."
+}

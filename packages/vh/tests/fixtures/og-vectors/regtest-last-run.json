@@ -1,0 +1,168 @@
+{
+  "gate": "regtest (release blocker step a)",
+  "date": "2026-11-21",
+  "passed": true,
+  "bitcoind": "Bitcoin Core daemon version v32.1.0 bitcoind",
+  "ord": "ord 0.29.1",
+  "network": "regtest",
+  "sat": 45000000000,
+  "anchoringAlias": "did:btco:reg:45000000000",
+  "holder": "bcrt1pqgmca7tc3vrl9mg2p309yc55ee4lpnvwja33jt9dmxjcptr7skgq4z35uq",
+  "transactions": {
+    "commit": "9d18b0d35d07c1e46caf909435e0a87c1c8600df5b585f071a2c2fa5d0a365a3",
+    "revealPart1": "6be86ff282f82d06199fcaf4cb3a592533a2e0131fb1d3e887c07a1d620afe32",
+    "revealPart2": "636459ac31ee17bd432983cf85ee8b747debcda1754bbe8334790cb00fff510f"
+  },
+  "inscriptions": [
+    {
+      "id": "6be86ff282f82d06199fcaf4cb3a592533a2e0131fb1d3e887c07a1d620afe32i0",
+      "height": 122,
+      "txIndex": 1,
+      "inscriptionIndex": 0,
+      "sat": 45000000000,
+      "metaprotocol": "og",
+      "contentType": null,
+      "holder": "bcrt1pqgmca7tc3vrl9mg2p309yc55ee4lpnvwja33jt9dmxjcptr7skgq4z35uq",
+      "number": 0,
+      "charms": [
+        "coin",
+        "uncommon",
+        "nineball",
+        "vindicated"
+      ],
+      "envelopeBytes": 4298,
+      "envelopeDigest": "zQmTwFMNvRhKoF3oB7E1s5SnJqdXXHkyeswFz7mVQyGVvoh"
+    },
+    {
+      "id": "636459ac31ee17bd432983cf85ee8b747debcda1754bbe8334790cb00fff510fi0",
+      "height": 123,
+      "txIndex": 1,
+      "inscriptionIndex": 0,
+      "sat": 45000000000,
+      "metaprotocol": "og",
+      "contentType": "text/markdown",
+      "holder": "bcrt1pqgmca7tc3vrl9mg2p309yc55ee4lpnvwja33jt9dmxjcptr7skgq4z35uq",
+      "number": 1,
+      "charms": [
+        "coin",
+        "uncommon",
+        "nineball",
+        "reinscription",
+        "vindicated"
+      ],
+      "envelopeBytes": 349068,
+      "envelopeDigest": "zQmfCfxGGU9tHgvdcjkGykRPNNB24r6xF43cn6PppkxRqT8"
+    }
+  ],
+  "part1EnvelopeMatchesVector": true,
+  "anchoringEntry": "4-Qmb3vmUjfFBRfFRe1b2eJZcbYrDg2MNCKJAXgV4WiScAZy",
+  "tip": {
+    "height": 131,
+    "hash": "6cace823c76546a7f5b4b808936fa28d079a8160fc11182ed2097ba541c176b0"
+  },
+  "report": {
+    "type": "OriginalsVerificationReport",
+    "profile": "og:1.0-draft.1",
+    "original": "did:og:QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW",
+    "checkpoint": "4-Qmb3vmUjfFBRfFRe1b2eJZcbYrDg2MNCKJAXgV4WiScAZy",
+    "evidence": {
+      "inputs": [
+        {
+          "kind": "inscription",
+          "source": "index:6be86ff282f82d06199fcaf4cb3a592533a2e0131fb1d3e887c07a1d620afe32i0",
+          "digest": "zQmTwFMNvRhKoF3oB7E1s5SnJqdXXHkyeswFz7mVQyGVvoh"
+        },
+        {
+          "kind": "inscription",
+          "source": "index:636459ac31ee17bd432983cf85ee8b747debcda1754bbe8334790cb00fff510fi0",
+          "digest": "zQmfCfxGGU9tHgvdcjkGykRPNNB24r6xF43cn6PppkxRqT8"
+        }
+      ],
+      "network": "regtest",
+      "tip": {
+        "height": 131,
+        "hash": "6cace823c76546a7f5b4b808936fa28d079a8160fc11182ed2097ba541c176b0"
+      },
+      "depth": 1
+    },
+    "axes": {
+      "outcome": "verified",
+      "binding": "bound",
+      "history": "valid",
+      "identity": "complete",
+      "authority": "current",
+      "state": "current",
+      "availability": "partial",
+      "offline": "needs-external",
+      "bitcoin": "anchored"
+    },
+    "entries": [
+      {
+        "versionId": "1-QmdXPmoxmFpAtqK3ZLVusnXZM422SAou6dRz1mg6i8HrrD",
+        "status": "accepted",
+        "authority": "current-key",
+        "endorsed": true,
+        "ordering": "existed-by-block",
+        "block": 123
+      },
+      {
+        "versionId": "2-QmU36PtMBuoUaiC8To9eiE5ooy8xgEPBwjvptzdx27bHY2",
+        "status": "accepted",
+        "authority": "current-key",
+        "endorsed": true,
+        "ordering": "existed-by-block",
+        "block": 123
+      },
+      {
+        "versionId": "3-QmbrTQQNKzEJaBTop1WJNjfF2MCAwgJX7QVbLsAzdNJAFW",
+        "status": "accepted",
+        "authority": "current-key",
+        "endorsed": true,
+        "ordering": "existed-by-block",
+        "block": 123
+      },
+      {
+        "versionId": "4-Qmb3vmUjfFBRfFRe1b2eJZcbYrDg2MNCKJAXgV4WiScAZy",
+        "status": "accepted",
+        "authority": "current-key",
+        "endorsed": false,
+        "ordering": "chain-ordered",
+        "block": 123
+      }
+    ],
+    "signers": [
+      {
+        "did": "did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example",
+        "role": "author",
+        "latestVersionId": "1-QmNjhx8xG4JD9hCswSc1nSZncxuSGzex37ica8BoyHEmrq",
+        "source": "inscribed:6be86ff282f82d06199fcaf4cb3a592533a2e0131fb1d3e887c07a1d620afe32i0",
+        "freshness": "established"
+      }
+    ],
+    "missing": [
+      {
+        "kind": "resource",
+        "version": 1,
+        "digest": "zQmdvFJ4gaexH7x5R8H7o6Zbykni8wMNyN1ezdMLrVEa9Ng",
+        "versionId": "1-QmdXPmoxmFpAtqK3ZLVusnXZM422SAou6dRz1mg6i8HrrD"
+      }
+    ],
+    "dependencies": [
+      {
+        "kind": "anchoring-sat",
+        "did": "did:btco:reg:45000000000"
+      }
+    ],
+    "bitcoin": {
+      "sat": "did:btco:reg:45000000000",
+      "holder": {
+        "address": "bcrt1pqgmca7tc3vrl9mg2p309yc55ee4lpnvwja33jt9dmxjcptr7skgq4z35uq",
+        "uniqueness": "provisional"
+      },
+      "conflictingAnchors": [],
+      "unverifiable": [],
+      "waiting": []
+    }
+  },
+  "differences": []
+}

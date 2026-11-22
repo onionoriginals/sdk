@@ -1,0 +1,32 @@
+{
+  "network": "mainnet",
+  "sat": "did:btco:321959825747774",
+  "did": "did:vh:QmVyqQygXv1EbJfCwozKq4i5LDrH6kFg36aLDJZ2XGAsa5",
+  "method": "originals:1.0",
+  "contentType": "application/vnd.originals.vh+jsonl",
+  "inscriptions": [
+    {
+      "id": "f8c135cc047f1fdf37974f2a261511d9e1d48f5fd362cd912f958734096cecc7i0",
+      "revealTxid": "f8c135cc047f1fdf37974f2a261511d9e1d48f5fd362cd912f958734096cecc7",
+      "role": "anchoring publication: entries 1–2",
+      "block": 974060,
+      "blockHash": "00000000000000000000558b56d60b0ded83ce193ea09af11be607d2182ba397",
+      "blockTime": 1793498066,
+      "transaction": "transactions/f8c135cc047f1fdf37974f2a261511d9e1d48f5fd362cd912f958734096cecc7.hex"
+    },
+    {
+      "id": "2706166ea3e0e75d33aebe7b2db044611784a1436f04c45635e0b79c09a55485i0",
+      "revealTxid": "2706166ea3e0e75d33aebe7b2db044611784a1436f04c45635e0b79c09a55485",
+      "role": "reinscription: entry 3",
+      "block": 974063,
+      "blockHash": "0000000000000000000083e383faf7f2ba251415ea0fdd395b9215387642e69d",
+      "blockTime": 1793499442,
+      "transaction": "transactions/2706166ea3e0e75d33aebe7b2db044611784a1436f04c45635e0b79c09a55485.hex"
+    }
+  ],
+  "sources": {
+    "transactions": "https://mempool.space/api/tx/<txid>/hex, fetched 21 November 2026; block heights and hashes from https://mempool.space/api/tx/<txid>",
+    "sat": "the owner’s acceptance receipt of 1 November 2026, which names the sat and these two reveal transactions; the sat is not re-derived here"
+  },
+  "note": "The mainnet acceptance Original of 1 November 2026, written before did:og under the previous inscription encoding: the asset log as the inscription body, content type application/vnd.originals.vh+jsonl, no metaprotocol and no metadata, method originals:1.0, identifier did:vh. Kept as a regression fixture: a verifier of og:1.0-draft.1 reports it unsupported (P14.1, T14-085)."
+}

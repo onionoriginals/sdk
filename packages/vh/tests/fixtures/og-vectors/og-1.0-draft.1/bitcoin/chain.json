@@ -1,0 +1,35 @@
+{
+  "synthetic": true,
+  "note": "Synthetic chain fixture: no real regtest chain produced these transactions. Hashes are SHA-256 of labels. The index reads below are what a verifier is given (P7.17, P9.31).",
+  "network": "regtest",
+  "ordRelease": "0.29.1",
+  "tip": {
+    "height": 110,
+    "hash": "855a1c4b048aa241ea61a872b11f3b915048244a9841b5c501405ba268a20839"
+  },
+  "depth": 1,
+  "sat": 1234567890,
+  "holder": {
+    "address": "bcrt1p930e7d580b1ac0e6ffa8e4c3593317370139c91891c0cca10e9afaa205"
+  },
+  "inscriptions": [
+    {
+      "id": "bcbdc0375c141a6ae45685da65010aa15f92401baf8c3cdb36a290b97d3a08dbi0",
+      "sat": 1234567890,
+      "block": 101,
+      "txIndex": 1,
+      "inscriptionIndex": 0,
+      "envelope": "inscriptions/part-1.envelope.bin",
+      "confirmations": 10
+    },
+    {
+      "id": "53455ef2c9378bbc138bd1264b8ec7cfd50d8bb5bafade2e034c2eca22ddcdc5i0",
+      "sat": 1234567890,
+      "block": 102,
+      "txIndex": 1,
+      "inscriptionIndex": 0,
+      "envelope": "inscriptions/part-2.envelope.bin",
+      "confirmations": 9
+    }
+  ]
+}

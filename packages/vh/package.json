@@ -52,6 +52,11 @@
       "import": "./dist/originals/index.js",
       "default": "./dist/originals/index.js"
     },
+    "./og": {
+      "types": "./dist/og/index.d.ts",
+      "import": "./dist/og/index.js",
+      "default": "./dist/og/index.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
