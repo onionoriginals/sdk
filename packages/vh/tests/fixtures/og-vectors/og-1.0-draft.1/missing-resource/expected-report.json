@@ -73,6 +73,5 @@
       },
       "reason": "The evidence set does not hold the bytes of this resource version."
     }
-  ],
-  "changes": []
+  ]
 }

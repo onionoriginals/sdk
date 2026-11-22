@@ -1,0 +1,12 @@
+{
+  "synthetic": true,
+  "note": "Synthetic: the index reads the anchoring sat in full at this tip and lists no inscription on it, as after a reorganization from block 101 removed the anchoring publication (P9.5, P9.31, P9.35).",
+  "network": "regtest",
+  "ordRelease": "0.29.1",
+  "sat": 1234567890,
+  "tip": {
+    "height": 111,
+    "hash": "46a656aa6f7171862e5f9d8274ff44ea43380818eeb2e33924b06150dd675faa"
+  },
+  "inscriptions": []
+}

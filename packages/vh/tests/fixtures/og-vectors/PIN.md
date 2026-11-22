@@ -1,7 +1,7 @@
 # did:og test vectors (copied fixtures)
 
 Copied verbatim from `aviarytech/originals-spec`, pull request 69 (branch
-`design-review-did-og-core`), head `0c859c0`, directories `vectors/og-1.0-draft.1/`,
+`design-review-did-og-core`), head `b4f3604`, directories `vectors/og-1.0-draft.1/`,
 `vectors/prior-format/` and `vectors/regtest/last-run.json`. Provisional, like
 the parts of section 14 they exercise (P14.26). No code from the spec
 repository's generator is used: the SDK reproduces these files from its own

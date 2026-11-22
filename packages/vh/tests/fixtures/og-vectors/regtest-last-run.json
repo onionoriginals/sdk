@@ -5,81 +5,77 @@
   "bitcoind": "Bitcoin Core daemon version v32.1.0 bitcoind",
   "ord": "ord 0.29.1",
   "network": "regtest",
-  "sat": 65000000000,
-  "anchoringAlias": "did:btco:reg:65000000000",
-  "holder": "bcrt1pztjvkxw3gsmtj9saj83m5y7dtq0tc7selmqfaf8uz23z5h3090esgg568z",
+  "sat": 54999809300,
+  "anchoringAlias": "did:btco:reg:54999809300",
+  "holder": "bcrt1p3ckd3qvk6yh3d0d7vdq8y5plc89349xgch08fnfl3722gkg20tmqpwjwzw",
   "transactions": {
-    "commit": "1c0f9bb6c5555aac016635a8f2abc6c357a881c10183c5da5f8c3d3be6858a34",
-    "revealPart1": "59e2a212b5466a3bf0bbb9a3d76cfbbb979050ad7afff0371f5d5116dfaf491f",
-    "revealPart2": "e7d2f6754b399c62ad09246adeea56fdb65d6e73e1628be8b75175f5a8379b11"
+    "commit": "0b46c309461515c3de064325617542255d8341d666d3e470d0617624b1131444",
+    "revealPart1": "d83e1a504badd7a53afbda5789f969511aa93b3705b8ed8d75d87ad1bd487c9c",
+    "revealPart2": "3b8967ead15e659c2df27abe7263ad054770f23fbae64fad49b5e41d38dcd07b"
   },
   "inscriptions": [
     {
-      "id": "59e2a212b5466a3bf0bbb9a3d76cfbbb979050ad7afff0371f5d5116dfaf491fi0",
+      "id": "d83e1a504badd7a53afbda5789f969511aa93b3705b8ed8d75d87ad1bd487c9ci0",
       "height": 122,
       "txIndex": 1,
       "inscriptionIndex": 0,
-      "sat": 65000000000,
+      "sat": 54999809300,
       "metaprotocol": "og",
       "contentType": null,
-      "holder": "bcrt1pztjvkxw3gsmtj9saj83m5y7dtq0tc7selmqfaf8uz23z5h3090esgg568z",
+      "holder": "bcrt1p3ckd3qvk6yh3d0d7vdq8y5plc89349xgch08fnfl3722gkg20tmqpwjwzw",
       "number": 0,
       "charms": [
-        "coin",
-        "uncommon",
         "vindicated"
       ],
       "envelopeBytes": 4298,
       "envelopeDigest": "zQmTwFMNvRhKoF3oB7E1s5SnJqdXXHkyeswFz7mVQyGVvoh"
     },
     {
-      "id": "e7d2f6754b399c62ad09246adeea56fdb65d6e73e1628be8b75175f5a8379b11i0",
+      "id": "3b8967ead15e659c2df27abe7263ad054770f23fbae64fad49b5e41d38dcd07bi0",
       "height": 123,
       "txIndex": 1,
       "inscriptionIndex": 0,
-      "sat": 65000000000,
+      "sat": 54999809300,
       "metaprotocol": "og",
       "contentType": "text/markdown",
-      "holder": "bcrt1pztjvkxw3gsmtj9saj83m5y7dtq0tc7selmqfaf8uz23z5h3090esgg568z",
+      "holder": "bcrt1p3ckd3qvk6yh3d0d7vdq8y5plc89349xgch08fnfl3722gkg20tmqpwjwzw",
       "number": 1,
       "charms": [
-        "coin",
-        "uncommon",
         "reinscription",
         "vindicated"
       ],
       "envelopeBytes": 349068,
-      "envelopeDigest": "zQma4rXewH11qSJavkWgh4VrEdw4jgCrVZmGAF7r5uNWmWo"
+      "envelopeDigest": "zQmP3HKk3SFUe9XGQCLJTeaRNmneL4HRmY1yY2P4zEbssCk"
     }
   ],
   "part1EnvelopeMatchesVector": true,
-  "anchoringEntry": "4-QmQPyBKVSGGL3gJNGiwJXPmpBJ2pnXbPet6tfadbFQ2QFw",
+  "anchoringEntry": "4-QmWBfYWeowmsuMxW5F6R92cbCkCvMVHR6dD9QkCHhAyqWb",
   "tip": {
     "height": 131,
-    "hash": "71bbb9d79575d9030a055f2f4fc7dbd3c99e67754c96f3d332db43102ae55160"
+    "hash": "43492c7d223bab67896bf2b2b5b58814bdc1b4bb8b8156620c62958b1ea5dfe5"
   },
   "report": {
     "type": "OriginalsVerificationReport",
     "profile": "og:1.0-draft.1",
     "original": "did:og:QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW",
-    "checkpoint": "4-QmQPyBKVSGGL3gJNGiwJXPmpBJ2pnXbPet6tfadbFQ2QFw",
+    "checkpoint": "4-QmWBfYWeowmsuMxW5F6R92cbCkCvMVHR6dD9QkCHhAyqWb",
     "evidence": {
       "inputs": [
         {
           "kind": "inscription",
-          "source": "index:59e2a212b5466a3bf0bbb9a3d76cfbbb979050ad7afff0371f5d5116dfaf491fi0",
+          "source": "index:d83e1a504badd7a53afbda5789f969511aa93b3705b8ed8d75d87ad1bd487c9ci0",
           "digest": "zQmTwFMNvRhKoF3oB7E1s5SnJqdXXHkyeswFz7mVQyGVvoh"
         },
         {
           "kind": "inscription",
-          "source": "index:e7d2f6754b399c62ad09246adeea56fdb65d6e73e1628be8b75175f5a8379b11i0",
-          "digest": "zQma4rXewH11qSJavkWgh4VrEdw4jgCrVZmGAF7r5uNWmWo"
+          "source": "index:3b8967ead15e659c2df27abe7263ad054770f23fbae64fad49b5e41d38dcd07bi0",
+          "digest": "zQmP3HKk3SFUe9XGQCLJTeaRNmneL4HRmY1yY2P4zEbssCk"
         }
       ],
       "network": "regtest",
       "tip": {
         "height": 131,
-        "hash": "71bbb9d79575d9030a055f2f4fc7dbd3c99e67754c96f3d332db43102ae55160"
+        "hash": "43492c7d223bab67896bf2b2b5b58814bdc1b4bb8b8156620c62958b1ea5dfe5"
       },
       "depth": 1
     },
@@ -120,7 +116,7 @@
         "block": 123
       },
       {
-        "versionId": "4-QmQPyBKVSGGL3gJNGiwJXPmpBJ2pnXbPet6tfadbFQ2QFw",
+        "versionId": "4-QmWBfYWeowmsuMxW5F6R92cbCkCvMVHR6dD9QkCHhAyqWb",
         "status": "accepted",
         "authority": "current-key",
         "endorsed": false,
@@ -133,7 +129,7 @@
         "did": "did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example",
         "role": "author",
         "latestVersionId": "1-QmNjhx8xG4JD9hCswSc1nSZncxuSGzex37ica8BoyHEmrq",
-        "source": "inscribed:59e2a212b5466a3bf0bbb9a3d76cfbbb979050ad7afff0371f5d5116dfaf491fi0",
+        "source": "inscribed:d83e1a504badd7a53afbda5789f969511aa93b3705b8ed8d75d87ad1bd487c9ci0",
         "freshness": "established"
       }
     ],
@@ -149,11 +145,10 @@
         "reason": "Resource version zQmdvFJ4gaexH7x5R8H7o6Zbykni8wMNyN1ezdMLrVEa9Ng is not in the evidence set."
       }
     ],
-    "changes": [],
     "bitcoin": {
-      "sat": "did:btco:reg:65000000000",
+      "sat": "did:btco:reg:54999809300",
       "holder": {
-        "address": "bcrt1pztjvkxw3gsmtj9saj83m5y7dtq0tc7selmqfaf8uz23z5h3090esgg568z",
+        "address": "bcrt1p3ckd3qvk6yh3d0d7vdq8y5plc89349xgch08fnfl3722gkg20tmqpwjwzw",
         "uniqueness": "provisional"
       },
       "conflictingAnchors": [],

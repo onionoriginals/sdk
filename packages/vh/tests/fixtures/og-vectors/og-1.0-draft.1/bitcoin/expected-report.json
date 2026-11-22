@@ -89,7 +89,6 @@
       "reason": "The evidence set does not hold the bytes of this resource version."
     }
   ],
-  "changes": [],
   "bitcoin": {
     "sat": "did:btco:reg:1234567890",
     "holder": {
