@@ -82,7 +82,9 @@ async function main() {
       }
       for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) walk((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], `${path}.${k}`);
     };
-    walk(want, report, 'report');
+    // P14.25: reports compare as JSON values, ignoring each diagnostic's reason.
+    const noReason = (r: { diagnostics?: Array<{ reason?: string }> }) => ({ ...r, diagnostics: (r.diagnostics ?? []).map(({ reason: _r, ...d }) => d) });
+    walk(noReason(want), noReason(report), 'report');
     const part1Same = Buffer.compare(Buffer.from(part1.envelope), Buffer.from(env1)) === 0;
     if (!part1Same) diffs.push('part 1 as read from ord differs from the vector envelope');
     if (read.inscriptions.length !== 2) diffs.push(`ord lists ${read.inscriptions.length} inscriptions on the sat`);

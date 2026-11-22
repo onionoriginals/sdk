@@ -6,7 +6,7 @@ mainnet anchoring command.
 ## Source of truth
 
 The spec is `aviarytech/originals-spec` pull request 69, branch
-`design-review-did-og-core`, head `ccf4a69` (retargeted from `6e0e3f9` on 22 November 2026): `spec/*.md` is the core and
+`design-review-did-og-core`, head `0c859c0` (retargeted from `6e0e3f9`, then `ccf4a69`, on 22 November 2026): `spec/*.md` is the core and
 `spec/additions/` is out of scope. Method value `og:1.0-draft.1`. Its
 vectors are copied into `packages/vh/tests/fixtures/og-vectors/` (see `PIN.md`
 there); the spec repository's `vectors/tools/check.mjs` is the independent
@@ -28,7 +28,7 @@ The prior format (`originals:1.0`, `did:vh` identifiers) gets outcome
 
 ## Spec findings
 
-Status at `ccf4a69`: F2 is resolved (P14.25 now defines an `unsupported`
+Status at `0c859c0`: F8, F9, F10 and F11 are resolved too: reports now give typed `diagnostics` (each with a reason), `offline` is derived from the evidence set including loose inputs (P7.21), `changes` records head and holder changes with a cause, and `dependencies` is gone. F13 is half resolved: the new `reorg/` vector supplies its index read as a `sat-read` input, but `bitcoin/` still keeps its reads in `chain.json`. F14 and F15 are new. Status at `ccf4a69`: F2 is resolved (P14.25 now defines an `unsupported`
 report, and the prior-format vector matches it); F4 is resolved (P9.30 uses
 P4.4's new-version predicate, T9-134). The others are still open. `ccf4a69`
 also made did:og's own rules authoritative for the asset log (P5.5–P5.7,
@@ -188,15 +188,43 @@ inscription's id, position and confirmations, and the holder), or say in
 P14.26 that `chain.json` is part of the evidence set. The SDK's evidence set
 has a `sats` member, and its tests build it from `chain.json`.
 
-## Matrix coverage (section 12 at ccf4a69)
+### F14. P14.25: the `rule` of each diagnostic code is not fixed
 
-Rows cited by a test, by section: §3 8/12, §4 7/10, §5 48/60, §6 19/26, §7 36/70, §8 0/12, §9 99/139, §14 62/96 (T14-093 by
+P14.25 compares reports as JSON values ignoring only `reason`, so a
+diagnostic's `rule` must agree between implementations, but P14.25 gives it
+only as "the rule number under which the item is missing or failed, such as
+`P7.4`". The vectors fix `resource-missing` as `P7.4`, and the checker uses
+`P5.6` for `signer-history-missing`. **Proposed fix:** one rule per code. The
+SDK uses `P7.4` for both resource codes, `P5.6` for `signer-history-missing`,
+`P7.8` for `signer-version-missing`, `P7.19` for `proof-unchecked`, the failed
+rule for `entry-rejected`, `P7.14` for an anchor named by a copy and not read,
+`P9.17` for an anchoring sat read but not in full (`P9.10` when the indexes
+disagree), `P9.35` for `signer-sat-not-read`, `P9.15` for
+`inscription-unverifiable`, `P9.36` for `publication-waiting` and `P7.17` for
+`input-unusable`, all PROVISIONAL.
+
+### F15. P7.17: the `sat-read` and `prior-result` inputs have no defined form
+
+The `reorg/` vector adds evidence inputs of kinds `sat-read` (JSON with
+`network`, `sat`, `tip` and `inscriptions`) and `prior-result` (a report).
+No rule defines their members: what an inscription item in `inscriptions`
+holds (id, position, confirmations), how the holder and the completeness of
+the read are given, or how the read relates to the `inscription` inputs.
+**Proposed fix:** define `sat-read` in P14.25 or P14.26 (per inscription
+`{id, sat, height, txIndex, inscriptionIndex, confirmations}`, plus `holder`
+and `complete`), with envelopes as `inscription` inputs. The SDK reads that
+form, with `complete` true by default and an inscription with no envelope
+input counted as unread (P5.13).
+
+## Matrix coverage (section 12 at 0c859c0)
+
+Rows cited by a test, by section: §3 8/12, §4 7/10, §5 48/60, §6 19/26, §7 40/70, §8 0/12, §9 104/139, §14 65/96 (T14-093 by
 `packages/sdk/scripts/og-vector-regtest.ts` on a real regtest chain).
-279 of the 425 rows in all.
+291 of the 425 rows in all.
 
-Covered: T14-001 T14-002 T14-003 T14-004 T14-005 T14-006 T14-007 T14-008 T14-009 T14-010 T14-011 T14-012 T14-013 T14-014 T14-015 T14-016 T14-017 T14-018 T14-019 T14-020 T14-021 T14-022 T14-023 T14-024 T14-025 T14-026 T14-028 T14-051 T14-052 T14-054 T14-061 T14-062 T14-063 T14-064 T14-065 T14-066 T14-067 T14-068 T14-069 T14-070 T14-071 T14-072 T14-073 T14-075 T14-076 T14-077 T14-078 T14-079 T14-080 T14-081 T14-082 T14-083 T14-084 T14-085 T14-086 T14-087 T14-088 T14-089 T14-090 T14-091 T14-092 T14-093 T3-001 T3-003 T3-004 T3-006 T3-008 T3-009 T3-010 T3-011 T4-001 T4-004 T4-006 T4-007 T4-008 T4-009 T4-010 T5-001 T5-002 T5-003 T5-005 T5-006 T5-007 T5-008 T5-009 T5-010 T5-011 T5-012 T5-013 T5-014 T5-016 T5-017 T5-018 T5-019 T5-020 T5-021 T5-022 T5-023 T5-024 T5-025 T5-026 T5-027 T5-028 T5-029 T5-030 T5-031 T5-032 T5-033 T5-034 T5-035 T5-036 T5-037 T5-038 T5-039 T5-042 T5-043 T5-045 T5-046 T5-047 T5-048 T5-049 T5-054 T5-056 T5-059 T5-060 T6-004 T6-005 T6-006 T6-008 T6-010 T6-011 T6-012 T6-013 T6-015 T6-016 T6-017 T6-018 T6-019 T6-020 T6-021 T6-022 T6-023 T6-024 T6-025 T7-001 T7-002 T7-004 T7-005 T7-006 T7-007 T7-008 T7-010 T7-011 T7-012 T7-014 T7-015 T7-016 T7-017 T7-018 T7-020 T7-039 T7-040 T7-045 T7-046 T7-047 T7-048 T7-049 T7-050 T7-051 T7-052 T7-053 T7-054 T7-055 T7-058 T7-059 T7-062 T7-063 T7-064 T7-065 T7-066 T9-003 T9-004 T9-005 T9-006 T9-007 T9-008 T9-009 T9-010 T9-011 T9-012 T9-013 T9-014 T9-017 T9-018 T9-019 T9-022 T9-023 T9-024 T9-026 T9-028 T9-029 T9-030 T9-031 T9-032 T9-033 T9-035 T9-036 T9-037 T9-038 T9-039 T9-040 T9-042 T9-043 T9-044 T9-045 T9-046 T9-048 T9-049 T9-050 T9-051 T9-052 T9-053 T9-054 T9-055 T9-056 T9-057 T9-058 T9-059 T9-060 T9-061 T9-062 T9-063 T9-064 T9-066 T9-067 T9-068 T9-069 T9-070 T9-071 T9-072 T9-074 T9-075 T9-078 T9-079 T9-080 T9-081 T9-082 T9-083 T9-086 T9-087 T9-088 T9-089 T9-091 T9-093 T9-094 T9-095 T9-096 T9-097 T9-098 T9-100 T9-102 T9-103 T9-104 T9-105 T9-107 T9-108 T9-110 T9-112 T9-117 T9-118 T9-120 T9-121 T9-122 T9-123 T9-130 T9-131 T9-132 T9-133 T9-134
+Covered: T14-001 T14-002 T14-003 T14-004 T14-005 T14-006 T14-007 T14-008 T14-009 T14-010 T14-011 T14-012 T14-013 T14-014 T14-015 T14-016 T14-017 T14-018 T14-019 T14-020 T14-021 T14-022 T14-023 T14-024 T14-025 T14-026 T14-028 T14-051 T14-052 T14-054 T14-061 T14-062 T14-063 T14-064 T14-065 T14-066 T14-067 T14-068 T14-069 T14-070 T14-071 T14-072 T14-073 T14-075 T14-076 T14-077 T14-078 T14-079 T14-080 T14-081 T14-082 T14-083 T14-084 T14-085 T14-086 T14-087 T14-088 T14-089 T14-090 T14-091 T14-092 T14-093 T14-094 T14-095 T14-096 T3-001 T3-003 T3-004 T3-006 T3-008 T3-009 T3-010 T3-011 T4-001 T4-004 T4-006 T4-007 T4-008 T4-009 T4-010 T5-001 T5-002 T5-003 T5-005 T5-006 T5-007 T5-008 T5-009 T5-010 T5-011 T5-012 T5-013 T5-014 T5-016 T5-017 T5-018 T5-019 T5-020 T5-021 T5-022 T5-023 T5-024 T5-025 T5-026 T5-027 T5-028 T5-029 T5-030 T5-031 T5-032 T5-033 T5-034 T5-035 T5-036 T5-037 T5-038 T5-039 T5-042 T5-043 T5-045 T5-046 T5-047 T5-048 T5-049 T5-054 T5-056 T5-059 T5-060 T6-004 T6-005 T6-006 T6-008 T6-010 T6-011 T6-012 T6-013 T6-015 T6-016 T6-017 T6-018 T6-019 T6-020 T6-021 T6-022 T6-023 T6-024 T6-025 T7-001 T7-002 T7-004 T7-005 T7-006 T7-007 T7-008 T7-010 T7-011 T7-012 T7-014 T7-015 T7-016 T7-017 T7-018 T7-020 T7-039 T7-040 T7-045 T7-046 T7-047 T7-048 T7-049 T7-050 T7-051 T7-052 T7-053 T7-054 T7-055 T7-058 T7-059 T7-062 T7-063 T7-064 T7-065 T7-066 T7-067 T7-068 T7-069 T7-070 T9-003 T9-004 T9-005 T9-006 T9-007 T9-008 T9-009 T9-010 T9-011 T9-012 T9-013 T9-014 T9-017 T9-018 T9-019 T9-022 T9-023 T9-024 T9-026 T9-028 T9-029 T9-030 T9-031 T9-032 T9-033 T9-035 T9-036 T9-037 T9-038 T9-039 T9-040 T9-042 T9-043 T9-044 T9-045 T9-046 T9-048 T9-049 T9-050 T9-051 T9-052 T9-053 T9-054 T9-055 T9-056 T9-057 T9-058 T9-059 T9-060 T9-061 T9-062 T9-063 T9-064 T9-066 T9-067 T9-068 T9-069 T9-070 T9-071 T9-072 T9-074 T9-075 T9-078 T9-079 T9-080 T9-081 T9-082 T9-083 T9-086 T9-087 T9-088 T9-089 T9-091 T9-093 T9-094 T9-095 T9-096 T9-097 T9-098 T9-100 T9-102 T9-103 T9-104 T9-105 T9-107 T9-108 T9-110 T9-112 T9-117 T9-118 T9-120 T9-121 T9-122 T9-123 T9-130 T9-131 T9-132 T9-133 T9-134 T9-135 T9-136 T9-137 T9-138 T9-139
 
-Not covered yet: T14-027 T14-029 T14-030 T14-031 T14-032 T14-033 T14-034 T14-035 T14-036 T14-037 T14-038 T14-039 T14-040 T14-041 T14-042 T14-043 T14-044 T14-045 T14-046 T14-047 T14-048 T14-049 T14-050 T14-053 T14-055 T14-056 T14-057 T14-058 T14-059 T14-060 T14-074 T14-094 T14-095 T14-096 T3-002 T3-005 T3-007 T3-012 T4-002 T4-003 T4-005 T5-004 T5-015 T5-040 T5-041 T5-044 T5-050 T5-051 T5-052 T5-053 T5-055 T5-057 T5-058 T6-001 T6-002 T6-003 T6-007 T6-009 T6-014 T6-026 T7-003 T7-009 T7-013 T7-019 T7-021 T7-022 T7-023 T7-024 T7-025 T7-026 T7-027 T7-028 T7-029 T7-030 T7-031 T7-032 T7-033 T7-034 T7-035 T7-036 T7-037 T7-038 T7-041 T7-042 T7-043 T7-044 T7-056 T7-057 T7-060 T7-061 T7-067 T7-068 T7-069 T7-070 T8-001 T8-002 T8-003 T8-004 T8-005 T8-006 T8-007 T8-008 T8-009 T8-010 T8-011 T8-012 T9-001 T9-002 T9-015 T9-016 T9-020 T9-021 T9-025 T9-027 T9-034 T9-041 T9-047 T9-065 T9-073 T9-076 T9-077 T9-084 T9-085 T9-090 T9-092 T9-099 T9-101 T9-106 T9-109 T9-111 T9-113 T9-114 T9-115 T9-116 T9-119 T9-124 T9-125 T9-126 T9-127 T9-128 T9-129 T9-135 T9-136 T9-137 T9-138 T9-139
+Not covered yet: T14-027 T14-029 T14-030 T14-031 T14-032 T14-033 T14-034 T14-035 T14-036 T14-037 T14-038 T14-039 T14-040 T14-041 T14-042 T14-043 T14-044 T14-045 T14-046 T14-047 T14-048 T14-049 T14-050 T14-053 T14-055 T14-056 T14-057 T14-058 T14-059 T14-060 T14-074 T3-002 T3-005 T3-007 T3-012 T4-002 T4-003 T4-005 T5-004 T5-015 T5-040 T5-041 T5-044 T5-050 T5-051 T5-052 T5-053 T5-055 T5-057 T5-058 T6-001 T6-002 T6-003 T6-007 T6-009 T6-014 T6-026 T7-003 T7-009 T7-013 T7-019 T7-021 T7-022 T7-023 T7-024 T7-025 T7-026 T7-027 T7-028 T7-029 T7-030 T7-031 T7-032 T7-033 T7-034 T7-035 T7-036 T7-037 T7-038 T7-041 T7-042 T7-043 T7-044 T7-056 T7-057 T7-060 T7-061 T8-001 T8-002 T8-003 T8-004 T8-005 T8-006 T8-007 T8-008 T8-009 T8-010 T8-011 T8-012 T9-001 T9-002 T9-015 T9-016 T9-020 T9-021 T9-025 T9-027 T9-034 T9-041 T9-047 T9-065 T9-073 T9-076 T9-077 T9-084 T9-085 T9-090 T9-092 T9-099 T9-101 T9-106 T9-109 T9-111 T9-113 T9-114 T9-115 T9-116 T9-119 T9-124 T9-125 T9-126 T9-127 T9-128 T9-129
 
 What the gaps are:
 
