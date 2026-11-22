@@ -86,3 +86,68 @@ P14.6), so an entry that retypes an image keeps its parent's preview rather
 than one made for the new version. **Proposed fix:** confirm that "digest" is
 intended, or say "changes the resource's version (its digest or
 `mediaType`)". The SDK follows the text (digest).
+
+### F5. P5.8 and T5-030: telling the DIF did:vh from the VH-Log-based pre-draft
+
+T5-030: "did:vh signer DID whose log `method` value is not a did:vh value the
+verifier implements, such as the VH-Log-based pre-draft's". [S3] gives the DIF
+did:vh the method value `did:vh:1.0`. If the pre-draft (swcurran/didvh-old)
+also wrote `did:vh:1.0`, the method value alone cannot tell them apart, and
+P5.8's test ("a log whose `method` value is that of another did:vh") does not
+work. **Proposed fix:** name the pre-draft's method value in [S3]'s note, or,
+if it is the same string, give P5.8 another test (for example the did:webvh
+entry format and its `created` proofs). The SDK verifies a did:vh signer's log
+under did:webvh's format with `did:vh:1.0`, whole seconds and id
+`did:vh:<SCID>`, and treats any other method value as no evidence.
+
+### F6. P7.18 and P14.25: the `checkpoint` of a `conflict` report
+
+P14.25: "`checkpoint`, the versionId of the reported checkpoint, or null when
+`state` is `none`". P7.18 `conflict`: "no branch's state is reported as the
+Original's". Neither says what `checkpoint` is under `conflict`.
+**Proposed fix:** under `conflict`, `checkpoint` is the last entry common to
+every branch (the fork point). The SDK does that, PROVISIONAL.
+
+### F7. P7.18: `outcome` when no checkpoint can be reported
+
+P3.2 requires exact-checkpoint resolution to "report why it cannot", and
+P7.18 has `state` `none`, but its `outcome` rule makes such a report
+`verified` when nothing else failed (a named checkpoint absent from the
+evidence set, or an evidence set with no entry). **Proposed fix:** P7.18 adds
+"`incomplete` when `state` is `none` because the evidence set lacks the
+target" and P14.25 a `reason` member. The SDK reports `state` `none`, keeps the
+outcome formula as written, and gives a `reason` (PROVISIONAL).
+
+### F8. P7.18 and P14.25: reasons for missing items
+
+P7.18: "For each missing or failed item, it gives a reason." P14.25:
+"`missing`, as in the manifest (P14.10)", whose items have no reason member,
+and the vectors give none. **Proposed fix:** either add an optional `reason`
+to report `missing` items, or say the item kind is its reason. The SDK
+follows the vectors (no reason member); a failed entry's reason is its `rule`.
+
+### F9. P7.21: `offline` for an evidence set that is not a package
+
+P7.21: "The `offline` axis is computed over the supplied package or carried
+file". The genesis vector supplies loose files (a log, a signer history, a
+resource) and expects `self-contained`. **Proposed fix:** P7.21 says the axis
+is computed over the supplied local inputs (package, carried file or loose
+files), excluding anything fetched from a host or index. The SDK does that,
+PROVISIONAL: inputs whose source is an `http(s)` URL count as external.
+
+### F10. P9.36, P6.6, T9-034: where a report states a change of head
+
+P9.36: "the report MUST state the change of head"; P6.6 and T6-017 likewise
+for a newly found fork, and T9-034 names a label
+`authoritative-source-changed`. P14.25 lists no member for any of this, and
+says a report has "exactly these members". **Proposed fix:** add
+`headChange: {from, to}` (or the label T9-034 uses) to P14.25, present only
+with a prior result. The SDK writes `headChange` (PROVISIONAL).
+
+### F11. P7.21 and P14.25: the `kind` values of `dependencies`
+
+P14.25: "`dependencies`, the external dependencies P7.21 lists, each `{kind,
+did}`". The bitcoin vector uses `anchoring-sat`; P7.21's other two
+dependencies (a did:btco signer's sat, a signer DID whose history the package
+lacks) have no kind value. **Proposed fix:** list `anchoring-sat`,
+`signer-sat` and `signer-history`. The SDK uses those (PROVISIONAL).

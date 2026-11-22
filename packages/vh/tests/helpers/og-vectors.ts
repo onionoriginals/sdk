@@ -28,3 +28,13 @@ export function vtree(dir: string): Record<string, Uint8Array> {
 
 export const bytesEqual = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
 export const utf8 = (s: string) => new TextEncoder().encode(s);
+
+/** A vector's evidence-set.json, with each input's bytes read from the vector (P7.17). */
+export function vectorEvidence(dir: string): import('../../src/og/index.js').EvidenceSet {
+  const e = vjson(`${dir}/evidence-set.json`);
+  return {
+    original: e.original, checkpoint: e.checkpoint, network: e.network, tip: e.tip, depth: e.depth, prior: e.prior,
+    signerHistories: e.signerHistories,
+    inputs: e.inputs.map((i: { kind: string; source: string }) => ({ kind: i.kind, source: i.source, bytes: vbytes(i.source) })),
+  } as never;
+}
