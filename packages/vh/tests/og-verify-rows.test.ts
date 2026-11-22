@@ -295,6 +295,20 @@ describe('operations and forks (§6)', () => {
     expect(r.checkpoint).toBe(sup.versionId);
   });
 
+  test('T14-074: an author entry superseding 8 distinct editor-only branches is accepted and settles them all', async () => {
+    const w = await World.create();
+    const ed = await webvhSigner();
+    const g = await w.entry((s) => { s.asset.editors = [grant(ed.did, { name: true })]; });
+    const branches = [];
+    for (let i = 0; i < 8; i++) branches.push(await w.entry((s) => { s.asset.name = `editor ${i}`; }, { by: ed, editor: true, parent: g, push: false }));
+    const sup = await w.entry((s) => { s.asset.name = 'by author'; s.supersedes = branches.map((b) => b.versionId); }, { parent: g });
+    const r = await w.verify({ logs: [w.entries, ...branches.map((b) => [w.entries[0], g, b])], signers: [w.author, ed] });
+    expect(labelOf(r, sup)).toMatchObject({ status: 'accepted' });
+    for (const b of branches) expect(labelOf(r, b)).toEqual({ versionId: b.versionId, status: 'conflicting' });
+    expect(axes(r).state).toBe('valid-as-of');
+    expect(r.checkpoint).toBe(sup.versionId);
+  });
+
   test('T6-020: supersedes naming a branch that holds an author entry settles nothing', async () => {
     const { w, a, b } = await fork();
     const sup = await w.entry((s) => { s.asset.name = 'A2'; s.supersedes = [b.versionId]; }, { parent: a });
@@ -509,7 +523,7 @@ describe('evidence and the report (§7)', () => {
     expect(r.signers?.[0].freshness).toBe('not-established');
   });
 
-  test('T7-039: a complete package of an anchored Original read without the anchor: historical-checkpoint, bitcoin missing-evidence', async () => {
+  test('T7-039, T7-060: a complete package of an anchored Original read without the anchor: historical-checkpoint, bitcoin missing-evidence', async () => {
     const w = await World.create();
     const before = await w.entry((s) => { s.asset.name = 'Two'; });
     const anchor = await w.entry((s) => { s.asset.aliases = ['did:btco:reg:42']; s.asset.body = 'none'; });
