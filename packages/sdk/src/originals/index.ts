@@ -20,6 +20,6 @@ export {
 } from "./inscription.js";
 // Bitcoin previews (P9.30): the WebP preview of an image version, its codecs loaded only when one is made.
 export {
-  generateImagePreview, configurePreviewCodecs, PREVIEW_MAX_BYTES, PREVIEW_EDGES, PREVIEW_QUALITIES, PREVIEW_FAIR_QUALITY,
+  generateImagePreview, configurePreviewCodecs, PREVIEW_CODEC_ATTEMPTS, PREVIEW_CODEC_RETRY_DELAYS_MS, PREVIEW_MAX_BYTES, PREVIEW_EDGES, PREVIEW_QUALITIES, PREVIEW_FAIR_QUALITY,
   type GeneratedPreview, type PreviewFailure, type PreviewResult, type PreviewReport, type GeneratePreviewOptions, type PreviewCodecConfig, type ImageFormat,
 } from "./preview.js";
