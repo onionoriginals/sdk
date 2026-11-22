@@ -1,5 +1,5 @@
 /**
- * did:og `og:1.0-draft.1` (originals-spec PR 69 at 6e0e3f9): the method value,
+ * did:og `og:1.0-draft.1` (originals-spec master 3c7b6db, where PR 69 merged, with PR 84 at 45dc624): the method value,
  * the limits of P14.13 and the error every did:og check raises, which names
  * the rule it enforces so that a report can give it (P7.19, P14.25).
  */
