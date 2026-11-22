@@ -225,7 +225,7 @@ export async function stepFund(ctx: Ctx, opts: { yes?: boolean } = {}): Promise<
   const p = plan({ secret: hex.decode(s.reveal.secretHex), network: ctx.network, envelopes: parts.map((x) => x.envelope), holder: s.reveal.holder, feeRate: s.reveal.feeRate, postage: 0n });
   const fees = p.fees.reduce((a, b) => a + b, 0n);
   for (const l of disclosure({ name: s.original.name, mediaType: s.original.mediaType, bytes: s.original.size, body: s.original.body, previewMessage: s.original.previewMessage, parts: parts.length, feeSats: fees, feeRate: s.reveal.feeRate, network: ctx.network, author: author.did }).lines) ctx.io.say(l);
-  ctx.io.say(`The sat goes to the holder ${s.reveal.holder}, keeping ${BigInt(s.funding.amount) - fees} sats.`);
+  ctx.io.say(`The final reveal sends the sat to ${s.reveal.holder}, in an output of ${BigInt(s.funding.amount) - fees} sats.`);
   if (!opts.yes && !(await ctx.io.confirm(`Sign the anchoring entry for ${btcoDid(ctx.network, sat)} and inscribe ${parts.length} inscription(s) on ${ctx.network}?`))) throw new Error("stopped before signing");
   s.anchoringEntry = anchoring;
   saveState(ctx.stateDir, s);
@@ -293,7 +293,13 @@ export interface LastRun {
   authorUrl: string;
   sat: string;
   anchoringAlias: string;
-  holder: string;
+  /**
+   * The holder the explorer reports at the verified tip (P9.11), the same as `report.bitcoin.holder.address`;
+   * null when no holder was observed. It can differ from `revealDestination` once the sat has moved.
+   */
+  holder: string | null;
+  /** The address the final reveal sent the sat to, as configured with `--holder`. */
+  revealDestination: string;
   transactions: { funding: string; commit: string; reveals: string[] };
   inscriptions: Array<{ id: string; height: number; txIndex: number; inscriptionIndex: number; confirmations: number; metaprotocol: string | null; contentType: string | null; envelopeBytes: number; envelopeDigest: string }>;
   tip: { height: number; hash: string };
@@ -356,7 +362,8 @@ export async function stepVerify(ctx: Ctx, opts: { out?: string; minConfirmation
     authorUrl: s.author.url,
     sat: s.funding.sat,
     anchoringAlias: btcoDid(ctx.network, sat),
-    holder: s.reveal.holder,
+    holder: report.bitcoin?.holder.address ?? null,
+    revealDestination: s.reveal.holder,
     transactions: { funding: s.funding.txid, commit: signed.txids[0], reveals: signed.txids.slice(1) },
     inscriptions: read.inscriptions.map((i) => ({ id: i.id, height: i.height, txIndex: i.txIndex, inscriptionIndex: i.inscriptionIndex, confirmations: i.confirmations, metaprotocol: i.metaprotocol, contentType: i.contentType, envelopeBytes: i.envelope.length, envelopeDigest: resourceDigest(i.envelope) })),
     tip: read.evidence.tip!,
@@ -370,7 +377,8 @@ export async function stepVerify(ctx: Ctx, opts: { out?: string; minConfirmation
   };
   const out = opts.out ?? join(ctx.stateDir, "last-run.json");
   writeFileSync(out, JSON.stringify(run, null, 2) + "\n");
-  ctx.io.say(`Report: outcome ${axes.outcome}, state ${axes.state}, bitcoin ${axes.bitcoin}, availability ${axes.availability}; holder ${report.bitcoin?.holder.address} (${JSON.stringify(report.bitcoin?.holder.uniqueness)}).`);
+  ctx.io.say(`Report: outcome ${axes.outcome}, state ${axes.state}, bitcoin ${axes.bitcoin}, availability ${axes.availability}; holder at the tip ${run.holder ?? "not observed"} (${JSON.stringify(report.bitcoin?.holder.uniqueness)}).`);
+  if (run.holder !== run.revealDestination) ctx.io.say(`The sat is no longer at the reveal destination ${run.revealDestination}: it has moved since the reveal (P9.11).`);
   ctx.io.say(describeTransferCheck(report));
   ctx.io.say(`Public host copy of the author's log: ${publicHost.served ? (publicHost.matchesInscribed ? "served and matches the inscribed history" : `served but does not match (${publicHost.reason ?? "differs"})`) : "not served"}.`);
   ctx.io.say(`Wrote ${out}. ${run.passed ? "PASS" : "NOT PASSED"}`);
