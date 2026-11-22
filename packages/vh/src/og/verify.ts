@@ -399,12 +399,24 @@ export async function verifyOriginal(evidence: EvidenceSet): Promise<Report> {
 }
 
 /**
+ * P9.18: a writer's check of its own committed log, through the entry it is
+ * about to publish, as a local copy. Every entry, including the anchoring
+ * entry, is checked; the result is never `current` and is only the writer's
+ * own gate before inscribing (T9-039, T9-040).
+ */
+export async function verifyLocalCopy(evidence: EvidenceSet): Promise<Report> {
+  return verifyOffChain(evidence, gather(evidence), { bitcoinRead: false, localCopy: true });
+}
+
+/**
  * Verify from copies of the log alone (P7.10, P7.14): never `current`. A copy
  * holding an anchoring entry is read as a historical checkpoint before it,
  * with `bitcoin` `missing-evidence`.
  */
 export interface OffChainOptions {
   bitcoinRead: boolean;
+  /** P9.18: the writer's own check of its committed log, through the entry it is about to publish. */
+  localCopy?: boolean;
   /**
    * did:btco sats the evidence set reads in full at its tip that hold no anchoring
    * publication of this Original (P9.5): a copy's anchoring entry naming one, and every
@@ -424,7 +436,7 @@ export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, 
     genesisIds.every((id) => stateOf(tree.nodes.get(id)!.entry).id === evidence.original) &&
     !tree.structureFailures.some((f) => f.parent === null && /^P(14\.28|3\.1)$/.test(ruleOfError(f.error)));
   const anyAnchor = [...tree.nodes.values()].some((n) => stateOf(n.entry).asset?.aliases?.some?.((a: string) => a.startsWith("did:btco:")));
-  const stopAtAnchor = anyAnchor;
+  const stopAtAnchor = anyAnchor && !opts.localCopy;
   const evaluated = bound ? evaluateTree(tree, histories, { stopAtAnchor, target: evidence.checkpoint ?? undefined }) : new Map<string, Evaluated>();
 
   // A copy's anchoring entry naming a sat read in full without an anchor, and every entry after it, are ignored (P9.5, P7.19).
@@ -599,6 +611,7 @@ export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, 
     signers,
     diagnostics: sorted,
   };
+  if (opts.localCopy) report.reason = "local copy (P9.18): the writer's own check before it publishes; unverified on Bitcoin, never current, and never a report for anyone else";
   return report;
 }
 
