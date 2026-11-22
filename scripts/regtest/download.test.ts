@@ -22,7 +22,7 @@ describe('regtest archive download', () => {
     let guard: ReturnType<typeof setTimeout> | undefined;
     try {
       const result = await Promise.race([
-        downloadArchive(server.url.href, path, 'unused', 50).then(() => 'completed', error => (error as Error).name),
+        downloadArchive(server.url.href, path, 'unused', 50, []).then(() => 'completed', error => (error as Error).name),
         new Promise<string>(resolve => { guard = setTimeout(() => resolve('body ignored timeout'), 1000); }),
       ]);
       expect(result).toBe('TimeoutError');
@@ -49,6 +49,39 @@ describe('regtest archive download', () => {
       const invalid = join(directory, 'invalid.tar.gz');
       await expect(downloadArchive(server.url.href, invalid, '0'.repeat(64))).rejects.toThrow('SHA256 mismatch');
       expect(await Bun.file(invalid).exists()).toBe(false);
+    } finally {
+      server.stop(true);
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('retries a transient failure with backoff, and never a digest mismatch or a 404', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'originals-download-test-'));
+    const bytes = new Uint8Array([7, 7, 7]);
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    let requests = 0;
+    let failures = 2;
+    let status = 200;
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+      requests++;
+      if (failures-- > 0) return new Response('busy', { status: 503 });
+      return new Response(status === 200 ? bytes : 'gone', { status });
+    } });
+    try {
+      const path = join(directory, 'flaky.tar.gz');
+      await downloadArchive(server.url.href, path, digest, 1000, [0, 0]);
+      expect(requests).toBe(3);
+      expect(new Uint8Array(await Bun.file(path).arrayBuffer())).toEqual(bytes);
+      requests = 0; failures = 0;
+      await expect(downloadArchive(server.url.href, join(directory, 'bad.tar.gz'), '0'.repeat(64), 1000, [0, 0])).rejects.toThrow('SHA256 mismatch');
+      expect(requests).toBe(1);
+      requests = 0; status = 404;
+      await expect(downloadArchive(server.url.href, join(directory, 'missing.tar.gz'), digest, 1000, [0, 0])).rejects.toThrow('404');
+      expect(requests).toBe(1);
+      // Out of retries: the last transient error is thrown.
+      requests = 0; failures = 5; status = 200;
+      await expect(downloadArchive(server.url.href, join(directory, 'down.tar.gz'), digest, 1000, [0, 0])).rejects.toThrow('503');
+      expect(requests).toBe(3);
     } finally {
       server.stop(true);
       await rm(directory, { recursive: true, force: true });
