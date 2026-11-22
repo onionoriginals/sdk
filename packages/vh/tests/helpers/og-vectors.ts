@@ -41,25 +41,34 @@ export function vectorEvidence(dir: string): import('../../src/og/index.js').Evi
 }
 
 /**
- * The bitcoin vector's evidence set (P9.18): its inscription inputs, and the index reads from
- * chain.json (placement, chain order, confirmations, holder), which evidence-set.json does not carry.
+ * The bitcoin vector's evidence set (P9.18, T14-102): exactly its evidence-set.json, the sat-read input
+ * and the inscription inputs; chain.json only says where each envelope's bytes are.
  */
 export function bitcoinEvidence(): import('../../src/og/index.js').EvidenceSet {
   const e = vectorEvidence('bitcoin');
-  const chain = vjson('bitcoin/chain.json');
-  e.inputs = chain.inscriptions.map((x: any) => ({ kind: 'inscription', source: `index:${x.id}`, bytes: vbytes(`bitcoin/${x.envelope}`) }));
-  e.sats = [{
-    sat: `did:btco:reg:${chain.sat}`, index: 'vector', complete: true, holder: chain.holder.address,
-    inscriptions: chain.inscriptions.map((x: any) => ({ id: x.id, sat: String(x.sat), height: x.block, txIndex: x.txIndex, inscriptionIndex: x.inscriptionIndex, confirmations: x.confirmations, envelope: vbytes(`bitcoin/${x.envelope}`) })),
-  }];
+  const where = new Map(vjson('bitcoin/chain.json').inscriptions.map((x: any) => [`index:${x.id}`, `bitcoin/${x.envelope}`]));
+  e.inputs = e.inputs.map((i: any) => (i.kind === 'inscription' ? { ...i, digest: vjson('bitcoin/evidence-set.json').inputs.find((x: any) => x.source === i.source).digest, bytes: vbytes(where.get(i.source) as string) } : i));
   return e;
+}
+
+/** Replace the evidence set's sat-read with an edited copy (its digest dropped, since the bytes change). */
+export function withSatRead(e: import('../../src/og/index.js').EvidenceSet, edit: (r: any) => void): import('../../src/og/index.js').EvidenceSet {
+  return {
+    ...e,
+    inputs: e.inputs.map((i: any) => {
+      if (i.kind !== 'sat-read') return i;
+      const r = JSON.parse(new TextDecoder().decode(i.bytes));
+      edit(r);
+      return { kind: i.kind, source: i.source, bytes: new TextEncoder().encode(JSON.stringify(r)) };
+    }),
+  };
 }
 
 /** The prior-format fixture as an evidence set: its two reveal transactions' raw bytes, as mempool.space served them (hex decoded). */
 export function priorEvidence(): import('../../src/og/index.js').EvidenceSet {
   const chain = pjson('chain.json');
   return {
-    original: null as never, checkpoint: null, network: 'mainnet', tip: null, depth: null, prior: null,
+    original: null as never, checkpoint: null, network: 'mainnet', tip: null, depth: null,
     inputs: chain.inscriptions.map((x: any) => ({ kind: 'transaction', source: `mempool.space:${x.revealTxid}`, bytes: new Uint8Array(Buffer.from(new TextDecoder().decode(pbytes(x.transaction)).trim(), 'hex')) })),
   };
 }

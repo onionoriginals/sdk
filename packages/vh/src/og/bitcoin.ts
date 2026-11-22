@@ -430,7 +430,7 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
   const network = evidence.network ?? null;
   const depth = evidence.depth ?? 1;
   const groups = new Map<string, SatRead[]>();
-  for (const r of [...(evidence.sats ?? []), ...satReadsFromInputs(evidence)]) groups.set(r.sat, [...(groups.get(r.sat) ?? []), r]);
+  for (const r of [...(evidence.sats ?? []), ...satReadsFromInputs(evidence, gathered)]) groups.set(r.sat, [...(groups.get(r.sat) ?? []), r]);
   const merged = new Map<string, MergedSat>();
   for (const [sat, reads] of groups) {
     const m = mergeSat(sat, reads, depth);
@@ -614,23 +614,45 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
   return report;
 }
 
-/** `sat-read` inputs (P9.31): JSON `{network, sat, tip, inscriptions, holder?, complete?}`; envelopes come from the inscription inputs. */
-function satReadsFromInputs(evidence: EvidenceSet): SatRead[] {
+/**
+ * `sat-read` inputs (P14.25, 45dc624): exactly `{network, sat, tip, complete, holder, inscriptions}`,
+ * `sat` an integer, `tip` `{height, hash}`, `holder` `{address}` or null, and one
+ * `{id, height, txIndex, inscriptionIndex, confirmations}` per inscription in chain order, with
+ * `confirmations` the tip's height less `height`, plus one. Envelopes are `inscription` inputs
+ * (`index:<id>`); an inscription listed without one is unread (P9.35, P5.13). A read that breaks the form,
+ * or disagrees with the evidence set's network or tip, is unusable (P7.17).
+ */
+function satReadsFromInputs(evidence: EvidenceSet, gathered: Gathered): SatRead[] {
   const envelopes = new Map(evidence.inputs.filter((i) => i.kind === "inscription").map((i) => [i.source.replace(/^index:/, ""), i.bytes]));
   const out: SatRead[] = [];
+  const exact = (o: unknown, keys: string[]): o is Record<string, unknown> =>
+    isJsonObject(o) && Object.keys(o).length === keys.length && keys.every((k) => k in (o as object));
   for (const i of evidence.inputs) {
     if (i.kind !== "sat-read") continue;
-    let r: { network: BitcoinNetwork; sat: number | string; inscriptions: Array<{ id: string; sat?: number | string; block?: number; height?: number; txIndex: number; inscriptionIndex: number; confirmations: number }>; holder?: string | null; complete?: boolean };
+    const unusable = (why: string) => gathered.invalidInputs.push({ source: i.source, error: new OgRuleError("P7.17", "SAT_READ_FORM", `the sat-read ${why}`) });
+    let r: unknown;
     try {
-      r = JSON.parse(new TextDecoder().decode(i.bytes)) as typeof r;
+      r = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(i.bytes));
     } catch {
+      unusable("is not JSON");
       continue;
     }
+    if (!exact(r, ["network", "sat", "tip", "complete", "holder", "inscriptions"])) { unusable("does not have exactly network, sat, tip, complete, holder and inscriptions"); continue; }
+    const tip = r.tip as { height?: unknown; hash?: unknown };
+    const holder = r.holder as { address?: unknown } | null;
+    if (typeof r.network !== "string" || !Number.isSafeInteger(r.sat) || (r.sat as number) < 0 || !exact(tip, ["height", "hash"]) || !Number.isSafeInteger(tip.height) || typeof tip.hash !== "string" ||
+      typeof r.complete !== "boolean" || !(holder === null || (exact(holder, ["address"]) && typeof holder.address === "string")) || !Array.isArray(r.inscriptions)) { unusable("has a member of the wrong type"); continue; }
+    if (r.network !== evidence.network || !evidence.tip || tip.height !== evidence.tip.height || tip.hash !== evidence.tip.hash) { unusable("is not at the evidence set's network and tip"); continue; }
+    const items = r.inscriptions as unknown[];
+    const keys = ["id", "height", "txIndex", "inscriptionIndex", "confirmations"];
+    const bad = items.find((x) => !exact(x, keys) || typeof x.id !== "string" || !keys.slice(1).every((k) => Number.isSafeInteger(x[k])) || x.confirmations !== (tip.height as number) - (x.height as number) + 1);
+    if (bad !== undefined) { unusable("lists an inscription whose members or confirmations break the form"); continue; }
+    const network = r.network;
     out.push({
-      sat: btcoDid(r.network, r.sat), index: `sat-read:${i.source}`, complete: r.complete !== false, holder: r.holder ?? null,
-      inscriptions: r.inscriptions.map((x) => {
+      sat: btcoDid(network, r.sat as number), index: `sat-read:${i.source}`, complete: r.complete, holder: holder?.address as string | null ?? null,
+      inscriptions: (items as Array<{ id: string; height: number; txIndex: number; inscriptionIndex: number; confirmations: number }>).map((x) => {
         const envelope = envelopes.get(x.id);
-        return { id: x.id, sat: String(x.sat ?? r.sat), height: x.height ?? x.block ?? 0, txIndex: x.txIndex, inscriptionIndex: x.inscriptionIndex, confirmations: x.confirmations, envelope: envelope ?? new Uint8Array(), unread: !envelope };
+        return { id: x.id, sat: String(r.sat), height: x.height, txIndex: x.txIndex, inscriptionIndex: x.inscriptionIndex, confirmations: x.confirmations, envelope: envelope ?? new Uint8Array(), unread: !envelope };
       }),
     });
   }
