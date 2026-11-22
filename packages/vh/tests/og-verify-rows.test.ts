@@ -31,13 +31,22 @@ describe('identifiers (§3)', () => {
     expect(deriveDocument(w.entries[0])).not.toHaveProperty('alsoKnownAs');
   });
 
-  test('T3-010: exact-checkpoint resolution of a checkpoint not in the evidence reports why', async () => {
+  test('T3-010, T3-013: exact-checkpoint resolution of a checkpoint not in the evidence set: state none, outcome incomplete, target-missing', async () => {
     const w = await World.create();
     await w.entry((s) => { s.asset.name = 'Two'; });
     const r = await w.verify({ checkpoint: '9-QmNotHere' });
     expect(r.checkpoint).toBeNull();
     expect(axes(r).state).toBe('none');
-    expect(r.reason).toMatch(/not in the evidence set/);
+    expect(axes(r).outcome).toBe('incomplete');
+    expect(r.diagnostics.filter((d) => d.code === 'target-missing').map(({ reason: _r, ...d }) => d)).toEqual([{ code: 'target-missing', rule: 'P3.2', item: { kind: 'entry', id: '9-QmNotHere' } }]);
+    expect(r).not.toHaveProperty('reason');
+  });
+
+  test('T7-076: an evidence set with the did:og and no log entry: state none, outcome incomplete, target-missing naming the did:og', async () => {
+    const w = await World.create();
+    const r = await verifyOriginal({ original: w.did, inputs: [] });
+    expect(axes(r)).toMatchObject({ state: 'none', outcome: 'incomplete' });
+    expect(r.diagnostics.map(({ reason: _r, ...d }) => d)).toEqual([{ code: 'target-missing', rule: 'P3.2', item: { kind: 'entry', id: w.did } }]);
   });
 
   test('exact-checkpoint resolution of an earlier checkpoint reports that checkpoint, not the latest (P3.2)', async () => {
@@ -163,12 +172,32 @@ describe('signer binding (§5)', () => {
     expect(axes(await w.verify())).toMatchObject({ outcome: 'verified', identity: 'complete' });
   });
 
-  test('T5-030: a did:vh log under a method value the verifier does not implement establishes no identity', async () => {
+  test('T5-030: a did:vh log whose method value is not did:vh:1.0 is no evidence: identity incomplete, signer-history-missing (P5.8)', async () => {
     const w = await World.create(await vhSigner());
     const log = w.author.log().replaceAll('"did:vh:1.0"', '"did:vh:0.1"');
     const r = await w.verify({ histories: [{ did: w.author.did, log }] });
     expect(axes(r)).toMatchObject({ identity: 'incomplete', outcome: 'incomplete' });
     expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'signer-history-missing', item: { kind: 'signer', id: w.author.did } }));
+  });
+
+  test('T5-061: a did:vh:1.0 log that breaks one of [S3]\'s rules (a fractional-second versionTime) is no evidence, not a valid prefix', async () => {
+    const author = await vhSigner();
+    const w = await World.create(author);
+    const h = author.handle as unknown as { timeoutOverride?: string; timeOverride: string | null; rotate: (k: unknown[]) => Promise<string> };
+    h.timeOverride = '2026-10-18T09:59:59.500Z';
+    await h.rotate([{ fragment: 'key-1', signer: author.key }]);
+    const r = await w.verify();
+    expect(axes(r)).toMatchObject({ identity: 'incomplete', outcome: 'incomplete' });
+    expect(r.diagnostics.map((d) => d.code)).toContain('signer-history-missing');
+    expect(labelOf(r, w.entries[0])).toEqual({ versionId: w.entries[0].versionId, status: 'unchecked' });
+  });
+
+  test('T5-062: a did:vh:1.0 log written by the VH-Log-based pre-draft builder that verifies under [S3]\'s rules is that signer\'s log', async () => {
+    // VhAuthor writes logs with the pre-draft's VH-Log builder (did:vh:1.0, whole seconds, id did:vh:<SCID>).
+    const w = await World.create(await vhSigner());
+    const r = await w.verify();
+    expect(axes(r)).toMatchObject({ identity: 'complete', outcome: 'verified' });
+    expect(r.signers[0].did).toMatch(/^did:vh:/);
   });
 
   test('T5-039, T5-042: a moved and rotated author signs naming a version after the move; a method controlled by the old DID fails', async () => {
@@ -225,7 +254,7 @@ describe('operations and forks (§6)', () => {
     return { w, base, a, b };
   }
 
-  test('T6-005, T6-015: divergent valid branches are a conflict with no winner, whatever their lengths', async () => {
+  test('T6-005, T6-015, T7-075: divergent valid branches are a conflict with no winner, whatever their lengths; the checkpoint is the fork point', async () => {
     const { w, base, a, b } = await fork();
     const a2 = await w.entry((s) => { s.asset.name = 'A2'; });
     const r = await w.verify({ logs: [[w.entries[0], a, a2], [w.entries[0], b]] });

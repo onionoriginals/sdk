@@ -418,7 +418,9 @@ export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, 
   const tree = buildTree(gathered.copies);
   const scid = evidence.original?.startsWith("did:og:") ? evidence.original.slice("did:og:".length) : undefined;
   const genesisIds = tree.children.get(null) ?? [];
-  const bound = genesisIds.length > 0 && [...tree.scids].every((s) => s === scid) &&
+  // No entry at all: nothing binds the did:og, and nothing contradicts it either (P7.18, T7-076; finding F16).
+  const noEntries = tree.nodes.size === 0 && tree.structureFailures.length === 0;
+  const bound = noEntries || genesisIds.length > 0 && [...tree.scids].every((s) => s === scid) &&
     genesisIds.every((id) => stateOf(tree.nodes.get(id)!.entry).id === evidence.original) &&
     !tree.structureFailures.some((f) => f.parent === null && /^P(14\.28|3\.1)$/.test(ruleOfError(f.error)));
   const anyAnchor = [...tree.nodes.values()].some((n) => stateOf(n.entry).asset?.aliases?.some?.((a: string) => a.startsWith("did:btco:")));
@@ -463,15 +465,19 @@ export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, 
   // State and checkpoint.
   let state: Axes["state"];
   let checkpoint: string | null = null;
-  let reason: string | undefined;
+  // P3.2, P7.18: a target checkpoint the evidence set lacks, or no entry at all, is target-missing.
+  let targetMissing: string | undefined;
   if (evidence.checkpoint && !tree.nodes.has(evidence.checkpoint)) {
     state = "none";
-    reason = `checkpoint ${evidence.checkpoint} is not in the evidence set (P3.2)`;
+    targetMissing = evidence.checkpoint;
+  } else if (noEntries) {
+    state = "none";
+    targetMissing = evidence.original;
   } else if (!bound || heads.length === 0) {
     state = "none";
   } else if (heads.length > 1) {
     state = "conflict";
-    checkpoint = commonAncestor(tree, heads); // PROVISIONAL (finding F6): the fork point.
+    checkpoint = commonAncestor(tree, heads); // the fork point, the last entry common to every branch (P7.18, P14.25)
   } else {
     const head = evaluated.get(heads[0])!;
     if (head.status === "unchecked" && stopAtAnchor) {
@@ -573,6 +579,7 @@ export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, 
     });
   }
 
+  if (targetMissing) diagnostics.push({ code: "target-missing", rule: "P3.2", item: { kind: "entry", id: targetMissing }, reason: "The evidence set does not hold the target checkpoint, or holds no entry." });
   // Offline (P7.21): derived from the diagnostics.
   const sorted = sortDiagnostics(diagnostics);
   const offline = offlineFrom(sorted);
@@ -586,12 +593,12 @@ export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, 
     original: evidence.original,
     checkpoint,
     evidence: { inputs: reportInputs(evidence), network: evidence.network ?? null, tip: evidence.tip ?? null, depth: evidence.depth ?? null },
-    axes: { outcome: outcomeOf(rest), ...rest },
+    // P7.18: `state` `none` for a missing target is `incomplete`, unless something failed.
+    axes: { outcome: targetMissing && outcomeOf(rest) === "verified" ? "incomplete" : outcomeOf(rest), ...rest },
     entries: labels,
     signers,
     diagnostics: sorted,
   };
-  if (reason) report.reason = reason;
   return report;
 }
 

@@ -119,7 +119,7 @@ export interface SignerLabel {
 
 /** P14.25's closed list of diagnostic codes, in report order. */
 export const DIAGNOSTIC_CODES = [
-  "resource-missing", "resource-mismatch", "signer-history-missing", "signer-version-missing",
+  "target-missing", "resource-missing", "resource-mismatch", "signer-history-missing", "signer-version-missing",
   "proof-unchecked", "entry-rejected", "anchoring-sat-not-read", "signer-sat-not-read",
   "inscription-unverifiable", "publication-waiting", "input-unusable", "insufficient-depth",
 ] as const;
@@ -130,7 +130,13 @@ export const DEPENDENCY_CODES: ReadonlySet<DiagnosticCode> = new Set(["resource-
 
 export interface Diagnostic {
   code: DiagnosticCode;
-  /** The rule under which the item is missing or failed. PROVISIONAL (finding F14) except where the vectors fix it. */
+  /**
+   * The rule P14.25 fixes for the code: target-missing P3.2, the resource codes P7.4,
+   * signer-history-missing P5.6, signer-version-missing P7.8, proof-unchecked P7.19, entry-rejected the
+   * failing rule, anchoring-sat-not-read P7.14 (not read at all), P9.17 (read, not in full) or P9.10 (the
+   * indexes disagree), signer-sat-not-read P9.35, inscription-unverifiable P9.15, publication-waiting
+   * P9.36, input-unusable P7.17, insufficient-depth P7.22.
+   */
   rule: string;
   item: { kind: "resource" | "signer" | "entry" | "sat" | "inscription" | "input"; id: string; versionId?: string };
   /** Text for people; not compared (P14.25). */
@@ -189,7 +195,7 @@ export interface Report {
     unverifiable: Array<{ inscription: string; did: string; versionId: string }>;
     waiting: Array<{ inscription: string; waitsOn: string }>;
   };
-  /** PROVISIONAL (finding F7): why no checkpoint is reported, or that the report is a writer's local copy. */
+  /** Set only on a writer's local-copy check (P9.18), which is never a report for anyone else; P14.25 has no such member. */
   reason?: string;
 }
 
@@ -241,7 +247,7 @@ const AXIS_VALUES: Record<keyof Axes, readonly string[]> = {
 /** P7.18, P7.23 (T7-048): every applicable axis present, each from its closed list. */
 export function checkAxes(axes: Record<string, unknown>): string[] {
   const problems: string[] = [];
-  if (axes.outcome === "unsupported") return Object.keys(axes).length === 1 ? [] : ["an unsupported report carries the outcome only (PROVISIONAL, F2)"];
+  if (axes.outcome === "unsupported") return Object.keys(axes).length === 1 ? [] : ["an unsupported report carries the outcome only (P14.25)"];
   for (const [axis, values] of Object.entries(AXIS_VALUES)) {
     if (!(axis in axes)) problems.push(`axis ${axis} is missing`);
     else if (!values.includes(axes[axis] as string)) problems.push(`axis ${axis} has value ${JSON.stringify(axes[axis])} outside its list`);

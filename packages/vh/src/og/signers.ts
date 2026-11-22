@@ -91,6 +91,12 @@ export async function verifySignerLog(did: string, entries: readonly JsonValue[]
     updateKeys: v.active.updateKeys,
   }));
   if (log.failure) out.failure = log.failure.error;
+  // P5.8 (45dc624): a did:vh signer's log is evidence exactly when it verifies under [S3]'s rules, whichever
+  // draft wrote it; a log that breaks any of them is no evidence for that signer, not a valid prefix.
+  if (method === "did:vh" && log.failure) {
+    out.versions = [];
+    return out;
+  }
   const last = log.entries[log.entries.length - 1];
   out.witnessed = !!last.witnessList && last.witnessed;
   return out;
