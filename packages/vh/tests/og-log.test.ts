@@ -40,7 +40,7 @@ const ruleOf = (values: unknown[]) => {
 };
 
 describe('genesis vector (T14-091, P14.26–P14.29)', () => {
-  test('the writer reproduces did.jsonl byte for byte from its inputs', async () => {
+  test('the writer reproduces the entry in canonical form, JCS plus LF, from its inputs (P14.26)', async () => {
     const e = await genesis();
     expect(entryLine(e)).toBe(vtext('genesis/did.jsonl'));
     expect(bytesEqual(utf8(serializeLog([e])), vbytes('local/asset/did.jsonl').subarray(0, utf8(entryLine(e)).length))).toBe(true);
@@ -249,6 +249,20 @@ describe('parameters (P14.1)', () => {
     expect(ruleOf([g, nul])).toMatchObject({ index: 1, rule: 'P14.1', code: 'PARAMETER_NULL' });
     const ttl = await next(g, '2026-01-03T00:00:00Z', { ttl: 60 });
     expect(ruleOf([g, ttl])).toMatchObject({ index: 1, rule: 'P14.1' });
+  });
+
+  test('T5-060: VH Log\'s rules do not apply to the asset log: a logVersion parameter, or updateKeys naming the signer, is rejected (P5.5, P5.7)', async () => {
+    const g = await genesis();
+    // A genesis whose SCID and hash cover a logVersion parameter, so only the parameter rule can fail.
+    const pre = { versionId: '{SCID}', versionTime: '2026-01-02T00:00:00Z', parameters: { method: OG_METHOD, scid: '{SCID}', updateKeys: [], logVersion: 'vh-log:1.0' }, state: genesisState() };
+    const scid = ogHash(pre);
+    const body = JSON.parse(JSON.stringify(pre).replaceAll('{SCID}', scid));
+    const withLogVersion = await signEntry({ ...body, versionId: `1-${ogHash({ ...body, versionId: scid })}` }, authorRef.verificationMethod, authorKey);
+    expect(ruleOf([withLogVersion])).toMatchObject({ rule: 'P14.1', code: 'GENESIS_PARAMETERS' });
+    const e2 = await next(g, '2026-01-03T00:00:00Z', { logVersion: 'vh-log:1.0' });
+    expect(ruleOf([g, e2])).toMatchObject({ index: 1, rule: 'P14.1' });
+    const authorizing = await next(g, '2026-01-03T00:00:00Z', { updateKeys: [authorKey.publicKeyMultibase] });
+    expect(ruleOf([g, authorizing])).toMatchObject({ index: 1, rule: 'P14.1', code: 'UPDATE_KEYS' });
   });
 
   test('T5-005: nextKeyHashes is rejected (P5.9)', async () => {

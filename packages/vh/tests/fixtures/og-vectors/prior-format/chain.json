@@ -28,5 +28,9 @@
     "transactions": "https://mempool.space/api/tx/<txid>/hex, fetched 21 November 2026; block heights and hashes from https://mempool.space/api/tx/<txid>",
     "sat": "the owner’s acceptance receipt of 1 November 2026, which names the sat and these two reveal transactions; the sat is not re-derived here"
   },
-  "note": "The mainnet acceptance Original of 1 November 2026, written before did:og under the previous inscription encoding: the asset log as the inscription body, content type application/vnd.originals.vh+jsonl, no metaprotocol and no metadata, method originals:1.0, identifier did:vh. Kept as a regression fixture: a verifier of og:1.0-draft.1 reports it unsupported (P14.1, T14-085)."
+  "note": "The mainnet acceptance Original of 1 November 2026, written before did:og under the previous inscription encoding: the asset log as the inscription body, content type application/vnd.originals.vh+jsonl, no metaprotocol and no metadata, method originals:1.0, identifier did:vh. Kept as a regression fixture: a verifier of og:1.0-draft.1 reports it unsupported (P14.1, T14-085).",
+  "expectedReport": {
+    "reason": "The log’s method value is originals:1.0, which an implementation of og:1.0-draft.1 does not implement (P14.1, P3.3); its inscriptions carry no og metaprotocol, so they are not Originals inscriptions under P9.31 either.",
+    "note": "Only the outcome is fixed: under outcome unsupported a verifier reports no history, state or Bitcoin result for the log."
+  }
 }
