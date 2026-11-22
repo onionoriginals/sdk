@@ -151,3 +151,14 @@ did}`". The bitcoin vector uses `anchoring-sat`; P7.21's other two
 dependencies (a did:btco signer's sat, a signer DID whose history the package
 lacks) have no kind value. **Proposed fix:** list `anchoring-sat`,
 `signer-sat` and `signer-history`. The SDK uses those (PROVISIONAL).
+
+### F12. P6.7 and section 14 "Shared-host saves": refusing a submission that does not verify
+
+P6.7 requires a host to accept an entry only if it "verifies under this
+profile against that head", and section 14's guide gives the answers
+`accepted`, `already-accepted` and `stale-parent`. Neither gives the answer
+for a submission whose parent is the head but which does not verify (a bad
+proof, a change outside a grant, a P7.20 refusal, bytes that do not match).
+**Proposed fix:** add `rejected` with the rule the entry fails. The SDK's
+host answers `{result: "rejected", rule, reason}` (PROVISIONAL), and over HTTP
+uses 201, 200, 409 and 422 for the four answers.
