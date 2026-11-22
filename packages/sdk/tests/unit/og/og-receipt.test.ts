@@ -12,7 +12,7 @@ import { generateKeyFile } from '../../../src/og/keys.js';
 import { createAuthorDid } from '../../../src/og/author-did.js';
 import { anchoringPublication, createAnchoringEntry, createGenesis, type AuthorRef } from '../../../src/og/original.js';
 import { scureNetwork, signChain } from '../../../src/og/inscribe.js';
-import { saveState, stepVerify, type AnchorState, type Ctx } from '../../../src/og/anchor.js';
+import { loadState, saveState, stepBroadcast, stepVerify, type AnchorState, type Ctx } from '../../../src/og/anchor.js';
 import type { ChainBackend, OrdExplorer } from '../../../src/og/chain.js';
 
 const addr = (fill: number) => btc.p2tr(schnorr.getPublicKey(new Uint8Array(32).fill(fill)), undefined, scureNetwork('regtest')).address!;
@@ -84,6 +84,79 @@ describe('anchoring receipt (P9.11, T7-074)', () => {
       expect(receipt).toMatchObject({ holder: observedHolder, revealDestination, passed: true });
       expect(said.some((l) => l.includes(`holder at the tip ${observedHolder}`))).toBe(true);
       expect(said.some((l) => l.includes(`no longer at the reveal destination ${revealDestination}`))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('broadcast (P9.18, P9.6)', () => {
+  async function signedState() {
+    const dir = mkdtempSync(join(tmpdir(), 'og-broadcast-'));
+    const keyFile = join(dir, 'keys.json');
+    const keys = generateKeyFile(keyFile);
+    const a = await createAuthorDid(keys, { path: ['authors', 'broadcast'], now: new Date('2026-11-22T00:00:00Z') });
+    const author: AuthorRef = { did: a.did, verificationMethod: a.verificationMethod, versionId: a.versionId, log: a.log, signer: keys.assertion };
+    const bytes = new TextEncoder().encode('# Broadcast\n');
+    const file = join(dir, 'notes.md');
+    await Bun.write(file, bytes);
+    const genesis = await createGenesis({ name: 'Broadcast', bytes, mediaType: 'text/markdown', network: 'regtest', author });
+    const anchoring = await createAnchoringEntry(genesis, { sat: 5000n, network: 'regtest', body: 'full', author });
+    saveState(dir, {
+      version: 1, network: 'regtest',
+      author: { did: a.did, url: a.url, log: a.log, verificationMethod: a.verificationMethod, versionId: a.versionId, resolved: true },
+      original: { file, name: 'Broadcast', mediaType: 'text/markdown', digest: genesis.state.transitions[0].to, size: bytes.length, body: 'full', previewMessage: '', genesis },
+      reveal: { secretHex: '09'.repeat(32), fundingAddress: 'unused', fundingAmount: '100000', holder: addr(2), feeRate: 2, postage: '1000', estimatedParts: 1, estimatedFees: [] },
+      funding: { txid: 'ab'.repeat(32), vout: 0, amount: '100000', sat: '5000' },
+      anchoringEntry: anchoring,
+    });
+    return { dir, keyFile };
+  }
+  const chainWith = (seen: (txid: string) => number | null, sent: string[]): ChainBackend => ({
+    name: 'stub', utxos: async () => [], feeRate: async () => 2, txHex: async () => '', tip: async () => ({ height: 1, hash: 'h' }), blockTxids: async () => [],
+    txConfirmations: async (txid) => seen(txid),
+    broadcast: async (hex) => { sent.push(hex); return parseTransaction(hex).txid; },
+  });
+  const ctxOf = (dir: string, keyFile: string, chain: ChainBackend, said: string[]): Ctx => ({
+    stateDir: dir, keyFile, network: 'regtest', chain, ord: {} as OrdExplorer, pollMs: 1, timeoutMs: 1_000,
+    io: { say: (l) => said.push(l), confirm: async () => true, sleep: async () => {} },
+  });
+
+  test('T9-041, T9-111: pending only while the network is seen to hold a transaction; otherwise submitted, not observed', async () => {
+    const { dir, keyFile } = await signedState();
+    try {
+      const sent: string[] = [];
+      const said: string[] = [];
+      // The backend never sees the transactions (rejected, evicted, or a provider without a mempool view).
+      await stepBroadcast(ctxOf(dir, keyFile, chainWith(() => null, sent), said));
+      expect(loadState(dir, 'regtest').broadcast!.map((b) => b.status)).toEqual(['submitted-not-observed', 'submitted-not-observed']);
+      expect(said.filter((l) => /pending/.test(l))).toEqual([]);
+      expect(said.filter((l) => /submitted, not observed/.test(l))).toHaveLength(2);
+      // Once the mempool holds them, they are pending Bitcoin acceptance.
+      const pending: string[] = [];
+      await stepBroadcast(ctxOf(dir, keyFile, chainWith(() => 0, sent), pending));
+      expect(loadState(dir, 'regtest').broadcast!.map((b) => b.status)).toEqual(['pending', 'pending']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('T9-127: a rebroadcast sends the same transactions; no entry is re-signed or rebased', async () => {
+    const { dir, keyFile } = await signedState();
+    try {
+      const first: string[] = [];
+      await stepBroadcast(ctxOf(dir, keyFile, chainWith(() => null, first), []));
+      const signedBefore = loadState(dir, 'regtest').signed!;
+      const anchoringBefore = loadState(dir, 'regtest').anchoringEntry;
+      const second: string[] = [];
+      await stepBroadcast(ctxOf(dir, keyFile, chainWith(() => null, second), []));
+      expect(second).toEqual(first);
+      expect(loadState(dir, 'regtest').signed).toEqual(signedBefore);
+      expect(loadState(dir, 'regtest').anchoringEntry).toEqual(anchoringBefore);
+      // A transaction the network already holds is not sent again.
+      const third: string[] = [];
+      await stepBroadcast(ctxOf(dir, keyFile, chainWith(() => 0, third), []));
+      expect(third).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -173,3 +173,34 @@ describe('describing the transfer check (P7.22, T7-074)', () => {
     expect(text).toMatch(/fails: 1 publication\(s\) of the history are fewer than 6 blocks deep \(abci0\)/);
   });
 });
+
+describe('writer refusals and previews (P9.33, P9.30)', () => {
+  test('T9-073: the local copy fails when the newest author DID version no longer lists the signing key', async () => {
+    const d = mkdtempSync(join(tmpdir(), 'og-sdk-'));
+    const keys = generateKeyFile(join(d, 'k.json'));
+    const a = await createAuthorDid(keys, { path: ['authors', 'rotated'], now: new Date('2026-11-21T00:00:00Z') });
+    const ref: AuthorRef = { did: a.did, verificationMethod: a.verificationMethod, versionId: a.versionId, log: a.log, signer: keys.assertion };
+    const bytes = new TextEncoder().encode('# Notes\n');
+    const g = await createGenesis({ name: 'Notes', bytes, mediaType: 'text/markdown', network: 'regtest', author: ref });
+    const anchor = await createAnchoringEntry(g, { sat: 1n, network: 'regtest', body: 'none', author: ref });
+    // A newer author version that removes key-1, which the writer has verified.
+    const { appendEntry, signWith, serializeLog } = await import('@originals/vh/log');
+    const genesis = a.entries[0];
+    const state = { ...genesis.state, verificationMethod: [], assertionMethod: [] };
+    const upd = keys.update.publicKeyMultibase;
+    const v2 = await appendEntry(genesis, { versionTime: '2026-11-21T00:00:05Z', parameters: {}, state, sign: signWith(keys.update, { cryptosuite: 'eddsa-jcs-2022', verificationMethod: `did:key:${upd}#${upd}` }) });
+    const c = await checkLocalCopy([g, anchor], { ...ref, log: serializeLog([genesis, v2]) }, bytes);
+    expect(c.ok).toBe(false);
+    expect(c.problems.join()).toMatch(/no longer lists/);
+    rmSync(d, { recursive: true });
+  });
+
+  test('T9-090: an image version gets a generated image/webp preview of at most 8,192 bytes', async () => {
+    const { png, busy } = await import('../originals/preview-fixtures.js');
+    const p = await choosePreview({ bytes: png(busy(640, 480)), mediaType: 'image/png' });
+    expect(p.body).toBe('preview');
+    expect(p.preview?.descriptor.mediaType).toBe('image/webp');
+    expect(p.preview!.descriptor.size).toBeGreaterThan(0);
+    expect(p.preview!.descriptor.size).toBeLessThanOrEqual(8192);
+  });
+});

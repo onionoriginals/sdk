@@ -110,6 +110,8 @@ export async function checkLocalCopy(entries: OgEntry[], author: AuthorRef, reso
   });
   const problems: string[] = [];
   for (const e of report.entries ?? []) if (e.status !== "accepted") problems.push(`${e.versionId} is ${e.status}${"rule" in e ? ` under ${e.rule}` : ""}`);
+  // P9.33 (T9-073): never inscribe an entry whose key the newest verified version of its signer's DID no longer lists.
+  for (const e of report.entries ?? []) if (e.status === "accepted" && e.authority !== "current-key") problems.push(`${e.versionId} is signed with a key the newest author DID version no longer lists (${e.authority})`);
   const axes = report.axes as { history?: string; identity?: string };
   if (axes.history !== "valid") problems.push(`history is ${axes.history}`);
   if (axes.identity !== "complete") problems.push(`identity is ${axes.identity}`);
