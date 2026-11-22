@@ -127,6 +127,12 @@ export interface OriginalsSDKOptions {
    */
   retrievalLimits?: RetrievalLimits;
   /**
+   * The largest resource version this SDK publishes or sends to a shared host, in bytes. It may
+   * lower the 64 MiB a hosted reader fetches (P8.5, P14.13), for a host that serves less, but never
+   * raise it: a larger value is held to 64 MiB. Defaults to 64 MiB.
+   */
+  hostedResourceLimit?: number;
+  /**
    * Retrieve a did:webvh signer identity's log where P5.14 says to find it:
    * at the location of the DID in the verification method id of the latest
    * entry that identity signed. Redirects must not be followed (P8.5);
@@ -1841,7 +1847,7 @@ export class OriginalsSDK {
       sdkError("invalid-evidence", "ALIAS_NOT_CONFIRMED", `${input.alias.did} does not point to ${did}: ${check.reason ?? check.message ?? check.status}`);
     }
     const draft = await this.prepareUpdate(did, { parent: input.parent, author: input.author }, [input.alias.did]);
-    assertHostable(await this.stored(did));
+    assertHostable(await this.stored(did), this.options.hostedResourceLimit);
     await this.store.putAuthorEvidence(input.alias);
     return this.commit(draft, signersOf(input) as OriginalsSigner);
   }
@@ -2175,7 +2181,7 @@ export class OriginalsSDK {
     const committed = lines(stored).includes(candidate.line);
     if (!committed && headOf(stored) !== candidate.parent) throw staleHead(did, candidate.parent, headOf(stored));
     // A shared host serves what it accepts (P6.7): nothing it could not serve is sent (P8.5, P14.13).
-    assertHostable(committed ? stored : `${stored.trimEnd()}\n${candidate.line}`);
+    assertHostable(committed ? stored : `${stored.trimEnd()}\n${candidate.line}`, this.options.hostedResourceLimit);
     // Kept before it is sent, with its staged bytes, so a lost acknowledgement is retried with the
     // same signed bytes (P6.4). Staged bytes are content addressed and never a version on their own (P6.1).
     for (const [digest, bytes] of candidate.bytes) await this.store.putResource(digest, bytes);
