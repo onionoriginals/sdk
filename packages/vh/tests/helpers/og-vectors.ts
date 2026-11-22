@@ -35,7 +35,31 @@ export function vectorEvidence(dir: string): import('../../src/og/index.js').Evi
   return {
     original: e.original, checkpoint: e.checkpoint, network: e.network, tip: e.tip, depth: e.depth,
     signerHistories: e.signerHistories,
-    // Each input with the digest the evidence set states for it (P7.17).
-    inputs: e.inputs.map((i: { kind: string; source: string; digest: string }) => ({ kind: i.kind, source: i.source, digest: i.digest, bytes: vbytes(i.source) })),
+    // Each input with the digest the evidence set states for it (P7.17); index reads are supplied separately.
+    inputs: e.inputs.map((i: { kind: string; source: string; digest: string }) => (i.source.startsWith('index:') ? { kind: i.kind, source: i.source, bytes: new Uint8Array() } : { kind: i.kind, source: i.source, digest: i.digest, bytes: vbytes(i.source) })),
   } as never;
+}
+
+/**
+ * The bitcoin vector's evidence set (P9.18): its inscription inputs, and the index reads from
+ * chain.json (placement, chain order, confirmations, holder), which evidence-set.json does not carry.
+ */
+export function bitcoinEvidence(): import('../../src/og/index.js').EvidenceSet {
+  const e = vectorEvidence('bitcoin');
+  const chain = vjson('bitcoin/chain.json');
+  e.inputs = chain.inscriptions.map((x: any) => ({ kind: 'inscription', source: `index:${x.id}`, bytes: vbytes(`bitcoin/${x.envelope}`) }));
+  e.sats = [{
+    sat: `did:btco:reg:${chain.sat}`, index: 'vector', complete: true, holder: chain.holder.address,
+    inscriptions: chain.inscriptions.map((x: any) => ({ id: x.id, sat: String(x.sat), height: x.block, txIndex: x.txIndex, inscriptionIndex: x.inscriptionIndex, confirmations: x.confirmations, envelope: vbytes(`bitcoin/${x.envelope}`) })),
+  }];
+  return e;
+}
+
+/** The prior-format fixture as an evidence set: its two reveal transactions, as mempool.space served them. */
+export function priorEvidence(): import('../../src/og/index.js').EvidenceSet {
+  const chain = pjson('chain.json');
+  return {
+    original: null as never, checkpoint: null, network: 'mainnet', tip: null, depth: null, prior: null,
+    inputs: chain.inscriptions.map((x: any) => ({ kind: 'transaction', source: `mempool.space:${x.revealTxid}`, txid: x.revealTxid, bytes: new TextEncoder().encode(new TextDecoder().decode(pbytes(x.transaction)).trim()) })),
+  };
 }

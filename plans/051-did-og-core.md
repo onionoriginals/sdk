@@ -162,3 +162,18 @@ proof, a change outside a grant, a P7.20 refusal, bytes that do not match).
 **Proposed fix:** add `rejected` with the rule the entry fails. The SDK's
 host answers `{result: "rejected", rule, reason}` (PROVISIONAL), and over HTTP
 uses 201, 200, 409 and 422 for the four answers.
+
+### F13. P7.17, P9.18 and the bitcoin vector: the index reads are not in the evidence set
+
+P7.17 puts in the evidence set "what the index read at that tip: the
+complete list of inscriptions on the anchoring sat ..., with their holders",
+and P9.18 calls the bitcoin vector's evidence set exactly that. But
+`bitcoin/evidence-set.json` lists only the two inscriptions (`kind`,
+`source`, `digest`); the sat each is on, its block, transaction and
+inscription index, its confirmations and the holder, which the expected
+report depends on (`block`, `bitcoin.sat`, `bitcoin.holder`), are only in
+`chain.json`. **Proposed fix:** add the index reads to the evidence set (a
+`sats` member: per sat, the index, whether the list is complete, each
+inscription's id, position and confirmations, and the holder), or say in
+P14.26 that `chain.json` is part of the evidence set. The SDK's evidence set
+has a `sats` member, and its tests build it from `chain.json`.

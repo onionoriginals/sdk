@@ -79,6 +79,8 @@ export interface EvidenceSet {
   depth?: number | null;
   /** The sats the index read (P9.18): the anchoring sat and each did:btco signer's. */
   sats?: SatRead[];
+  /** An index of Originals inscriptions the verifier trusts, and the block through which it lists every one (P9.16). */
+  originalsIndex?: { name: string; through: number } | null;
 }
 
 // ---------------------------------------------------------------------------
