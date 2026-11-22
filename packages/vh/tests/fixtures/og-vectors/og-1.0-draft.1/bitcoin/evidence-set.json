@@ -3,6 +3,11 @@
   "checkpoint": null,
   "inputs": [
     {
+      "kind": "sat-read",
+      "source": "bitcoin/sat-read.json",
+      "digest": "zQmVJVNQZH4wZTpDi41Lh2ZH3Q3dRzL1WJCraJ9ArzziMhV"
+    },
+    {
       "kind": "inscription",
       "source": "index:bcbdc0375c141a6ae45685da65010aa15f92401baf8c3cdb36a290b97d3a08dbi0",
       "digest": "zQmTwFMNvRhKoF3oB7E1s5SnJqdXXHkyeswFz7mVQyGVvoh"
@@ -20,5 +25,5 @@
     "hash": "855a1c4b048aa241ea61a872b11f3b915048244a9841b5c501405ba268a20839"
   },
   "depth": 1,
-  "note": "Exactly the P9.18 evidence set: the anchoring sat's inscriptions at the stated network and tip, and nothing else."
+  "note": "Exactly the P9.18 evidence set: the index read of the anchoring sat and its inscriptions at the stated network and tip, and nothing else."
 }

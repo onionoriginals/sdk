@@ -6,6 +6,11 @@
   "evidence": {
     "inputs": [
       {
+        "kind": "sat-read",
+        "source": "bitcoin/sat-read.json",
+        "digest": "zQmVJVNQZH4wZTpDi41Lh2ZH3Q3dRzL1WJCraJ9ArzziMhV"
+      },
+      {
         "kind": "inscription",
         "source": "index:bcbdc0375c141a6ae45685da65010aa15f92401baf8c3cdb36a290b97d3a08dbi0",
         "digest": "zQmTwFMNvRhKoF3oB7E1s5SnJqdXXHkyeswFz7mVQyGVvoh"
