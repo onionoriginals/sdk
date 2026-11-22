@@ -45,7 +45,8 @@ describe('identifiers (§3)', () => {
   test('T7-076: an evidence set with the did:og and no log entry: state none, outcome incomplete, target-missing naming the did:og', async () => {
     const w = await World.create();
     const r = await verifyOriginal({ original: w.did, inputs: [] });
-    expect(axes(r)).toMatchObject({ state: 'none', outcome: 'incomplete' });
+    // P7.18 (5281746, F16): with no log entry nothing contradicts the binding; target-missing carries the gap.
+    expect(axes(r)).toMatchObject({ binding: 'bound', state: 'none', outcome: 'incomplete' });
     expect(r.diagnostics.map(({ reason: _r, ...d }) => d)).toEqual([{ code: 'target-missing', rule: 'P3.2', item: { kind: 'entry', id: w.did } }]);
   });
 
