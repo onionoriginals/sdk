@@ -123,6 +123,32 @@ describe('metadata member order (P14.12, T14-097, T14-098)', () => {
   }
 });
 
+describe('metadata members on the bitcoin vector (P14.12, T14-003, owner decision D)', () => {
+  /** The vector with part 1's metadata given one more member, its other fields and body kept. */
+  const withMember = (member: Record<string, unknown>) => {
+    const e = bitcoinEvidence();
+    const env = vbytes('bitcoin/inscriptions/part-1.envelope.bin');
+    const r = readInscription(env);
+    if (r.kind !== 'originals') throw new Error('part 1');
+    const changed = encodeEnvelope({ contentType: r.contentType, metadata: encodeCbor({ ...(r.metadata as any), ...member }), body: r.body });
+    let k = 0;
+    e.inputs = e.inputs.map((i) => (i.kind === 'inscription' && k++ === 0 ? { kind: i.kind, source: i.source, bytes: changed } : i));
+    return e;
+  };
+
+  test('T14-003: an unknown member makes the publication rejected: outcome invalid, as the reference checker gives', async () => {
+    const r = await verifyOriginal(withMember({ extra: 1 }));
+    expect(r.axes).toMatchObject({ outcome: 'invalid', history: 'invalid', bitcoin: 'not-anchored' });
+    expect(r.entries.length).toBe(4);
+    expect(r.entries.every((x) => x.status === 'rejected' && x.rule === 'P14.12')).toBe(true);
+  });
+
+  test('owner decision D: a signers member on regtest is an unknown member too: invalid', async () => {
+    const r = await verifyOriginal(withMember({ signers: [{ did: vjson('index.json').author, log: [] }] }));
+    expect(r.axes).toMatchObject({ outcome: 'invalid', bitcoin: 'not-anchored' });
+  });
+});
+
 describe('inscription bytes (T14-076, T14-078)', () => {
   for (const k of [1, 2]) {
     test(`part ${k}: the vector envelope is a read fixture: the codec reproduces it from its decoded key order, and other orders decode to the same values`, () => {

@@ -118,15 +118,17 @@ describe('signer versions on Bitcoin (P9.15, P9.33)', () => {
     expect(short.checkpoint).toBe(anchor.versionId);
   });
 
-  test('T9-109: an inscription after the anchor naming a did:webvh version number held under another versionId is rejected', async () => {
+  test('T9-109 (owner decision B): an inscription after the anchor naming a did:webvh versionId no supplied log holds, at a number they do hold, is unverifiable (signer-version-missing), never rejected', async () => {
     const { w, anchor, chain } = await anchoredWorld();
     const real = w.author.ref();
     const fake = { ...real, versionId: real.versionId.replace(/-.+$/, '-QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW') };
     const e = await later(w, anchor, (s) => { s.asset.name = 'x'; }, { ref: fake });
-    chain.publish(SAT, pub1(e));
+    const [u] = chain.publish(SAT, pub1(e));
     const r = await verifyOriginal(chain.evidence(w.did));
-    expect(labelOf(r, e)).toMatchObject({ status: 'rejected', rule: 'P5.3' });
-    expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'entry-rejected', rule: 'P5.3', item: { kind: 'entry', id: e.versionId } }));
+    expect(labelOf(r, e)).toEqual({ versionId: e.versionId, status: 'unverifiable' });
+    expect(r.bitcoin?.unverifiable).toEqual([{ inscription: u, did: w.author.did, versionId: fake.versionId }]);
+    expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'signer-version-missing', rule: 'P7.8', item: { kind: 'signer', id: w.author.did, versionId: fake.versionId } }));
+    expect(r.diagnostics.some((d) => d.code === 'entry-rejected')).toBe(false);
   });
 
   test('D22: an inscription after the anchor whose proof fails at the named version is rejected under P5.3', async () => {
@@ -136,15 +138,20 @@ describe('signer versions on Bitcoin (P9.15, P9.33)', () => {
     expect(labelOf(await verifyOriginal(chain.evidence(w.did)), e)).toMatchObject({ status: 'rejected', rule: 'P5.3' });
   });
 
-  test('T9-115: an entry in the anchoring publication naming a version number held under another versionId: rejected, so no anchor', async () => {
+  test('T9-115 (owner decision B): an entry in the anchoring publication naming a versionId no supplied log holds, at a number they do hold: missing evidence, so the anchor is undetermined, never rejected', async () => {
     const w = await World.create();
     const real = w.author.ref();
     const fake = { ...real, versionId: real.versionId.replace(/-.+$/, '-QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW') };
-    await w.entry((s) => { s.asset.name = 'x'; }, { ref: fake });
+    const x = await w.entry((s) => { s.asset.name = 'x'; }, { ref: fake });
     await w.entry((s) => { s.asset.aliases = [SAT]; s.asset.body = 'none'; });
     const chain = new Chain();
     chain.publish(SAT, anchoring(w));
-    expect(axes(await verifyOriginal(chain.evidence(w.did))).bitcoin).toBe('not-anchored');
+    const r = await verifyOriginal(chain.evidence(w.did));
+    expect(axes(r)).toMatchObject({ bitcoin: 'undetermined', identity: 'incomplete', outcome: 'incomplete' });
+    expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'signer-version-missing', item: { kind: 'signer', id: w.author.did, versionId: fake.versionId } }));
+    expect(labelOf(r, x)).toEqual({ versionId: x.versionId, status: 'unchecked' });
+    expect(r.entries.some((e) => e.status === 'rejected')).toBe(false);
+    expect(r.bitcoin).toBeUndefined();
   });
 
   test('T9-116, T9-124: an inscription whose did:btco signer\'s sat is not read in full but that fails a check needing no such sat is rejected, not unverifiable (first matching row)', async () => {
@@ -212,7 +219,7 @@ describe('competing anchors (P9.16)', () => {
     expect(r.checkpoint).toBe(b.versionId);
   });
 
-  test('T9-077: an earlier anchoring publication with a did:btco signer whose sat is not read in full, and a later valid one: undetermined', async () => {
+  test('T9-077 (owner decision A): an earlier anchoring publication on another sat with a did:btco signer whose sat is not read in full does not block a later valid one: anchored, the other listed unverifiable, uniqueness provisional', async () => {
     const chain = new Chain();
     const { editor } = btcoEditor(chain);
     const w = await World.create();
@@ -224,9 +231,15 @@ describe('competing anchors (P9.16)', () => {
     chain.publish(SAT, anchoring(w, { entries: [w.entries[0], g, byEditor, a] }), { height: 250 });
     chain.publish(SAT2, anchoring(w, { entries: [w.entries[0], g, b] }), { height: 260 });
     chain.height = 270;
-    const r = await verifyOriginal(chain.evidence(w.did, { reads: [chain.read(SAT), chain.read(SAT2), chain.read(EDITOR_SAT, 'ord-a', false)] }));
-    expect(axes(r).bitcoin).toBe('undetermined');
-    expect(r.bitcoin).toBeUndefined();
+    const [first] = chain.sats.get(SAT)!.slice(-1);
+    const r = await verifyOriginal(chain.evidence(w.did, { reads: [chain.read(SAT), chain.read(SAT2), chain.read(EDITOR_SAT, 'ord-a', false)], originalsIndex: { name: 'og-index', through: 265 } }));
+    expect(axes(r)).toMatchObject({ bitcoin: 'anchored', outcome: 'verified', state: 'current' });
+    expect(r.bitcoin?.sat).toBe(SAT2);
+    expect(r.checkpoint).toBe(b.versionId);
+    expect(r.bitcoin?.unverifiable).toEqual([{ inscription: first.id, did: EDITOR_SAT, versionId: (byEditor.state as any).editor.versionId }]);
+    expect(r.bitcoin?.holder.uniqueness).toBe('provisional');
+    expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'inscription-unverifiable', rule: 'P9.15', item: { kind: 'inscription', id: first.id } }));
+    expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'signer-sat-not-read', item: { kind: 'sat', id: EDITOR_SAT } }));
     const decided = await verifyOriginal(chain.evidence(w.did));
     expect(decided.bitcoin?.sat).toBe(SAT);
   });

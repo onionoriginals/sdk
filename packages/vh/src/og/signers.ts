@@ -91,10 +91,11 @@ export async function verifySignerLog(did: string, entries: readonly JsonValue[]
     deactivated: v.active.deactivated,
     updateKeys: v.active.updateKeys,
   }));
-  if (log.failure) out.failure = log.failure.error;
-  // P5.8 (45dc624): a did:vh signer's log is evidence exactly when it verifies under [S3]'s rules, whichever
-  // draft wrote it; a log that breaks any of them is no evidence for that signer, not a valid prefix.
-  if (method === "did:vh" && log.failure) {
+  // P5.8, P9.33 (owner decision B, 22 November 2026): a signer's log is evidence exactly when it verifies in
+  // full from its genesis under its method's rules; a log that fails anywhere is no evidence for that signer
+  // at all, never a valid prefix, whichever method it is.
+  if (log.failure) {
+    out.failure = log.failure.error;
     out.versions = [];
     return out;
   }
@@ -130,24 +131,41 @@ export function listsKey(document: JsonObject, publicKeyMultibase: string): bool
 
 export type VersionLookup =
   | { found: SignerVersion }
-  /** The history ends before the named version: missing evidence (P5.6, P5.13). */
-  | { beyond: true }
-  /** The history holds that version number under another versionId, or names no such version. */
+  /**
+   * No log that verifies holds the named version: missing evidence, never a rejection (P5.6, P9.33). `history`
+   * when no supplied log of the DID verifies; `version` when logs verify but none holds that versionId,
+   * because they end before it or hold another versionId at that number, a fork of the signer's log.
+   */
+  | { missing: "history" | "version" }
+  /** The named versionId cannot name any version: no version number, or one above P14.13's limit. */
   | { mismatch: string };
 
-export function lookupVersion(history: SignerHistory, versionId: string, method: SignerMethod): VersionLookup {
-  const found = history.versions.find((v) => v.versionId === versionId);
-  if (found) return { found };
-  if (method === "did:btco") return { beyond: true };
+/**
+ * The named version of a did:vh or did:webvh signer, from the union of the supplied logs that verify
+ * (owner decision B, 22 November 2026): found if any of them holds it, whatever the others hold, so the
+ * result does not depend on which logs are supplied beside it or in what order.
+ */
+export function lookupVersion(histories: readonly SignerHistory[], versionId: string): VersionLookup {
+  const usable = histories.filter((h) => !h.failure && h.versions.length > 0);
+  for (const h of usable) {
+    const found = h.versions.find((v) => v.versionId === versionId);
+    if (found) return { found };
+  }
   const m = /^([1-9]\d*)-/.exec(versionId);
   if (!m) return { mismatch: "the named versionId has no version number" };
-  const n = Number(m[1]);
-  if (n > OG_LIMITS.signerVersions) return { mismatch: "the named version is above the P14.13 limit" };
-  const latest = latestVersion(history);
-  // A log that verifies no version at all is no evidence of this identity (P5.6, T5-030).
-  if (!latest) return { beyond: true };
-  if (n > latest.number) return history.failure && !history.limitExceeded ? { mismatch: "the history does not verify through the named version" } : { beyond: true };
-  return { mismatch: "the history holds that version number under another versionId" };
+  if (Number(m[1]) > OG_LIMITS.signerVersions) return { mismatch: "the named version is above the P14.13 limit" };
+  return { missing: usable.length ? "version" : "history" };
+}
+
+/** Compare strings by Unicode code point, for the report's deterministic tie-breaks. */
+export function byCodePoint(a: string, b: string): number {
+  const x = [...a];
+  const y = [...b];
+  for (let i = 0; i < Math.min(x.length, y.length); i++) {
+    const d = x[i].codePointAt(0)! - y[i].codePointAt(0)!;
+    if (d) return d;
+  }
+  return x.length - y.length;
 }
 
 /**

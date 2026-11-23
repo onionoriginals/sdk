@@ -200,22 +200,48 @@ describe('anchoring (P9.10, P9.16, P9.18)', () => {
     expect(r.entries.some((e) => e.versionId === w.head.versionId && e.status === 'accepted')).toBe(false);
   });
 
-  test('D22: a reader ignores a signers member in older inscriptions; it is never evidence of the signer', async () => {
-    const w = await World.create();
-    await w.entry((s) => { s.asset.aliases = [SAT]; s.asset.body = 'none'; });
+  test('D22 (owner decision D): a signers member is ignored, never evidence, only in a mainnet inscription at or below block 977,150', async () => {
+    const MAIN = 'did:btco:5000';
+    const w = await World.create(undefined, { network: 'mainnet' });
+    await w.entry((s) => { s.asset.aliases = [MAIN]; s.asset.body = 'none'; });
     const legacy = encodeCbor({ entries: w.entries, signers: [{ did: w.author.did, log: JSON.parse(`[${w.author.log().trim().split('\n').join(',')}]`) }] } as never);
-    const read = readInscription(encodeEnvelope({ metadata: legacy, body: null }));
+    const env = encodeEnvelope({ metadata: legacy, body: null });
+    const read = readInscription(env, { network: 'mainnet', height: 977_150 });
     expect(read.kind).toBe('originals');
     expect(read.kind === 'originals' && Object.keys(read.metadata)).toEqual(['entries']);
-    // Even a malformed signers member is ignored, while any other unknown member still invalidates the metadata.
-    expect(readInscription(encodeEnvelope({ metadata: encodeCbor({ entries: w.entries, signers: 7 } as never), body: null })).kind).toBe('originals');
-    expect(readInscription(encodeEnvelope({ metadata: encodeCbor({ entries: w.entries, witnesses: [] } as never), body: null }))).toMatchObject({ kind: 'invalid', rule: 'P14.12' });
+    // Even a malformed signers member is ignored there, while any other unknown member still invalidates the metadata.
+    expect(readInscription(encodeEnvelope({ metadata: encodeCbor({ entries: w.entries, signers: 7 } as never), body: null }), { network: 'mainnet', height: 977_095 }).kind).toBe('originals');
+    expect(readInscription(encodeEnvelope({ metadata: encodeCbor({ entries: w.entries, witnesses: [] } as never), body: null }), { network: 'mainnet', height: 977_095 })).toMatchObject({ kind: 'invalid', rule: 'P14.12' });
+    // Outside the window it is an unknown member: above the height, on another network, or with no place given.
+    for (const at of [{ network: 'mainnet' as const, height: 977_151 }, { network: 'regtest' as const, height: 200 }, { network: 'signet' as const, height: 1 }, undefined]) {
+      expect(readInscription(env, at)).toMatchObject({ kind: 'invalid', rule: 'P14.12' });
+    }
     // The inscribed history is not used: without a supplied log the anchor is undetermined; with one, anchored.
     const chain = new Chain();
-    chain.inscribe(SAT, [encodeEnvelope({ metadata: legacy, body: null })]);
-    expect(axes(await verifyOriginal(chain.evidence(w.did)))).toMatchObject({ bitcoin: 'undetermined', outcome: 'incomplete' });
+    chain.inscribe(MAIN, [env], { height: 977_095 });
+    chain.height = 977_100;
+    expect(axes(await verifyOriginal(chain.evidence(w.did, { network: 'mainnet' })))).toMatchObject({ bitcoin: 'undetermined', outcome: 'incomplete' });
     chain.supply(history(w.author));
-    expect(axes(await verifyOriginal(chain.evidence(w.did)))).toMatchObject({ bitcoin: 'anchored', outcome: 'verified' });
+    expect(axes(await verifyOriginal(chain.evidence(w.did, { network: 'mainnet' })))).toMatchObject({ bitcoin: 'anchored', outcome: 'verified' });
+    // The same inscription in block 977,151 is rejected, with its publication: the entries are rejected under P14.12.
+    const late = new Chain().supply(history(w.author));
+    late.inscribe(MAIN, [env], { height: 977_151 });
+    late.height = 977_160;
+    const r = await verifyOriginal(late.evidence(w.did, { network: 'mainnet' }));
+    expect(axes(r)).toMatchObject({ bitcoin: 'not-anchored', history: 'invalid', outcome: 'invalid' });
+    expect(labelOf(r, w.head)).toMatchObject({ status: 'rejected', rule: 'P14.12' });
+  });
+
+  test('D22 (owner decision D): a regtest inscription with a signers member is invalid; the anchor is not taken from it', async () => {
+    const w = await World.create();
+    await w.entry((s) => { s.asset.aliases = [SAT]; s.asset.body = 'none'; });
+    const legacy = encodeCbor({ entries: w.entries, signers: [] } as never);
+    const chain = new Chain().supply(history(w.author));
+    chain.inscribe(SAT, [encodeEnvelope({ metadata: legacy, body: null })]);
+    const r = await verifyOriginal(chain.evidence(w.did));
+    expect(axes(r)).toMatchObject({ bitcoin: 'not-anchored', outcome: 'invalid' });
+    expect(r.entries.every((e) => e.status === 'rejected' && e.rule === 'P14.12')).toBe(true);
+    expect(r.bitcoin).toBeUndefined();
   });
 
   test('D22: the writer never writes a signers member', async () => {

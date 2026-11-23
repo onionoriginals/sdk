@@ -12,6 +12,7 @@ import { isJsonObject, type JsonObject, type JsonValue } from "../json/index.js"
 import { decodeCbor, encodeCbor } from "../originals/cbor.js";
 import { checkStrictValue, entryBytes } from "./log.js";
 import { OG_LIMITS, reject } from "./rules.js";
+import type { BitcoinNetwork } from "./state.js";
 
 /** PROVISIONAL (P14.12): the metaprotocol value of an Originals inscription. */
 export const OG_METAPROTOCOL = "og";
@@ -21,7 +22,8 @@ const TAG = { contentType: 1, pointer: 2, parent: 3, metadata: 5, metaprotocol: 
 /**
  * Originals inscriptions carry no signer DID histories (D22, 22 November 2026; P14.12): a did:vh or
  * did:webvh signer's log is supplied to the verifier from resolution (P7.8, P7.17). A `signers` member in
- * an older inscription is ignored by the reader and is never evidence.
+ * an inscription written before D22 is ignored by the reader and is never evidence; only those inscriptions
+ * may carry one (see `LEGACY_SIGNERS_LAST_HEIGHT`).
  */
 export interface Metadata {
   entries: JsonObject[];
@@ -175,16 +177,41 @@ function concat(parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
+/** Where an inscription is: the network and the height of the block that holds it. */
+export interface InscriptionPlace {
+  network: BitcoinNetwork;
+  height: number;
+}
+
+/**
+ * Owner decision (22 November 2026, bounding P14.12's legacy `signers` member): a reader ignores a
+ * `signers` member only in an inscription on mainnet in a block at this height or lower, where
+ * inscriptions written before D22 are; the D22 mainnet gate's tip was 977,150. Anywhere else a `signers`
+ * member makes the metadata invalid, like any other unknown member.
+ */
+export const LEGACY_SIGNERS_LAST_HEIGHT = 977_150;
+
+/** Whether an inscription at this place may carry a legacy `signers` member, which is then ignored. */
+export const legacySignersAllowed = (at?: InscriptionPlace): boolean => !!at && at.network === "mainnet" && at.height <= LEGACY_SIGNERS_LAST_HEIGHT;
+
 export type InscriptionReading =
   /** Not an Originals inscription (P9.31): no `og` metaprotocol. Its own metadata may be a did:btco version (P5.13). */
   | { kind: "other"; metadata: Uint8Array | null; contentType: string | null }
-  | { kind: "invalid"; rule: string; reason: string }
+  /**
+   * An Originals inscription that is rejected, with its publication (P9.31, P14.12). `partial` is its metadata's
+   * `entries` and `part` as far as they can be read, used only to find the publication it belongs to (P9.32)
+   * and to label the entries rejected with it; never evidence.
+   */
+  | { kind: "invalid"; rule: string; reason: string; partial?: { entries: JsonObject[]; part?: [number, number]; contentType: string | null; body: Uint8Array | null } }
   | { kind: "originals"; metadata: Metadata; metadataBytes: number; contentType: string | null; body: Uint8Array | null };
 
 const strictText = new TextDecoder("utf-8", { fatal: true });
 
-/** Read an inscription's envelope under P14.12 and P9.31. */
-export function readInscription(envelope: Uint8Array): InscriptionReading {
+/**
+ * Read an inscription's envelope under P14.12 and P9.31. `at` is where the inscription is; without it, or
+ * outside the legacy window, a `signers` member makes the metadata invalid (`LEGACY_SIGNERS_LAST_HEIGHT`).
+ */
+export function readInscription(envelope: Uint8Array, at?: InscriptionPlace): InscriptionReading {
   const p = parseEnvelope(envelope);
   if (!p) return { kind: "invalid", rule: "P14.12", reason: "not an ord envelope" };
   const mp = p.fields.get(TAG.metaprotocol);
@@ -205,7 +232,10 @@ export function readInscription(envelope: Uint8Array): InscriptionReading {
     }
   })();
   if (!isOg) return { kind: "other", metadata, contentType };
-  const fail = (rule: string, reason: string): InscriptionReading => ({ kind: "invalid", rule, reason });
+  const fail = (rule: string, reason: string): InscriptionReading => {
+    const partial = metadata ? partialMetadata(metadata) : undefined;
+    return partial ? { kind: "invalid", rule, reason, partial: { ...partial, contentType, body: p.body } } : { kind: "invalid", rule, reason };
+  };
   // P14.12, P9.17, P9.31: no delegate, pointer, parent, content encoding, or field ord does not recognise.
   for (const tag of p.fields.keys()) {
     if (tag === TAG.delegate) return fail("P9.17", "an Originals inscription names no delegate");
@@ -224,21 +254,41 @@ export function readInscription(envelope: Uint8Array): InscriptionReading {
     return fail("P14.12", (error as Error).message);
   }
   try {
-    return { kind: "originals", metadata: checkMetadata(decoded), metadataBytes: metadata.length, contentType, body: p.body };
+    return { kind: "originals", metadata: checkMetadata(decoded, { legacySigners: legacySignersAllowed(at) }), metadataBytes: metadata.length, contentType, body: p.body };
   } catch (error) {
     const e = error as { details?: { rule?: string }; message: string };
     return fail(e.details?.rule ?? "P14.12", e.message);
   }
 }
 
+/** The `entries` and `part` of metadata that fails P14.12, as far as they can be read; never evidence. */
+function partialMetadata(metadata: Uint8Array): { entries: JsonObject[]; part?: [number, number] } | undefined {
+  let v: JsonValue;
+  try {
+    v = decodeCbor(metadata, { shortest: false });
+  } catch {
+    return undefined;
+  }
+  if (!isJsonObject(v) || !Array.isArray(v.entries)) return undefined;
+  const entries = v.entries.filter(isJsonObject);
+  const p = v.part;
+  const part = Array.isArray(p) && p.length === 2 && p.every((x) => Number.isSafeInteger(x)) && (p[1] as number) >= 2 && (p[1] as number) <= OG_LIMITS.publicationParts && (p[0] as number) >= 1 && (p[0] as number) <= (p[1] as number)
+    ? [p[0], p[1]] as [number, number] : undefined;
+  return { entries, ...(part ? { part } : {}) };
+}
+
 /**
- * P14.12 (D22): an object of `entries` and, in a publication in parts, `part`, and nothing else, except
- * that a `signers` member, which older inscriptions carry, is ignored whatever it holds: it is dropped
- * from the result and is never evidence of a signer's history (P7.8).
+ * P14.12 (D22): an object of `entries` and, in a publication in parts, `part`, and nothing else. A
+ * `signers` member is ignored whatever it holds only when `legacySigners` is set, for an inscription in the
+ * legacy window (`LEGACY_SIGNERS_LAST_HEIGHT`): it is dropped from the result and is never evidence of a
+ * signer's history (P7.8, P9.33). Anywhere else it is an unknown member.
  */
-export function checkMetadata(v: JsonValue): Metadata {
+export function checkMetadata(v: JsonValue, options: { legacySigners?: boolean } = {}): Metadata {
   if (!isJsonObject(v)) reject("P14.12", "METADATA_SHAPE", "the metadata is an object, not an array of entries (T14-003)");
-  for (const k of Object.keys(v)) if (k !== "entries" && k !== "signers" && k !== "part") reject("P14.12", "METADATA_MEMBERS", `metadata member ${k} is not defined`);
+  for (const k of Object.keys(v)) {
+    if (k === "entries" || k === "part" || (k === "signers" && options.legacySigners)) continue;
+    reject("P14.12", "METADATA_MEMBERS", k === "signers" ? "a signers member is ignored only in inscriptions on mainnet at or below block 977,150; here it is not defined" : `metadata member ${k} is not defined`);
+  }
   if (!Array.isArray(v.entries) || !v.entries.every(isJsonObject)) reject("P14.12", "METADATA_ENTRIES", "entries is an array of entries");
   for (const e of v.entries) {
     checkStrictValue(e);
