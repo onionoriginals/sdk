@@ -323,7 +323,7 @@ export interface LastRun {
 /**
  * Beside the report, never in it (P14.25; D22): the newest resolved author version deactivates the DID, or no
  * longer lists the key the entries were signed with. The inscribed entries stay accepted, since each is checked
- * at the version it names (P5.3); the warning is for the owner, who cannot sign new entries with that key.
+ * at the version it names (P5.3); the warning only reports what the latest resolved version says.
  */
 export function authorWarnings(c: AuthorLogCheck, verificationMethod: string, versionId: string): string[] {
   const latest = c.versions[c.versions.length - 1];
@@ -331,7 +331,7 @@ export function authorWarnings(c: AuthorLogCheck, verificationMethod: string, ve
   const named = c.versions.find((v) => v.versionId === versionId)?.document;
   const vms = Array.isArray(named?.verificationMethod) ? (named.verificationMethod as Array<{ id?: unknown; publicKeyMultibase?: unknown }>) : [];
   const key = vms.find((v) => v.id === verificationMethod)?.publicKeyMultibase;
-  if (latest.deactivated) return [`the author DID is deactivated at its newest version ${latest.versionId}; the inscribed entries stay accepted (each is checked at the version it names), but the DID can sign nothing new`];
+  if (latest.deactivated) return [`The latest resolved version of the author DID (${latest.versionId}) is deactivated. Inscribed entries are verified against the DID version each entry names.`];
   if (typeof key === "string" && !listsKey(latest.document as JsonObject, key)) return [`the newest author DID version ${latest.versionId} no longer lists the key of ${verificationMethod}; the inscribed entries stay accepted (each is checked at the version it names)`];
   return [];
 }

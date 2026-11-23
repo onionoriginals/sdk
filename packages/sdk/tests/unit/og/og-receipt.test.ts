@@ -134,7 +134,7 @@ describe('author warnings beside the report (D22)', () => {
   });
   test('a newer version that removes the key, or deactivates the DID, is a warning, never a failure', () => {
     expect(authorWarnings({ ok: true, versions: [v1, { versionId: '2-b', document: doc(['zB']), deactivated: false }] }, 'did:webvh:x:a#key-1', '1-a')[0]).toMatch(/2-b no longer lists the key/);
-    expect(authorWarnings({ ok: true, versions: [v1, { versionId: '2-b', document: doc(['zA']), deactivated: true }] }, 'did:webvh:x:a#key-1', '1-a')[0]).toMatch(/deactivated at its newest version 2-b/);
+    expect(authorWarnings({ ok: true, versions: [v1, { versionId: '2-b', document: doc(['zA']), deactivated: true }] }, 'did:webvh:x:a#key-1', '1-a')[0]).toBe('The latest resolved version of the author DID (2-b) is deactivated. Inscribed entries are verified against the DID version each entry names.');
   });
 });
 
