@@ -157,7 +157,7 @@ describe('owner decision A: other sats never block the anchor', () => {
     expect(r.diagnostics.some((d) => d.code === 'signer-history-missing' || d.code === 'anchoring-sat-not-read')).toBe(false);
   });
 
-  test('the same did:og undecidable on another sat, earlier than our valid anchor: ours is anchored, the other listed unverifiable, uniqueness provisional', async () => {
+  test('T9-145(a): the same did:og undecidable on another sat, earlier than our valid anchor, is ignored: ours is anchored, nothing listed, uniqueness provisional', async () => {
     const w = await World.create();
     const genesis = w.head;
     const v1 = w.author.ref().versionId;
@@ -172,11 +172,10 @@ describe('owner decision A: other sats never block the anchor', () => {
     expect(axes(r)).toMatchObject({ bitcoin: 'anchored', outcome: 'verified', state: 'current' });
     expect(r.bitcoin?.sat).toBe(SAT);
     expect(r.checkpoint).toBe(ours.versionId);
-    expect(r.bitcoin?.unverifiable).toEqual([{ inscription: e1, did: w.author.did, versionId: early.state.author.versionId }]);
+    expect(r.bitcoin?.unverifiable).toEqual([]);
     expect(r.bitcoin?.conflictingAnchors).toEqual([]);
     expect(r.bitcoin?.holder.uniqueness).toBe('provisional');
-    expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'inscription-unverifiable', rule: 'P9.15', item: { kind: 'inscription', id: e1 } }));
-    expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'signer-version-missing', item: { kind: 'signer', id: w.author.did, versionId: early.state.author.versionId } }));
+    expect(r.diagnostics.map((d) => d.code)).toEqual(['resource-missing']);
     // Once its signer's log is supplied, the earlier one verifies: it is the anchor and ours a conflicting anchor.
     const full = await verifyOriginal(chain.evidence(w.did, { histories: [{ did: w.author.did, log: w.author.log() }] }));
     expect(full.bitcoin?.sat).toBe(SAT2);

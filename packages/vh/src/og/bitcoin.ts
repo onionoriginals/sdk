@@ -594,14 +594,8 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
     inscribed.push({ entry: judged.entries[0], block: pub.final.height, ordering: "chain-ordered" });
     if (judged.fullBody) bodies.set(resourceDigest(judged.fullBody), judged.fullBody);
   }
-  // Owner decision A: our anchoring publications on other sats that cannot be decided do not block this
-  // anchor; each is listed as unverifiable, with what deciding it lacks (P9.16, P14.25).
-  for (const o of undecided) {
-    const pub = o.outcome.undetermined!;
-    const l = o.outcome.lacking!;
-    unverifiable.push({ inscription: pub.final.id, did: l[0].did, versionId: l[0].versionId });
-    lacking.push({ signers: l, sat: o.outcome.sat.sat });
-  }
+  // Owner ruling (23 November 2026): our anchoring publications on other sats that cannot be decided are
+  // ignored: not listed, no diagnostic, no effect on the checks; they only keep uniqueness provisional (P9.16).
   // Copies' entries that are not on the sat: after the anchor they are ignored (P9.12, T9-005); before
   // it they are on a branch that lost to the anchor, so conflicting (P7.19, P9.16).
   const onSat = new Set(inscribed.map((x) => x.entry.versionId));
@@ -674,8 +668,8 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
   }
 
   const conflictingAnchors = valid.slice(1).map((x) => ({ sat: x.outcome.sat.sat, inscription: x.outcome.anchor!.pub.final.id }));
-  // Owner decision A: an anchoring publication of this did:og on another sat that cannot be decided does not
-  // block the anchor; it is listed as unverifiable, and uniqueness is never established through it.
+  // An anchoring publication of this did:og on another sat that cannot be decided does not block the anchor
+  // and is ignored, but uniqueness is never established through it (P9.16).
   const uniqueness = evidence.originalsIndex && undecided.length === 0 ? { "established-through": evidence.originalsIndex.through } : "provisional" as const;
   const rest: Omit<Axes, "outcome"> = {
     binding: "bound", history: "valid", identity: "complete", authority: "current", state: "current",
