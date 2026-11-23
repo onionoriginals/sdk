@@ -124,7 +124,16 @@ describe('signer versions on Bitcoin (P9.15, P9.33)', () => {
     const fake = { ...real, versionId: real.versionId.replace(/-.+$/, '-QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW') };
     const e = await later(w, anchor, (s) => { s.asset.name = 'x'; }, { ref: fake });
     chain.publish(SAT, pub1(e));
-    expect(labelOf(await verifyOriginal(chain.evidence(w.did)), e)).toMatchObject({ status: 'rejected' });
+    const r = await verifyOriginal(chain.evidence(w.did));
+    expect(labelOf(r, e)).toMatchObject({ status: 'rejected', rule: 'P5.3' });
+    expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'entry-rejected', rule: 'P5.3', item: { kind: 'entry', id: e.versionId } }));
+  });
+
+  test('D22: an inscription after the anchor whose proof fails at the named version is rejected under P5.3', async () => {
+    const { w, anchor, chain } = await anchoredWorld();
+    const e = await later(w, anchor, (s) => { s.asset.name = 'x'; }, { key: seeded(242) });
+    chain.publish(SAT, pub1(e));
+    expect(labelOf(await verifyOriginal(chain.evidence(w.did)), e)).toMatchObject({ status: 'rejected', rule: 'P5.3' });
   });
 
   test('T9-115: an entry in the anchoring publication naming a version number held under another versionId: rejected, so no anchor', async () => {

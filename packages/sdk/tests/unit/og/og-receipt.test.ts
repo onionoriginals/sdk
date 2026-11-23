@@ -80,7 +80,7 @@ describe('anchoring receipt (P9.11, T7-074)', () => {
     try {
       const { run, said, a, signed, revealTxid, revealDestination, observedHolder } = await receipt(dir, (log) => log);
       // D22: the author's log comes from its URL, supplied as the resolved signer history.
-      expect(run.report.signers).toEqual([expect.objectContaining({ did: a.did, role: 'author', source: `resolved:${a.url}`, obtained: run.publicHost.obtained, freshness: 'not-established' })]);
+      expect(run.report.signers).toEqual([expect.objectContaining({ did: a.did, role: 'author', source: a.url, obtained: run.publicHost.obtained, freshness: 'not-established' })]);
       expect(run.publicHost).toMatchObject({ served: true, verifies: true, reachesNamedVersions: true });
       expect(run.warnings).toEqual([]);
       expect(parseTransaction(signed.hex.at(-1)!).txid).toBe(revealTxid);

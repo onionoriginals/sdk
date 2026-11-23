@@ -55,22 +55,24 @@ that text:
   failing proof, is `rejected`. Missing evidence never accepts. An undetermined
   anchoring publication of another did:og leaves ours undetermined too.
 - The anchor CLI's `verify` fetches the author's `did.jsonl` from its URL (no
-  redirects) and supplies it as `resolved:<url>`; `last-run.json` records
+  redirects) and supplies it as a signer history whose source is that URL; `last-run.json` records
   whether it was served, verifies and reaches the named versions, and prints
   a warning beside the report (not in it) when the newest version removes the
   key or deactivates the DID.
-- The copied bitcoin vector predates D22. Until it is regenerated, its tests
-  in `packages/vh/tests/og-bitcoin.test.ts` check that its as-published
-  evidence set is now undetermined, and compare the expected report with the
-  author log supplied (`local/author/did.jsonl`), patching the added input and
-  the signer label. `og-vector-regtest.ts` inscribes part 1 without `signers`.
+- The vectors are recopied from the spec branch `no-inscribed-signers` at
+  `d74f0a9` (see `PIN.md`): the bitcoin vector's part 1 has no `signers`, and
+  its author log is a resolved `signer-history` input
+  (`bitcoin/author/did.jsonl`, located through `bitcoin/resolved.json`). The SDK
+  reproduces its expected report from that evidence set unchanged. A version
+  number held under another versionId, or a failing proof, on an inscribed
+  entry is rejected under P5.3.
 - Also fixed on the way: the Bitcoin path recomputed `outcome` after the
   off-chain report and lost `target-missing`'s `incomplete` (P7.18, T7-076).
 - `bun run regtest:og` passed all four runs on 22 November 2026 with this
   branch (Bitcoin Core 32.1, ord 0.29.1): no inscription carries `signers`,
   `verify` supplies the resolved author log, and the vector run (T14-093)
-  matches the expected report with part 1's envelope digest and the
-  resolution-dependent signer label substituted.
+  matches the regenerated expected report with only chain-dependent values
+  substituted.
 
 ## Spec findings
 

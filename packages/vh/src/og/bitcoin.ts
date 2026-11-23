@@ -270,7 +270,7 @@ function judgeEntry(
     const h = c.histories.byDid.get(ref.did)?.history;
     const found = h ? lookupVersion(h, ref.versionId, method) : ({ beyond: true } as const);
     if ("beyond" in found) return missing(ref.did, ref.versionId, h?.versions.length ? "version" : "history"); // row 3
-    if ("mismatch" in found) return { status: "rejected", rule: "P9.15", identity: true }; // row 3: another versionId at that number
+    if ("mismatch" in found) return { status: "rejected", rule: "P5.3", identity: true }; // row 3: another versionId at that number
     version = found.found;
   }
   try {

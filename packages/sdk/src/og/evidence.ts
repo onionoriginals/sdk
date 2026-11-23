@@ -72,7 +72,7 @@ export async function readSatEvidence(input: { original: string; network: Bitcoi
  * at the version it names in this log.
  */
 export function withResolvedSigner(evidence: EvidenceSet, signer: { did: string; url: string; log: string; obtained: string }): EvidenceSet {
-  const source = `resolved:${signer.url}`;
+  const source = signer.url; // the URL resolution fetched, as the spec's vectors name it (D22)
   return {
     ...evidence,
     inputs: [...evidence.inputs, { kind: "signer-history", source, did: signer.did, bytes: new TextEncoder().encode(signer.log) }],

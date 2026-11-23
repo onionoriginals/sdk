@@ -2,11 +2,10 @@
 // real regtest chain with this SDK's commit/reveal builder (no pointer, both parts on one
 // sat), read it back through ord 0.29.x with this SDK's reader, and compare the report this
 // SDK computes with the vector's expected report, substituting only chain-dependent values.
-// Part 1 is the vector's envelope with no signers member (D22: inscriptions carry no signer
-// history; for a vector written before D22 the member is dropped and the rest keeps its bytes'
-// member order, otherwise it is the vector's envelope byte for byte). The vector's sat is synthetic,
-// so entry 4, the anchoring entry, is re-signed with the vector's test key for the real sat. The
-// author's log is supplied to the verifier as resolved (P7.8, P7.17), not read from Bitcoin.
+// Part 1 is the vector's envelope byte for byte; the vector's sat is synthetic, so entry 4,
+// the anchoring entry, is re-signed with the vector's test key for the real sat. The
+// inscriptions carry no signer history (D22): the author's log is the vector's resolved
+// signer-history input, exactly as its evidence set states it (bytes via resolved.json).
 // Run: bun packages/sdk/scripts/og-vector-regtest.ts
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,8 +13,7 @@ import { randomBytes } from 'node:crypto';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { localSigner } from '@originals/vh/crypto';
 import { encodeEnvelope, encodeMetadata, prepareNext, readInscription, resourceDigest, signEntry, verifyOriginal, type OgEntry } from '@originals/vh/og';
-import { didWebvhLogUrl } from '@originals/vh/webvh';
-import { readSatEvidence, withResolvedSigner } from '../src/og/evidence.js';
+import { readSatEvidence } from '../src/og/evidence.js';
 import { fundingAddress, plan, signChain } from '../src/og/inscribe.js';
 import { startRegtest } from './og-regtest-harness.js';
 
@@ -28,8 +26,7 @@ async function main() {
   const rt = await startRegtest({ label: 'og-vector-regtest', keep: process.argv.includes('--keep') });
   try {
     log(rt.versions.bitcoind, '/', rt.versions.ord);
-    const vectorEnv1 = vread('bitcoin/inscriptions/part-1.envelope.bin');
-    const env1 = withoutSigners(vectorEnv1);
+    const env1 = vread('bitcoin/inscriptions/part-1.envelope.bin');
     const env2v = vread('bitcoin/inscriptions/part-2.envelope.bin');
     const r1 = readInscription(env1), r2 = readInscription(env2v);
     if (r1.kind !== 'originals' || r2.kind !== 'originals') throw new Error('vector envelopes do not read');
@@ -63,11 +60,12 @@ async function main() {
     await rt.mine(8);
     await rt.ordSync();
     const read = await readSatEvidence({ original: vjson('index.json').original, network: 'regtest', sat, ord: rt.ord, chain: rt.core });
-    // D22: the author's log, as a resolver would return it from its URL, supplied as a signer history.
-    const authorDid = vjson('index.json').author as string;
-    const authorUrl = didWebvhLogUrl(authorDid);
-    const obtained = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-    const evidence = withResolvedSigner(read.evidence, { did: authorDid, url: authorUrl, log: new TextDecoder().decode(vread('local/author/did.jsonl')), obtained });
+    // D22: the vector's resolved signer-history inputs and notes, exactly as its evidence set states them.
+    const vectorSet = vjson('bitcoin/evidence-set.json');
+    const files = new Map(vjson('bitcoin/resolved.json').responses.map((r: { source: string; file: string }) => [r.source, `bitcoin/${r.file}`]));
+    const histories = vectorSet.inputs.filter((i: { kind: string }) => i.kind === 'signer-history')
+      .map((i: { source: string; digest: string }) => ({ kind: 'signer-history' as const, source: i.source, digest: i.digest, bytes: vread(files.get(i.source) as string) }));
+    const evidence = { ...read.evidence, inputs: [...read.evidence.inputs, ...histories], signerHistories: vectorSet.signerHistories };
     const report = await verifyOriginal(evidence);
 
     // The expected report, with only chain-dependent values substituted.
@@ -81,20 +79,11 @@ async function main() {
       .replaceAll(chain.inscriptions[0].id, part1.id)
       .replaceAll(chain.inscriptions[1].id, part2.id)
       .replaceAll(resourceDigest(env2v), resourceDigest(env2))
-      .replaceAll(resourceDigest(vectorEnv1), resourceDigest(env1)) // the same unless the vector predates D22
       .replaceAll(vectorRead.holder.address, holder);
     const want = JSON.parse(text);
     want.evidence.tip = read.evidence.tip;
     // The sat-read input is the index read on this chain: its source and digest are chain-dependent.
     want.evidence.inputs = want.evidence.inputs.map((i: { kind: string }) => (i.kind === 'sat-read' ? report.evidence.inputs.find((x) => x.kind === 'sat-read') : i));
-    // The resolved author log is resolution-dependent: its input, and the signer label's source, obtained
-    // time and freshness (a vector written before D22 has neither: its label names the inscription).
-    const resolvedInput = report.evidence.inputs.find((x) => x.kind === 'signer-history');
-    if (resolvedInput && !want.evidence.inputs.some((i: { kind: string }) => i.kind === 'signer-history')) want.evidence.inputs.push(resolvedInput);
-    want.signers = want.signers.map((x: { did: string }) => {
-      const got = report.signers.find((y) => y.did === x.did);
-      return got ? { ...x, source: got.source, obtained: got.obtained, freshness: got.freshness } : x;
-    });
     for (const e of want.entries) e.block = part2.height;
     const diffs: string[] = [];
     const walk = (a: unknown, b: unknown, path: string) => {
@@ -108,14 +97,14 @@ async function main() {
     const noReason = (r: { diagnostics?: Array<{ reason?: string }> }) => ({ ...r, diagnostics: (r.diagnostics ?? []).map(({ reason: _r, ...d }) => d) });
     walk(noReason(want), noReason(report), 'report');
     const part1Same = Buffer.compare(Buffer.from(part1.envelope), Buffer.from(env1)) === 0;
-    if (!part1Same) diffs.push('part 1 as read from ord differs from the vector envelope (without signers)');
+    if (!part1Same) diffs.push('part 1 as read from ord differs from the vector envelope');
     if (read.inscriptions.length !== 2) diffs.push(`ord lists ${read.inscriptions.length} inscriptions on the sat`);
     const result = {
       gate: 'T14-093 with @originals/sdk and @originals/vh as the implementation (plan 051)', date: new Date().toISOString().slice(0, 10),
       bitcoind: rt.versions.bitcoind, ord: rt.versions.ord, passed: diffs.length === 0, sat: sat.toString(), anchoringAlias: BTCO, holder,
       transactions: { funding: fundTxid, commit: signed.txids[0], revealPart1: signed.txids[1], revealPart2: signed.txids[2] },
       inscriptions: read.inscriptions.map(({ envelope, ...x }) => ({ ...x, envelopeBytes: envelope.length, envelopeDigest: resourceDigest(envelope) })),
-      part1EnvelopeMatchesVector: part1Same, part1VectorHadSigners: !bytesEqual(vectorEnv1, env1), resolvedAuthorLog: { did: authorDid, url: authorUrl, obtained }, anchoringEntry: e4.versionId, tip: read.evidence.tip, report, differences: diffs,
+      part1EnvelopeMatchesVector: part1Same, anchoringEntry: e4.versionId, tip: read.evidence.tip, report, differences: diffs,
     };
     writeFileSync(join(import.meta.dir, 'og-vector-regtest.last-run.json'), JSON.stringify(result, null, 2) + '\n');
     if (diffs.length) { for (const d of diffs) console.error('MISMATCH', d); throw new Error(`${diffs.length} differences from the expected report`); }
@@ -123,18 +112,6 @@ async function main() {
   } finally {
     rt.cleanup();
   }
-}
-
-const bytesEqual = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
-
-/**
- * The envelope as a D22 writer writes it: the metadata's entries and part in the vector's own member order, and no
- * signers member (the reader drops it). For a vector with no signers member this is the vector's envelope, byte for byte.
- */
-function withoutSigners(env: Uint8Array): Uint8Array {
-  const r = readInscription(env);
-  if (r.kind !== 'originals') throw new Error('the vector envelope does not read');
-  return encodeEnvelope({ contentType: r.contentType, metadata: encodeMetadata(r.metadata, { keepOrder: true }), body: r.body });
 }
 
 main().catch((e) => { console.error('[og-vector-regtest] FAIL', e?.stack ?? e); process.exitCode = 1; });

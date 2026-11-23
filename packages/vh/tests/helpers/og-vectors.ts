@@ -4,7 +4,6 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { localSigner, type ProofSigner } from '../../src/crypto/index.js';
-import { resourceDigest } from '../../src/og/log.js';
 
 export const VECTORS = join(import.meta.dir, '..', 'fixtures', 'og-vectors');
 export const OG = join(VECTORS, 'og-1.0-draft.1');
@@ -30,14 +29,24 @@ export function vtree(dir: string): Record<string, Uint8Array> {
 export const bytesEqual = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
 export const utf8 = (s: string) => new TextEncoder().encode(s);
 
+/** Where a resolved input's bytes are in a vector (its `resolved.json`, D22): source URL to file. */
+function resolvedFiles(dir: string): Map<string, string> {
+  try {
+    return new Map(vjson(`${dir}/resolved.json`).responses.map((r: { source: string; file: string }) => [r.source, `${dir}/${r.file}`]));
+  } catch {
+    return new Map();
+  }
+}
+
 /** A vector's evidence-set.json, with each input's bytes read from the vector (P7.17). */
 export function vectorEvidence(dir: string): import('../../src/og/index.js').EvidenceSet {
   const e = vjson(`${dir}/evidence-set.json`);
+  const resolved = resolvedFiles(dir);
   return {
     original: e.original, checkpoint: e.checkpoint, network: e.network, tip: e.tip, depth: e.depth,
     signerHistories: e.signerHistories,
     // Each input with the digest the evidence set states for it (P7.17); index reads are supplied separately.
-    inputs: e.inputs.map((i: { kind: string; source: string; digest: string }) => (i.source.startsWith('index:') ? { kind: i.kind, source: i.source, bytes: new Uint8Array() } : { kind: i.kind, source: i.source, digest: i.digest, bytes: vbytes(i.source) })),
+    inputs: e.inputs.map((i: { kind: string; source: string; digest: string }) => (i.source.startsWith('index:') ? { kind: i.kind, source: i.source, bytes: new Uint8Array() } : { kind: i.kind, source: i.source, digest: i.digest, bytes: vbytes(resolved.get(i.source) ?? i.source) })),
   } as never;
 }
 
@@ -50,32 +59,6 @@ export function bitcoinEvidence(): import('../../src/og/index.js').EvidenceSet {
   const where = new Map(vjson('bitcoin/chain.json').inscriptions.map((x: any) => [`index:${x.id}`, `bitcoin/${x.envelope}`]));
   e.inputs = e.inputs.map((i: any) => (i.kind === 'inscription' ? { ...i, digest: vjson('bitcoin/evidence-set.json').inputs.find((x: any) => x.source === i.source).digest, bytes: vbytes(where.get(i.source) as string) } : i));
   return e;
-}
-
-/**
- * D22 (22 November 2026): the copied bitcoin vector predates D22, and its inscriptions still carry the
- * author's history in a `signers` member, which a reader now ignores. Until the vectors are regenerated,
- * these tests supply the vector author's log as a resolved signer history (the same log as
- * `local/author/did.jsonl`), and `resolvedExpected` patches the expected report to match: one more
- * evidence input, and the signer label's source, obtained time and freshness.
- */
-export const VECTOR_AUTHOR_LOG = 'local/author/did.jsonl';
-export const VECTOR_AUTHOR_OBTAINED = '2026-11-22T00:00:00Z';
-
-export function bitcoinEvidenceResolved(): import('../../src/og/index.js').EvidenceSet {
-  const e = bitcoinEvidence();
-  const did = vjson('index.json').author as string;
-  e.inputs = [...e.inputs, { kind: 'signer-history', source: VECTOR_AUTHOR_LOG, did, bytes: vbytes(VECTOR_AUTHOR_LOG) }];
-  e.signerHistories = [{ did, source: VECTOR_AUTHOR_LOG, obtained: VECTOR_AUTHOR_OBTAINED }];
-  return e;
-}
-
-export function resolvedExpected(want: any): any {
-  return {
-    ...want,
-    evidence: { ...want.evidence, inputs: [...want.evidence.inputs, { kind: 'signer-history', source: VECTOR_AUTHOR_LOG, digest: resourceDigest(vbytes(VECTOR_AUTHOR_LOG)) }] },
-    signers: want.signers.map((s: any) => ({ ...s, source: VECTOR_AUTHOR_LOG, obtained: VECTOR_AUTHOR_OBTAINED, freshness: 'not-established' })),
-  };
 }
 
 /** Replace the evidence set's sat-read with an edited copy (its digest dropped, since the bytes change). */

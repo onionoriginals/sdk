@@ -1,0 +1,9 @@
+{
+  "note": "Where the bytes of each resolved signer-history input are. The source is the URL resolution fetched (did:webvh, no redirects, P8.5); the bytes are the response body.",
+  "responses": [
+    {
+      "source": "https://author.example/.well-known/did.jsonl",
+      "file": "author/did.jsonl"
+    }
+  ]
+}

@@ -2,71 +2,71 @@
   "gate": "originals-og anchor on regtest (plan 051)",
   "date": "2026-11-23",
   "bitcoind": "Bitcoin Core daemon version v32.1.0 bitcoind",
-  "ord": "unknown at http://127.0.0.1:59023",
+  "ord": "unknown at http://127.0.0.1:59566",
   "image": true,
   "large": false,
   "command": "originals-og anchor",
   "profile": "og:1.0-draft.1",
   "network": "regtest",
-  "original": "did:og:QmbdMbbpC6VryH9k9YA8KR8ACsNLNbVy4HKBGo3MwhbKbQ",
-  "author": "did:webvh:Qmd7XQ696yS3kxnpQD6jKqef5CeiiqFLMDn2rUGLjvgFha:og-regtest.localhost%3A59033:authors:regtest-author",
-  "authorUrl": "https://og-regtest.localhost:59033/authors/regtest-author/did.jsonl",
-  "sat": "59999992678",
-  "anchoringAlias": "did:btco:reg:59999992678",
-  "holder": "bcrt1py5v6cme6gy6lzw8pv2veeu500mh8d9ucduj6nmy6228d5yf886dqtsxzzs",
-  "revealDestination": "bcrt1py5v6cme6gy6lzw8pv2veeu500mh8d9ucduj6nmy6228d5yf886dqtsxzzs",
+  "original": "did:og:QmetLAgVdSn9pbEhd7PrP2vDPRJDPsUJNaCsMiEV8r5oJY",
+  "author": "did:webvh:QmSay8hVtXrW54bgD5UPQKwcSCNuy6uNok4DSbwaRNagUD:og-regtest.localhost%3A59576:authors:regtest-author",
+  "authorUrl": "https://og-regtest.localhost:59576/authors/regtest-author/did.jsonl",
+  "sat": "95000000000",
+  "anchoringAlias": "did:btco:reg:95000000000",
+  "holder": "bcrt1pdzwdy4r4f5fe9053r60pauqpy834knnhe52mnr7qdjxuuk8wlfms9pja9g",
+  "revealDestination": "bcrt1pdzwdy4r4f5fe9053r60pauqpy834knnhe52mnr7qdjxuuk8wlfms9pja9g",
   "transactions": {
-    "funding": "77436ff967bc831b5423e291117797b71871712932b5dfc72832178e29aeb296",
-    "commit": "f6c3174c1ef0b514fb0833d70162d2502ca3d308331870bab115f0c0b7c577ee",
+    "funding": "ca91e8213bb7024c4891efe6a1f012ac65fc9711d60a1f505252a5fe63ef45d3",
+    "commit": "7945d174a0d0718505bb69806412d70dda614ec64956854bf0f734268fc3e01c",
     "reveals": [
-      "82a6ee158ad52841fce2ba7370db1927b1f3a870a0d0699476b41a888875592d"
+      "b82c3a76b89db50421fcd76d25c97dc412370c790ec09deafc346be283418ad8"
     ]
   },
   "inscriptions": [
     {
-      "id": "82a6ee158ad52841fce2ba7370db1927b1f3a870a0d0699476b41a888875592di0",
+      "id": "b82c3a76b89db50421fcd76d25c97dc412370c790ec09deafc346be283418ad8i0",
       "height": 122,
       "txIndex": 2,
       "inscriptionIndex": 0,
       "confirmations": 6,
       "metaprotocol": "og",
       "contentType": "image/webp",
-      "envelopeBytes": 5479,
-      "envelopeDigest": "zQmXbRij3Zsk2KzQPY3hoioLCiSH6zBsUfxZGBjykLQXCJ6"
+      "envelopeBytes": 5478,
+      "envelopeDigest": "zQmUxr6x8JhRZidyvAxcsowqzQsy6NivnGaJXHcf5pbZbLU"
     }
   ],
   "tip": {
     "height": 127,
-    "hash": "38183d991761e27d4e376d1fbe21775047a4ee806a7400c56bf65deafc46ea74"
+    "hash": "52992b18bb84b9d034172a8f8b1f13df24ea534166d8aa2c83e819aa9ddf8296"
   },
-  "backend": "core-rpc:http://127.0.0.1:59021",
+  "backend": "core-rpc:http://127.0.0.1:59564",
   "report": {
     "type": "OriginalsVerificationReport",
     "profile": "og:1.0-draft.1",
-    "original": "did:og:QmbdMbbpC6VryH9k9YA8KR8ACsNLNbVy4HKBGo3MwhbKbQ",
-    "checkpoint": "2-QmZ5D66PmkJSnh7Gh6uoXySSfF9GHDpN5yMV7iSJNrekRm",
+    "original": "did:og:QmetLAgVdSn9pbEhd7PrP2vDPRJDPsUJNaCsMiEV8r5oJY",
+    "checkpoint": "2-QmZ96WQAN9HAXgYky1sXA2bqbMK2hyQwiZuEfuU6qLexA3",
     "evidence": {
       "inputs": [
         {
           "kind": "sat-read",
-          "source": "ord:http://127.0.0.1:59023/sat/59999992678",
-          "digest": "zQmTC7sCYjJpwnrWcEsLPRWDUyymoQveSoWFKXGdSi5pD7a"
+          "source": "ord:http://127.0.0.1:59566/sat/95000000000",
+          "digest": "zQmdj3FYqNDzs3e62amLqFTVKxwxWk924pekrLitQgfbZeT"
         },
         {
           "kind": "inscription",
-          "source": "index:82a6ee158ad52841fce2ba7370db1927b1f3a870a0d0699476b41a888875592di0",
-          "digest": "zQmXbRij3Zsk2KzQPY3hoioLCiSH6zBsUfxZGBjykLQXCJ6"
+          "source": "index:b82c3a76b89db50421fcd76d25c97dc412370c790ec09deafc346be283418ad8i0",
+          "digest": "zQmUxr6x8JhRZidyvAxcsowqzQsy6NivnGaJXHcf5pbZbLU"
         },
         {
           "kind": "signer-history",
-          "source": "resolved:https://og-regtest.localhost:59033/authors/regtest-author/did.jsonl",
-          "digest": "zQmP5aX8f7NjLTdvsYN2WVoLz3UjSi35S3YVfzDh2SBqyTJ"
+          "source": "https://og-regtest.localhost:59576/authors/regtest-author/did.jsonl",
+          "digest": "zQmcGDVc1ej8KxGY9uNoj5DjK4hN5sYjcyWSM12eUN6Wr2W"
         }
       ],
       "network": "regtest",
       "tip": {
         "height": 127,
-        "hash": "38183d991761e27d4e376d1fbe21775047a4ee806a7400c56bf65deafc46ea74"
+        "hash": "52992b18bb84b9d034172a8f8b1f13df24ea534166d8aa2c83e819aa9ddf8296"
       },
       "depth": 1
     },
@@ -83,7 +83,7 @@
     },
     "entries": [
       {
-        "versionId": "1-QmYap27MNac7crgDc22bjX7zzoktN2hLkrUYk5m62Dxcya",
+        "versionId": "1-QmQtjPmfLtUj1oYPfLShL2gae6v48yoUaCqhbp7jAC882t",
         "status": "accepted",
         "authority": "current-key",
         "endorsed": true,
@@ -91,7 +91,7 @@
         "block": 122
       },
       {
-        "versionId": "2-QmZ5D66PmkJSnh7Gh6uoXySSfF9GHDpN5yMV7iSJNrekRm",
+        "versionId": "2-QmZ96WQAN9HAXgYky1sXA2bqbMK2hyQwiZuEfuU6qLexA3",
         "status": "accepted",
         "authority": "current-key",
         "endorsed": false,
@@ -101,11 +101,11 @@
     ],
     "signers": [
       {
-        "did": "did:webvh:Qmd7XQ696yS3kxnpQD6jKqef5CeiiqFLMDn2rUGLjvgFha:og-regtest.localhost%3A59033:authors:regtest-author",
+        "did": "did:webvh:QmSay8hVtXrW54bgD5UPQKwcSCNuy6uNok4DSbwaRNagUD:og-regtest.localhost%3A59576:authors:regtest-author",
         "role": "author",
-        "latestVersionId": "1-QmYcmXBRzoUT5pvw9dmvnQsUx1MPnJUoArDdWWCbx8vj2q",
-        "source": "resolved:https://og-regtest.localhost:59033/authors/regtest-author/did.jsonl",
-        "obtained": "2026-11-23T03:02:44Z",
+        "latestVersionId": "1-QmfCar6PhCqiLCoVWJcxfnioGTf5hJLw2mLubYUfKSr5z6",
+        "source": "https://og-regtest.localhost:59576/authors/regtest-author/did.jsonl",
+        "obtained": "2026-11-23T03:09:23Z",
         "freshness": "not-established"
       }
     ],
@@ -116,15 +116,15 @@
         "item": {
           "kind": "resource",
           "id": "zQmTrb1baZzcKxSbt6kRYT2s1oL7K8PBMitHcWHFR8hzwP8",
-          "versionId": "1-QmYap27MNac7crgDc22bjX7zzoktN2hLkrUYk5m62Dxcya"
+          "versionId": "1-QmQtjPmfLtUj1oYPfLShL2gae6v48yoUaCqhbp7jAC882t"
         },
         "reason": "The evidence set does not hold the bytes of this resource version."
       }
     ],
     "bitcoin": {
-      "sat": "did:btco:reg:59999992678",
+      "sat": "did:btco:reg:95000000000",
       "holder": {
-        "address": "bcrt1py5v6cme6gy6lzw8pv2veeu500mh8d9ucduj6nmy6228d5yf886dqtsxzzs",
+        "address": "bcrt1pdzwdy4r4f5fe9053r60pauqpy834knnhe52mnr7qdjxuuk8wlfms9pja9g",
         "uniqueness": "provisional"
       },
       "conflictingAnchors": [],
@@ -135,12 +135,12 @@
   "defaultCheck": true,
   "transferCheck": true,
   "publicHost": {
-    "url": "https://og-regtest.localhost:59033/authors/regtest-author/did.jsonl",
+    "url": "https://og-regtest.localhost:59576/authors/regtest-author/did.jsonl",
     "served": true,
     "verifies": true,
     "reachesNamedVersions": true,
-    "obtained": "2026-11-23T03:02:44Z",
-    "latestVersionId": "1-QmYcmXBRzoUT5pvw9dmvnQsUx1MPnJUoArDdWWCbx8vj2q"
+    "obtained": "2026-11-23T03:09:23Z",
+    "latestVersionId": "1-QmfCar6PhCqiLCoVWJcxfnioGTf5hJLw2mLubYUfKSr5z6"
   },
   "warnings": [],
   "passed": true

@@ -4,19 +4,19 @@
   "bitcoind": "Bitcoin Core daemon version v32.1.0 bitcoind",
   "ord": "ord 0.29.1",
   "passed": true,
-  "sat": "35000000000",
-  "anchoringAlias": "did:btco:reg:35000000000",
-  "holder": "bcrt1pfa05grpl7hpu883t3fqasrkmgyqj6rjzm4r43vvjr5mn7j5knqvslg8n2c",
+  "sat": "39999810088",
+  "anchoringAlias": "did:btco:reg:39999810088",
+  "holder": "bcrt1pwug0ztmsk3gpjw8qt4l9njpw6ms82kv55kl8et4xvds5sw8cpn4qeuxqvc",
   "transactions": {
-    "funding": "bd9445d164655b73ce77c77f4d9472510efe3bdbe160c5e6af4b8c3a4f83869f",
-    "commit": "80f7eba19c966bc61c785337e7d33150a2c74a1999a331d66a4c1f744906c57c",
-    "revealPart1": "30721213e099df5bdd8e1b3fdb73b3745eb2d24cc9b970422791141ea93a4dc9",
-    "revealPart2": "824b4c00ce4545ba76c0e5e7d007118ed67a49c6de73c72ee22ddc6e703263ff"
+    "funding": "badb9374d9879e4068d71583bb5af5e30eb6f2dd8dcd938fb5748bf5ad3f6a47",
+    "commit": "d956d38292e4a6e182117a4cf2c8fba606c61754afbbd650857c90430da4b4a3",
+    "revealPart1": "1f4df7dabcc9b78a8cd91ef372ee23afdb65566367e9f78762f683e2b38ee185",
+    "revealPart2": "3fc82223509d3e949970383bd43e7d7be794e390cc58d10b335af416d467acbe"
   },
   "inscriptions": [
     {
-      "id": "30721213e099df5bdd8e1b3fdb73b3745eb2d24cc9b970422791141ea93a4dc9i0",
-      "sat": "35000000000",
+      "id": "1f4df7dabcc9b78a8cd91ef372ee23afdb65566367e9f78762f683e2b38ee185i0",
+      "sat": "39999810088",
       "height": 122,
       "txIndex": 2,
       "inscriptionIndex": 0,
@@ -27,8 +27,8 @@
       "envelopeDigest": "zQmPxaVJjs5mN3oJUKbQVxfSro7WZpqJ2hYWNNS4yYE7drV"
     },
     {
-      "id": "824b4c00ce4545ba76c0e5e7d007118ed67a49c6de73c72ee22ddc6e703263ffi0",
-      "sat": "35000000000",
+      "id": "3fc82223509d3e949970383bd43e7d7be794e390cc58d10b335af416d467acbei0",
+      "sat": "39999810088",
       "height": 122,
       "txIndex": 3,
       "inscriptionIndex": 0,
@@ -36,53 +36,47 @@
       "metaprotocol": "og",
       "contentType": "text/markdown",
       "envelopeBytes": 349068,
-      "envelopeDigest": "zQmNqj5ux3iHMnW2Go8BABQumqQSbc9gMG5Jhpx2gNrvEhP"
+      "envelopeDigest": "zQmQg4gMNMPob4rgjgWiZN9Ctxop3NNPDCCn9WenK4mZADr"
     }
   ],
   "part1EnvelopeMatchesVector": true,
-  "part1VectorHadSigners": true,
-  "resolvedAuthorLog": {
-    "did": "did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example",
-    "url": "https://author.example/.well-known/did.jsonl",
-    "obtained": "2026-11-23T03:03:45Z"
-  },
-  "anchoringEntry": "4-QmY4JKBrtEP3C9KBhWgXppseSfgxbngVNMwaquMut4aQfn",
+  "anchoringEntry": "4-QmZ79MSVtgU5scKsKP6MzD82qQBqbTx9X8XHBWHLCVYC58",
   "tip": {
     "height": 130,
-    "hash": "2b57d75ea72fa3ebaab679b3512a4841c685e9a8acadb77670dd1f246a228893"
+    "hash": "2843fedc6630595f66041ed55ae31c5c263e4263ed114379ad1fcba15312549f"
   },
   "report": {
     "type": "OriginalsVerificationReport",
     "profile": "og:1.0-draft.1",
     "original": "did:og:QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW",
-    "checkpoint": "4-QmY4JKBrtEP3C9KBhWgXppseSfgxbngVNMwaquMut4aQfn",
+    "checkpoint": "4-QmZ79MSVtgU5scKsKP6MzD82qQBqbTx9X8XHBWHLCVYC58",
     "evidence": {
       "inputs": [
         {
           "kind": "sat-read",
-          "source": "ord:http://127.0.0.1:59131/sat/35000000000",
-          "digest": "zQmVFMCJjq8g1MNX1zKTBAPQk2RhLY3n4ZpchDAcAurek1m"
+          "source": "ord:http://127.0.0.1:59640/sat/39999810088",
+          "digest": "zQmRe8YQjaMGwVyDavVpQU1sSyGnfWZ5nFXxoFfq8HYg5aV"
         },
         {
           "kind": "inscription",
-          "source": "index:30721213e099df5bdd8e1b3fdb73b3745eb2d24cc9b970422791141ea93a4dc9i0",
+          "source": "index:1f4df7dabcc9b78a8cd91ef372ee23afdb65566367e9f78762f683e2b38ee185i0",
           "digest": "zQmPxaVJjs5mN3oJUKbQVxfSro7WZpqJ2hYWNNS4yYE7drV"
         },
         {
           "kind": "inscription",
-          "source": "index:824b4c00ce4545ba76c0e5e7d007118ed67a49c6de73c72ee22ddc6e703263ffi0",
-          "digest": "zQmNqj5ux3iHMnW2Go8BABQumqQSbc9gMG5Jhpx2gNrvEhP"
+          "source": "index:3fc82223509d3e949970383bd43e7d7be794e390cc58d10b335af416d467acbei0",
+          "digest": "zQmQg4gMNMPob4rgjgWiZN9Ctxop3NNPDCCn9WenK4mZADr"
         },
         {
           "kind": "signer-history",
-          "source": "resolved:https://author.example/.well-known/did.jsonl",
+          "source": "https://author.example/.well-known/did.jsonl",
           "digest": "zQmfXJB3kVg7jeL7HjvrTvwy5bcPEyPQP5bkLjTEEUJxorv"
         }
       ],
       "network": "regtest",
       "tip": {
         "height": 130,
-        "hash": "2b57d75ea72fa3ebaab679b3512a4841c685e9a8acadb77670dd1f246a228893"
+        "hash": "2843fedc6630595f66041ed55ae31c5c263e4263ed114379ad1fcba15312549f"
       },
       "depth": 1
     },
@@ -123,7 +117,7 @@
         "block": 122
       },
       {
-        "versionId": "4-QmY4JKBrtEP3C9KBhWgXppseSfgxbngVNMwaquMut4aQfn",
+        "versionId": "4-QmZ79MSVtgU5scKsKP6MzD82qQBqbTx9X8XHBWHLCVYC58",
         "status": "accepted",
         "authority": "current-key",
         "endorsed": false,
@@ -136,8 +130,8 @@
         "did": "did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example",
         "role": "author",
         "latestVersionId": "1-QmNjhx8xG4JD9hCswSc1nSZncxuSGzex37ica8BoyHEmrq",
-        "source": "resolved:https://author.example/.well-known/did.jsonl",
-        "obtained": "2026-11-23T03:03:45Z",
+        "source": "https://author.example/.well-known/did.jsonl",
+        "obtained": "2026-01-06T00:00:00Z",
         "freshness": "not-established"
       }
     ],
@@ -154,9 +148,9 @@
       }
     ],
     "bitcoin": {
-      "sat": "did:btco:reg:35000000000",
+      "sat": "did:btco:reg:39999810088",
       "holder": {
-        "address": "bcrt1pfa05grpl7hpu883t3fqasrkmgyqj6rjzm4r43vvjr5mn7j5knqvslg8n2c",
+        "address": "bcrt1pwug0ztmsk3gpjw8qt4l9njpw6ms82kv55kl8et4xvds5sw8cpn4qeuxqvc",
         "uniqueness": "provisional"
       },
       "conflictingAnchors": [],

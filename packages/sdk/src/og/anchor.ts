@@ -358,7 +358,7 @@ export async function stepVerify(ctx: Ctx, opts: { out?: string; minConfirmation
     return signed.txids.slice(1).every((t) => ids.has(`${t}i0`)) ? r : undefined;
   });
   // D22: the author's history is not inscribed. Resolve it from its public URL, no redirects, and supply it
-  // in the evidence set as a signer history with its source and obtained time (P7.8, P7.17).
+  // in the evidence set as a signer history whose source is that URL, with its obtained time (P7.8, P7.17).
   const fetchLog = ctx.fetchAuthorLog ?? (async (url: string) => {
     const r = await fetch(url, { redirect: "error" });
     return r.ok ? r.text() : null;
