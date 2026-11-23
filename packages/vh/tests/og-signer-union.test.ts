@@ -183,7 +183,7 @@ describe('owner decision A: other sats never block the anchor', () => {
     expect(full.bitcoin?.conflictingAnchors.map((x) => x.sat)).toEqual([SAT]);
   });
 
-  test('on the same sat, an earlier undecidable anchoring publication still leaves ours undetermined, of this did:og or another', async () => {
+  test('T9-077, T9-147: on the same sat, an earlier undecidable anchoring publication still leaves ours undetermined, of this did:og or another', async () => {
     const w = await World.create();
     const genesis = w.head;
     const v1 = w.author.ref().versionId;

@@ -219,7 +219,7 @@ describe('competing anchors (P9.16)', () => {
     expect(r.checkpoint).toBe(b.versionId);
   });
 
-  test('T9-077 (owner decision A): an earlier anchoring publication on another sat with a did:btco signer whose sat is not read in full does not block a later valid one: anchored, the other listed unverifiable, uniqueness provisional', async () => {
+  test('T9-145(b) (owner decision A): an earlier anchoring publication on another sat with a did:btco signer whose sat is not read in full does not block a later valid one: anchored, the other listed unverifiable, uniqueness provisional', async () => {
     const chain = new Chain();
     const { editor } = btcoEditor(chain);
     const w = await World.create();
