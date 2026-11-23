@@ -19,7 +19,7 @@ const addr = (fill: number) => btc.p2tr(schnorr.getPublicKey(new Uint8Array(32).
 
 describe('anchoring receipt (P9.11, T7-074)', () => {
   /** An anchored Original read back through stub backends; `served` is what the author's URL returns. */
-  async function receipt(dir: string, served: (log: string) => string | null) {
+  async function receipt(dir: string, served: (log: string) => string | null, ordHeight: () => number = () => 309) {
       const keyFile = join(dir, 'keys.json');
       const keys = generateKeyFile(keyFile);
       const a = await createAuthorDid(keys, { path: ['authors', 'receipt'], now: new Date('2026-11-22T00:00:00Z') });
@@ -59,7 +59,7 @@ describe('anchoring receipt (P9.11, T7-074)', () => {
       };
       const ids = signed.txids.slice(1).map((t) => `${t}i0`);
       const ord = {
-        base: 'stub-ord', version: async () => '0.29.1', height: async () => 309, blockhash: async () => 'f'.repeat(64),
+        base: 'stub-ord', version: async () => '0.29.1', height: async () => ordHeight(), blockhash: async () => 'f'.repeat(64),
         satInscriptions: async () => ids,
         inscription: async (id: string) => ({ id, height: 300, sat: Number(sat), satpoint: `${'cd'.repeat(32)}:0:0`, metaprotocol: 'og', content_type: id.startsWith(revealTxid) ? 'text/markdown' : null }),
         output: async () => ({ address: observedHolder }),
@@ -94,6 +94,23 @@ describe('anchoring receipt (P9.11, T7-074)', () => {
       expect(record).toMatchObject({ holder: observedHolder, revealDestination, passed: true });
       expect(said.some((l) => l.includes(`holder at the tip ${observedHolder}`))).toBe(true);
       expect(said.some((l) => l.includes(`no longer at the reveal destination ${revealDestination}`))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('the explorer trails the chain backend: verify waits for the publication to be 6 deep at the explorer\'s own tip', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'og-receipt-'));
+    try {
+      // The chain backend already reports 10 confirmations, but the explorer's first read is at 304, where the
+      // reveal (height 300) is only 5 deep; its second read is at 309.
+      let calls = 0;
+      const { run, said } = await receipt(dir, (log) => log, () => (calls++ < 2 ? 304 : 309));
+      expect(calls).toBeGreaterThanOrEqual(4);
+      expect(said.some((l) => l.includes('6 blocks deep'))).toBe(true);
+      expect(run.tip.height).toBe(309);
+      expect(run.transferCheck).toBe(true);
+      expect(run.passed).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

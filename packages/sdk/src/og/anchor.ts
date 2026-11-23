@@ -351,11 +351,12 @@ export async function stepVerify(ctx: Ctx, opts: { out?: string; minConfirmation
   await until(ctx, `the final reveal to have ${depth} confirmations`, async () => ((await ctx.chain.txConfirmations(final)) ?? 0) >= depth ? true : undefined);
   const original = s.original.genesis.state.id as string;
   const sat = BigInt(s.funding.sat);
-  // Wait until the explorer has indexed every part.
-  const read = await until(ctx, "the explorer to index the inscriptions", async () => {
+  // Wait until the explorer has indexed every part, at a tip of its own where each part is `depth` deep: the
+  // evidence set's tip is the explorer's, which can trail the chain backend's by a block or more.
+  const read = await until(ctx, `the explorer to index the inscriptions ${depth} blocks deep`, async () => {
     const r = await readSatEvidence({ original, network: ctx.network, sat, ord: ctx.ord, chain: ctx.chain });
-    const ids = new Set(r.inscriptions.map((i) => i.id));
-    return signed.txids.slice(1).every((t) => ids.has(`${t}i0`)) ? r : undefined;
+    const parts = signed.txids.slice(1).map((t) => r.inscriptions.find((i) => i.id === `${t}i0`));
+    return parts.every((i) => i !== undefined && i.confirmations >= depth) ? r : undefined;
   });
   // D22: the author's history is not inscribed. Resolve it from its public URL, no redirects, and supply it
   // in the evidence set as a signer history whose source is that URL, with its obtained time (P7.8, P7.17).
