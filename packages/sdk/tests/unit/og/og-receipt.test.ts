@@ -150,8 +150,19 @@ describe('author warnings beside the report (D22)', () => {
     expect(authorWarnings({ ok: true, versions: [v1] }, 'did:webvh:x:a#key-1', '1-a')).toEqual([]);
   });
   test('a newer version that removes the key, or deactivates the DID, is a warning, never a failure', () => {
-    expect(authorWarnings({ ok: true, versions: [v1, { versionId: '2-b', document: doc(['zB']), deactivated: false }] }, 'did:webvh:x:a#key-1', '1-a')[0]).toMatch(/2-b no longer lists the key/);
-    expect(authorWarnings({ ok: true, versions: [v1, { versionId: '2-b', document: doc(['zA']), deactivated: true }] }, 'did:webvh:x:a#key-1', '1-a')[0]).toBe('The latest resolved version of the author DID (2-b) is deactivated. Inscribed entries are verified against the DID version each entry names.');
+    expect(authorWarnings({ ok: true, versions: [v1, { versionId: '2-b', document: doc(['zB']), deactivated: false }] }, 'did:webvh:x:a#key-1', '1-a')).toEqual(['The latest resolved version of the author DID (2-b) no longer lists the key did:webvh:x:a#key-1. Inscribed entries are verified against the DID version each entry names.']);
+    expect(authorWarnings({ ok: true, versions: [v1, { versionId: '2-b', document: doc(['zA']), deactivated: true }] }, 'did:webvh:x:a#key-1', '1-a')).toEqual(['The latest resolved version of the author DID (2-b) is deactivated. Inscribed entries are verified against the DID version each entry names.']);
+  });
+  test('a served log without the version the entries name: a clear message (the run does not pass on it)', () => {
+    expect(authorWarnings({ ok: true, versions: [v1] }, 'did:webvh:x:a#key-1', '2-z')).toEqual(['The resolved author log does not contain the version the entries name (2-z). The report cannot verify the inscribed entries against it, so the run does not pass.']);
+  });
+  test('every message is sentences: a capital first letter and a final full stop', () => {
+    const all = [
+      ...authorWarnings({ ok: true, versions: [v1, { versionId: '2-b', document: doc(['zB']), deactivated: false }] }, 'did:webvh:x:a#key-1', '1-a'),
+      ...authorWarnings({ ok: true, versions: [v1, { versionId: '2-b', document: doc(['zA']), deactivated: true }] }, 'did:webvh:x:a#key-1', '9-z'),
+    ];
+    expect(all.length).toBe(3);
+    for (const m of all) expect(m).toMatch(/^[A-Z].*\.$/);
   });
 });
 

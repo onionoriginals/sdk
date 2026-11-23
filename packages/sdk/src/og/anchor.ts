@@ -321,19 +321,23 @@ export interface LastRun {
 }
 
 /**
- * Beside the report, never in it (P14.25; D22): the newest resolved author version deactivates the DID, or no
- * longer lists the key the entries were signed with. The inscribed entries stay accepted, since each is checked
- * at the version it names (P5.3); the warning only reports what the latest resolved version says.
+ * Beside the report, never in it (P14.25; D22): the served author log does not hold the version the entries
+ * name, its newest version deactivates the DID, or no longer lists the key the entries were signed with.
+ * A missing named version is also a failure: the report cannot check the entries, and the run does not
+ * pass. A removed key or a deactivation is a warning only: the inscribed entries stay accepted, since each
+ * is checked at the version it names (P5.3, P9.33). Each message is one or more full sentences.
  */
 export function authorWarnings(c: AuthorLogCheck, verificationMethod: string, versionId: string): string[] {
   const latest = c.versions[c.versions.length - 1];
   if (!c.ok || !latest) return [];
+  const out: string[] = [];
   const named = c.versions.find((v) => v.versionId === versionId)?.document;
+  if (!named) out.push(`The resolved author log does not contain the version the entries name (${versionId}). The report cannot verify the inscribed entries against it, so the run does not pass.`);
   const vms = Array.isArray(named?.verificationMethod) ? (named.verificationMethod as Array<{ id?: unknown; publicKeyMultibase?: unknown }>) : [];
   const key = vms.find((v) => v.id === verificationMethod)?.publicKeyMultibase;
-  if (latest.deactivated) return [`The latest resolved version of the author DID (${latest.versionId}) is deactivated. Inscribed entries are verified against the DID version each entry names.`];
-  if (typeof key === "string" && !listsKey(latest.document as JsonObject, key)) return [`the newest author DID version ${latest.versionId} no longer lists the key of ${verificationMethod}; the inscribed entries stay accepted (each is checked at the version it names)`];
-  return [];
+  if (latest.deactivated) out.push(`The latest resolved version of the author DID (${latest.versionId}) is deactivated. Inscribed entries are verified against the DID version each entry names.`);
+  else if (typeof key === "string" && !listsKey(latest.document as JsonObject, key)) out.push(`The latest resolved version of the author DID (${latest.versionId}) no longer lists the key ${verificationMethod}. Inscribed entries are verified against the DID version each entry names.`);
+  return out;
 }
 
 /**
@@ -406,7 +410,7 @@ export async function stepVerify(ctx: Ctx, opts: { out?: string; minConfirmation
   if (run.holder !== run.revealDestination) ctx.io.say(`The sat is no longer at the reveal destination ${run.revealDestination}: it has moved since the reveal (P9.11).`);
   ctx.io.say(describeTransferCheck(report));
   ctx.io.say(`Author log at ${publicHost.url}: ${publicHost.served ? (publicHost.verifies && publicHost.reachesNamedVersions ? `served, verifies and reaches the versions the entries name (latest ${publicHost.latestVersionId}); supplied to the verifier as the resolved history` : `served but ${publicHost.verifies ? "does not reach the versions the entries name" : `does not verify (${publicHost.reason ?? "invalid"})`}`) : "not served: the report cannot check the author's signatures (signer-history-missing)"}.`);
-  for (const w of warnings) ctx.io.say(`Warning (not part of the report): ${w}.`);
+  for (const w of warnings) ctx.io.say(`Warning (not part of the report): ${w}`);
   ctx.io.say(`Wrote ${out}. ${run.passed ? "PASS" : "NOT PASSED"}`);
   if (run.passed) {
     s.done = true;
