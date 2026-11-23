@@ -2,21 +2,24 @@
  * did:og on Bitcoin (P9.10–P9.36): publications on the anchoring sat, read
  * as ord 0.29.x reads them (P9.31), in chain order (block height, transaction
  * index, inscription index; P9.13), at one tip. The anchoring publication
- * carries the log from genesis through the anchoring entry with the signer
- * histories its entries rely on (P9.17, P9.33); each later publication one
- * entry. Each entry is decided by the first matching row of the P9.15 table.
+ * carries the log from genesis through the anchoring entry (P9.17); each later
+ * publication one entry. No inscription carries a signer DID history (D22,
+ * 22 November 2026): a did:vh or did:webvh signer's log is a supplied signer
+ * history in the evidence set (P7.8, P7.17), and each entry is checked at the
+ * version it names (P5.3); a did:btco signer's versions come from its own sat
+ * (P5.13). Each entry is decided by the first matching row of the P9.15 table.
  * A sat holds at most one Original (P9.34); the first valid anchor in chain
  * order wins (P9.16).
  */
 import { isJsonObject, type JsonObject } from "../json/index.js";
 import { decodeCbor } from "../originals/cbor.js";
-import { checkChainLink, checkEntryShape, checkParameters, checkStrictValue, parseLogFile, resourceDigest, versionNumber, type OgEntry } from "./log.js";
-import { envelopesInWitness, parseEnvelope, parseTransaction, readInscription, type InscriptionReading, type SignerHistoryItem } from "./inscription.js";
+import { checkChainLink, checkEntryShape, checkParameters, parseLogFile, resourceDigest, versionNumber, type OgEntry } from "./log.js";
+import { envelopesInWitness, parseEnvelope, parseTransaction, readInscription, type InscriptionReading } from "./inscription.js";
 import { offlineFrom, outcomeOf, reportInputs, sortDiagnostics, type Axes, type Diagnostic, type EntryLabel, type EvidenceSet, type InscriptionRead, type Report, type SatRead, type SignerLabel } from "./report.js";
 import { OG_LIMITS, OG_METHOD, OgRuleError, reject } from "./rules.js";
-import { checkBinding, listsKey, lookupVersion, verifySignerLog, type SignerHistory, type SignerVersion } from "./signers.js";
+import { checkBinding, latestVersion, listsKey, lookupVersion, type SignerHistory, type SignerVersion } from "./signers.js";
 import { advance, btcoDid, checkTransition, genesisContext, isEditorEntry, parseBtco, signerMethodOf, stateOf, type BitcoinNetwork, type BranchContext } from "./state.js";
-import { registerAnchoredEvaluator, unsupportedReport, verifyOffChain, type Gathered } from "./verify.js";
+import { registerAnchoredEvaluator, unsupportedReport, verifyHistories, verifyOffChain, type Gathered, type Histories } from "./verify.js";
 
 // ---------------------------------------------------------------------------
 // Chain order and sat reads
@@ -160,11 +163,6 @@ export function publicationsOf(sat: MergedSat): { publications: Publication[]; i
 // ---------------------------------------------------------------------------
 // Judging publications
 
-interface SignerState {
-  /** Cumulative inscribed log entries for each did:vh / did:webvh signer (P9.33). */
-  logs: Map<string, { entries: JsonObject[]; witness: unknown[]; history: SignerHistory; source: string }>;
-}
-
 interface Head {
   entry: OgEntry;
   ctx: BranchContext;
@@ -173,7 +171,24 @@ interface Head {
   position: Position;
 }
 
-type EntryResult = { status: "accepted" } | { status: "rejected"; rule: string; identity?: boolean } | { status: "unverifiable"; did: string; versionId: string } | { status: "incomplete"; did: string };
+/**
+ * What is missing when an entry cannot be decided: a did:btco signer's sat not read in full (P9.35),
+ * or a did:vh / did:webvh signer's history not supplied (`history`) or not reaching the version the
+ * entry names (`version`) (D22; P5.6, P7.8).
+ */
+type Missing = "sat" | "history" | "version";
+
+type EntryResult =
+  | { status: "accepted" }
+  | { status: "rejected"; rule: string; identity?: boolean }
+  | { status: "unverifiable"; did: string; versionId: string; missing: Missing }
+  | { status: "incomplete"; did: string; versionId: string; missing: Missing };
+
+export interface MissingSigner {
+  did: string;
+  versionId: string;
+  missing: Missing;
+}
 
 interface Judged {
   ok: boolean;
@@ -181,14 +196,11 @@ interface Judged {
   identity?: boolean;
   entries: OgEntry[];
   results: EntryResult[];
-  signers: SignerState["logs"];
-  unverifiable?: { did: string; versionId: string };
-  incomplete?: string[];
+  unverifiable?: MissingSigner;
+  incomplete?: MissingSigner[];
   fullBody?: Uint8Array;
   original?: string;
 }
-
-const clone = (s: SignerState["logs"]) => new Map([...s].map(([k, v]) => [k, { ...v, entries: [...v.entries], witness: [...v.witness] }]));
 
 /** P9.17, P9.32: the shape of a publication's parts and its body against its last entry's `body`. */
 function checkPublicationShape(pub: Publication, last: OgEntry): Uint8Array | undefined {
@@ -213,30 +225,13 @@ function checkPublicationShape(pub: Publication, last: OgEntry): Uint8Array | un
   return undefined;
 }
 
-/** P9.33: add a publication's signer histories, continuing what is inscribed, and verify each from genesis. */
-async function addSignerHistories(items: SignerHistoryItem[], signers: SignerState["logs"], source: string): Promise<void> {
-  for (const item of items) {
-    const known = signers.get(item.did);
-    const prior = known?.entries ?? [];
-    const first = item.log[0];
-    const n = typeof first.versionId === "string" ? versionNumber(first.versionId) : NaN;
-    if (n !== prior.length + 1) reject("P9.33", "SIGNER_HISTORY_GAP", `${item.did}'s inscribed history does not continue from version ${prior.length}`);
-    const entries = [...prior, ...item.log];
-    for (const e of entries) checkStrictValue(e);
-    if (entries.length > OG_LIMITS.signerVersions) reject("P14.13", "SIGNER_HISTORY_LIMIT", "an inscribed signer history above 1,000 versions", "limit-exceeded");
-    if (prior.length && known!.history.versions[known!.history.versions.length - 1].deactivated) reject("P9.33", "SIGNER_HISTORY_AFTER_DEACTIVATION", "an inscribed history continues after a deactivated version");
-    const witness = [...(known?.witness ?? []), ...(item.witness ?? [])];
-    const history = await verifySignerLog(item.did, entries, witness.length ? witness : undefined);
-    if (history.failure || history.versions.length !== entries.length) reject("P9.33", "SIGNER_HISTORY_INVALID", `${item.did}'s inscribed history does not verify under its method: ${history.failure?.message ?? ""}`);
-    signers.set(item.did, { entries, witness, history, source });
-  }
-}
-
 interface JudgeContext {
   original: string;
   sat: string;
   network: BitcoinNetwork;
   btco: Map<string, ReturnType<typeof btcoSignerHistory> & { complete: boolean }>;
+  /** The did:vh and did:webvh signer histories the evidence set supplies, verified from genesis (P7.8, P7.17; D22). */
+  histories: Histories;
 }
 
 /**
@@ -248,30 +243,35 @@ function readInFull(h: (ReturnType<typeof btcoSignerHistory> & { complete: boole
   return !!h && h.complete && (!h.endsBefore || chainOrder(h.endsBefore, at) > 0);
 }
 
-/** The P9.15 table for one inscribed entry. */
+/**
+ * The P9.15 table for one inscribed entry. `anchoring` is true for every entry of the anchoring
+ * publication, where missing evidence leaves the anchor undetermined (P9.16); after it, missing
+ * evidence makes the inscription unverifiable (P9.36). Missing evidence never accepts.
+ */
 function judgeEntry(
-  entry: OgEntry, ref: { did: string; versionId: string; verificationMethod: string }, preAnchor: boolean,
-  at: Position, signers: SignerState["logs"], c: JudgeContext, authorDid: string,
+  entry: OgEntry, ref: { did: string; versionId: string; verificationMethod: string }, anchoring: boolean, preAnchor: boolean,
+  at: Position, c: JudgeContext, authorDid: string,
 ): EntryResult {
   const method = signerMethodOf(ref.did)!;
+  const missing = (did: string, versionId: string, what: Missing): EntryResult => (anchoring ? { status: "incomplete", did, versionId, missing: what } : { status: "unverifiable", did, versionId, missing: what });
   if (versionNumber(ref.versionId) > OG_LIMITS.signerVersions) return { status: "rejected", rule: "P14.13" }; // row 2
   let version: SignerVersion | undefined;
   let stateAt: SignerVersion | undefined;
   if (method === "did:btco") {
     const h = c.btco.get(ref.did);
-    if (!readInFull(h, at)) return preAnchor ? { status: "incomplete", did: ref.did } : { status: "unverifiable", did: ref.did, versionId: ref.versionId }; // row 4
-    if (!h) return { status: "incomplete", did: ref.did };
+    if (!readInFull(h, at) || !h) return missing(ref.did, ref.versionId, "sat"); // row 4
     const before = h.versions.filter((_, k) => chainOrder(h.positions[k], at) < 0);
     version = before.find((v) => v.versionId === ref.versionId);
     if (!version) return { status: "rejected", rule: "P5.13" }; // row 5
     stateAt = before[before.length - 1];
   } else {
-    const h = signers.get(ref.did)?.history;
-    if (!h) return { status: "rejected", rule: "P9.33" }; // row 3
-    const found = lookupVersion(h, ref.versionId, method);
-    if (!("found" in found)) return { status: "rejected", rule: "P9.15" }; // row 3
+    // D22: the signer's log comes from resolution, supplied in the evidence set; the entry is checked at
+    // the version it names (P5.3). No log, or one that ends before that version, is missing evidence.
+    const h = c.histories.byDid.get(ref.did)?.history;
+    const found = h ? lookupVersion(h, ref.versionId, method) : ({ beyond: true } as const);
+    if ("beyond" in found) return missing(ref.did, ref.versionId, h?.versions.length ? "version" : "history"); // row 3
+    if ("mismatch" in found) return { status: "rejected", rule: "P9.15", identity: true }; // row 3: another versionId at that number
     version = found.found;
-    stateAt = h.versions[h.versions.length - 1];
   }
   try {
     checkBinding(entry, ref, version); // row 1: proof under P5.3 at the named version
@@ -279,35 +279,37 @@ function judgeEntry(
     if (error instanceof OgRuleError) return { status: "rejected", rule: error.rule, identity: true };
     throw error;
   }
-  // Row 6 (ccf4a69): a post-anchor editor entry also needs the author DID's state at the
-  // inscription (P5.18); a did:btco author whose sat is not read in full leaves it undecided.
-  // Missing author evidence is never accepting.
+  // Row 6 (ccf4a69): a post-anchor editor entry also needs a did:btco author DID's state at the
+  // inscription (P5.18); an author whose sat is not read in full leaves it undecided.
   if (!preAnchor && isEditorEntry(entry) && signerMethodOf(authorDid) === "did:btco") {
     const a = c.btco.get(authorDid);
     const authorRef = stateOf(entry).author;
-    if (!readInFull(a, at)) return { status: "unverifiable", did: authorDid, versionId: authorRef.versionId };
+    if (!readInFull(a, at)) return missing(authorDid, authorRef.versionId, "sat");
   }
   if (preAnchor) return { status: "accepted" }; // row 7
-  // Row 8: the key in the signer's state at the inscription, not deactivated; an editor also needs the author's.
-  const key = (entry.proof[0] as JsonObject).verificationMethod as string;
-  const vm = Array.isArray(version.document.verificationMethod) ? (version.document.verificationMethod as JsonObject[]).find((v) => v.id === key) : undefined;
-  const pk = vm?.publicKeyMultibase as string | undefined;
-  if (!stateAt || stateAt.deactivated || !pk || !listsKey(stateAt.document, pk)) return { status: "rejected", rule: "P9.15", identity: true };
-  if (isEditorEntry(entry)) {
-    const am = signerMethodOf(authorDid) === "did:btco" ? c.btco.get(authorDid) : signers.get(authorDid)?.history;
-    const latest = am?.versions.filter((_, k) => !("positions" in am) || chainOrder((am as ReturnType<typeof btcoSignerHistory>).positions[k], at) < 0).pop();
+  // Row 8, did:btco signers only (D22): the key in the signer's state at the inscription, not deactivated.
+  // A did:vh / did:webvh signer's later removal or deactivation never invalidates an inscribed entry.
+  if (method === "did:btco") {
+    const key = (entry.proof[0] as JsonObject).verificationMethod as string;
+    const vm = Array.isArray(version.document.verificationMethod) ? (version.document.verificationMethod as JsonObject[]).find((v) => v.id === key) : undefined;
+    const pk = vm?.publicKeyMultibase as string | undefined;
+    if (!stateAt || stateAt.deactivated || !pk || !listsKey(stateAt.document, pk)) return { status: "rejected", rule: "P9.15", identity: true };
+  }
+  // P5.18, did:btco authors only (D22): an editor entry inscribed after the author DID's deactivation.
+  if (isEditorEntry(entry) && signerMethodOf(authorDid) === "did:btco") {
+    const am = c.btco.get(authorDid);
+    const latest = am?.versions.filter((_, k) => chainOrder(am.positions[k], at) < 0).pop();
     if (latest?.deactivated) return { status: "rejected", rule: "P5.18" };
   }
   return { status: "accepted" }; // row 9
 }
 
-/** Judge an anchoring publication (head undefined) or a later one (P9.15, P9.17, P9.32, P9.33). */
-async function judge(pub: Publication, head: Head | undefined, signersIn: SignerState["logs"], c: JudgeContext): Promise<Judged & { head?: Head }> {
-  const out: Judged & { head?: Head } = { ok: false, entries: [], results: [], signers: clone(signersIn) };
+/** Judge an anchoring publication (head undefined) or a later one (P9.15, P9.17, P9.32). */
+function judge(pub: Publication, head: Head | undefined, c: JudgeContext): Judged & { head?: Head } {
+  const out: Judged & { head?: Head } = { ok: false, entries: [], results: [] };
   const fail = (rule: string, identity = false) => Object.assign(out, { ok: false, rule, identity });
   if (pub.invalid) return fail(pub.invalid.rule);
   const raw = pub.readings.flatMap((p) => p.reading.metadata.entries);
-  const histories = pub.readings.flatMap((p) => (p.reading.metadata.signers ?? []).map((s) => ({ s, source: `inscribed:${p.read.id}` })));
   if (pub.readings[pub.readings.length - 1].reading.metadata.entries.length === 0) return fail("P9.32"); // the last entry is in the final part
   try {
     out.entries = raw.map((e) => checkEntryShape(e));
@@ -317,12 +319,6 @@ async function judge(pub: Publication, head: Head | undefined, signersIn: Signer
   if (!head) {
     out.original = typeof out.entries[0].state?.id === "string" ? out.entries[0].state.id : undefined;
   } else if (out.entries.length !== 1) return fail("P9.17");
-  // Signer histories first: a publication's own history counts for its entries (P9.33).
-  try {
-    for (const { s, source } of histories) await addSignerHistories([s], out.signers, source);
-  } catch (error) {
-    return fail(error instanceof OgRuleError ? error.rule : "P9.33");
-  }
   let ctx = head?.ctx;
   let lastVersions = new Map(head?.lastVersions ?? []);
   const genesis = head ? undefined : out.entries[0];
@@ -356,11 +352,11 @@ async function judge(pub: Publication, head: Head | undefined, signersIn: Signer
       return fail("P5.8");
     }
     const preAnchor = !head && k < out.entries.length - 1;
-    const r = judgeEntry(e, ref, preAnchor, pub.final, out.signers, c, s.author.did);
+    const r = judgeEntry(e, ref, !head, preAnchor, pub.final, c, s.author.did);
     out.results.push(r);
     if (r.status === "rejected") return fail(r.rule, !!r.identity);
-    if (r.status === "unverifiable") out.unverifiable = { did: r.did, versionId: r.versionId };
-    if (r.status === "incomplete") (out.incomplete ??= []).push(r.did);
+    if (r.status === "unverifiable") out.unverifiable = { did: r.did, versionId: r.versionId, missing: r.missing };
+    if (r.status === "incomplete") (out.incomplete ??= []).push({ did: r.did, versionId: r.versionId, missing: r.missing });
     if (r.status === "accepted" || r.status === "incomplete") lastVersions = new Map(lastVersions).set(ref.did, versionNumber(ref.versionId));
   }
   try {
@@ -381,23 +377,37 @@ interface SatOutcome {
   sat: MergedSat;
   /** The anchoring publication for our Original on this sat, if one is valid. */
   anchor?: { pub: Publication; judged: Judged & { head?: Head } };
-  /** An earlier anchoring publication for our Original that cannot be decided yet (P9.16). */
+  /** An earlier anchoring publication for our Original that cannot be decided yet (P9.16), and what it lacks. */
   undetermined?: Publication;
+  lacking?: MissingSigner[];
+  /** The undetermined publication is another did:og's. */
+  other?: boolean;
   takenByOther?: boolean;
 }
 
-async function anchorOnSat(sat: MergedSat, original: string, c: JudgeContext): Promise<{ outcome: SatOutcome; publications: Publication[] }> {
+function anchorOnSat(sat: MergedSat, original: string, c: JudgeContext): { outcome: SatOutcome; publications: Publication[] } {
   const { publications } = publicationsOf(sat);
   const outcome: SatOutcome = { sat };
   for (const pub of publications) {
-    const judged = await judge(pub, undefined, new Map(), { ...c, sat: sat.sat });
+    const judged = judge(pub, undefined, { ...c, sat: sat.sat });
     if (!judged.ok) continue;
+    if (judged.original !== original && judged.incomplete?.length) {
+      // Another did:og's anchoring publication that cannot be decided yet: whether it takes the sat is
+      // undetermined (P9.16, P9.34), so ours on this sat is too. Its entries are not a copy of our log.
+      outcome.undetermined = pub;
+      outcome.lacking = judged.incomplete;
+      outcome.other = true;
+      break;
+    }
     if (judged.original !== original) {
       outcome.takenByOther = true; // P9.34: the sat is taken; later inscriptions for another did:og are rejected
       break;
     }
     if (judged.incomplete?.length) {
-      outcome.undetermined = pub; // P9.16: cannot decide it while a did:btco signer's sat is not read in full
+      // P9.16: cannot decide it while a did:btco signer's sat is not read in full, or a did:vh /
+      // did:webvh signer's history is not supplied through the version an entry names (D22).
+      outcome.undetermined = pub;
+      outcome.lacking = judged.incomplete;
       break;
     }
     outcome.anchor = { pub, judged };
@@ -436,7 +446,7 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
     const m = mergeSat(sat, reads, depth);
     if (m.network === network) merged.set(sat, m); // P9.31, P9.34: only the genesis network's reads are evidence
   }
-  const c: JudgeContext = { original: evidence.original, sat: "", network: network ?? "mainnet", btco: new Map() };
+  const c: JudgeContext = { original: evidence.original, sat: "", network: network ?? "mainnet", btco: new Map(), histories: await verifyHistories(gathered.histories) };
   for (const m of merged.values()) {
     // Any sat read can be a did:btco signer's (P5.13); it is used only for DIDs entries name.
     const btcoDid = m.sat;
@@ -448,7 +458,7 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
   for (const m of merged.values()) {
     // An anchoring sat must be read in full, every inscription on it read (P9.17); a sat that is not is missing evidence.
     if (m.disputed || !m.complete || m.inscriptions.some((i) => i.unread)) continue;
-    outcomes.push(await anchorOnSat(m, evidence.original, c));
+    outcomes.push(anchorOnSat(m, evidence.original, c));
   }
   const disputedAnchoring = [...merged.values()].some((m) => m.disputed || !m.complete || m.inscriptions.some((i) => i.unread));
   const candidates = outcomes.filter((o) => o.outcome.anchor || o.outcome.undetermined)
@@ -459,9 +469,11 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
     // Not anchored on any sat read, or missing evidence: what the copies show, with the Bitcoin result.
     // An undetermined anchoring publication's entries are a copy of the log too (P7.14), read without the anchor.
     const pending = first?.outcome.undetermined;
-    const withPending = pending ? { ...gathered, copies: [...gathered.copies, { source: `inscribed:${pending.final.id}`, values: pending.readings.flatMap((p) => p.reading.metadata.entries) }] } : gathered;
+    const withPending = pending && !first.outcome.other ? { ...gathered, copies: [...gathered.copies, { source: `inscribed:${pending.final.id}`, values: pending.readings.flatMap((p) => p.reading.metadata.entries) }] } : gathered;
     // Sats read in full at the tip with no anchoring publication of this Original (P9.5).
-    const readSats = new Set([...merged.values()].filter((m) => !m.disputed && m.complete && !m.inscriptions.some((i) => i.unread)).map((m) => m.sat));
+    // A sat holding an undetermined anchoring publication is not one of them.
+    const undeterminedSats = new Set(outcomes.filter((o) => o.outcome.undetermined).map((o) => o.outcome.sat.sat));
+    const readSats = new Set([...merged.values()].filter((m) => !m.disputed && m.complete && !m.inscriptions.some((i) => i.unread) && !undeterminedSats.has(m.sat)).map((m) => m.sat));
     const report = await verifyOffChain(evidence, withPending, { bitcoinRead: true, readSats });
     const a = report.axes as Axes;
     const extra: Diagnostic[] = [];
@@ -472,12 +484,19 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
       const carries = m.inscriptions.some((i) => !i.unread && readInscription(i.envelope).kind !== "other") || m.inscriptions.some((i) => i.unread);
       if (carries) extra.push({ code: "anchoring-sat-not-read", rule: m.disputed ? "P9.10" : "P9.17", item: { kind: "sat", id: m.sat }, reason: m.disputed ? "The indexes used disagree on this sat's inscriptions." : "This sat is not read in full." });
     }
+    // What the undetermined anchoring publication lacks (D22): its entries' did:vh / did:webvh histories.
+    for (const l of first?.outcome.lacking ?? []) {
+      const d = missingSignerDiagnostic(l);
+      if (d) extra.push(d);
+    }
     report.diagnostics = sortDiagnostics([...report.diagnostics, ...extra]);
     if (pending) a.bitcoin = "undetermined";
     else if (report.diagnostics.some((d) => d.code === "anchoring-sat-not-read") || disputedAnchoring && !readSats.size) a.bitcoin = "missing-evidence";
     else a.bitcoin = "not-anchored";
     a.offline = offlineFrom(report.diagnostics);
-    a.outcome = outcomeOf(a);
+    // P7.18 (T7-076): a missing target, or no entry at all, is incomplete unless something failed.
+    const outcome = outcomeOf(a);
+    a.outcome = outcome === "verified" && report.diagnostics.some((d) => d.code === "target-missing") ? "incomplete" : outcome;
     return report;
   }
 
@@ -487,8 +506,8 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
   const labels: EntryLabel[] = [];
   const unverifiable: NonNullable<Report["bitcoin"]>["unverifiable"] = [];
   const waiting: NonNullable<Report["bitcoin"]>["waiting"] = [];
+  const lacking: MissingSigner[] = [];
   const bodies = new Map<string, Uint8Array>();
-  let signers = anchor.judged.signers;
   let head = anchor.judged.head!;
   const inscribed: Array<{ entry: OgEntry; block: number; ordering: "existed-by-block" | "chain-ordered" }> = [];
   anchor.judged.entries.forEach((e, k) => inscribed.push({ entry: e, block: anchor.pub.final.height, ordering: k < anchor.judged.entries.length - 1 ? "existed-by-block" : "chain-ordered" }));
@@ -503,7 +522,7 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
       waiting.push({ inscription: pub.parts[0].id, waitsOn: blockedOn.inscription });
       continue;
     }
-    const judged = await judge(pub, head, signers, { ...c, sat: anchorSat.sat });
+    const judged = judge(pub, head, { ...c, sat: anchorSat.sat });
     const entryId = judged.entries[0]?.versionId;
     if (!judged.ok) {
       // Not extending the head (another branch, or another Original): ignored; otherwise rejected.
@@ -513,11 +532,11 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
     }
     if (judged.unverifiable) {
       unverifiable.push({ inscription: pub.final.id, did: judged.unverifiable.did, versionId: judged.unverifiable.versionId });
+      lacking.push(judged.unverifiable);
       labels.push({ versionId: entryId, status: "unverifiable" });
       blockedOn = { inscription: pub.final.id, head: head.entry.versionId };
       continue;
     }
-    signers = judged.signers;
     head = judged.head!;
     headPublications.push(pub);
     inscribed.push({ entry: judged.entries[0], block: pub.final.height, ordering: "chain-ordered" });
@@ -557,10 +576,11 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
   }
   const availability: Axes["availability"] = unavailable === 0 ? "complete" : unavailable === versions ? "none" : "partial";
   for (const l of labels) if (l.status === "rejected") diagnostics.push({ code: "entry-rejected", rule: l.rule, item: { kind: "entry", id: l.versionId }, reason: `The entry fails ${l.rule}.` });
-  for (const u of unverifiable) {
-    diagnostics.push({ code: "inscription-unverifiable", rule: "P9.15", item: { kind: "inscription", id: u.inscription }, reason: `It names ${u.did}, whose sat is not read in full.` });
-    if (signerMethodOf(u.did) === "did:btco") diagnostics.push({ code: "signer-sat-not-read", rule: "P9.35", item: { kind: "sat", id: u.did }, reason: "The did:btco signer's sat is not read in full for this inscription." });
-  }
+  unverifiable.forEach((u, k) => {
+    const m = lacking[k];
+    diagnostics.push({ code: "inscription-unverifiable", rule: "P9.15", item: { kind: "inscription", id: u.inscription }, reason: m.missing === "sat" ? `It names ${u.did}, whose sat is not read in full.` : `It names ${u.did} at ${u.versionId}, and the evidence set holds no history of it through that version.` });
+    diagnostics.push(missingSignerDiagnostic(m)!);
+  });
   for (const w of waiting) diagnostics.push({ code: "publication-waiting", rule: "P9.36", item: { kind: "inscription", id: w.inscription }, reason: `It waits on ${w.waitsOn}.` });
   for (const i of gathered.invalidInputs) diagnostics.push({ code: "input-unusable", rule: "P7.17", item: { kind: "input", id: i.source }, reason: i.error.message });
   // P7.22, P14.13: a publication's confirmations are the tip's height less its final part's block height, plus one.
@@ -570,7 +590,8 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
   }
   const sortedDiagnostics = sortDiagnostics(diagnostics);
 
-  // Signers relied on (P7.8): inscribed histories, freshness established by chain order.
+  // Signers relied on (P7.8): did:vh / did:webvh histories as supplied, with their source, when they were
+  // obtained and whether their own witnesses establish freshness (D22); did:btco sats by chain order.
   const signerLabels: SignerLabel[] = [];
   const seen = new Set<string>();
   for (const { entry } of inscribed) {
@@ -579,9 +600,10 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
     if (seen.has(ref.did)) continue;
     seen.add(ref.did);
     const role = s.editor ? "editor" : "author";
-    const h = signers.get(ref.did);
-    if (h) signerLabels.push({ did: ref.did, role, latestVersionId: h.entries[h.entries.length - 1].versionId as string, source: h.source, freshness: "established" });
-    else {
+    const h = c.histories.byDid.get(ref.did);
+    if (h && signerMethodOf(ref.did) !== "did:btco") {
+      signerLabels.push({ did: ref.did, role, latestVersionId: latestVersion(h.history)!.versionId, source: h.candidate.source, obtained: h.candidate.obtained ?? null, freshness: h.history.witnessed ? "established" : "not-established" });
+    } else {
       const b = c.btco.get(ref.did);
       const latest = b?.versions[b.versions.length - 1];
       if (latest) signerLabels.push({ did: ref.did, role, latestVersionId: latest.versionId, source: `index:${latest.inscription}`, freshness: "established" });
@@ -657,6 +679,13 @@ function satReadsFromInputs(evidence: EvidenceSet, gathered: Gathered): SatRead[
     });
   }
   return out;
+}
+
+/** The diagnostic for one missing signer (P14.25): a did:btco sat, or a did:vh / did:webvh history or version. */
+function missingSignerDiagnostic(m: MissingSigner): Diagnostic | undefined {
+  if (m.missing === "sat") return { code: "signer-sat-not-read", rule: "P9.35", item: { kind: "sat", id: m.did }, reason: "The did:btco signer's sat is not read in full for this inscription." };
+  if (m.missing === "version") return { code: "signer-version-missing", rule: "P7.8", item: { kind: "signer", id: m.did, versionId: m.versionId }, reason: "The supplied signer history does not reach the version the entry names." };
+  return { code: "signer-history-missing", rule: "P5.6", item: { kind: "signer", id: m.did }, reason: "The signer DID's history is not in the evidence set." };
 }
 
 function extendsHead(entry: OgEntry, head: Head): boolean {

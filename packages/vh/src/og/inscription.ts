@@ -1,6 +1,6 @@
 /**
  * Originals inscriptions (P14.12, P9.17, P9.31, P9.32): the CBOR metadata
- * `{entries, signers?, part?}` in the writer order P14.12 fixes, the ord
+ * `{entries, part?}` in the writer order P14.12 fixes, the ord
  * 0.29.1 envelope (content type, metaprotocol `og`, metadata pushes, body),
  * and the reader that applies P14.12's restrictions to an envelope as ord
  * reads it. Raw transactions are parsed to find the envelopes in a reveal's
@@ -18,15 +18,13 @@ export const OG_METAPROTOCOL = "og";
 
 const TAG = { contentType: 1, pointer: 2, parent: 3, metadata: 5, metaprotocol: 7, contentEncoding: 9, delegate: 11 } as const;
 
-export interface SignerHistoryItem {
-  did: string;
-  log: JsonObject[];
-  witness?: JsonValue[];
-}
-
+/**
+ * Originals inscriptions carry no signer DID histories (D22, 22 November 2026; P14.12): a did:vh or
+ * did:webvh signer's log is supplied to the verifier from resolution (P7.8, P7.17). A `signers` member in
+ * an older inscription is ignored by the reader and is never evidence.
+ */
 export interface Metadata {
   entries: JsonObject[];
-  signers?: SignerHistoryItem[];
   /** `[i, n]` in a publication in parts (P9.32). */
   part?: [number, number];
 }
@@ -48,8 +46,8 @@ export function jcsOrdered(value: JsonValue): JsonValue {
 /**
  * The metadata's CBOR (P14.12). Map members may be in any order at every
  * level, and readers accept any order (originals-spec b4f3604); this writer
- * writes the members in the order entries, signers, part, and each entry and
- * signer log entry in JCS order, so the same publication gives the same
+ * writes the members in the order entries, part, and each entry in JCS
+ * order, and never a `signers` member (D22), so the same publication gives the same
  * bytes. Hashes and proofs never cover these bytes, only the JCS form of the
  * decoded JSON. ord's JSON-to-CBOR mapping (PROVISIONAL): text keys,
  * shortest integers, narrowest exact floats.
@@ -57,11 +55,6 @@ export function jcsOrdered(value: JsonValue): JsonValue {
 export function encodeMetadata(m: Metadata, options: { keepOrder?: boolean } = {}): Uint8Array {
   const order = options.keepOrder ? (v: JsonValue) => v : jcsOrdered;
   const out: JsonObject = { entries: m.entries.map((e) => order(e)) };
-  if (m.signers) out.signers = m.signers.map((s) => {
-    const item: JsonObject = { did: s.did, log: s.log.map((e) => order(e)) };
-    if (s.witness) item.witness = s.witness.map((w) => order(w));
-    return item;
-  });
   if (m.part) out.part = [...m.part];
   return encodeCbor(out);
 }
@@ -238,7 +231,11 @@ export function readInscription(envelope: Uint8Array): InscriptionReading {
   }
 }
 
-/** P14.12: an object of `entries` and, where they apply, `signers` and `part`, and nothing else. */
+/**
+ * P14.12 (D22): an object of `entries` and, in a publication in parts, `part`, and nothing else, except
+ * that a `signers` member, which older inscriptions carry, is ignored whatever it holds: it is dropped
+ * from the result and is never evidence of a signer's history (P7.8).
+ */
 export function checkMetadata(v: JsonValue): Metadata {
   if (!isJsonObject(v)) reject("P14.12", "METADATA_SHAPE", "the metadata is an object, not an array of entries (T14-003)");
   for (const k of Object.keys(v)) if (k !== "entries" && k !== "signers" && k !== "part") reject("P14.12", "METADATA_MEMBERS", `metadata member ${k} is not defined`);
@@ -247,25 +244,15 @@ export function checkMetadata(v: JsonValue): Metadata {
     checkStrictValue(e);
     if (entryBytes(e) > OG_LIMITS.entryBytes) reject("P14.13", "ENTRY_TOO_LARGE", "an entry over 65,536 bytes as its JCS form", "limit-exceeded");
   }
-  if ("signers" in v) {
-    if (!Array.isArray(v.signers) || v.signers.length === 0) reject("P14.12", "METADATA_SIGNERS", "signers is a non-empty array");
-    const dids = new Set<string>();
-    for (const s of v.signers) {
-      if (!isJsonObject(s) || typeof s.did !== "string" || !Array.isArray(s.log) || s.log.length === 0 || !s.log.every(isJsonObject)) reject("P14.12", "METADATA_SIGNERS", "a signers item is {did, log, witness?} with a non-empty log");
-      for (const k of Object.keys(s)) if (k !== "did" && k !== "log" && k !== "witness") reject("P14.12", "METADATA_SIGNERS", `signers member ${k} is not defined`);
-      if ("witness" in s && !Array.isArray(s.witness)) reject("P14.12", "METADATA_SIGNERS", "witness is an array");
-      if (!/^did:(webvh|vh):/.test(s.did)) reject("P9.33", "SIGNER_HISTORY_METHOD", `${s.did} is not a did:vh or did:webvh`);
-      if (dids.has(s.did)) reject("P14.12", "METADATA_SIGNERS", `${s.did} appears twice`);
-      dids.add(s.did);
-    }
-  }
   if ("part" in v) {
     const p = v.part;
     if (!Array.isArray(p) || p.length !== 2 || !p.every((x) => Number.isSafeInteger(x)) || (p[1] as number) < 2 || (p[1] as number) > OG_LIMITS.publicationParts || (p[0] as number) < 1 || (p[0] as number) > (p[1] as number)) {
       reject("P9.32", "METADATA_PART", "part is [i, n] with 1 ≤ i ≤ n and 2 ≤ n ≤ 16 (P14.13)");
     }
   }
-  return v as unknown as Metadata;
+  const out: Metadata = { entries: v.entries };
+  if ("part" in v) out.part = v.part as [number, number];
+  return out;
 }
 
 // ---------------------------------------------------------------------------

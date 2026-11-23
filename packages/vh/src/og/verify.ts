@@ -33,8 +33,6 @@ export interface HistoryCandidate {
   witness?: unknown;
   source: string;
   obtained?: string;
-  /** Inscribed on the anchoring sat (P9.33), with the inscription carrying it. */
-  inscribed?: string;
 }
 
 export interface Gathered {

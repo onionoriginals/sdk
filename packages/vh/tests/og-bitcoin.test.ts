@@ -3,12 +3,20 @@ import { describe, expect, test } from 'bun:test';
 import { decodeCbor } from '../src/originals/cbor.js';
 import { defaultCheck, encodeEnvelope, encodeMetadata, parseTransaction, readInscription, resourceDigest, sameReport, transferCheck, verifyOriginal } from '../src/og/index.js';
 import { encodeCbor } from '../src/originals/cbor.js';
-import { bitcoinEvidence, bytesEqual, pjson, priorEvidence, vbytes, vectorEvidence, vjson, withSatRead } from './helpers/og-vectors.js';
+import { bitcoinEvidence, bitcoinEvidenceResolved, bytesEqual, pjson, priorEvidence, resolvedExpected, vbytes, vectorEvidence, vjson, withSatRead } from './helpers/og-vectors.js';
 
 describe('bitcoin vector (T14-075, T9-030, T14-102, P9.18)', () => {
-  test('the expected report from exactly the P9.18 evidence set', async () => {
+  // D22: the copied vector predates D22 (its inscriptions carry a `signers` member); see helpers/og-vectors.ts.
+  test('D22: from exactly the pre-D22 evidence set, the inscribed signers member is ignored: the anchor is undetermined, nothing accepted', async () => {
     const r = await verifyOriginal(bitcoinEvidence());
-    const want = vjson('bitcoin/expected-report.json');
+    expect(r.axes).toMatchObject({ bitcoin: 'undetermined', identity: 'incomplete', outcome: 'incomplete' });
+    expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'signer-history-missing', rule: 'P5.6', item: { kind: 'signer', id: vjson('index.json').author } }));
+    expect(r.entries.some((e) => e.status === 'accepted')).toBe(false);
+  });
+
+  test('with the author log supplied as resolved: the expected report, apart from the added input and the signer label (until the vectors are regenerated for D22)', async () => {
+    const r = await verifyOriginal(bitcoinEvidenceResolved());
+    const want = resolvedExpected(vjson('bitcoin/expected-report.json'));
     expect(sameReport(r, want)).toBe(true);
     expect({ ...r, diagnostics: r.diagnostics.map(({ reason: _r, ...d }) => d) }).toEqual({ ...want, diagnostics: want.diagnostics.map(({ reason: _r, ...d }: any) => d) });
   });
@@ -51,7 +59,7 @@ describe('sat-read input (P14.25, P7.17)', () => {
 describe('transfer depth (P7.22, P14.13)', () => {
   const at = async (height: number) => {
     // Another tip: the evidence set's tip and the sat-read's, with each inscription's confirmations recomputed.
-    const e = withSatRead(bitcoinEvidence(), (r) => {
+    const e = withSatRead(bitcoinEvidenceResolved(), (r) => {
       r.tip.height = height;
       for (const x of r.inscriptions) x.confirmations = height - x.height + 1;
     });
@@ -60,7 +68,7 @@ describe('transfer depth (P7.22, P14.13)', () => {
   };
 
   test('the bitcoin vector has 9 confirmations: no insufficient-depth, the transfer check passes', async () => {
-    const r = await verifyOriginal(bitcoinEvidence());
+    const r = await verifyOriginal(bitcoinEvidenceResolved());
     expect(r.diagnostics.some((d) => d.code === 'insufficient-depth')).toBe(false);
     expect(transferCheck(r)).toBe(true);
   });
@@ -88,20 +96,20 @@ describe('metadata member order (P14.12, T14-097, T14-098)', () => {
     if (r.kind !== 'originals') throw new Error('part');
     const rev = (v: any): any => (Array.isArray(v) ? v.map(rev) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).reverse().map((x) => [x, rev(v[x])])) : v);
     const m = r.metadata as any;
-    const value = order === 'reverse' ? { ...(m.part ? { part: m.part } : {}), ...(m.signers ? { signers: rev(m.signers) } : {}), entries: rev(m.entries) } : m;
+    const value = order === 'reverse' ? { ...(m.part ? { part: m.part } : {}), entries: rev(m.entries) } : m;
     const metadata = order === 'reverse' ? encodeCbor(value) : encodeMetadata(m);
     return encodeEnvelope({ contentType: r.contentType, metadata, body: r.body });
   };
 
   for (const order of ['reverse', 'jcs'] as const) {
     test(`T14-097, T14-098: the bitcoin vector re-encoded with map members in ${order} order gives the same entries and the same report, apart from the input digests`, async () => {
-      const e = bitcoinEvidence();
+      const e = bitcoinEvidenceResolved();
       const envs = [reorder(1, order), reorder(2, order)];
       expect(readInscription(envs[0])).toMatchObject({ kind: 'originals' });
       let k = 0;
       e.inputs = e.inputs.map((i) => (i.kind === 'inscription' ? { kind: i.kind, source: i.source, bytes: envs[k++] } : i));
       const r = await verifyOriginal(e);
-      const want = vjson('bitcoin/expected-report.json');
+      const want = resolvedExpected(vjson('bitcoin/expected-report.json'));
       let j = 0;
       want.evidence.inputs = want.evidence.inputs.map((i: any) => (i.kind === 'inscription' ? { ...i, digest: resourceDigest(envs[j++]) } : i));
       expect(sameReport(r, want)).toBe(true);
@@ -114,16 +122,18 @@ describe('inscription bytes (T14-076, T14-078)', () => {
     test(`part ${k}: the vector envelope is a read fixture: the codec reproduces it from its decoded key order, and other orders decode to the same values`, () => {
       const meta = vbytes(`bitcoin/inscriptions/part-${k}.metadata.cbor`);
       const env = vbytes(`bitcoin/inscriptions/part-${k}.envelope.bin`);
-      const decoded = decodeCbor(meta, { shortest: false }) as never;
-      const asWritten = encodeMetadata(decoded, { keepOrder: true });
+      const decoded = decodeCbor(meta, { shortest: false }) as Record<string, unknown>;
+      // The pre-D22 part 1 carries a signers member, which the writer no longer writes: the CBOR codec reproduces it.
+      const asWritten = 'signers' in decoded ? encodeCbor(decoded as never) : encodeMetadata(decoded as never, { keepOrder: true });
       expect(bytesEqual(asWritten, meta)).toBe(true);
       const r = readInscription(env);
       if (r.kind !== 'originals') throw new Error(r.kind);
       expect(bytesEqual(encodeEnvelope({ contentType: r.contentType, metadata: asWritten, body: r.body }), env)).toBe(true);
       // Any member order conforms (P14.12, b4f3604): JCS member order gives other bytes, the same JSON values.
-      const jcs = encodeMetadata(decoded);
+      const { signers: _s, ...members } = decoded;
+      const jcs = encodeMetadata(members as never);
       expect(bytesEqual(jcs, meta)).toBe(false);
-      expect(decodeCbor(jcs, { shortest: false })).toEqual(decodeCbor(meta, { shortest: false }));
+      expect(decodeCbor(jcs, { shortest: false })).toEqual(members as never);
     });
   }
 });

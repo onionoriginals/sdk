@@ -1,6 +1,7 @@
 /**
- * Signer DID histories for did:og (P5.3, P5.8, P5.13, P5.14, P7.8, P9.33) and
- * the signer binding of one entry. The baseline lists did:webvh, the DIF
+ * Signer DID histories for did:og (P5.3, P5.8, P5.13, P5.14, P7.8) and
+ * the signer binding of one entry. did:webvh and did:vh histories are always
+ * supplied in the evidence set, never inscribed (D22). The baseline lists did:webvh, the DIF
  * did:vh and did:btco (P5.8). did:webvh and did:vh logs are verified from
  * their genesis with the VH engine under their own method's rules; did:btco
  * versions come from the DID's own sat (P5.13) and are supplied by the
@@ -24,7 +25,7 @@ export interface SignerVersion {
   deactivated: boolean;
   /** The DID's own updateKeys at this version, which may not sign entries (P5.3). */
   updateKeys: string[];
-  /** For a did:btco version or an inscribed version: the inscription that carries it. */
+  /** For a did:btco version: the inscription that carries it. */
   inscription?: string;
 }
 
