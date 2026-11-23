@@ -55,17 +55,26 @@ export async function createAuthorDid(keys: AuthorKeys, options: { domain?: stri
   return { did, log: serializeLog([genesis]), url: didWebvhLogUrl(did), entries: [genesis], verificationMethod: `${did}#key-1`, versionId: genesis.versionId };
 }
 
+export interface AuthorLogCheck {
+  ok: boolean;
+  reason?: string;
+  latestVersionId?: string;
+  /** Every verified version, in order: its versionId, DID document and whether it deactivates the DID. */
+  versions: Array<{ versionId: string; document: Record<string, unknown>; deactivated: boolean }>;
+}
+
 /** Whether `text` is this DID's log, verifying under did:webvh and naming the DID (P5.14). */
-export async function checkAuthorLog(did: string, text: string): Promise<{ ok: boolean; reason?: string; latestVersionId?: string }> {
+export async function checkAuthorLog(did: string, text: string): Promise<AuthorLogCheck> {
   let entries: unknown[];
   try {
     entries = parseJsonLines(text);
   } catch (error) {
-    return { ok: false, reason: `not JSON Lines: ${(error as Error).message}` };
+    return { ok: false, reason: `not JSON Lines: ${(error as Error).message}`, versions: [] };
   }
   const v = await verifyLog(entries, { specialisation: didWebvh, now: Date.now() + 300_000 });
-  if (v.failure) return { ok: false, reason: v.failure.error.message };
+  if (v.failure) return { ok: false, reason: v.failure.error.message, versions: [] };
   const last = v.entries[v.entries.length - 1];
-  if (!v.entries.some((e) => e.entry.state.id === did)) return { ok: false, reason: "the log is not this DID's" };
-  return { ok: true, latestVersionId: last.entry.versionId };
+  if (!v.entries.some((e) => e.entry.state.id === did)) return { ok: false, reason: "the log is not this DID's", versions: [] };
+  const versions = v.entries.map((e) => ({ versionId: e.entry.versionId, document: e.entry.state, deactivated: e.active.deactivated }));
+  return { ok: true, latestVersionId: last.entry.versionId, versions };
 }

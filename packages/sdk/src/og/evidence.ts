@@ -2,8 +2,9 @@
  * Reading an anchored Original back from Bitcoin (P9.18, P9.31): the
  * anchoring sat's inscriptions as an ord 0.29.x explorer reports them, each
  * envelope from its reveal transaction, its position in chain order and its
- * confirmations, and the holder, all at one tip. Nothing else: no copy of the
- * log, no signer DID host and no resource bytes.
+ * confirmations, and the holder, all at one tip. No copy of the log and no
+ * resource bytes. The inscriptions carry no signer history (D22): a did:webvh
+ * author's log is resolved from its URL and added with `withResolvedSigner`.
  */
 import { envelopesInWitness, parseTransaction, type BitcoinNetwork, type EvidenceSet, type InscriptionRead } from "@originals/vh/og";
 import type { ChainBackend, OrdExplorer } from "./chain.js";
@@ -63,4 +64,18 @@ export async function readSatEvidence(input: { original: string; network: Bitcoi
     depth: input.depth ?? 1,
   };
   return { evidence, ordVersion, inscriptions: reads };
+}
+
+/**
+ * The evidence set with a did:vh / did:webvh signer's log, as resolved from its URL, supplied as a signer
+ * history with its source and obtained time (D22; P7.8, P7.17). The verifier checks each inscribed entry
+ * at the version it names in this log.
+ */
+export function withResolvedSigner(evidence: EvidenceSet, signer: { did: string; url: string; log: string; obtained: string }): EvidenceSet {
+  const source = `resolved:${signer.url}`;
+  return {
+    ...evidence,
+    inputs: [...evidence.inputs, { kind: "signer-history", source, did: signer.did, bytes: new TextEncoder().encode(signer.log) }],
+    signerHistories: [...(evidence.signerHistories ?? []), { did: signer.did, source, obtained: signer.obtained }],
+  };
 }

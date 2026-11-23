@@ -6,10 +6,10 @@
  * (P9.18) and tells the author what becomes public (P9.18, P8.3).
  */
 import type { ProofSigner } from "@originals/vh/crypto";
-import { parseJsonLines, type JsonObject } from "@originals/vh/json";
+import type { JsonObject } from "@originals/vh/json";
 import {
   OG_LIMITS, btcoDid, transferCheck, buildPublication, isActiveContent, prepareGenesis, prepareNext, resourceDigest, serializeLog, signEntry,
-  type BitcoinNetwork, type BodyMode, type Descriptor, type OgEntry, type PublicationPart, type Report, type SignerHistoryItem, verifyLocalCopy,
+  type BitcoinNetwork, type BodyMode, type Descriptor, type OgEntry, type PublicationPart, type Report, verifyLocalCopy,
 } from "@originals/vh/og";
 import { generateImagePreview } from "../originals/preview.js";
 
@@ -17,7 +17,10 @@ export interface AuthorRef {
   did: string;
   verificationMethod: string;
   versionId: string;
-  /** The author DID's `did.jsonl`, inscribed with the anchoring publication (P9.33). */
+  /**
+   * The author DID's `did.jsonl`, for the writer's local-copy check (P9.18). It is never inscribed
+   * (D22): a verifier resolves it from the DID's own URL and supplies it in its evidence set (P7.8).
+   */
   log: string;
   signer: ProofSigner;
 }
@@ -86,16 +89,15 @@ export async function createAnchoringEntry(parent: OgEntry, input: { sat: bigint
   return signEntry(prepareNext(parent, { versionTime: time(t), parameters: {}, state }), input.author.verificationMethod, input.author.signer);
 }
 
-/** The anchoring publication (P9.17, P9.33): the log through the anchoring entry and the author's history. */
-export function anchoringPublication(entries: OgEntry[], author: AuthorRef, body: Uint8Array | null): PublicationPart[] {
-  const signers: SignerHistoryItem[] = [{ did: author.did, log: parseJsonLines(author.log) as JsonObject[] }];
-  return buildPublication({ entries, signers, body });
+/** The anchoring publication (P9.17): the log through the anchoring entry, and no signer history (D22). */
+export function anchoringPublication(entries: OgEntry[], body: Uint8Array | null): PublicationPart[] {
+  return buildPublication({ entries, body });
 }
 
 /**
  * P9.18: the writer verifies its own committed log as a local copy before it
  * inscribes: whole, from genesis through the anchoring entry, with the
- * author's history it will inscribe. Never current, and never a report for
+ * author's log it holds (the one served at the DID's URL). Never current, and never a report for
  * anyone else; it gates the inscription only.
  */
 export async function checkLocalCopy(entries: OgEntry[], author: AuthorRef, resource: Uint8Array): Promise<{ ok: boolean; report: Report; problems: string[] }> {
@@ -127,7 +129,7 @@ export interface Disclosure {
 export function disclosure(input: { name: string; mediaType: string; bytes: number; body: BodyMode; previewMessage: string; parts: number; feeSats: bigint; feeRate: number; network: BitcoinNetwork; author: string }): Disclosure {
   const lines = [
     `Body: ${input.body === "preview" ? `a preview (${input.previewMessage})` : input.body === "full" ? `the full version (${input.bytes} bytes)` : "none"}.`,
-    `Public and permanent on Bitcoin ${input.network}, and no later entry can remove it: this body, the log with its name "${input.name}" and metadata, and the author DID history of ${input.author}.`,
+    `Public and permanent on Bitcoin ${input.network}, and no later entry can remove it: this body, and the log with its name "${input.name}", its metadata and its author DID ${input.author}. The author DID's own history is not inscribed: verifiers resolve it from its URL, so keep it served.`,
     input.body === "full" ? "Bitcoin will hold the current version." : `Bitcoin will NOT hold the version itself (${input.mediaType}, ${input.bytes} bytes); keep it, and give it to whoever receives the sat.`,
     `Inscriptions: ${input.parts}. Cost: about ${input.feeSats} sats in fees at ${input.feeRate} sat/vB, plus the postage the sat keeps.`,
   ];

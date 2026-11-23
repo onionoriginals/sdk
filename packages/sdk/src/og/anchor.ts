@@ -8,19 +8,20 @@
  *   prepare    build the genesis entry; size the publication; show the funding address and exact amount
  *   fund       wait for the funding output to confirm; find its first sat; sign the anchoring entry; check the local copy
  *   broadcast  sign and broadcast the commit and each reveal, the sat going to the holder's address
- *   verify     read everything back from the ord explorer, compute the report from exactly the P9.18 evidence set,
- *              check the public-host copy of the author's log, write last-run.json
+ *   verify     read everything back from the ord explorer, fetch the author's did.jsonl from its public URL (no
+ *              redirects) as the resolved signer history (D22), compute the report from that evidence set, write
+ *              last-run.json
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { basename, join } from "node:path";
-import { parseJsonLines, type JsonObject } from "@originals/vh/json";
 import {
-  OG_LIMITS, OG_METHOD, btcoDid, defaultCheck, readInscription, resourceDigest, transferCheck, verifyOriginal,
+  OG_LIMITS, OG_METHOD, btcoDid, defaultCheck, listsKey, resourceDigest, transferCheck, verifyOriginal,
   type BitcoinNetwork, type BodyMode, type Descriptor, type OgEntry, type Report,
 } from "@originals/vh/og";
-import { checkAuthorLog, createAuthorDid, DEFAULT_AUTHOR_DOMAIN } from "./author-did.js";
-import { readSatEvidence } from "./evidence.js";
+import type { JsonObject } from "@originals/vh/json";
+import { checkAuthorLog, createAuthorDid, DEFAULT_AUTHOR_DOMAIN, type AuthorLogCheck } from "./author-did.js";
+import { readSatEvidence, withResolvedSigner } from "./evidence.js";
 import { checkAddress, fundingAddress, hex, plan, signChain } from "./inscribe.js";
 import { readKeyFile } from "./keys.js";
 import { anchoringPublication, checkLocalCopy, choosePreview, createAnchoringEntry, createGenesis, describeTransferCheck, disclosure, type AuthorRef } from "./original.js";
@@ -161,7 +162,7 @@ export async function stepPrepare(ctx: Ctx, opts: { file: string; name?: string;
   s.original = { file: opts.file, name, mediaType: opts.mediaType, digest: resourceDigest(bytes), size: bytes.length, body: choice.body, previewMessage: choice.message, genesis, ...(choice.preview ? { preview: { hex: hex.encode(choice.preview.bytes), descriptor: choice.preview.descriptor } } : {}) };
   // Size the publication with the largest sat number, so the real one can only be smaller.
   const probe = await createAnchoringEntry(genesis, { sat: PLACEHOLDER_SAT, network: ctx.network, body: choice.body, preview: choice.preview?.descriptor, author });
-  const parts = anchoringPublication([genesis, probe], author, choice.body === "preview" ? choice.preview!.bytes : choice.body === "full" ? bytes : null);
+  const parts = anchoringPublication([genesis, probe], choice.body === "preview" ? choice.preview!.bytes : choice.body === "full" ? bytes : null);
   const secret = s.reveal ? hex.decode(s.reveal.secretHex) : new Uint8Array(randomBytes(32));
   const feeRate = opts.feeRate ?? (await ctx.chain.feeRate());
   const postage = opts.postage ?? 1_000n;
@@ -217,11 +218,11 @@ export async function stepFund(ctx: Ctx, opts: { yes?: boolean } = {}): Promise<
   const anchoring = s.anchoringEntry ?? await createAnchoringEntry(s.original.genesis, { sat, network: ctx.network, body: s.original.body, preview: s.original.preview?.descriptor, author });
   const bytes = new Uint8Array(readFileSync(s.original.file));
   if (resourceDigest(bytes) !== s.original.digest) throw new Error(`${s.original.file} changed since prepare`);
-  // P9.18: verify the committed log through the anchoring entry as a local copy, with the history to be inscribed.
+  // P9.18: verify the committed log through the anchoring entry as a local copy, with the author log it holds (never inscribed, D22).
   const local = await checkLocalCopy([s.original.genesis, anchoring], author, bytes);
   if (!local.ok) throw new Error(`the local copy does not verify; refusing to inscribe (P9.18): ${local.problems.join("; ")}`);
   ctx.io.say("Local copy verified through the anchoring entry (the writer's own check: not on Bitcoin yet, never current).");
-  const parts = anchoringPublication([s.original.genesis, anchoring], author, bodyBytes(s, bytes));
+  const parts = anchoringPublication([s.original.genesis, anchoring], bodyBytes(s, bytes));
   const p = plan({ secret: hex.decode(s.reveal.secretHex), network: ctx.network, envelopes: parts.map((x) => x.envelope), holder: s.reveal.holder, feeRate: s.reveal.feeRate, postage: 0n });
   const fees = p.fees.reduce((a, b) => a + b, 0n);
   for (const l of disclosure({ name: s.original.name, mediaType: s.original.mediaType, bytes: s.original.size, body: s.original.body, previewMessage: s.original.previewMessage, parts: parts.length, feeSats: fees, feeRate: s.reveal.feeRate, network: ctx.network, author: author.did }).lines) ctx.io.say(l);
@@ -244,10 +245,9 @@ function bodyBytes(s: AnchorState, bytes: Uint8Array): Uint8Array | null {
 export async function stepBroadcast(ctx: Ctx): Promise<AnchorState> {
   const s = loadState(ctx.stateDir, ctx.network);
   if (!s.anchoringEntry || !s.funding || !s.original || !s.reveal) throw new Error("run fund first");
-  const author = authorRef(s, ctx);
   const bytes = new Uint8Array(readFileSync(s.original.file));
   if (!s.signed) {
-    const parts = anchoringPublication([s.original.genesis, s.anchoringEntry], author, bodyBytes(s, bytes));
+    const parts = anchoringPublication([s.original.genesis, s.anchoringEntry], bodyBytes(s, bytes));
     const chain = signChain({
       secret: hex.decode(s.reveal.secretHex), network: ctx.network, envelopes: parts.map((p) => p.envelope), holder: s.reveal.holder, feeRate: s.reveal.feeRate,
       funding: { txid: s.funding.txid, vout: s.funding.vout, amount: BigInt(s.funding.amount) },
@@ -309,8 +309,31 @@ export interface LastRun {
   defaultCheck: boolean;
   /** P7.22: the transfer check, on the Original's publication history (at least the transfer depth deep, P14.13), not on the sat transfer. */
   transferCheck: boolean;
-  publicHost: { url: string; served: boolean; matchesInscribed: boolean; latestVersionId?: string; reason?: string };
+  /**
+   * The author's did.jsonl fetched from its public URL (no redirects), which the evidence set holds as the
+   * resolved signer history (D22, P7.8): whether it was served, verifies as the author DID's own log, and
+   * reaches every version the inscribed entries name.
+   */
+  publicHost: { url: string; served: boolean; verifies: boolean; reachesNamedVersions: boolean; obtained?: string; latestVersionId?: string; reason?: string };
+  /** Not part of the report (P14.25): the newest resolved author version no longer lists a key an entry used, or deactivates the DID. */
+  warnings: string[];
   passed: boolean;
+}
+
+/**
+ * Beside the report, never in it (P14.25; D22): the newest resolved author version deactivates the DID, or no
+ * longer lists the key the entries were signed with. The inscribed entries stay accepted, since each is checked
+ * at the version it names (P5.3); the warning is for the owner, who cannot sign new entries with that key.
+ */
+export function authorWarnings(c: AuthorLogCheck, verificationMethod: string, versionId: string): string[] {
+  const latest = c.versions[c.versions.length - 1];
+  if (!c.ok || !latest) return [];
+  const named = c.versions.find((v) => v.versionId === versionId)?.document;
+  const vms = Array.isArray(named?.verificationMethod) ? (named.verificationMethod as Array<{ id?: unknown; publicKeyMultibase?: unknown }>) : [];
+  const key = vms.find((v) => v.id === verificationMethod)?.publicKeyMultibase;
+  if (latest.deactivated) return [`the author DID is deactivated at its newest version ${latest.versionId}; the inscribed entries stay accepted (each is checked at the version it names), but the DID can sign nothing new`];
+  if (typeof key === "string" && !listsKey(latest.document as JsonObject, key)) return [`the newest author DID version ${latest.versionId} no longer lists the key of ${verificationMethod}; the inscribed entries stay accepted (each is checked at the version it names)`];
+  return [];
 }
 
 /**
@@ -334,23 +357,23 @@ export async function stepVerify(ctx: Ctx, opts: { out?: string; minConfirmation
     const ids = new Set(r.inscriptions.map((i) => i.id));
     return signed.txids.slice(1).every((t) => ids.has(`${t}i0`)) ? r : undefined;
   });
-  const report = await verifyOriginal(read.evidence);
-  // The public-host copy of the author's log (P9.18 lists no host; this checks the copy the gate names).
+  // D22: the author's history is not inscribed. Resolve it from its public URL, no redirects, and supply it
+  // in the evidence set as a signer history with its source and obtained time (P7.8, P7.17).
   const fetchLog = ctx.fetchAuthorLog ?? (async (url: string) => {
     const r = await fetch(url, { redirect: "error" });
     return r.ok ? r.text() : null;
   });
+  const obtained = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
   const served = await fetchLog(s.author.url).catch(() => null);
-  const inscribed = read.inscriptions.flatMap((i) => {
-    const r = readInscription(i.envelope);
-    return r.kind === "originals" ? (r.metadata.signers ?? []).filter((x) => x.did === s.author!.did).flatMap((x) => x.log) : [];
-  });
-  let publicHost: LastRun["publicHost"] = { url: s.author.url, served: served !== null, matchesInscribed: false };
+  const evidence = served === null ? read.evidence : withResolvedSigner(read.evidence, { did: s.author.did, url: s.author.url, log: served, obtained });
+  const report = await verifyOriginal(evidence);
+  const named = [s.original.genesis, ...(s.anchoringEntry ? [s.anchoringEntry] : [])].map((e) => (e.state.author as { versionId: string }).versionId);
+  let publicHost: LastRun["publicHost"] = { url: s.author.url, served: served !== null, verifies: false, reachesNamedVersions: false };
+  const warnings: string[] = [];
   if (served !== null) {
     const c = await checkAuthorLog(s.author.did, served);
-    const servedEntries = c.ok ? (parseJsonLines(served) as JsonObject[]) : [];
-    const matches = c.ok && inscribed.length > 0 && inscribed.every((e, k) => JSON.stringify(servedEntries[k]) === JSON.stringify(e) || servedEntries[k]?.versionId === e.versionId);
-    publicHost = { url: s.author.url, served: true, matchesInscribed: matches, latestVersionId: c.latestVersionId, reason: c.ok ? undefined : c.reason };
+    publicHost = { url: s.author.url, served: true, verifies: c.ok, reachesNamedVersions: c.ok && named.every((v) => c.versions.some((x) => x.versionId === v)), obtained, latestVersionId: c.latestVersionId, reason: c.ok ? undefined : c.reason };
+    warnings.push(...authorWarnings(c, s.author.verificationMethod, s.author.versionId));
   }
   const axes = report.axes as Record<string, string>;
   const run: LastRun = {
@@ -366,21 +389,23 @@ export async function stepVerify(ctx: Ctx, opts: { out?: string; minConfirmation
     revealDestination: s.reveal.holder,
     transactions: { funding: s.funding.txid, commit: signed.txids[0], reveals: signed.txids.slice(1) },
     inscriptions: read.inscriptions.map((i) => ({ id: i.id, height: i.height, txIndex: i.txIndex, inscriptionIndex: i.inscriptionIndex, confirmations: i.confirmations, metaprotocol: i.metaprotocol, contentType: i.contentType, envelopeBytes: i.envelope.length, envelopeDigest: resourceDigest(i.envelope) })),
-    tip: read.evidence.tip!,
+    tip: evidence.tip!,
     ord: `${read.ordVersion} at ${ctx.ord.base}`,
     backend: ctx.chain.name,
     report,
     defaultCheck: defaultCheck(report),
     transferCheck: transferCheck(report),
     publicHost,
-    passed: axes.outcome === "verified" && axes.bitcoin === "anchored" && axes.state === "current" && transferCheck(report) && publicHost.matchesInscribed,
+    warnings,
+    passed: axes.outcome === "verified" && axes.bitcoin === "anchored" && axes.state === "current" && transferCheck(report) && publicHost.verifies && publicHost.reachesNamedVersions,
   };
   const out = opts.out ?? join(ctx.stateDir, "last-run.json");
   writeFileSync(out, JSON.stringify(run, null, 2) + "\n");
   ctx.io.say(`Report: outcome ${axes.outcome}, state ${axes.state}, bitcoin ${axes.bitcoin}, availability ${axes.availability}; holder at the tip ${run.holder ?? "not observed"} (${JSON.stringify(report.bitcoin?.holder.uniqueness)}).`);
   if (run.holder !== run.revealDestination) ctx.io.say(`The sat is no longer at the reveal destination ${run.revealDestination}: it has moved since the reveal (P9.11).`);
   ctx.io.say(describeTransferCheck(report));
-  ctx.io.say(`Public host copy of the author's log: ${publicHost.served ? (publicHost.matchesInscribed ? "served and matches the inscribed history" : `served but does not match (${publicHost.reason ?? "differs"})`) : "not served"}.`);
+  ctx.io.say(`Author log at ${publicHost.url}: ${publicHost.served ? (publicHost.verifies && publicHost.reachesNamedVersions ? `served, verifies and reaches the versions the entries name (latest ${publicHost.latestVersionId}); supplied to the verifier as the resolved history` : `served but ${publicHost.verifies ? "does not reach the versions the entries name" : `does not verify (${publicHost.reason ?? "invalid"})`}`) : "not served: the report cannot check the author's signatures (signer-history-missing)"}.`);
+  for (const w of warnings) ctx.io.say(`Warning (not part of the report): ${w}.`);
   ctx.io.say(`Wrote ${out}. ${run.passed ? "PASS" : "NOT PASSED"}`);
   if (run.passed) {
     s.done = true;
