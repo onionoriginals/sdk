@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "@originals/monorepo",
@@ -144,6 +145,7 @@
         "@noble/ed25519": "^3.2.0",
         "@noble/hashes": "^2.0.1",
         "@noble/secp256k1": "^3.2.0",
+        "@originals/tsp": "workspace:*",
         "@originals/vh": "^0.4.0",
         "@resvg/resvg-wasm": "2.6.2",
         "@scure/base": "^2.2.0",
@@ -170,6 +172,24 @@
         "prettier": "^3.9.10",
         "typescript": "^6.0.3",
         "typescript-eslint": "^8.0.0",
+      },
+    },
+    "packages/tsp": {
+      "name": "@originals/tsp",
+      "version": "0.1.0",
+      "dependencies": {
+        "@hpke/chacha20poly1305": "^1.7.5",
+        "@hpke/core": "^1.7.5",
+        "@noble/curves": "^2.2.0",
+        "@noble/ed25519": "^3.0.0",
+        "@noble/hashes": "^2.0.1",
+        "@scure/base": "^2.2.0",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.4.4",
+        "@types/node": "^26.6.6",
+        "bun-types": "^1.3.1",
+        "typescript": "^6.0.3",
       },
     },
     "packages/vh": {
@@ -433,6 +453,8 @@
     "@originals/landing": ["@originals/landing@workspace:apps/landing"],
 
     "@originals/sdk": ["@originals/sdk@workspace:packages/sdk"],
+
+    "@originals/tsp": ["@originals/tsp@workspace:packages/tsp"],
 
     "@originals/vh": ["@originals/vh@workspace:packages/vh"],
 
