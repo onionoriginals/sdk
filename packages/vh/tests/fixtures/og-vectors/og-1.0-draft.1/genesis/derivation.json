@@ -1,0 +1,13 @@
+{
+  "note": "How the genesis entry is derived (P14.28, P14.29). scid-input.json and entry-hash-input.json are the exact JCS bytes hashed.",
+  "scid": "QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW",
+  "scidInput": "genesis/scid-input.json",
+  "scidMultihash": "sha2-256 (0x12, 0x20), base58btc, no multibase prefix",
+  "entryHash": "QmdXPmoxmFpAtqK3ZLVusnXZM422SAou6dRz1mg6i8HrrD",
+  "entryHashInput": "genesis/entry-hash-input.json",
+  "versionId": "1-QmdXPmoxmFpAtqK3ZLVusnXZM422SAou6dRz1mg6i8HrrD",
+  "signer": {
+    "verificationMethod": "did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example#key-1",
+    "key": "author assertionMethod key-1"
+  }
+}

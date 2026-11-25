@@ -1,0 +1,16 @@
+{
+  "synthetic": true,
+  "note": "Synthetic chain fixture: no real regtest chain produced these transactions. Hashes are SHA-256 of labels. What a verifier is given is evidence-set.json: sat-read.json and the envelopes as inscription inputs (P7.17, P14.25).",
+  "network": "regtest",
+  "ordRelease": "0.29.1",
+  "inscriptions": [
+    {
+      "id": "bcbdc0375c141a6ae45685da65010aa15f92401baf8c3cdb36a290b97d3a08dbi0",
+      "envelope": "inscriptions/part-1.envelope.bin"
+    },
+    {
+      "id": "53455ef2c9378bbc138bd1264b8ec7cfd50d8bb5bafade2e034c2eca22ddcdc5i0",
+      "envelope": "inscriptions/part-2.envelope.bin"
+    }
+  ]
+}

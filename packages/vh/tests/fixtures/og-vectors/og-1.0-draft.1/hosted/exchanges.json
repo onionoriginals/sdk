@@ -1,0 +1,44 @@
+{
+  "note": "Applied in order to a shared host (P6.7) whose accepted head is entry 2.",
+  "initialHead": "2-QmU36PtMBuoUaiC8To9eiE5ooy8xgEPBwjvptzdx27bHY2",
+  "exchanges": [
+    {
+      "request": {
+        "original": "did:og:QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW",
+        "entry": "{\"parameters\":{},\"proof\":[{\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"proofValue\":\"z2K6imgqzDYvRUsup5n4BfAW2XncBY8MrcPDucDakFEn3J7QfzeLndECbuNpvSRgLomzbTR5DPCqYYRbJRBCEPoqM\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example#key-1\"}],\"state\":{\"asset\":{\"aliases\":[\"did:webvh:QmUg1fNtihPZVbFoxxo9ZEronC5j7vbNS5H9Uv9mcRGEEV:host.example:field-notes\"],\"name\":\"Field notes\",\"network\":\"regtest\",\"resource\":{\"digest\":\"zQmQFt79upGpNBqAnKak3f3XaUrgy6gevkrvEoGbJJCGLTo\",\"mediaType\":\"text/markdown\",\"size\":346000},\"status\":\"active\"},\"author\":{\"did\":\"did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example\",\"verificationMethod\":\"did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example#key-1\",\"versionId\":\"1-QmNjhx8xG4JD9hCswSc1nSZncxuSGzex37ica8BoyHEmrq\"},\"id\":\"did:og:QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW\",\"operation\":\"update\",\"transitions\":[]},\"versionId\":\"3-QmbrTQQNKzEJaBTop1WJNjfF2MCAwgJX7QVbLsAzdNJAFW\",\"versionTime\":\"2026-01-04T00:00:00Z\"}\n",
+        "resources": [],
+        "identities": []
+      },
+      "response": {
+        "result": "accepted",
+        "checkpoint": "3-QmbrTQQNKzEJaBTop1WJNjfF2MCAwgJX7QVbLsAzdNJAFW",
+        "head": "3-QmbrTQQNKzEJaBTop1WJNjfF2MCAwgJX7QVbLsAzdNJAFW"
+      }
+    },
+    {
+      "request": {
+        "original": "did:og:QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW",
+        "entry": "{\"parameters\":{},\"proof\":[{\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"proofValue\":\"z3DSpoCKXReoHqHjUhXAgfzg78NZQiEqnjwk5iqUD7qjaXrAxQ8tByhzkv5HWxh3zSzMKZgf4zAHATMMamXxASNtr\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example#key-1\"}],\"state\":{\"asset\":{\"aliases\":[],\"metadata\":{\"location\":\"North beach\"},\"name\":\"Field notes\",\"network\":\"regtest\",\"resource\":{\"digest\":\"zQmQFt79upGpNBqAnKak3f3XaUrgy6gevkrvEoGbJJCGLTo\",\"mediaType\":\"text/markdown\",\"size\":346000},\"status\":\"active\"},\"author\":{\"did\":\"did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example\",\"verificationMethod\":\"did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example#key-1\",\"versionId\":\"1-QmNjhx8xG4JD9hCswSc1nSZncxuSGzex37ica8BoyHEmrq\"},\"id\":\"did:og:QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW\",\"operation\":\"update\",\"transitions\":[]},\"versionId\":\"3-Qmb2kvjAEzmEd914igCucioUvUZ99SWH9MtzgU2Zp4jRM5\",\"versionTime\":\"2026-01-04T00:00:01Z\"}\n",
+        "resources": [],
+        "identities": []
+      },
+      "response": {
+        "result": "stale-parent",
+        "head": "3-QmbrTQQNKzEJaBTop1WJNjfF2MCAwgJX7QVbLsAzdNJAFW"
+      }
+    },
+    {
+      "request": {
+        "original": "did:og:QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW",
+        "entry": "{\"parameters\":{},\"proof\":[{\"cryptosuite\":\"eddsa-jcs-2022\",\"proofPurpose\":\"assertionMethod\",\"proofValue\":\"z2K6imgqzDYvRUsup5n4BfAW2XncBY8MrcPDucDakFEn3J7QfzeLndECbuNpvSRgLomzbTR5DPCqYYRbJRBCEPoqM\",\"type\":\"DataIntegrityProof\",\"verificationMethod\":\"did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example#key-1\"}],\"state\":{\"asset\":{\"aliases\":[\"did:webvh:QmUg1fNtihPZVbFoxxo9ZEronC5j7vbNS5H9Uv9mcRGEEV:host.example:field-notes\"],\"name\":\"Field notes\",\"network\":\"regtest\",\"resource\":{\"digest\":\"zQmQFt79upGpNBqAnKak3f3XaUrgy6gevkrvEoGbJJCGLTo\",\"mediaType\":\"text/markdown\",\"size\":346000},\"status\":\"active\"},\"author\":{\"did\":\"did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example\",\"verificationMethod\":\"did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example#key-1\",\"versionId\":\"1-QmNjhx8xG4JD9hCswSc1nSZncxuSGzex37ica8BoyHEmrq\"},\"id\":\"did:og:QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW\",\"operation\":\"update\",\"transitions\":[]},\"versionId\":\"3-QmbrTQQNKzEJaBTop1WJNjfF2MCAwgJX7QVbLsAzdNJAFW\",\"versionTime\":\"2026-01-04T00:00:00Z\"}\n",
+        "resources": [],
+        "identities": []
+      },
+      "response": {
+        "result": "already-accepted",
+        "checkpoint": "3-QmbrTQQNKzEJaBTop1WJNjfF2MCAwgJX7QVbLsAzdNJAFW",
+        "head": "3-QmbrTQQNKzEJaBTop1WJNjfF2MCAwgJX7QVbLsAzdNJAFW"
+      }
+    }
+  ]
+}

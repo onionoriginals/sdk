@@ -1,6 +1,6 @@
 {
   "name": "@originals/sdk",
-  "version": "6.1.0",
+  "version": "6.2.0",
   "description": "TypeScript SDK for the Originals Protocol - creating, discovering, and transferring digital assets with cryptographically verifiable provenance",
   "type": "module",
   "main": "./dist/index.js",
@@ -11,7 +11,8 @@
     "LICENSE"
   ],
   "bin": {
-    "originals": "./dist/originals/cli.js"
+    "originals": "./dist/originals/cli.js",
+    "originals-og": "./dist/og/cli.js"
   },
   "sideEffects": false,
   "exports": {
@@ -45,6 +46,11 @@
       "import": "./dist/originals/bitcoin-writer.js",
       "default": "./dist/originals/bitcoin-writer.js"
     },
+    "./og": {
+      "types": "./dist/og/index.d.ts",
+      "import": "./dist/og/index.js",
+      "default": "./dist/og/index.js"
+    },
     "./did": {
       "types": "./dist/did/index.d.ts",
       "import": "./dist/did/index.js",
@@ -68,7 +74,8 @@
     "test:security": "bun test tests/security",
     "bench:clock": "bun scripts/bench-inscription-clock.ts",
     "lint": "eslint \"src/**/*.ts\"",
-    "format": "prettier --write \"src/**/*.ts\""
+    "format": "prettier --write \"src/**/*.ts\"",
+    "regtest:og": "bun scripts/og-anchor-regtest.ts && bun scripts/og-anchor-regtest.ts --image && bun scripts/og-anchor-regtest.ts --large && bun scripts/og-vector-regtest.ts"
   },
   "keywords": [
     "originals",
@@ -100,7 +107,7 @@
     "@noble/hashes": "^2.0.1",
     "@noble/secp256k1": "^3.2.0",
     "@originals/tsp": "workspace:*",
-    "@originals/vh": "^0.4.0",
+    "@originals/vh": "^0.5.0",
     "@resvg/resvg-wasm": "2.6.2",
     "@scure/base": "^2.2.0",
     "@scure/btc-signer": "^2.4.1",

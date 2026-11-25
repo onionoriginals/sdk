@@ -14,7 +14,7 @@
     },
     "apps/landing": {
       "name": "@originals/landing",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "dependencies": {
         "@fontsource-variable/archivo": "^5.3.0",
         "@fontsource/jetbrains-mono": "^5.2.8",
@@ -24,7 +24,7 @@
         "@originals/auth": "workspace:*",
         "@originals/host": "workspace:*",
         "@originals/sdk": "workspace:*",
-        "@originals/vh": "^0.4.0",
+        "@originals/vh": "^0.5.0",
         "@scure/base": "^2.2.0",
         "@scure/btc-signer": "^2.4.1",
         "@turnkey/api-key-stamper": "^0.6.7",
@@ -82,7 +82,7 @@
     },
     "packages/code": {
       "name": "@originals/code",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "bin": {
         "originals-code": "./dist/cli.js",
         "git-remote-originals": "./dist/remote-helper.js",
@@ -90,8 +90,8 @@
       "dependencies": {
         "@noble/hashes": "^2.0.1",
         "@originals/auth": "^4.0.4",
-        "@originals/sdk": "^6.1.0",
-        "@originals/vh": "^0.4.0",
+        "@originals/sdk": "^6.2.0",
+        "@originals/vh": "^0.5.0",
         "@turnkey/sdk-server": "^8.8.0",
         "fflate": "^0.8.3",
       },
@@ -110,12 +110,12 @@
     },
     "packages/host": {
       "name": "@originals/host",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@noble/hashes": "^2.0.1",
-        "@originals/sdk": "^6.0.0",
+        "@originals/sdk": "^6.2.0",
         "@originals/tsp": "workspace:*",
-        "@originals/vh": "^0.4.0",
+        "@originals/vh": "^0.5.0",
         "@scure/base": "^2.2.0",
       },
       "devDependencies": {
@@ -133,9 +133,10 @@
     },
     "packages/sdk": {
       "name": "@originals/sdk",
-      "version": "6.1.0",
+      "version": "6.2.0",
       "bin": {
         "originals": "./dist/originals/cli.js",
+        "originals-og": "./dist/og/cli.js",
       },
       "dependencies": {
         "@jsquash/avif": "2.1.1",
@@ -147,7 +148,7 @@
         "@noble/hashes": "^2.0.1",
         "@noble/secp256k1": "^3.2.0",
         "@originals/tsp": "workspace:*",
-        "@originals/vh": "^0.4.0",
+        "@originals/vh": "^0.5.0",
         "@resvg/resvg-wasm": "2.6.2",
         "@scure/base": "^2.2.0",
         "@scure/btc-signer": "^2.4.1",
@@ -196,7 +197,7 @@
     },
     "packages/vh": {
       "name": "@originals/vh",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@noble/curves": "^2.2.0",
         "@noble/hashes": "^2.0.1",

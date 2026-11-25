@@ -1,0 +1,44 @@
+{
+  "original": "did:og:QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW",
+  "checkpoint": null,
+  "inputs": [
+    {
+      "kind": "log",
+      "source": "anchor-absent/did.jsonl",
+      "digest": "zQmUmeEZS1W9vTDqqnfkfA6CAGe52uoJNasSotVN1NZZYdU"
+    },
+    {
+      "kind": "signer-history",
+      "source": "anchor-absent/author/did.jsonl",
+      "digest": "zQmfXJB3kVg7jeL7HjvrTvwy5bcPEyPQP5bkLjTEEUJxorv"
+    },
+    {
+      "kind": "resource",
+      "source": "anchor-absent/resources/v1.md",
+      "digest": "zQmdvFJ4gaexH7x5R8H7o6Zbykni8wMNyN1ezdMLrVEa9Ng"
+    },
+    {
+      "kind": "resource",
+      "source": "anchor-absent/resources/v2.md",
+      "digest": "zQmQFt79upGpNBqAnKak3f3XaUrgy6gevkrvEoGbJJCGLTo"
+    },
+    {
+      "kind": "sat-read",
+      "source": "anchor-absent/sat-read.json",
+      "digest": "zQmRdYQRX3MALBWqwXA7dz5xM99DYHGoSNefMcQaud4qvUE"
+    }
+  ],
+  "signerHistories": [
+    {
+      "did": "did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example",
+      "source": "anchor-absent/author/did.jsonl",
+      "obtained": "2026-01-06T00:00:00Z"
+    }
+  ],
+  "network": "regtest",
+  "tip": {
+    "height": 111,
+    "hash": "46a656aa6f7171862e5f9d8274ff44ea43380818eeb2e33924b06150dd675faa"
+  },
+  "depth": 1
+}

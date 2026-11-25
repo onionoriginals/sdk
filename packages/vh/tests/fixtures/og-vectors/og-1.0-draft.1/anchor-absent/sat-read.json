@@ -1,0 +1,11 @@
+{
+  "network": "regtest",
+  "sat": 1234567890,
+  "tip": {
+    "height": 111,
+    "hash": "46a656aa6f7171862e5f9d8274ff44ea43380818eeb2e33924b06150dd675faa"
+  },
+  "complete": true,
+  "holder": null,
+  "inscriptions": []
+}
