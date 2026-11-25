@@ -14,3 +14,6 @@ export * from "./document.js";
 export * from "./carried.js";
 export * from "./fetch.js";
 export * from "./hosted.js";
+export * from "./inscription.js";
+export * from "./bitcoin.js";
+export * from "./publish.js";

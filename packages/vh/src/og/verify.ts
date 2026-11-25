@@ -12,7 +12,7 @@ import { checkLogStructure, parseLogFile, resourceDigest, versionNumber, isDeact
 import { ASSET_LOG_NAME, MANIFEST_NAME, readManifest, readPackageZip, signerDirectory, type Manifest } from "./package.js";
 import { offlineFrom, outcomeOf, reportInputs, sortDiagnostics, type Axes, type Diagnostic, type EntryAuthority, type EntryLabel, type EvidenceInput, type EvidenceSet, type Report, type SignerLabel } from "./report.js";
 import { OG_METHOD, OgRuleError } from "./rules.js";
-import { checkBinding, latestVersion, listsKey, lookupVersion, verifySignerLog, type SignerHistory } from "./signers.js";
+import { byCodePoint, checkBinding, latestVersion, listsKey, lookupVersion, verifySignerLog, type SignerHistory, type SignerVersion } from "./signers.js";
 import { advance, checkTransition, genesisContext, isAnchoringEntry, isEditorEntry, signerMethodOf, stateOf, type BranchContext, type SignerRef } from "./state.js";
 
 // ---------------------------------------------------------------------------
@@ -33,8 +33,6 @@ export interface HistoryCandidate {
   witness?: unknown;
   source: string;
   obtained?: string;
-  /** Inscribed on the anchoring sat (P9.33), with the inscription carrying it. */
-  inscribed?: string;
 }
 
 export interface Gathered {
@@ -146,14 +144,24 @@ function genesisMethod(copy: LogCopy): string | undefined {
 // ---------------------------------------------------------------------------
 // Signer histories
 
+export interface VerifiedLog {
+  history: SignerHistory;
+  candidate: HistoryCandidate;
+}
+
 export interface Histories {
-  byDid: Map<string, { history: SignerHistory; candidate: HistoryCandidate }>;
+  /**
+   * Per signer DID, every supplied log that verifies in full from its genesis (P7.8, P9.33). The evidence is
+   * their union (owner decision B, 22 November 2026): a named version is found if any of them holds it. A
+   * log that fails anywhere is not here at all.
+   */
+  byDid: Map<string, VerifiedLog[]>;
 }
 
 /**
- * Verify every signer history supplied and keep, for each DID, the one with
- * the newest verified version (P7.8: a newer version in the evidence set wins
- * over an older one a package or host supplies).
+ * Verify every signer history supplied and keep, for each DID, every one that verifies (P7.8: a newer
+ * version in the evidence set wins over an older one a package or host supplies; every verifying log is
+ * evidence, whichever order the inputs come in).
  */
 export async function verifyHistories(candidates: HistoryCandidate[]): Promise<Histories> {
   const byDid: Histories["byDid"] = new Map();
@@ -161,10 +169,39 @@ export async function verifyHistories(candidates: HistoryCandidate[]): Promise<H
     const method = signerMethodOf(c.did);
     if (method !== "did:webvh" && method !== "did:vh") continue;
     const history = await verifySignerLog(c.did, c.entries, c.witness);
-    const current = byDid.get(c.did);
-    if (!current || history.versions.length > current.history.versions.length) byDid.set(c.did, { history, candidate: c });
+    if (history.failure || history.versions.length === 0) continue;
+    byDid.set(c.did, [...(byDid.get(c.did) ?? []), { history, candidate: c }]);
   }
   return { byDid };
+}
+
+/** The supplied logs of a DID that verify, as histories. */
+export const signerLogs = (h: Histories, did: string): SignerHistory[] => (h.byDid.get(did) ?? []).map((l) => l.history);
+
+/**
+ * The newest version of a signer DID in the evidence set (P7.8) and the log that holds it: the
+ * highest-numbered version among the logs that verify, ties broken by the versionId's code-point order,
+ * then the log's source and when it was obtained, so the choice never depends on input order.
+ */
+export function newestSignerLog(h: Histories, did: string): (VerifiedLog & { latest: SignerVersion }) | undefined {
+  let best: (VerifiedLog & { latest: SignerVersion }) | undefined;
+  for (const l of h.byDid.get(did) ?? []) {
+    const latest = latestVersion(l.history);
+    if (!latest) continue;
+    const better = !best || latest.number > best.latest.number || (latest.number === best.latest.number && (
+      byCodePoint(latest.versionId, best.latest.versionId) < 0 || (latest.versionId === best.latest.versionId && (
+        byCodePoint(l.candidate.source, best.candidate.source) < 0 ||
+        (l.candidate.source === best.candidate.source && byCodePoint(l.candidate.obtained ?? "", best.candidate.obtained ?? "") < 0)))));
+    if (better) best = { ...l, latest };
+  }
+  return best;
+}
+
+/** The report's item for a did:vh or did:webvh signer relied on (P7.8, P14.25), from the newest log. */
+export function signerLabelOf(h: Histories, did: string, role: "author" | "editor"): SignerLabel | undefined {
+  const n = newestSignerLog(h, did);
+  if (!n) return undefined;
+  return { did, role, latestVersionId: n.latest.versionId, source: n.candidate.source, obtained: n.candidate.obtained ?? null, freshness: n.history.witnessed ? "established" : "not-established" };
 }
 
 // ---------------------------------------------------------------------------
@@ -321,17 +358,17 @@ function bindSigner(ev: Evaluated, histories: Histories, lastVersions: Map<strin
   const last = lastVersions.get(identityOf(ref.did));
   if (last !== undefined && versionNumber(ref.versionId) < last) throw new OgRuleError("P5.8", "SIGNER_VERSION_OLDER", "the entry names an older signer DID version than an earlier entry by the same identity");
   const method = signerMethodOf(ref.did)!;
-  const known = histories.byDid.get(ref.did);
-  if (!known || method === "did:btco") {
+  if (method === "did:btco") {
     ev.status = "unchecked";
     ev.missingDid = ref.did;
     return;
   }
-  const found = lookupVersion(known.history, ref.versionId, method);
-  if ("beyond" in found) {
+  // P7.8 with the union rule (owner decision B): the named version from any supplied log that verifies.
+  const found = lookupVersion(signerLogs(histories, ref.did), ref.versionId);
+  if ("missing" in found) {
     ev.status = "unchecked";
     ev.missingDid = ref.did;
-    if (known.history.versions.length) ev.missingVersion = ref.versionId;
+    if (found.missing === "version") ev.missingVersion = ref.versionId;
     return;
   }
   if ("mismatch" in found) throw new OgRuleError("P5.3", "SIGNER_VERSION_UNKNOWN", `${ref.did} has no version ${ref.versionId}: ${found.mismatch}`, "author-binding");
@@ -342,9 +379,9 @@ function bindSigner(ev: Evaluated, histories: Histories, lastVersions: Map<strin
 function authorityOf(ev: Evaluated, histories: Histories): EntryAuthority {
   const s = stateOf(ev.node.entry);
   const ref = s.editor ?? s.author;
-  const latest = latestVersion(histories.byDid.get(ref.did)!.history)!;
-  const authorLatest = s.editor ? histories.byDid.get(s.author.did) : undefined;
-  if (latest.deactivated || (authorLatest && latestVersion(authorLatest.history)?.deactivated)) return "did-deactivated-since";
+  const latest = newestSignerLog(histories, ref.did)!.latest;
+  const authorLatest = s.editor ? newestSignerLog(histories, s.author.did)?.latest : undefined;
+  if (latest.deactivated || authorLatest?.deactivated) return "did-deactivated-since";
   if (!listsKey(latest.document, ev.key!)) return "key-removed-since";
   return "current-key";
 }
@@ -399,18 +436,35 @@ export async function verifyOriginal(evidence: EvidenceSet): Promise<Report> {
 }
 
 /**
+ * P9.18: a writer's check of its own committed log, through the entry it is
+ * about to publish, as a local copy. Every entry, including the anchoring
+ * entry, is checked; the result is never `current` and is only the writer's
+ * own gate before inscribing (T9-039, T9-040).
+ */
+export async function verifyLocalCopy(evidence: EvidenceSet): Promise<Report> {
+  return verifyOffChain(evidence, gather(evidence), { bitcoinRead: false, localCopy: true });
+}
+
+/**
  * Verify from copies of the log alone (P7.10, P7.14): never `current`. A copy
  * holding an anchoring entry is read as a historical checkpoint before it,
  * with `bitcoin` `missing-evidence`.
  */
 export interface OffChainOptions {
   bitcoinRead: boolean;
+  /** P9.18: the writer's own check of its committed log, through the entry it is about to publish. */
+  localCopy?: boolean;
   /**
    * did:btco sats the evidence set reads in full at its tip that hold no anchoring
    * publication of this Original (P9.5): a copy's anchoring entry naming one, and every
    * entry after it, are `ignored`, and the state is valid as of the entry before.
    */
   readSats?: ReadonlySet<string>;
+  /**
+   * Sats the evidence set reads in full that hold an anchoring publication of this Original that cannot be
+   * decided yet (P9.16): not missing evidence, so no `anchoring-sat-not-read` (P7.14), and not `ignored`.
+   */
+  undecidedSats?: ReadonlySet<string>;
 }
 
 export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, opts: OffChainOptions): Promise<Report> {
@@ -424,7 +478,7 @@ export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, 
     genesisIds.every((id) => stateOf(tree.nodes.get(id)!.entry).id === evidence.original) &&
     !tree.structureFailures.some((f) => f.parent === null && /^P(14\.28|3\.1)$/.test(ruleOfError(f.error)));
   const anyAnchor = [...tree.nodes.values()].some((n) => stateOf(n.entry).asset?.aliases?.some?.((a: string) => a.startsWith("did:btco:")));
-  const stopAtAnchor = anyAnchor;
+  const stopAtAnchor = anyAnchor && !opts.localCopy;
   const evaluated = bound ? evaluateTree(tree, histories, { stopAtAnchor, target: evidence.checkpoint ?? undefined }) : new Map<string, Evaluated>();
 
   // A copy's anchoring entry naming a sat read in full without an anchor, and every entry after it, are ignored (P9.5, P7.19).
@@ -515,7 +569,7 @@ export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, 
   const historyInvalid = !bound || structuralRules.some((e) => e.category !== "limit-exceeded" && !isBinding(e)) ||
     [...evaluated.values()].some((e) => e.status === "rejected" && !e.identityFailure);
   const limitExceeded = tree.limitExceeded || structuralRules.some((e) => e.category === "limit-exceeded") ||
-    [...histories.byDid.values()].some((h) => h.history.limitExceeded);
+    [...histories.byDid.values()].some((logs) => logs.some((h) => h.history.limitExceeded));
   const identityFailed = [...evaluated.values()].some((e) => e.status === "rejected" && e.identityFailure) || structuralRules.some(isBinding);
   const unchecked = [...evaluated.values()].some((e) => e.status === "unchecked");
   const history: Axes["history"] = historyInvalid ? "invalid" : limitExceeded ? "limit-exceeded" : "valid";
@@ -559,7 +613,7 @@ export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, 
     const a = branchAnchor(tree, ev.node);
     if (a) anchorAliases.add(a);
   }
-  for (const a of anchorAliases) if (!opts.readSats?.has(a)) diagnostics.push({ code: "anchoring-sat-not-read", rule: "P7.14", item: { kind: "sat", id: a }, reason: "The log names this anchoring sat, and the evidence set does not read it in full." });
+  for (const a of anchorAliases) if (!opts.readSats?.has(a) && !opts.undecidedSats?.has(a)) diagnostics.push({ code: "anchoring-sat-not-read", rule: "P7.14", item: { kind: "sat", id: a }, reason: "The log names this anchoring sat, and the evidence set does not read it in full." });
   for (const i of gathered.invalidInputs) diagnostics.push({ code: "input-unusable", rule: "P7.17", item: { kind: "input", id: i.source }, reason: i.error.message });
 
   // Signers relied on (P7.8).
@@ -571,13 +625,7 @@ export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, 
     const did = (s.editor ?? s.author).did;
     if (!relied.has(did)) relied.set(did, s.editor ? "editor" : "author");
   }
-  for (const [did, role] of relied) {
-    const h = histories.byDid.get(did)!;
-    signers.push({
-      did, role, latestVersionId: latestVersion(h.history)!.versionId, source: h.candidate.source,
-      obtained: h.candidate.obtained ?? null, freshness: h.history.witnessed ? "established" : "not-established",
-    });
-  }
+  for (const [did, role] of relied) signers.push(signerLabelOf(histories, did, role)!);
 
   if (targetMissing) diagnostics.push({ code: "target-missing", rule: "P3.2", item: { kind: "entry", id: targetMissing }, reason: "The evidence set does not hold the target checkpoint, or holds no entry." });
   // Offline (P7.21): derived from the diagnostics.
@@ -599,6 +647,7 @@ export async function verifyOffChain(evidence: EvidenceSet, gathered: Gathered, 
     signers,
     diagnostics: sorted,
   };
+  if (opts.localCopy) report.reason = "local copy (P9.18): the writer's own check before it publishes; unverified on Bitcoin, never current, and never a report for anyone else";
   return report;
 }
 
