@@ -11,7 +11,8 @@
     "LICENSE"
   ],
   "bin": {
-    "originals": "./dist/originals/cli.js"
+    "originals": "./dist/originals/cli.js",
+    "originals-og": "./dist/og/cli.js"
   },
   "sideEffects": false,
   "exports": {
@@ -45,6 +46,11 @@
       "import": "./dist/originals/bitcoin-writer.js",
       "default": "./dist/originals/bitcoin-writer.js"
     },
+    "./og": {
+      "types": "./dist/og/index.d.ts",
+      "import": "./dist/og/index.js",
+      "default": "./dist/og/index.js"
+    },
     "./did": {
       "types": "./dist/did/index.d.ts",
       "import": "./dist/did/index.js",
@@ -63,7 +69,8 @@
     "test:security": "bun test tests/security",
     "bench:clock": "bun scripts/bench-inscription-clock.ts",
     "lint": "eslint \"src/**/*.ts\"",
-    "format": "prettier --write \"src/**/*.ts\""
+    "format": "prettier --write \"src/**/*.ts\"",
+    "regtest:og": "bun scripts/og-anchor-regtest.ts && bun scripts/og-anchor-regtest.ts --image && bun scripts/og-anchor-regtest.ts --large && bun scripts/og-vector-regtest.ts"
   },
   "keywords": [
     "originals",
