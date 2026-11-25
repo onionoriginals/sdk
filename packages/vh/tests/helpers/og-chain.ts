@@ -1,8 +1,10 @@
 // A synthetic Bitcoin chain for did:og tests: sats with inscriptions in chain order, read by
-// one or more indexes at a tip, and evidence sets over them (P7.17, P9.18, P9.31).
-import { parseJsonLines, type JsonObject } from '../../src/json/index.js';
+// one or more indexes at a tip, and evidence sets over them (P7.17, P9.18, P9.31). Inscriptions
+// carry no signer histories (D22): the chain records which did:vh / did:webvh signers a test
+// resolves, and `evidence()` supplies their logs as signer-history inputs.
+import type { JsonObject } from '../../src/json/index.js';
 import { encodeCbor } from '../../src/originals/cbor.js';
-import { buildPublication, type EvidenceSet, type InscriptionRead, type OgEntry, type PublicationPart, type SatRead, type SignerHistoryItem } from '../../src/og/index.js';
+import { buildPublication, type EvidenceSet, type InscriptionRead, type OgEntry, type PublicationPart, type SatRead } from '../../src/og/index.js';
 import type { Signer, World } from './og-world.js';
 
 let txSeq = 0;
@@ -23,11 +25,24 @@ export class Chain {
   /** Per sat: its inscriptions in order. */
   sats = new Map<string, InscriptionRead[]>();
   holders = new Map<string, string>();
+  /** did:vh / did:webvh signers whose logs the evidence set supplies, as resolved at verification (D22). */
+  supplied = new Map<string, Supplied>();
+
+  /** Supply these signers' logs in the evidence set (through version `to`, or all of it). */
+  supply(...items: Supplied[]): this {
+    for (const x of items) {
+      const known = this.supplied.get(x.signer.did);
+      const to = !known ? x.to : known.to === undefined || x.to === undefined ? undefined : Math.max(known.to, x.to);
+      this.supplied.set(x.signer.did, { signer: x.signer, to });
+    }
+    return this;
+  }
 
   /** Inscribe envelopes on `sat`, each in a new block unless `sameBlock`. Returns their ids. */
   inscribe(sat: string, envelopes: Uint8Array[], opts: { sameBlock?: boolean; txIndex?: number; confirmations?: number; height?: number } = {}): string[] {
     const list = this.sats.get(sat) ?? [];
     const ids: string[] = [];
+    for (const envelope of envelopes) this.supply(...(SUPPLIES.get(envelope) ?? []));
     let txIndex = opts.txIndex ?? 1;
     for (const envelope of envelopes) {
       if (!opts.sameBlock && opts.height === undefined) this.height++;
@@ -60,24 +75,53 @@ export class Chain {
     return { sat, index, complete, inscriptions: [...(this.sats.get(sat) ?? [])], holder: this.holders.get(sat) ?? null };
   }
 
-  /** The P9.18 evidence set: every sat's inscriptions at the tip, read by one index; plus any extra inputs. */
-  evidence(original: string, opts: { sats?: string[]; reads?: SatRead[]; extra?: EvidenceSet['inputs']; network?: EvidenceSet['network']; originalsIndex?: EvidenceSet['originalsIndex']; tipHeight?: number } = {}): EvidenceSet {
+  /**
+   * The evidence set: every sat's inscriptions at the tip, read by one index; the logs of the signers
+   * supplied (`histories: false` for none, or exactly these); plus any extra inputs.
+   */
+  evidence(original: string, opts: { sats?: string[]; reads?: SatRead[]; extra?: EvidenceSet['inputs']; network?: EvidenceSet['network']; originalsIndex?: EvidenceSet['originalsIndex']; tipHeight?: number; histories?: Array<{ did: string; log: string; source?: string; obtained?: string }> | false } = {}): EvidenceSet {
     const reads = opts.reads ?? (opts.sats ?? [...this.sats.keys()]).map((s) => this.read(s));
     const inputs: EvidenceSet['inputs'] = reads.flatMap((r) => r.inscriptions.map((i) => ({ kind: 'inscription' as const, source: `index:${i.id}`, bytes: i.envelope })));
+    const histories = opts.histories === false ? [] : opts.histories ?? [...this.supplied.values()].map((x) => ({ did: x.signer.did, log: logThrough(x.signer, x.to) }));
+    const notes = histories.map((h) => ({ did: h.did, source: h.source ?? `resolved:${h.did}`, obtained: h.obtained ?? '2026-11-20T00:00:00Z' }));
+    const enc = new TextEncoder();
+    const supplied = histories.map((h, k) => ({ kind: 'signer-history' as const, source: notes[k].source, bytes: enc.encode(h.log), did: h.did }));
     return {
-      original, checkpoint: null, inputs: [...inputs, ...(opts.extra ?? [])], network: opts.network ?? 'regtest',
+      original, checkpoint: null, inputs: [...inputs, ...supplied, ...(opts.extra ?? [])], network: opts.network ?? 'regtest',
       tip: { height: opts.tipHeight ?? this.height + 10, hash: 'f'.repeat(64) }, depth: 1, sats: reads, originalsIndex: opts.originalsIndex ?? null,
+      signerHistories: notes,
     };
   }
 }
 
-/** A signer's log as inscribed history items (P9.33), from version `from` (1-based). */
-export function history(s: Signer, from = 1, to?: number): SignerHistoryItem {
-  const entries = parseJsonLines(s.log()) as JsonObject[];
-  return { did: s.did, log: entries.slice(from - 1, to) };
+/** A signer whose log the evidence set supplies, through version `to` (1-based) or all of it (D22). */
+export interface Supplied {
+  signer: Signer;
+  to?: number;
 }
 
-/** The anchoring publication of a world's log, with its author's history inscribed. */
-export function anchoring(w: World, opts: { body?: Uint8Array | null; signers?: SignerHistoryItem[]; entries?: OgEntry[] } = {}): PublicationPart[] {
-  return buildPublication({ entries: opts.entries ?? w.entries, signers: opts.signers ?? [history(w.author)], body: opts.body ?? null });
+/** The signers a test resolves for a publication, by each part's envelope (never inscribed, D22). */
+const SUPPLIES = new WeakMap<Uint8Array, Supplied[]>();
+
+/** The signer's did.jsonl through version `to`, as resolution would return it. */
+export function logThrough(s: Signer, to?: number): string {
+  if (to === undefined) return s.log();
+  return s.log().split('\n').filter((l) => l.length).slice(0, to).map((l) => `${l}\n`).join('');
+}
+
+/** Supply a signer's log (through version `to`) to the verifier: resolution, not inscription (D22). */
+export function history(s: Signer, _from = 1, to?: number): Supplied {
+  return { signer: s, to };
+}
+
+/** A publication of these entries, supplying these signers' logs in the evidence set. */
+export function publication(input: { entries: OgEntry[]; body?: Uint8Array | null }, supplies: Supplied[] = []): PublicationPart[] {
+  const parts = buildPublication({ entries: input.entries, body: input.body ?? null });
+  for (const p of parts) SUPPLIES.set(p.envelope, supplies);
+  return parts;
+}
+
+/** The anchoring publication of a world's log; its author's log is supplied, not inscribed (D22). */
+export function anchoring(w: World, opts: { body?: Uint8Array | null; signers?: Supplied[]; entries?: OgEntry[] } = {}): PublicationPart[] {
+  return publication({ entries: opts.entries ?? w.entries, body: opts.body ?? null }, opts.signers ?? [history(w.author)]);
 }

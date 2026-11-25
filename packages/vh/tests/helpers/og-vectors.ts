@@ -29,14 +29,24 @@ export function vtree(dir: string): Record<string, Uint8Array> {
 export const bytesEqual = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
 export const utf8 = (s: string) => new TextEncoder().encode(s);
 
+/** Where a resolved input's bytes are in a vector (its `resolved.json`, D22): source URL to file. */
+function resolvedFiles(dir: string): Map<string, string> {
+  try {
+    return new Map(vjson(`${dir}/resolved.json`).responses.map((r: { source: string; file: string }) => [r.source, `${dir}/${r.file}`]));
+  } catch {
+    return new Map();
+  }
+}
+
 /** A vector's evidence-set.json, with each input's bytes read from the vector (P7.17). */
 export function vectorEvidence(dir: string): import('../../src/og/index.js').EvidenceSet {
   const e = vjson(`${dir}/evidence-set.json`);
+  const resolved = resolvedFiles(dir);
   return {
     original: e.original, checkpoint: e.checkpoint, network: e.network, tip: e.tip, depth: e.depth,
     signerHistories: e.signerHistories,
     // Each input with the digest the evidence set states for it (P7.17); index reads are supplied separately.
-    inputs: e.inputs.map((i: { kind: string; source: string; digest: string }) => (i.source.startsWith('index:') ? { kind: i.kind, source: i.source, bytes: new Uint8Array() } : { kind: i.kind, source: i.source, digest: i.digest, bytes: vbytes(i.source) })),
+    inputs: e.inputs.map((i: { kind: string; source: string; digest: string }) => (i.source.startsWith('index:') ? { kind: i.kind, source: i.source, bytes: new Uint8Array() } : { kind: i.kind, source: i.source, digest: i.digest, bytes: vbytes(resolved.get(i.source) ?? i.source) })),
   } as never;
 }
 
