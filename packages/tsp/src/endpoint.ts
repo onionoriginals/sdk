@@ -1,6 +1,6 @@
 import type { LocalVid, OpenedMessage } from './message.js';
 import { keysFromRev3Vid, openTspMessage, sealTspPayload } from './message.js';
-import type { Payload } from './cesr/packet.js';
+import type { Digest, Payload } from './cesr/packet.js';
 import { postTspWire } from './http/client.js';
 import { peerFromKeys, MemoryTspRouter } from './transport.js';
 
@@ -8,6 +8,10 @@ export type RelationshipState =
   | { status: 'unrelated' }
   | { status: 'uni'; inviteDigest: Uint8Array }
   | { status: 'bi'; inviteDigest: Uint8Array; replyDigest: Uint8Array };
+
+function digestsEqual(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]!);
+}
 
 export class TspEndpoint {
   readonly vid: LocalVid;
@@ -21,6 +25,35 @@ export class TspEndpoint {
 
   relationship(peerId: string): RelationshipState {
     return this.relationships.get(peerId) ?? { status: 'unrelated' };
+  }
+
+  /** Apply inbound control payloads (RFI / RFA / RFD) after HTTP or in-memory delivery. */
+  recordInbound(senderId: string, opened: OpenedMessage): void {
+    this.applyInboundPayload(senderId, opened.payload);
+  }
+
+  private applyInboundPayload(peerId: string, payload: Payload): void {
+    if (payload.type === 'rfi') {
+      this.relationships.set(peerId, {
+        status: 'uni',
+        inviteDigest: payload.requestDigest.bytes,
+      });
+    }
+    if (payload.type === 'rfa') {
+      this.relationships.set(peerId, {
+        status: 'bi',
+        inviteDigest: payload.requestDigest.bytes,
+        replyDigest: payload.replyDigest.bytes,
+      });
+    }
+    if (payload.type === 'rfd') {
+      const state = this.relationships.get(peerId);
+      if (state?.status === 'bi' && digestsEqual(state.replyDigest, payload.reply.bytes)) {
+        this.relationships.delete(peerId);
+      } else if (state?.status === 'uni') {
+        this.relationships.delete(peerId);
+      }
+    }
   }
 
   async sendRaw(peer: LocalVid, payload: Payload, options?: { confidential?: boolean }): Promise<Uint8Array> {
@@ -58,6 +91,26 @@ export class TspEndpoint {
     return wire;
   }
 
+  async requestRelationshipHttp(peer: LocalVid, options?: { fetch?: typeof fetch }): Promise<Uint8Array> {
+    const transport = peer.transport;
+    if (!transport) throw new Error('peer has no TSP transport URL');
+    const wire = await this.sendRelationshipInvite(peer);
+    await postTspWire(transport, wire, { fetch: options?.fetch });
+    return wire;
+  }
+
+  private pendingInvite(peerId: string): Extract<Payload, { type: 'rfi' }> {
+    const state = this.relationship(peerId);
+    if (state.status !== 'uni') throw new Error('no pending invite for peer');
+    return {
+      type: 'rfi',
+      requestDigest: { kind: 'sha256', bytes: state.inviteDigest },
+      nonce: new Uint8Array(16),
+      replyPath: [],
+      referral: null,
+    };
+  }
+
   async sendRelationshipAccept(
     peer: LocalVid,
     invite: Extract<Payload, { type: 'rfi' }>,
@@ -76,24 +129,51 @@ export class TspEndpoint {
     return wire;
   }
 
+  async acceptRelationshipHttp(
+    peer: LocalVid,
+    invite?: Extract<Payload, { type: 'rfi' }>,
+    options?: { fetch?: typeof fetch },
+  ): Promise<Uint8Array> {
+    const transport = peer.transport;
+    if (!transport) throw new Error('peer has no TSP transport URL');
+    const inv = invite ?? this.pendingInvite(peer.id);
+    const wire = await this.sendRelationshipAccept(peer, inv);
+    await postTspWire(transport, wire, { fetch: options?.fetch });
+    return wire;
+  }
+
+  async sendRelationshipCancel(peer: LocalVid, replyDigest: Digest): Promise<Uint8Array> {
+    const payload: Payload = { type: 'rfd', reply: replyDigest };
+    const wire = await this.sendRaw(peer, payload, { confidential: true });
+    const state = this.relationships.get(peer.id);
+    if (state?.status === 'bi' && digestsEqual(state.replyDigest, replyDigest.bytes)) {
+      this.relationships.delete(peer.id);
+    }
+    return wire;
+  }
+
+  async cancelRelationshipHttp(
+    peer: LocalVid,
+    options?: { fetch?: typeof fetch },
+  ): Promise<Uint8Array> {
+    const transport = peer.transport;
+    if (!transport) throw new Error('peer has no TSP transport URL');
+    const state = this.relationship(peer.id);
+    if (state.status !== 'bi') throw new Error('no active relationship to cancel');
+    const wire = await this.sendRelationshipCancel(
+      peer,
+      { kind: 'sha256', bytes: state.replyDigest },
+    );
+    await postTspWire(transport, wire, { fetch: options?.fetch });
+    return wire;
+  }
+
   async receiveNext(
     peer: LocalVid,
     wire: Uint8Array,
   ): Promise<OpenedMessage> {
     const opened = await openTspMessage(wire, peer, this.vid);
-    if (opened.payload.type === 'rfi') {
-      this.relationships.set(peer.id, {
-        status: 'uni',
-        inviteDigest: opened.payload.requestDigest.bytes,
-      });
-    }
-    if (opened.payload.type === 'rfa') {
-      this.relationships.set(peer.id, {
-        status: 'bi',
-        inviteDigest: opened.payload.requestDigest.bytes,
-        replyDigest: opened.payload.replyDigest.bytes,
-      });
-    }
+    this.recordInbound(peer.id, opened);
     return opened;
   }
 

@@ -607,6 +607,15 @@ export function decodePayload(stream: Uint8Array): DecodedPayload {
       senderIdentity: sender.vid,
     };
   }
+  if (matchType(msgType, XRFD)) {
+    const rep = decodeDigest(body)!;
+    body = decodePadding(rep.rest)!;
+    if (body.length > 0) throw new DecodeError('TrailingGarbage');
+    return {
+      payload: { type: 'rfd', reply: rep.digest },
+      senderIdentity: sender.vid,
+    };
+  }
   if (matchType(msgType, XPAD)) {
     const nonce = decodeFixedData(TSP_NONCE, body, 16)!;
     body = decodePadding(nonce.rest)!;

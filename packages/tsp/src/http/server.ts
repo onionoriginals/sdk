@@ -1,5 +1,6 @@
 import { cesrToBinary } from '../cesr/binary.js';
 import { decodeEnvelope } from '../cesr/packet.js';
+import type { TspEndpoint } from '../endpoint.js';
 import type { LocalVid, OpenedMessage } from '../message.js';
 import { openTspMessage } from '../message.js';
 
@@ -12,8 +13,20 @@ export type SenderLookup = (
 export type TspHttpHandlerOptions = {
   local: LocalVid;
   lookupSender: SenderLookup;
+  /** When set, records RFI/RFA/RFD relationship state on the receiving endpoint. */
+  endpoint?: TspEndpoint;
   onMessage?: (message: OpenedMessage) => void | Promise<void>;
 };
+
+/** Bundle handler options with relationship state tracking for an inbox-hosted endpoint. */
+export function tspInboxHandlerOptions(
+  endpoint: TspEndpoint,
+  local: LocalVid,
+  lookupSender: SenderLookup,
+  onMessage?: (message: OpenedMessage) => void | Promise<void>,
+): TspHttpHandlerOptions {
+  return { local, lookupSender, endpoint, onMessage };
+}
 
 function envelopeSenderId(wire: Uint8Array): string {
   const decoded = decodeEnvelope(cesrToBinary(wire));
@@ -48,6 +61,7 @@ export function createTspHttpHandler(options: TspHttpHandlerOptions): (req: Requ
         { id: senderDid, signingPublicKey: senderKeys.signingPublicKey },
         options.local,
       );
+      options.endpoint?.recordInbound(senderDid, opened);
       await options.onMessage?.(opened);
       return new Response(null, { status: 204 });
     } catch {

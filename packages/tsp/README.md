@@ -9,7 +9,8 @@ TypeScript implementation of **TSP 1.0 direct mode** with **Multikey** VIDs. Pee
 - Ed25519 signatures (CESR indexed `B#` at index 0)
 - VID resolution from DID documents (`TSPTransport` / `tsp` service, Multikey + JWK peers)
 - `TspEndpoint` direct-mode send/receive over an in-memory inbox
-- Hosted HTTP inbox layout for **did:webvh** (mirrors `did.jsonl` paths): root DIDs use `https://{host}/.well-known/tsp/inbox`; path DIDs use `https://{host}/{path}/tsp/inbox`. Helpers: `webvhTspInboxUrl`, `createTspInboxRouter` (multi-DID path routing with `createTspHttpHandler`)
+- Hosted HTTP inbox layout for **did:webvh** (mirrors `did.jsonl` paths): root DIDs use `https://{host}/.well-known/tsp/inbox`; path DIDs use `https://{host}/{path}/tsp/inbox`. Helpers: `webvhTspInboxUrl`, `createTspInboxRouter`, `tspInboxHandlerOptions` (RFI/RFA/RFD state on receive)
+- `TspEndpoint.requestRelationshipHttp` / `acceptRelationshipHttp` / `cancelRelationshipHttp` over POST inbox
 
 ## Usage
 
