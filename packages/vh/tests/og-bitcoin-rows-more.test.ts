@@ -1,0 +1,294 @@
+// More §9 rows on Bitcoin (P9.15, P9.16, P9.17, P9.30, P9.31, P9.36): bodies after the anchor,
+// competing anchors, the P9.15 table's rows for unverifiable and mismatched signer versions.
+import { describe, expect, test } from 'bun:test';
+import { buildPublication, encodeEnvelope, encodeMetadata, resourceDigest, verifyOriginal, type OgEntry } from '../src/og/index.js';
+import { anchoring, Chain, history, publication } from './helpers/og-chain.js';
+import { seeded, WebvhAuthor } from './helpers/originals.js';
+import { axes, enc, labelOf, res, webvhSigner, World, type Signer } from './helpers/og-world.js';
+import { withSatRead, bitcoinEvidence } from './helpers/og-vectors.js';
+
+const SAT = 'did:btco:reg:5000';
+const SAT2 = 'did:btco:reg:6000';
+const EDITOR_SAT = 'did:btco:reg:888';
+const web = (w: World) => w.author.handle as WebvhAuthor;
+const later = (w: World, parent: OgEntry, change: (s: any) => void, opts: Parameters<World['entry']>[1] = {}) => w.entry((s) => { change(s); }, { parent, push: false, ...opts });
+const pub1 = (e: OgEntry, signers?: ReturnType<typeof history>[], body: Uint8Array | null = null) => publication({ entries: [e], body }, signers);
+const PRV = enc('PRV');
+const preview = (b: Uint8Array) => ({ mediaType: 'image/webp', size: b.length, digest: resourceDigest(b) });
+
+async function anchoredWorld(body: 'none' | 'full' | 'preview' = 'none', sat = SAT) {
+  const w = await World.create();
+  const before = await w.entry((s) => { s.asset.name = 'Two'; });
+  const anchor = await w.entry((s) => { s.asset.aliases = [sat]; s.asset.body = body; if (body === 'preview') s.asset.preview = preview(PRV); });
+  const chain = new Chain();
+  chain.publish(sat, anchoring(w, { body: body === 'full' ? res('version 1') : body === 'preview' ? PRV : null }));
+  return { w, before, anchor, chain };
+}
+
+/** A did:btco editor whose DID document is inscribed on its own sat. */
+function btcoEditor(chain: Chain, opts: { unreadBefore?: boolean } = {}) {
+  const ke = seeded(240);
+  if (opts.unreadBefore) chain.unread(EDITOR_SAT);
+  const v1 = chain.btcoVersion(EDITOR_SAT, { id: EDITOR_SAT, verificationMethod: [{ id: `${EDITOR_SAT}#key-1`, type: 'Multikey', controller: EDITOR_SAT, publicKeyMultibase: ke.publicKeyMultibase }], assertionMethod: [`${EDITOR_SAT}#key-1`] });
+  const editor: Signer = { did: EDITOR_SAT, key: ke, kind: 'webvh', handle: null as never, log: () => '', ref: (f = 'key-1', v = v1) => ({ did: EDITOR_SAT, verificationMethod: `${EDITOR_SAT}#${f}`, versionId: v }) };
+  return { editor, v1 };
+}
+
+describe('bodies after the anchor (P9.17, P9.30)', () => {
+  test('T9-084: a name change after the anchor whose parent names a preview carries it; the body is that preview again', async () => {
+    const { w, anchor, chain } = await anchoredWorld('preview');
+    const e = await later(w, anchor, (s) => { s.asset.name = 'Renamed'; });
+    chain.publish(SAT, pub1(e, undefined, PRV));
+    expect(labelOf(await verifyOriginal(chain.evidence(w.did)), e)).toMatchObject({ status: 'accepted' });
+    // Or it carries none, with no body.
+    const { w: w2, anchor: a2, chain: c2 } = await anchoredWorld('preview');
+    const none = await later(w2, a2, (s) => { s.asset.name = 'Renamed'; delete s.asset.preview; s.asset.body = 'none'; });
+    c2.publish(SAT, pub1(none));
+    expect(labelOf(await verifyOriginal(c2.evidence(w2.did)), none)).toMatchObject({ status: 'accepted' });
+  });
+
+  test('T9-085: a name change after the anchor whose parent names no preview: the full version again, or no body', async () => {
+    const { w, anchor, chain } = await anchoredWorld('full');
+    const e = await later(w, anchor, (s) => { s.asset.name = 'Renamed'; });
+    chain.publish(SAT, pub1(e, undefined, res('version 1')));
+    expect(labelOf(await verifyOriginal(chain.evidence(w.did)), e)).toMatchObject({ status: 'accepted' });
+    const { w: w2, anchor: a2, chain: c2 } = await anchoredWorld('full');
+    const none = await later(w2, a2, (s) => { s.asset.name = 'Renamed'; s.asset.body = 'none'; });
+    c2.publish(SAT, pub1(none));
+    expect(labelOf(await verifyOriginal(c2.evidence(w2.did)), none)).toMatchObject({ status: 'accepted' });
+  });
+
+  test('T9-101: an entry after the anchor that changes the resource and names a new preview, inscribed with it as its body, is accepted', async () => {
+    const { w, anchor, chain } = await anchoredWorld('preview');
+    const p2 = enc('PRV2');
+    const e = await later(w, anchor, (s) => { w.version(s, res('version 2')); s.asset.preview = preview(p2); });
+    chain.publish(SAT, pub1(e, undefined, p2));
+    const r = await verifyOriginal(chain.evidence(w.did));
+    expect(r.checkpoint).toBe(e.versionId);
+    expect(labelOf(r, e)).toMatchObject({ status: 'accepted', ordering: 'chain-ordered' });
+  });
+
+  test('T9-099: an entry after the anchor naming a preview, signed but never inscribed, is not current', async () => {
+    const { w, anchor, chain } = await anchoredWorld('preview');
+    const e = await later(w, anchor, (s) => { w.version(s, res('version 2')); s.asset.preview = preview(enc('NEW')); });
+    const r = await verifyOriginal(chain.evidence(w.did, { extra: [{ kind: 'log', source: 'copy', bytes: enc([...w.entries, e].map((x) => JSON.stringify(x)).join('\n') + '\n') }] }));
+    expect(r.checkpoint).toBe(anchor.versionId);
+    expect(labelOf(r, e)).toEqual({ versionId: e.versionId, status: 'ignored' });
+  });
+
+  test('T9-025: an inscription whose entry is a delta rather than the full state is rejected; the baseline defines no compact encoding', async () => {
+    const { w, anchor, chain } = await anchoredWorld();
+    const e = await later(w, anchor, (s) => { s.asset.name = 'Delta'; });
+    const delta = { ...e, state: { asset: { name: 'Delta' } } };
+    chain.inscribe(SAT, [encodeEnvelope({ metadata: encodeMetadata({ entries: [delta as never] }), body: null })]);
+    const r = await verifyOriginal(chain.evidence(w.did));
+    expect(r.checkpoint).toBe(anchor.versionId);
+    expect(labelOf(r, delta as never)?.status).not.toBe('accepted');
+  });
+});
+
+describe('signer versions on Bitcoin (P9.15, P9.33)', () => {
+  test('T9-047: an entry before the anchoring entry signed by a key removed before the publication is accepted against the version it names', async () => {
+    const w = await World.create();
+    const k1Entry = await w.entry((s) => { s.asset.name = 'by K1'; });
+    const k2 = seeded(241);
+    await web(w).rotate([{ fragment: 'key-2', signer: k2 }]); // v2 removes key-1
+    const anchor = await w.entry((s) => { s.asset.aliases = [SAT]; s.asset.body = 'none'; }, { ref: w.author.ref('key-2'), key: k2 });
+    const chain = new Chain();
+    chain.publish(SAT, anchoring(w));
+    const r = await verifyOriginal(chain.evidence(w.did));
+    expect(axes(r).bitcoin).toBe('anchored');
+    expect(labelOf(r, k1Entry)).toMatchObject({ status: 'accepted', ordering: 'existed-by-block' });
+    expect(labelOf(r, anchor)).toMatchObject({ status: 'accepted', ordering: 'chain-ordered' });
+  });
+
+  test('T9-002, D22: an inscription after the anchor naming a did:webvh author version is checked in the supplied log: accepted when it reaches it, unverifiable (never rejected or accepted) when it does not', async () => {
+    const { w, anchor, chain } = await anchoredWorld();
+    const v1 = w.author.log();
+    await web(w).rotate([{ fragment: 'key-1', signer: w.author.key }]); // v2, never inscribed
+    const e = await later(w, anchor, (s) => { s.asset.name = 'names v2'; });
+    const [u] = chain.publish(SAT, pub1(e));
+    const r = await verifyOriginal(chain.evidence(w.did));
+    expect(labelOf(r, e)).toMatchObject({ status: 'accepted', ordering: 'chain-ordered' });
+    expect(r.signers?.[0]).toMatchObject({ did: w.author.did, latestVersionId: e.state.author.versionId });
+    const short = await verifyOriginal(chain.evidence(w.did, { histories: [{ did: w.author.did, log: v1 }] }));
+    expect(labelOf(short, e)).toEqual({ versionId: e.versionId, status: 'unverifiable' });
+    expect(short.bitcoin?.unverifiable).toEqual([{ inscription: u, did: w.author.did, versionId: e.state.author.versionId }]);
+    expect(short.diagnostics).toContainEqual(expect.objectContaining({ code: 'signer-version-missing', item: { kind: 'signer', id: w.author.did, versionId: e.state.author.versionId } }));
+    expect(short.checkpoint).toBe(anchor.versionId);
+  });
+
+  test('T9-109 (owner decision B): an inscription after the anchor naming a did:webvh versionId no supplied log holds, at a number they do hold, is unverifiable (signer-version-missing), never rejected', async () => {
+    const { w, anchor, chain } = await anchoredWorld();
+    const real = w.author.ref();
+    const fake = { ...real, versionId: real.versionId.replace(/-.+$/, '-QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW') };
+    const e = await later(w, anchor, (s) => { s.asset.name = 'x'; }, { ref: fake });
+    const [u] = chain.publish(SAT, pub1(e));
+    const r = await verifyOriginal(chain.evidence(w.did));
+    expect(labelOf(r, e)).toEqual({ versionId: e.versionId, status: 'unverifiable' });
+    expect(r.bitcoin?.unverifiable).toEqual([{ inscription: u, did: w.author.did, versionId: fake.versionId }]);
+    expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'signer-version-missing', rule: 'P7.8', item: { kind: 'signer', id: w.author.did, versionId: fake.versionId } }));
+    expect(r.diagnostics.some((d) => d.code === 'entry-rejected')).toBe(false);
+  });
+
+  test('D22: an inscription after the anchor whose proof fails at the named version is rejected under P5.3', async () => {
+    const { w, anchor, chain } = await anchoredWorld();
+    const e = await later(w, anchor, (s) => { s.asset.name = 'x'; }, { key: seeded(242) });
+    chain.publish(SAT, pub1(e));
+    expect(labelOf(await verifyOriginal(chain.evidence(w.did)), e)).toMatchObject({ status: 'rejected', rule: 'P5.3' });
+  });
+
+  test('T9-115 (owner decision B): an entry in the anchoring publication naming a versionId no supplied log holds, at a number they do hold: missing evidence, so the anchor is undetermined, never rejected', async () => {
+    const w = await World.create();
+    const real = w.author.ref();
+    const fake = { ...real, versionId: real.versionId.replace(/-.+$/, '-QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW') };
+    const x = await w.entry((s) => { s.asset.name = 'x'; }, { ref: fake });
+    await w.entry((s) => { s.asset.aliases = [SAT]; s.asset.body = 'none'; });
+    const chain = new Chain();
+    chain.publish(SAT, anchoring(w));
+    const r = await verifyOriginal(chain.evidence(w.did));
+    expect(axes(r)).toMatchObject({ bitcoin: 'undetermined', identity: 'incomplete', outcome: 'incomplete' });
+    expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'signer-version-missing', item: { kind: 'signer', id: w.author.did, versionId: fake.versionId } }));
+    expect(labelOf(r, x)).toEqual({ versionId: x.versionId, status: 'unchecked' });
+    expect(r.entries.some((e) => e.status === 'rejected')).toBe(false);
+    expect(r.bitcoin).toBeUndefined();
+  });
+
+  test('T9-116, T9-124: an inscription whose did:btco signer\'s sat is not read in full but that fails a check needing no such sat is rejected, not unverifiable (first matching row)', async () => {
+    const chain = new Chain();
+    const { editor } = btcoEditor(chain);
+    const w = await World.create();
+    await w.entry((s) => { s.asset.editors = [{ did: EDITOR_SAT, name: true, metadata: false, resource: false }]; });
+    const anchor = await w.entry((s) => { s.asset.aliases = [SAT]; s.asset.body = 'none'; });
+    chain.publish(SAT, anchoring(w));
+    const outside = await later(w, anchor, (s) => { s.asset.metadata = { not: 'granted' }; }, { by: editor, editor: true });
+    chain.publish(SAT, pub1(outside));
+    const r = await verifyOriginal(chain.evidence(w.did, { reads: [chain.read(SAT), chain.read(EDITOR_SAT, 'ord-a', false)] }));
+    expect(labelOf(r, outside)).toMatchObject({ status: 'rejected' });
+    expect(r.bitcoin?.unverifiable).toEqual([]);
+  });
+
+  test('T9-119: a did:btco editor whose named version is known but an earlier inscription on its sat is unread: unverifiable', async () => {
+    const chain = new Chain();
+    const { editor } = btcoEditor(chain, { unreadBefore: true });
+    const w = await World.create();
+    await w.entry((s) => { s.asset.editors = [{ did: EDITOR_SAT, name: true, metadata: false, resource: false }]; });
+    const anchor = await w.entry((s) => { s.asset.aliases = [SAT]; s.asset.body = 'none'; });
+    chain.publish(SAT, anchoring(w));
+    const e = await later(w, anchor, (s) => { s.asset.name = 'by editor'; }, { by: editor, editor: true });
+    const [u] = chain.publish(SAT, pub1(e));
+    const r = await verifyOriginal(chain.evidence(w.did));
+    expect(labelOf(r, e)).toEqual({ versionId: e.versionId, status: 'unverifiable' });
+    expect(r.bitcoin?.unverifiable.map((x) => x.inscription)).toEqual([u]);
+  });
+
+  test('T9-113: an earlier unverifiable inscription found invalid once its sat is read in full: the later publication from the same head is accepted', async () => {
+    const chain = new Chain();
+    const { editor } = btcoEditor(chain);
+    const w = await World.create();
+    await w.entry((s) => { s.asset.editors = [{ did: EDITOR_SAT, name: true, metadata: false, resource: false }]; });
+    const anchor = await w.entry((s) => { s.asset.aliases = [SAT]; s.asset.body = 'none'; });
+    chain.publish(SAT, anchoring(w));
+    // The editor names a version that is not on its sat: rejected once the sat is read in full.
+    const bad = await later(w, anchor, (s) => { s.asset.name = 'by editor'; }, { by: editor, editor: true, ref: editor.ref('key-1', 'f'.repeat(64) + 'i0') });
+    const good = await later(w, anchor, (s) => { s.asset.name = 'by author'; });
+    chain.publish(SAT, pub1(bad));
+    chain.publish(SAT, pub1(good));
+    const partial = await verifyOriginal(chain.evidence(w.did, { reads: [chain.read(SAT), chain.read(EDITOR_SAT, 'ord-a', false)] }));
+    expect(labelOf(partial, good)?.status).not.toBe('accepted');
+    const full = await verifyOriginal(chain.evidence(w.did));
+    expect(labelOf(full, bad)).toMatchObject({ status: 'rejected' });
+    expect(full.checkpoint).toBe(good.versionId);
+  });
+});
+
+describe('competing anchors (P9.16)', () => {
+  test('T9-076, D22: an earlier anchoring publication naming a signer version number the supplied log holds under another versionId is not an anchor; a later valid one on another sat is', async () => {
+    const w = await World.create();
+    const base = w.head;
+    const real = w.author.ref();
+    const fake = { ...real, versionId: real.versionId.replace(/-.+$/, '-QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW') };
+    const a = await w.entry((s) => { s.asset.aliases = [SAT]; s.asset.body = 'none'; }, { parent: base, push: false, ref: fake });
+    const b = await w.entry((s) => { s.asset.aliases = [SAT2]; s.asset.body = 'none'; }, { parent: base, push: false });
+    const chain = new Chain();
+    chain.publish(SAT, buildPublication({ entries: [base, a], body: null }), { height: 150 });
+    chain.publish(SAT2, anchoring(w, { entries: [base, b] }), { height: 160 });
+    chain.height = 170;
+    const r = await verifyOriginal(chain.evidence(w.did));
+    expect(r.bitcoin?.sat).toBe(SAT2);
+    expect(r.checkpoint).toBe(b.versionId);
+  });
+
+  test('T9-145(b): an earlier anchoring publication on another sat with a did:btco signer whose sat is not read in full is ignored: the later valid one is anchored, nothing listed, uniqueness provisional', async () => {
+    const chain = new Chain();
+    const { editor } = btcoEditor(chain);
+    const w = await World.create();
+    const g = await w.entry((s) => { s.asset.editors = [{ did: EDITOR_SAT, name: true, metadata: false, resource: false }]; });
+    const byEditor = await w.entry((s) => { s.asset.name = 'by editor'; }, { by: editor, editor: true });
+    const a = await w.entry((s) => { s.asset.aliases = [SAT]; s.asset.body = 'none'; });
+    const b = await w.entry((s) => { s.asset.aliases = [SAT2]; s.asset.body = 'none'; }, { parent: g, push: false });
+    // Both after the editor's did:btco version, so it precedes them in chain order (P5.13).
+    chain.publish(SAT, anchoring(w, { entries: [w.entries[0], g, byEditor, a] }), { height: 250 });
+    chain.publish(SAT2, anchoring(w, { entries: [w.entries[0], g, b] }), { height: 260 });
+    chain.height = 270;
+    const [first] = chain.sats.get(SAT)!.slice(-1);
+    const r = await verifyOriginal(chain.evidence(w.did, { reads: [chain.read(SAT), chain.read(SAT2), chain.read(EDITOR_SAT, 'ord-a', false)], originalsIndex: { name: 'og-index', through: 265 } }));
+    expect(axes(r)).toMatchObject({ bitcoin: 'anchored', outcome: 'verified', state: 'current' });
+    expect(r.bitcoin?.sat).toBe(SAT2);
+    expect(r.checkpoint).toBe(b.versionId);
+    expect(r.bitcoin?.unverifiable).toEqual([]);
+    expect(r.bitcoin?.holder.uniqueness).toBe('provisional');
+    expect(r.diagnostics.map((d) => d.code)).not.toContain('inscription-unverifiable');
+    expect(r.diagnostics.map((d) => d.code)).not.toContain('signer-sat-not-read');
+    const decided = await verifyOriginal(chain.evidence(w.did));
+    expect(decided.bitcoin?.sat).toBe(SAT);
+  });
+
+  test('T9-106: after anchoring, an editor entry and the revoking author entry with the same parent: the first in chain order is accepted, the other ignored', async () => {
+    const w = await World.create();
+    const ed = await webvhSigner();
+    await w.entry((s) => { s.asset.editors = [{ did: ed.did, name: true, metadata: false, resource: false }]; });
+    const anchor = await w.entry((s) => { s.asset.aliases = [SAT]; s.asset.body = 'none'; });
+    const chain = new Chain();
+    chain.publish(SAT, anchoring(w));
+    const byEditor = await later(w, anchor, (s) => { s.asset.name = 'by editor'; }, { by: ed, editor: true });
+    const revoke = await later(w, anchor, (s) => { delete s.asset.editors; });
+    chain.publish(SAT, pub1(byEditor, [history(ed)]));
+    chain.publish(SAT, pub1(revoke));
+    const r = await verifyOriginal(chain.evidence(w.did));
+    expect(r.checkpoint).toBe(byEditor.versionId);
+    expect(labelOf(r, revoke)).toEqual({ versionId: revoke.versionId, status: 'ignored' });
+  });
+});
+
+describe('supplied signer histories for inscribed entries (D22; P7.8, P7.17)', () => {
+  test('a supplied author log that does not verify is no evidence: the anchor is undetermined, never accepted', async () => {
+    const { w } = await anchoredWorld();
+    const lines = w.author.log().trim().split('\n');
+    const tampered = JSON.parse(lines[0]);
+    tampered.versionTime = '2020-01-01T00:00:00Z';
+    const chain = new Chain();
+    chain.publish(SAT, buildPublication({ entries: w.entries, body: null }));
+    const r = await verifyOriginal(chain.evidence(w.did, { histories: [{ did: w.author.did, log: `${JSON.stringify(tampered)}\n` }] }));
+    expect(axes(r)).toMatchObject({ bitcoin: 'undetermined', outcome: 'incomplete', identity: 'incomplete' });
+    expect(r.diagnostics.map((d) => d.code)).toContain('signer-history-missing');
+    expect(r.entries.some((e) => e.status === 'accepted')).toBe(false);
+  });
+
+  test('the newest supplied version wins among several supplied logs; inscribed entries are still checked at the version they name', async () => {
+    const { w, anchor, chain } = await anchoredWorld();
+    const v1 = w.author.log();
+    await web(w).rotate([{ fragment: 'key-2', signer: seeded(241) }]);
+    const r = await verifyOriginal(chain.evidence(w.did, { histories: [{ did: w.author.did, log: v1, source: 'cache' }, { did: w.author.did, log: w.author.log(), source: 'resolved' }] }));
+    expect(labelOf(r, anchor)).toMatchObject({ status: 'accepted' });
+    expect(r.signers?.[0]).toMatchObject({ source: 'resolved', latestVersionId: web(w).entries.at(-1)!.versionId });
+  });
+});
+
+describe('one tip (P9.31)', () => {
+  test('T9-065: a sat read at another tip than the evidence set\'s is unusable: a holder or inscriptions read at different tips are never combined', async () => {
+    const r = await verifyOriginal(withSatRead(bitcoinEvidence(), (s) => { s.tip.height += 1; for (const x of s.inscriptions) x.confirmations += 1; }));
+    expect(r.diagnostics.map((d) => d.code)).toContain('input-unusable');
+    expect(axes(r).bitcoin).not.toBe('anchored');
+  });
+});

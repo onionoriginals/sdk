@@ -1,0 +1,28 @@
+{
+  "network": "regtest",
+  "sat": 1234567890,
+  "tip": {
+    "height": 110,
+    "hash": "855a1c4b048aa241ea61a872b11f3b915048244a9841b5c501405ba268a20839"
+  },
+  "complete": true,
+  "holder": {
+    "address": "bcrt1p930e7d580b1ac0e6ffa8e4c3593317370139c91891c0cca10e9afaa205"
+  },
+  "inscriptions": [
+    {
+      "id": "bcbdc0375c141a6ae45685da65010aa15f92401baf8c3cdb36a290b97d3a08dbi0",
+      "height": 101,
+      "txIndex": 1,
+      "inscriptionIndex": 0,
+      "confirmations": 10
+    },
+    {
+      "id": "53455ef2c9378bbc138bd1264b8ec7cfd50d8bb5bafade2e034c2eca22ddcdc5i0",
+      "height": 102,
+      "txIndex": 1,
+      "inscriptionIndex": 0,
+      "confirmations": 9
+    }
+  ]
+}

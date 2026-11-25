@@ -1,0 +1,40 @@
+{
+  "original": "did:og:QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW",
+  "checkpoint": null,
+  "inputs": [
+    {
+      "kind": "sat-read",
+      "source": "bitcoin/sat-read.json",
+      "digest": "zQmVJVNQZH4wZTpDi41Lh2ZH3Q3dRzL1WJCraJ9ArzziMhV"
+    },
+    {
+      "kind": "inscription",
+      "source": "index:bcbdc0375c141a6ae45685da65010aa15f92401baf8c3cdb36a290b97d3a08dbi0",
+      "digest": "zQmPxaVJjs5mN3oJUKbQVxfSro7WZpqJ2hYWNNS4yYE7drV"
+    },
+    {
+      "kind": "inscription",
+      "source": "index:53455ef2c9378bbc138bd1264b8ec7cfd50d8bb5bafade2e034c2eca22ddcdc5i0",
+      "digest": "zQmcgTvTsQco2KbDpvpecY7kcvSNYJ3weHqB1ikX9oYzgM8"
+    },
+    {
+      "kind": "signer-history",
+      "source": "https://author.example/.well-known/did.jsonl",
+      "digest": "zQmfXJB3kVg7jeL7HjvrTvwy5bcPEyPQP5bkLjTEEUJxorv"
+    }
+  ],
+  "signerHistories": [
+    {
+      "did": "did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example",
+      "source": "https://author.example/.well-known/did.jsonl",
+      "obtained": "2026-01-06T00:00:00Z"
+    }
+  ],
+  "network": "regtest",
+  "tip": {
+    "height": 110,
+    "hash": "855a1c4b048aa241ea61a872b11f3b915048244a9841b5c501405ba268a20839"
+  },
+  "depth": 1,
+  "note": "The P9.18 evidence set: the index read of the anchoring sat and its inscriptions at the stated network and tip, and the author's did:webvh log as resolved from its host (P9.33), and nothing else."
+}

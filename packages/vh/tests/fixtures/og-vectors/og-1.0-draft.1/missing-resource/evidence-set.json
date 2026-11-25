@@ -1,0 +1,31 @@
+{
+  "original": "did:og:QmV2yQcaZ5eeDyWKqeHW5whoWmhtH9ZygNfDcnFEqEt4vW",
+  "checkpoint": null,
+  "inputs": [
+    {
+      "kind": "log",
+      "source": "missing-resource/asset/did.jsonl",
+      "digest": "zQmUqGw6N8tPAsGS6DogBuU5iKVeaSvnwERUeKiiaKnuTRW"
+    },
+    {
+      "kind": "signer-history",
+      "source": "missing-resource/author/did.jsonl",
+      "digest": "zQmfXJB3kVg7jeL7HjvrTvwy5bcPEyPQP5bkLjTEEUJxorv"
+    },
+    {
+      "kind": "resource",
+      "source": "missing-resource/resources/v2.md",
+      "digest": "zQmQFt79upGpNBqAnKak3f3XaUrgy6gevkrvEoGbJJCGLTo"
+    }
+  ],
+  "signerHistories": [
+    {
+      "did": "did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example",
+      "source": "missing-resource/author/did.jsonl",
+      "obtained": "2026-01-06T00:00:00Z"
+    }
+  ],
+  "network": null,
+  "tip": null,
+  "depth": null
+}
