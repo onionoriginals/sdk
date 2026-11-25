@@ -1,0 +1,8 @@
+# Negative checks: altered copies of the PNG package must not verify
+# SDK commit: c9c5880b066745ab9f8b4d1634ade2372256e25b; sandbox-exec, networking denied
+
+one PNG bit flipped -> {"outcome":"verified","binding":"bound","history":"valid","identity":"complete","authority":"current","state":"valid-as-of","availability":"none","offline":"needs-external","bitcoin":"not-read"} diagnostics: resource-mismatch
+author key swapped in did:webvh log -> {"outcome":"incomplete","binding":"bound","history":"valid","identity":"incomplete","authority":"current","state":"valid-as-of","availability":"complete","offline":"needs-external","bitcoin":"not-read"} diagnostics: signer-history-missing,proof-unchecked
+
+RESULT: PASS (neither altered package passes: the flipped bit is availability none with resource-mismatch; the forged key is identity incomplete)
+# exit status: 0

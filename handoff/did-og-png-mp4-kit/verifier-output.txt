@@ -1,0 +1,149 @@
+# Offline verification of the did:og PNG/MP4 handoff kit
+# SDK commit: c9c5880b066745ab9f8b4d1634ade2372256e25b
+# Command: sandbox-exec -p '(version 1)(allow default)(deny network*)' bun handoff/did-og-png-mp4-kit/verify-kit.ts
+# Runtime: bun 1.2.22, Darwin arm64
+# Run at: 2026-11-25T07:47:05Z
+
+
+=== png: did-og-png-evidence.zip ===
+PASS  ZIP SHA-256 0de1ef68c16ebdfd9c0cb73a6b0c921bfed65589043b44a6c63a15c6a056466c matches did-og-png-evidence.zip.sha256
+PASS  SHA256SUMS lists every member (4) and nothing else
+PASS  9ce1c556454b148e02d3f4d3c24ba2bb2d0ec31cc7bd6c6c204e9eded3a3d84f  asset/did.jsonl
+PASS  4a1d70118434b7de726497525aae7a23bd021f6a567f81fdce20fde9fb9b01d0  originals-evidence.json
+PASS  77b03252ee8f7cbfcfa3013c6a9cc9c3e95235be40ad162835d87c1a165bd497  resources/zQmWPs48KpHyf87TumLjWe2CnBZXxCNgWMJX4Gc1tP1yc2r
+PASS  bbbfb43d8637c963d6c38bad329b651a27ebf67441af1a10e44d6f8a49dabe9f  signers/87bec4d6a935fac3a83141696a642bd97ab654d74e19039b5668693c61ba7a8d/did.jsonl
+--- report (verifyOriginal, evidence set = this ZIP only) ---
+{
+  "type": "OriginalsVerificationReport",
+  "profile": "og:1.0-draft.1",
+  "original": "did:og:QmVhbTsUBUazRmzY7traJrmEde72fhwib5ZXAzDNQjS9JW",
+  "checkpoint": "1-QmWSYacozGaQyzvn3aEU9qCzmEJ8Q1iKM7U7vaFg5BoFq6",
+  "evidence": {
+    "inputs": [
+      {
+        "kind": "package",
+        "source": "file:did-og-png-evidence.zip",
+        "digest": "zQmPGqpy6nX8oKr5tTKV4h3wM4MFrKnAmc1MiJGtH9quZi3"
+      }
+    ],
+    "network": null,
+    "tip": null,
+    "depth": null
+  },
+  "axes": {
+    "outcome": "verified",
+    "binding": "bound",
+    "history": "valid",
+    "identity": "complete",
+    "authority": "current",
+    "state": "valid-as-of",
+    "availability": "complete",
+    "offline": "self-contained",
+    "bitcoin": "not-read"
+  },
+  "entries": [
+    {
+      "versionId": "1-QmWSYacozGaQyzvn3aEU9qCzmEJ8Q1iKM7U7vaFg5BoFq6",
+      "status": "accepted",
+      "authority": "current-key",
+      "endorsed": false,
+      "ordering": "claimed"
+    }
+  ],
+  "signers": [
+    {
+      "did": "did:webvh:QmXQ7agTs2JXgUxpMizieRC2Ky3xfZTY1G7ceEbFcSRunb:example.com:authors:og-handoff-kit",
+      "role": "author",
+      "latestVersionId": "1-QmeYCqsiWDShFTRWmXNTQf6ZXsxFhR7bU5vaLoQ569WfcZ",
+      "source": "package",
+      "obtained": null,
+      "freshness": "not-established"
+    }
+  ],
+  "diagnostics": []
+}
+PASS  outcome verified
+PASS  binding bound
+PASS  history valid
+PASS  identity complete (author did:webvh history checked from the package)
+PASS  availability complete (the resource bytes are in the package)
+PASS  offline self-contained
+PASS  bitcoin not-read (no Bitcoin input, no anchor named: P7.18)
+PASS  state valid-as-of (unanchored: valid as of 1-QmWSYacozGaQyzvn3aEU9qCzmEJ8Q1iKM7U7vaFg5BoFq6)
+PASS  every entry accepted (1)
+PASS  no diagnostics (0)
+PASS  same axes and entries without SHA256SUMS
+
+=== mp4: did-og-mp4-evidence.zip ===
+PASS  ZIP SHA-256 e5cb119f47922d9e760344f6532019aa517ff7f0d816d452cf07d55d35ac7d51 matches did-og-mp4-evidence.zip.sha256
+PASS  SHA256SUMS lists every member (4) and nothing else
+PASS  2121bdad17a7264bf910bfa75b3ac9940fe68fdbdee2784f3329f5a773cfb95f  asset/did.jsonl
+PASS  a3dbea80580dfada931d3573b6713158623c4c1cb41ebb7c9cd1a8c20be4f6d7  originals-evidence.json
+PASS  f17dd49a5130877b2bd43c07406d366553604df0e04d6dbc9a770842b9fb68b0  resources/zQmebLFSd3gKYZTQMp53U6ifUbNeGLVfGxKNV8Jtv87gUB9
+PASS  bbbfb43d8637c963d6c38bad329b651a27ebf67441af1a10e44d6f8a49dabe9f  signers/87bec4d6a935fac3a83141696a642bd97ab654d74e19039b5668693c61ba7a8d/did.jsonl
+--- report (verifyOriginal, evidence set = this ZIP only) ---
+{
+  "type": "OriginalsVerificationReport",
+  "profile": "og:1.0-draft.1",
+  "original": "did:og:QmTD2bUxsR7NBnUcxfnChVUddMA3G3DK8V1qTCjroBsK2i",
+  "checkpoint": "1-QmW7vbWsUP1vk4kGZNkqQUhNLrqrzUvfpRypBt5xB9H5XF",
+  "evidence": {
+    "inputs": [
+      {
+        "kind": "package",
+        "source": "file:did-og-mp4-evidence.zip",
+        "digest": "zQmdofffVygSYPjFTCT7KUFfBSLg4wra9upFZqdh4sVzj4L"
+      }
+    ],
+    "network": null,
+    "tip": null,
+    "depth": null
+  },
+  "axes": {
+    "outcome": "verified",
+    "binding": "bound",
+    "history": "valid",
+    "identity": "complete",
+    "authority": "current",
+    "state": "valid-as-of",
+    "availability": "complete",
+    "offline": "self-contained",
+    "bitcoin": "not-read"
+  },
+  "entries": [
+    {
+      "versionId": "1-QmW7vbWsUP1vk4kGZNkqQUhNLrqrzUvfpRypBt5xB9H5XF",
+      "status": "accepted",
+      "authority": "current-key",
+      "endorsed": false,
+      "ordering": "claimed"
+    }
+  ],
+  "signers": [
+    {
+      "did": "did:webvh:QmXQ7agTs2JXgUxpMizieRC2Ky3xfZTY1G7ceEbFcSRunb:example.com:authors:og-handoff-kit",
+      "role": "author",
+      "latestVersionId": "1-QmeYCqsiWDShFTRWmXNTQf6ZXsxFhR7bU5vaLoQ569WfcZ",
+      "source": "package",
+      "obtained": null,
+      "freshness": "not-established"
+    }
+  ],
+  "diagnostics": []
+}
+PASS  outcome verified
+PASS  binding bound
+PASS  history valid
+PASS  identity complete (author did:webvh history checked from the package)
+PASS  availability complete (the resource bytes are in the package)
+PASS  offline self-contained
+PASS  bitcoin not-read (no Bitcoin input, no anchor named: P7.18)
+PASS  state valid-as-of (unanchored: valid as of 1-QmW7vbWsUP1vk4kGZNkqQUhNLrqrzUvfpRypBt5xB9H5XF)
+PASS  every entry accepted (1)
+PASS  no diagnostics (0)
+PASS  same axes and entries without SHA256SUMS
+PASS  network requests attempted: 0
+
+RESULT: PASS
+
+# exit status: 0
