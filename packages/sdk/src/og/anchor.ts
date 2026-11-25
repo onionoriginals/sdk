@@ -16,7 +16,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSy
 import { randomBytes } from "node:crypto";
 import { basename, join } from "node:path";
 import {
-  OG_LIMITS, OG_METHOD, btcoDid, defaultCheck, listsKey, resourceDigest, transferCheck, verifyOriginal,
+  OG_LIMITS, OG_METHOD, btcoDid, defaultCheck, listsKey, presentationWarnings, resourceDigest, transferCheck, verifyOriginal,
   type BitcoinNetwork, type BodyMode, type Descriptor, type OgEntry, type Report,
 } from "@originals/vh/og";
 import type { JsonObject } from "@originals/vh/json";
@@ -51,7 +51,15 @@ export interface Ctx {
 export interface AnchorState {
   version: 1;
   network: BitcoinNetwork;
-  author?: { did: string; url: string; log: string; verificationMethod: string; versionId: string; resolved?: boolean };
+  author?: {
+    did: string; url: string; log: string; verificationMethod: string; versionId: string; resolved?: boolean;
+    /**
+     * The newest author log a verify run fetched that verified and held every version the entries name, kept so
+     * that later runs supply it beside what the host serves then: a host that later withholds or truncates the
+     * log cannot leave those versions missing for us (P7.8, T7-079).
+     */
+    retained?: { log: string; source: string; obtained: string };
+  };
   original?: {
     file: string; name: string; mediaType: string; digest: string; size: number; body: BodyMode; previewMessage: string;
     preview?: { hex: string; descriptor: Descriptor };
@@ -370,7 +378,10 @@ export async function stepVerify(ctx: Ctx, opts: { out?: string; minConfirmation
   });
   const obtained = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
   const served = await fetchLog(s.author.url).catch(() => null);
-  const evidence = served === null ? read.evidence : withResolvedSigner(read.evidence, { did: s.author.did, url: s.author.url, log: served, obtained });
+  let evidence = served === null ? read.evidence : withResolvedSigner(read.evidence, { did: s.author.did, url: s.author.url, log: served, obtained });
+  // P7.8 (T7-079): the copy kept from an earlier run goes in beside what the host serves now, under its own source.
+  const kept = s.author.retained;
+  if (kept && kept.log !== served) evidence = withResolvedSigner(evidence, { did: s.author.did, url: kept.source, log: kept.log, obtained: kept.obtained });
   const report = await verifyOriginal(evidence);
   const named = [s.original.genesis, ...(s.anchoringEntry ? [s.anchoringEntry] : [])].map((e) => (e.state.author as { versionId: string }).versionId);
   let publicHost: LastRun["publicHost"] = { url: s.author.url, served: served !== null, verifies: false, reachesNamedVersions: false };
@@ -380,6 +391,19 @@ export async function stepVerify(ctx: Ctx, opts: { out?: string; minConfirmation
     publicHost = { url: s.author.url, served: true, verifies: c.ok, reachesNamedVersions: c.ok && named.every((v) => c.versions.some((x) => x.versionId === v)), obtained, latestVersionId: c.latestVersionId, reason: c.ok ? undefined : c.reason };
     warnings.push(...authorWarnings(c, s.author.verificationMethod, s.author.versionId));
   }
+  if (served !== null && publicHost.reachesNamedVersions && (!kept || served.startsWith(kept.log))) {
+    // Keep the newest good copy: one that verifies, holds the named versions and extends the copy kept before.
+    if (kept?.log !== served) {
+      s.author.retained = { log: served, source: `retained:${s.author.url}`, obtained };
+      saveState(ctx.stateDir, s);
+    }
+  } else if (kept && kept.log !== served) {
+    warnings.push(served === null
+      ? `The author log is not served at ${s.author.url}; the copy kept from ${kept.obtained} was supplied to the verifier instead.`
+      : `The author log served at ${s.author.url} does not extend the copy kept from ${kept.obtained}; both were supplied to the verifier.`);
+  }
+  // P9.16 (T9-153): an earlier claim to this Original on another sat that could not be checked.
+  warnings.push(...presentationWarnings(report).map((w) => w.message));
   const axes = report.axes as Record<string, string>;
   const run: LastRun = {
     command: "originals-og anchor",

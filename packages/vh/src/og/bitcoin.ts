@@ -691,6 +691,17 @@ async function verifyAnchored(evidence: EvidenceSet, gathered: Gathered): Promis
       conflictingAnchors, unverifiable, waiting,
     },
   };
+  // P9.16 (T9-153): an earlier claim on another sat that is ignored is still shown to a person, beside the report.
+  const unchecked = undecided.filter((o) => o.outcome.sat.sat !== anchorSat.sat && chainOrder(at(o), at(first)) < 0);
+  if (unchecked.length) presentation.set(report, unchecked.map((o) => {
+    const pub = o.outcome.undetermined!;
+    const missing = o.outcome.lacking ?? [];
+    const why = missing.length ? `: ${[...new Set(missing.map(describeMissing))].join("; ")}` : "";
+    return {
+      code: "earlier-claim-unchecked", rule: "P9.16", sat: o.outcome.sat.sat, inscription: pub.parts[0].id, missing,
+      message: `An earlier claim to this Original on sat ${o.outcome.sat.sat} (inscription ${pub.parts[0].id}) could not be checked${why}. It is ignored; if that evidence is supplied and it verifies, it is the anchor instead.`,
+    };
+  }));
   return report;
 }
 
@@ -781,6 +792,32 @@ function labelRejectedAnchoring(report: Report, outcomes: Array<{ outcome: SatOu
 }
 
 /** The diagnostic for one missing signer (P14.25): a did:btco sat, or a did:vh / did:webvh history or version. */
+/**
+ * A warning shown beside a report, never a member of the JSON report (P14.25) and never changing it
+ * (P9.16, P7.8): an earlier anchoring publication of the Original on another sat that could not be checked.
+ */
+export interface PresentationWarning {
+  code: "earlier-claim-unchecked";
+  rule: "P9.16";
+  sat: string;
+  inscription: string;
+  missing: MissingSigner[];
+  message: string;
+}
+
+const presentation = new WeakMap<Report, PresentationWarning[]>();
+
+/** The warnings to show beside this report (T9-153); empty for a report this verifier did not produce. */
+export function presentationWarnings(report: Report): PresentationWarning[] {
+  return presentation.get(report) ?? [];
+}
+
+function describeMissing(m: MissingSigner): string {
+  if (m.missing === "sat") return `the sat of ${m.did} is not read in full`;
+  if (m.missing === "version") return `no log of ${m.did} supplied holds version ${m.versionId}`;
+  return `no log of ${m.did} is supplied`;
+}
+
 function missingSignerDiagnostic(m: MissingSigner): Diagnostic | undefined {
   if (m.missing === "sat") return { code: "signer-sat-not-read", rule: "P9.35", item: { kind: "sat", id: m.did }, reason: "The did:btco signer's sat is not read in full for this inscription." };
   if (m.missing === "version") return { code: "signer-version-missing", rule: "P7.8", item: { kind: "signer", id: m.did, versionId: m.versionId }, reason: "The supplied signer history does not reach the version the entry names." };

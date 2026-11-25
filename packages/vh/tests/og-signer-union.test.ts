@@ -2,7 +2,7 @@
 // logs (B), other sats never blocking the anchor (A), no false anchoring-sat-not-read (C), and the
 // outcome of a rejected anchoring publication (E).
 import { describe, expect, test } from 'bun:test';
-import { serializeLog, verifyOriginal, type OgEntry, type Report } from '../src/og/index.js';
+import { presentationWarnings, serializeLog, verifyOriginal, type OgEntry, type Report } from '../src/og/index.js';
 import { anchoring, Chain, history, publication } from './helpers/og-chain.js';
 import { seeded, WebvhAuthor } from './helpers/originals.js';
 import { axes, enc, labelOf, vhSigner, World } from './helpers/og-world.js';
@@ -155,6 +155,7 @@ describe('owner decision A: other sats never block the anchor', () => {
     expect(r.bitcoin?.unverifiable).toEqual([]);
     expect(r.bitcoin?.holder.uniqueness).toEqual({ 'established-through': 300 });
     expect(r.diagnostics.some((d) => d.code === 'signer-history-missing' || d.code === 'anchoring-sat-not-read')).toBe(false);
+    expect(presentationWarnings(r)).toEqual([]); // another did:og is no claim on ours
   });
 
   test('T9-145(a), T9-146: the same did:og undecidable on another sat, earlier than our valid anchor, is ignored: ours is anchored, nothing listed, uniqueness provisional; once it verifies, it is the anchor', async () => {
@@ -176,10 +177,33 @@ describe('owner decision A: other sats never block the anchor', () => {
     expect(r.bitcoin?.conflictingAnchors).toEqual([]);
     expect(r.bitcoin?.holder.uniqueness).toBe('provisional');
     expect(r.diagnostics.map((d) => d.code)).toEqual(['resource-missing']);
+    // T9-153: shown beside the report, naming the inscription and what is missing; never in the JSON report.
+    expect(presentationWarnings(r)).toEqual([expect.objectContaining({ code: 'earlier-claim-unchecked', rule: 'P9.16', sat: SAT2, inscription: e1, missing: [expect.objectContaining({ did: w.author.did, missing: 'version' })] })]);
+    expect(presentationWarnings(r)[0].message).toContain('An earlier claim to this Original on sat');
+    expect(JSON.stringify(r)).not.toContain('earlier-claim');
     // Once its signer's log is supplied, the earlier one verifies: it is the anchor and ours a conflicting anchor.
     const full = await verifyOriginal(chain.evidence(w.did, { histories: [{ did: w.author.did, log: w.author.log() }] }));
     expect(full.bitcoin?.sat).toBe(SAT2);
     expect(full.bitcoin?.conflictingAnchors.map((x) => x.sat)).toEqual([SAT]);
+    expect(presentationWarnings(full)).toEqual([]);
+  });
+
+  test('T9-153: an undecidable anchoring publication of ours on another sat, later than the anchor, gives no warning', async () => {
+    const w = await World.create();
+    const genesis = w.head;
+    const v1 = w.author.ref().versionId;
+    await web(w).rotate([{ fragment: 'key-1', signer: w.author.key }]); // v2, not in the supplied log
+    const late = await w.entry((s) => { s.asset.aliases = [SAT2]; s.asset.body = 'none'; }, { parent: genesis, push: false }); // names v2
+    const ours = await w.entry((s) => { s.asset.aliases = [SAT]; s.asset.body = 'none'; }, { parent: genesis, push: false, ref: w.author.ref('key-1', v1) });
+    const chain = new Chain();
+    chain.publish(SAT, publication({ entries: [genesis, ours] }), { height: 150 });
+    chain.publish(SAT2, publication({ entries: [genesis, late] }), { height: 160 });
+    chain.height = 170;
+    const r = await verifyOriginal(chain.evidence(w.did, { histories: [{ did: w.author.did, log: lines(w.author.log())[0] + '\n' }] }));
+    expect(axes(r)).toMatchObject({ bitcoin: 'anchored', outcome: 'verified' });
+    expect(r.bitcoin?.sat).toBe(SAT);
+    expect(r.bitcoin?.holder.uniqueness).toBe('provisional');
+    expect(presentationWarnings(r)).toEqual([]);
   });
 
   test('T9-077, T9-147: on the same sat, an earlier undecidable anchoring publication still leaves ours undetermined, of this did:og or another', async () => {

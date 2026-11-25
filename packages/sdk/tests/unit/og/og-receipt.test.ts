@@ -72,7 +72,7 @@ describe('anchoring receipt (P9.11, T7-074)', () => {
         fetchAuthorLog: async () => served(a.log),
       };
       const run = await stepVerify(ctx, { out: join(dir, 'last-run.json') });
-      return { run, said, a, signed, revealTxid, revealDestination, observedHolder };
+      return { run, said, a, signed, revealTxid, revealDestination, observedHolder, ctx };
   }
 
   test('reveal destination A, observed holder B: the run passes and records the two roles distinctly', async () => {
@@ -125,6 +125,27 @@ describe('anchoring receipt (P9.11, T7-074)', () => {
       expect(run.report.entries.some((e) => e.status === 'accepted')).toBe(false);
       expect(run.publicHost).toMatchObject({ served: false, verifies: false });
       expect(run.passed).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('T7-079: the author log kept from a good run is supplied when the host later withholds it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'og-receipt-'));
+    try {
+      const { run, a, ctx } = await receipt(dir, (log) => log);
+      expect(run.passed).toBe(true);
+      expect(loadState(dir, 'regtest').author?.retained).toEqual({ log: a.log, source: `retained:${a.url}`, obtained: run.publicHost.obtained });
+      const said: string[] = [];
+      const again = await stepVerify({ ...ctx, io: { ...ctx.io, say: (l) => said.push(l) }, fetchAuthorLog: async () => null }, { out: join(dir, 'again.json') });
+      // The kept copy is evidence: the anchor still verifies, and the report names it as the source.
+      expect(again.report.axes).toMatchObject({ outcome: 'verified', bitcoin: 'anchored', identity: 'complete' });
+      expect(again.report.signers).toEqual([expect.objectContaining({ did: a.did, source: `retained:${a.url}` })]);
+      expect(again.warnings).toEqual([expect.stringContaining('the copy kept from')]);
+      // The public host is still checked on its own: not served is not passed.
+      expect(again.publicHost.served).toBe(false);
+      expect(again.passed).toBe(false);
+      expect(said.some((l) => l.startsWith('Warning (not part of the report): The author log is not served'))).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
