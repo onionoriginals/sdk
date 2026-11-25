@@ -1,5 +1,13 @@
 import type { LocalVid, OpenedMessage } from './message.js';
-import { keysFromRev3Vid, openTspMessage, sealTspPayload } from './message.js';
+import {
+  computeRelationshipDigest,
+  keysFromRev3Vid,
+  openTspMessage,
+  sealTspPayload,
+  vidIdBytes,
+} from './message.js';
+import { encodeEnvelopePrefix } from './cesr/packet.js';
+import { bytesFromNumberStream } from './cesr/encode.js';
 import type { Digest, Payload } from './cesr/packet.js';
 import { postTspWire } from './http/client.js';
 import { peerFromKeys, MemoryTspRouter } from './transport.js';
@@ -25,6 +33,12 @@ export class TspEndpoint {
 
   relationship(peerId: string): RelationshipState {
     return this.relationships.get(peerId) ?? { status: 'unrelated' };
+  }
+
+  private requireBilateral(peerId: string): void {
+    if (this.relationship(peerId).status !== 'bi') {
+      throw new Error('bilateral TSP relationship required');
+    }
   }
 
   /** Apply inbound control payloads (RFI / RFA / RFD) after HTTP or in-memory delivery. */
@@ -63,6 +77,7 @@ export class TspEndpoint {
   }
 
   async sendApplication(peer: LocalVid, data: Uint8Array): Promise<Uint8Array> {
+    this.requireBilateral(peer.id);
     return this.sendRaw(peer, { type: 'generic', data }, { confidential: true });
   }
 
@@ -115,16 +130,20 @@ export class TspEndpoint {
     peer: LocalVid,
     invite: Extract<Payload, { type: 'rfi' }>,
   ): Promise<Uint8Array> {
-    const payload: Payload = {
+    const draft: Payload = {
       type: 'rfa',
       requestDigest: invite.requestDigest,
       replyDigest: { kind: 'sha256', bytes: new Uint8Array(32) },
     };
-    const wire = await this.sendRaw(peer, payload, { confidential: true });
+    const stream: number[] = [];
+    encodeEnvelopePrefix(vidIdBytes(this.vid.id), vidIdBytes(peer.id), stream);
+    const prefix = bytesFromNumberStream(stream);
+    const replyDigest = computeRelationshipDigest(draft, vidIdBytes(this.vid.id), prefix);
+    const wire = await this.sendRaw(peer, draft, { confidential: true });
     this.relationships.set(peer.id, {
       status: 'bi',
       inviteDigest: invite.requestDigest.bytes,
-      replyDigest: (payload as { replyDigest: { bytes: Uint8Array } }).replyDigest.bytes,
+      replyDigest: replyDigest.bytes,
     });
     return wire;
   }

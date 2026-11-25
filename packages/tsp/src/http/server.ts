@@ -62,6 +62,13 @@ export function createTspHttpHandler(options: TspHttpHandlerOptions): (req: Requ
         options.local,
       );
       options.endpoint?.recordInbound(senderDid, opened);
+      if (
+        opened.payload.type === 'generic' &&
+        options.endpoint &&
+        options.endpoint.relationship(senderDid).status !== 'bi'
+      ) {
+        return new Response(null, { status: 204 });
+      }
       await options.onMessage?.(opened);
       return new Response(null, { status: 204 });
     } catch {

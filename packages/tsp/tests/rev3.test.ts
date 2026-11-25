@@ -14,7 +14,7 @@ function vid(name: string) {
 }
 
 describe('rev3 vectors', () => {
-  const names = ['direct-hpke-base', 'direct-signed-only', 'control-rfi-direct'] as const;
+  const names = ['direct-hpke-base', 'direct-signed-only', 'control-rfi-direct', 'control-rfd'] as const;
 
   for (const name of names) {
     test(name, async () => {
@@ -39,6 +39,12 @@ describe('rev3 vectors', () => {
         const expectedNonce = base64url.decode(vector!.nonce!);
         expect([...opened.payload.nonce]).toEqual([...expectedNonce]);
         expect(opened.payload.requestDigest.bytes.length).toBe(32);
+        return;
+      }
+
+      if (name === 'control-rfd') {
+        expect(opened.payload.type).toBe('rfd');
+        expect(opened.payload.reply.bytes.length).toBe(32);
         return;
       }
 
