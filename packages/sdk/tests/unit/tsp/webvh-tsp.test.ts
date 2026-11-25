@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveVidKeys } from '@originals/tsp';
+import { resolveVidKeys, webvhTspInboxUrl } from '@originals/tsp';
 import { WebVHManager } from '../../../src/did/WebVHManager';
 import { assertSdkDidDocumentHasNoJwk, localVidFromWebVhKeys } from '../../../src/tsp/index.js';
 
@@ -17,35 +17,32 @@ async function resolveFromLog(log: unknown) {
 }
 
 describe('did:webvh TSP wiring', () => {
-  test('create and update publish Multikey TSP VID material', async () => {
+  test('default inbox URL and override transport', async () => {
     const manager = new WebVHManager();
-    const transport = 'https://issuer.example/tsp/inbox';
-    const created = await manager.createDIDWebVH({ domain: 'example.com', tsp: { transport } });
+    const created = await manager.createDIDWebVH({ domain: 'example.com', tsp: true });
+    const expected = webvhTspInboxUrl(created.did);
     expect(created.tspEncryption?.encryptionPrivateMultibase).toMatch(/^z/);
     assertSdkDidDocumentHasNoJwk(created.didDocument as Record<string, unknown>);
 
     const resolved = await resolveFromLog(created.log);
-    const keys = resolveVidKeys(resolved);
-    expect(keys.transport).toBe(transport);
-    expect(keys.id).toBe(created.did);
+    expect(resolveVidKeys(resolved).transport).toBe(expected);
 
-    const local = localVidFromWebVhKeys(
-      created.did,
-      transport,
-      created.keyPair!.privateKey,
-      created.tspEncryption!.encryptionPrivateMultibase,
-    );
-    expect(local.signingPublicKey.length).toBe(32);
-
+    const override = 'https://issuer.example/tsp/inbox-v2';
     const updated = await manager.updateDIDWebVH({
       did: created.did,
       currentLog: created.log,
       updates: {},
       signer: created.keyPair!,
-      tsp: { transport: 'https://issuer.example/tsp/inbox-v2' },
+      tsp: { transport: override },
     });
-    assertSdkDidDocumentHasNoJwk(updated.didDocument as Record<string, unknown>);
-    const resolved2 = await resolveFromLog(updated.log);
-    expect(resolveVidKeys(resolved2).transport).toBe('https://issuer.example/tsp/inbox-v2');
+    expect(resolveVidKeys(await resolveFromLog(updated.log)).transport).toBe(override);
+
+    const local = localVidFromWebVhKeys(
+      created.did,
+      expected,
+      created.keyPair!.privateKey,
+      created.tspEncryption!.encryptionPrivateMultibase,
+    );
+    expect(local.signingPublicKey.length).toBe(32);
   }, 30000);
 });

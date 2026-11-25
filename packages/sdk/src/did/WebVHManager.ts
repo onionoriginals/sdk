@@ -9,6 +9,7 @@ import { assertEd25519WebVHUpdateKeys, computeNextKeyHash, normalizeUpdateKey, r
 export { assertEd25519WebVHUpdateKeys, computeNextKeyHash, normalizeUpdateKey, requireWebVHPaths } from './webvh-rules.js';
 import { buildWebVHCreateDocument, buildWebVHUpdateDocument, type WebVHDocumentFields } from './webvh-document.js';
 import { generateTspWebvhKeyMaterial, tspWebvhDocumentFields } from '../tsp/webvh-fields.js';
+import { resolveTspTransportUrl, type TspWebvhEnable } from '../tsp/transport-url.js';
 /**
  * Node-only modules, loaded on first use. Only saveDIDLog/loadDIDLog touch the
  * filesystem, but a static import here made every entry point that reaches
@@ -160,8 +161,8 @@ export interface CreateWebVHOptions {
   alsoKnownAs?: string[];
   /** Service endpoints to carry into the DID document. */
   services?: Array<Record<string, unknown>>;
-  /** When set, publish X25519 keyAgreement + TSPTransport (Multikey only). */
-  tsp?: { transport: string };
+  /** When truthy, publish X25519 keyAgreement + TSPTransport (Multikey only). */
+  tsp?: TspWebvhEnable;
 }
 
 export interface CreateWebVHResult {
@@ -434,9 +435,10 @@ export class WebVHManager {
     // Publish any carried-over verification methods after the signing key.
     // They are verification-only: updateKeys stays restricted to the signing key(s).
     let extraVerificationMethods = additionalVerificationMethods ?? [];
-    if (tsp) {
+    const transportUrl = resolveTspTransportUrl(tsp, { domain, paths: canonicalPaths });
+    if (transportUrl) {
       tspMaterial = generateTspWebvhKeyMaterial();
-      const tspFields = tspWebvhDocumentFields(tsp.transport, tspMaterial);
+      const tspFields = tspWebvhDocumentFields(transportUrl, tspMaterial);
       extraVerificationMethods = [...extraVerificationMethods, ...tspFields.additionalVerificationMethods];
       mergedServices = [...mergedServices, ...tspFields.services];
       keyAgreementForTsp = tspFields.keyAgreement;
@@ -655,7 +657,7 @@ export class WebVHManager {
     verifier?: ExternalVerifier;
     outputDir?: string;
     /** Add or replace TSP keyAgreement + TSPTransport on this update (Multikey only). */
-    tsp?: { transport: string };
+    tsp?: TspWebvhEnable;
   }): Promise<{
     didDocument: DIDDocument;
     log: DIDLog;
@@ -744,9 +746,10 @@ export class WebVHManager {
 
     let tspMaterial: ReturnType<typeof generateTspWebvhKeyMaterial> | undefined;
     let tspMerged = { ...updates };
-    if (tsp) {
+    const transportUrl = resolveTspTransportUrl(tsp, { domain: '', paths: [], did });
+    if (transportUrl) {
       tspMaterial = generateTspWebvhKeyMaterial();
-      const tspFields = tspWebvhDocumentFields(tsp.transport, tspMaterial);
+      const tspFields = tspWebvhDocumentFields(transportUrl, tspMaterial);
       const vms = [
         ...(currentDoc.verificationMethod ?? []),
         ...(updates.verificationMethod ?? []).filter(

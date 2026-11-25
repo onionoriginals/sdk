@@ -15,3 +15,4 @@ export {
   type TspWebvhKeyMaterial,
 } from './webvh-fields.js';
 export { localVidFromWebVhKeys } from './vid.js';
+export { resolveTspTransportUrl, type TspWebvhEnable } from './transport-url.js';

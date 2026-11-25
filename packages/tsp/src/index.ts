@@ -10,4 +10,5 @@ export * from './message.js';
 export * from './endpoint.js';
 export * from './transport.js';
 export * from './vid/keys.js';
+export * from './vid/webvh-inbox.js';
 export * from './http/index.js';
