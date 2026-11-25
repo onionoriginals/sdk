@@ -27,6 +27,52 @@ The prior format (`originals:1.0`, `did:vh` identifiers) gets outcome
 | 4 | `og/4-hosted` | Shared-host saves (P6.7), the hosted layout (P14.11, P9.7), the did:webvh alias (P3.6) and the hosted vector |
 | 5 | `og/5-bitcoin` | Inscription metadata and envelopes (P14.12), publications in parts (P9.32), the P9.15 table, anchors (P9.16), inscribed signer histories (P9.33), one SCID per sat (P9.34), the bitcoin and prior-format vectors |
 | 6 | `og/6-anchor-cli` | The SDK's did:og workflow and the mainnet anchoring command, with an end-to-end regtest run |
+| 7 | `og/7-no-inscribed-signers` | D22: inscriptions carry no signer histories; did:vh / did:webvh signers of inscribed entries come from resolution, checked at the version they name |
+
+## D22: no inscribed signer histories (owner decision, 22 November 2026)
+
+The spec text is being rewritten for D22 on the spec branch
+`no-inscribed-signers`; `og/7-no-inscribed-signers` implements it ahead of
+that text:
+
+- Inscription metadata is `{entries, part?}` (P14.12). The writer never
+  writes `signers`; the reader ignores a `signers` member whatever it holds
+  (older inscriptions, including the mainnet one, carry it) and never uses it
+  as evidence; any other unknown member still invalidates the metadata.
+  Multi-part sizing (P9.32) and the limits (P14.13) count entries and the body
+  only.
+- A did:vh or did:webvh signer of an inscribed entry is checked against a
+  supplied signer history in the evidence set, with its source and obtained
+  time (P7.8, P7.17), at the version the entry names (P5.3), before or after
+  the anchor. A later removal or deactivation never invalidates an inscribed
+  entry: P9.15 row 8 and the P5.18 author-deactivation check apply to did:btco
+  signers and authors only. did:btco signers are unchanged (P5.13).
+- No supplied log gives `signer-history-missing`; a log that ends before the
+  named version gives `signer-version-missing`. Both are handled like an
+  unread did:btco sat: in the anchoring publication, identity `incomplete` and
+  `bitcoin` `undetermined`; after it, the inscription is `unverifiable` and
+  later publications `waiting`. Another versionId at the named number, or a
+  failing proof, is `rejected`. Missing evidence never accepts. An undetermined
+  anchoring publication of another did:og leaves ours undetermined too.
+- The anchor CLI's `verify` fetches the author's `did.jsonl` from its URL (no
+  redirects) and supplies it as a signer history whose source is that URL; `last-run.json` records
+  whether it was served, verifies and reaches the named versions, and prints
+  a warning beside the report (not in it) when the newest version removes the
+  key or deactivates the DID.
+- The vectors are recopied from the spec branch `no-inscribed-signers` at
+  `d74f0a9` (see `PIN.md`): the bitcoin vector's part 1 has no `signers`, and
+  its author log is a resolved `signer-history` input
+  (`bitcoin/author/did.jsonl`, located through `bitcoin/resolved.json`). The SDK
+  reproduces its expected report from that evidence set unchanged. A version
+  number held under another versionId, or a failing proof, on an inscribed
+  entry is rejected under P5.3.
+- Also fixed on the way: the Bitcoin path recomputed `outcome` after the
+  off-chain report and lost `target-missing`'s `incomplete` (P7.18, T7-076).
+- `bun run regtest:og` passed all four runs on 22 November 2026 with this
+  branch (Bitcoin Core 32.1, ord 0.29.1): no inscription carries `signers`,
+  `verify` supplies the resolved author log, and the vector run (T14-093)
+  matches the regenerated expected report with only chain-dependent values
+  substituted.
 
 ## Spec findings
 

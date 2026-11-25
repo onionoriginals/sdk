@@ -2,11 +2,21 @@
 
 The command behind step b of the mainnet release gate (originals-spec 3c7b6db,
 section 13): a fresh mainnet inscription in the current format, made by the
-owner, verified from Bitcoin alone with exactly the P9.18 evidence set and
-through a public host. It creates a new did:webvh for the author, builds and
+owner, verified from Bitcoin with the P9.18 evidence set and the author's log
+resolved from its public host. It creates a new did:webvh for the author, builds and
 signs the did:og genesis and anchoring entries, shows a funding address and
 the exact amount, inscribes after the funding output confirms, and reads
 everything back from a public ord explorer.
+
+The inscriptions carry the did:og entries only, as `{entries, part?}` (P14.12):
+no signer DID history is inscribed (owner decision D22, 22 November 2026). A
+verifier resolves the author's did:webvh log from its URL and supplies it in
+its evidence set, and checks each entry at the author version it names (P5.3).
+So the author's `did.jsonl` must stay served: without it a verifier cannot
+check the entries' signatures, and the report is `incomplete`
+(`signer-history-missing`, `bitcoin` `undetermined`), never `verified`. A later
+version that removes the key or deactivates the DID does not invalidate the
+inscribed entries.
 
 Nothing is broadcast without an explicit confirmation. On mainnet `--yes` is
 ignored: every confirmation needs `yes` typed at a terminal after the question
@@ -33,10 +43,20 @@ the next question, and input that ends without one is a no.
 |---|---|
 | `author` | Creates `did:webvh:<SCID>:<domain>:authors:<name>` (default domain `originals.build`), prints its `did.jsonl` and the exact URL to serve it at (`https://<domain>/authors/<name>/did.jsonl`), writes it to `<state>/did.jsonl`, waits for confirmation, then fetches the URL (no redirects) and checks it is the same log and verifies under did:webvh. |
 | `prepare` | Builds the genesis entry for `--file` (`--media-type`, `--title`), chooses the body (P9.30: by default a WebP preview for an image, none for other types unless `--preview <file>`; `--body full` or `none` to choose), sizes the publication with the largest sat number, prints the P9.18 disclosure and the funding address with the exact amount. |
-| `fund` | Waits for the funding output (one confirmation), asks the ord explorer for its first sat (the anchoring sat), refuses a sat that already carries an Originals inscription (P9.34), signs the anchoring entry with `did:btco:<sat>` and the genesis network, verifies the committed log through it as a local copy with the author history to be inscribed (P9.18), prints the disclosure again with the real cost, and asks for confirmation. |
+| `fund` | Waits for the funding output (one confirmation), asks the ord explorer for its first sat (the anchoring sat), refuses a sat that already carries an Originals inscription (P9.34), signs the anchoring entry with `did:btco:<sat>` and the genesis network, verifies the committed log through it as a local copy with the author log it holds (P9.18; that log is not inscribed), prints the disclosure again with the real cost, and asks for confirmation. |
 | `broadcast` | Signs and broadcasts the commit and each reveal through the chain backend; the sat moves at input 0 and offset 0 into each part and then to `--holder` (no pointer, P14.12). A retry rebroadcasts the same transactions, never a re-signed entry (P9.6). Each is labelled pending (in the mempool) or submitted, not observed (P9.18). |
-| `verify` | Waits for the final reveal to be 6 blocks deep by default (`--min-confirmations`), so the Original's publication history meets the transfer check's depth (P7.22, P14.13), and for the explorer to index it, reads the sat's inscriptions, each envelope from its reveal transaction, chain order and the holder at one tip, computes the report from exactly that evidence set (P9.18), fetches the author's `did.jsonl` from its public URL and checks it matches the inscribed history, and writes `last-run.json` with the transactions, sat, heights, tip, report and host check. Its `holder` is the holder the explorer reports at the verified tip (P9.11), the same as the report's, or null when none is observed; `revealDestination` is the `--holder` address the reveal sent the sat to. They differ once the sat has moved, and the run can still pass. Exit 0 only if `outcome` is `verified`, `state` `current`, `bitcoin` `anchored`, the transfer check on the publication history passes and the host copy matches. The transfer check never covers the transaction that last moved the sat: the holder is whoever the explorer reports (P9.11), however recently the sat moved; check that transaction's depth yourself if you need the transfer settled (T7-074). |
+| `verify` | Waits for the final reveal to be 6 blocks deep by default (`--min-confirmations`), so the Original's publication history meets the transfer check's depth (P7.22, P14.13), and for the explorer to index it, reads the sat's inscriptions, each envelope from its reveal transaction, chain order and the holder at one tip, fetches the author's `did.jsonl` from its public URL (no redirects) and adds it to that evidence set as the resolved signer history, its source that URL, with its obtained time (P7.8, P7.17; D22), computes the report, and writes `last-run.json` with the transactions, sat, heights, tip, report and host check (`publicHost`: served, verifies as the author DID's log, reaches the versions the entries name). If the newest served version removes the entry key or deactivates the DID, it prints a warning and lists it under `warnings`; that is not part of the report and does not fail the run. If the served log does not contain the version the entries name, it says so under `warnings` too, and the run does not pass. Its `holder` is the holder the explorer reports at the verified tip (P9.11), the same as the report's, or null when none is observed; `revealDestination` is the `--holder` address the reveal sent the sat to. They differ once the sat has moved, and the run can still pass. Exit 0 only if `outcome` is `verified`, `state` `current`, `bitcoin` `anchored`, the transfer check on the publication history passes and the host copy verifies and reaches the versions the entries name. The transfer check never covers the transaction that last moved the sat: the holder is whoever the explorer reports (P9.11), however recently the sat moved; check that transaction's depth yourself if you need the transfer settled (T7-074). |
 | `run` | All five in order. |
+
+`verify` waits for 6 confirmations by default because this command is the
+release gate and checks the transfer depth (P7.22). That wait is not a display
+rule: an app should not wait for `anchor verify` to finish before it shows an
+inscription. Under P9.5 an app can show an inscription as soon as it is
+confirmed in a block. It can show the Original as verified and anchored at one
+confirmation when the report from the evidence at that tip has `outcome`
+`verified` and `bitcoin` `anchored`, with the observed confirmation depth shown
+beside it. A reveal seen only in the mempool can be shown as pending, never as
+anchored or verified. The CLI default stays at 6.
 
 ## Backends
 
@@ -59,6 +79,8 @@ route must:
 - answer `GET` and `HEAD` with `200`, `Content-Type: application/jsonl`
   (did:webvh does not fix a media type; `application/jsonl` or `text/plain`
   both work with didwebvh-ts) and `X-Content-Type-Options: nosniff`;
+- keep serving it for as long as the Original should verify: verifiers resolve
+  the author's history from it (nothing on Bitcoin carries it, D22);
 - answer directly, with no redirect (P8.5: verifiers do not follow redirects)
   and no HTML fallback from the SPA for that path;
 - send `Access-Control-Allow-Origin: *` so browser resolvers can read it;

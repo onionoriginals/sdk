@@ -1,6 +1,8 @@
 // End-to-end regtest run of the did:og anchoring command (plan 051): Bitcoin Core and ord
 // 0.29.x on regtest in a temporary directory, a local HTTP server standing in for the
 // author DID's host, and the command's own steps: author, prepare, fund, broadcast, verify.
+// The inscriptions carry no signer history (D22): verify resolves the author's did.jsonl from
+// that host and supplies it to the verifier as the resolved signer history.
 // Run: bun packages/sdk/scripts/og-anchor-regtest.ts [--image] [--keep]
 // Regtest only; nothing outside the temporary directory is written except the run record.
 import { writeFileSync } from 'node:fs';
@@ -43,10 +45,10 @@ async function main() {
       confirm: async () => true,
       sleep: async (ms) => { if (blocksAfterBroadcast) { await mine(1); await ordSync(); } await sleep(ms); },
     },
-    // did:webvh resolves over HTTPS; this host is local, so the same path is fetched over HTTP.
+    // did:webvh resolves over HTTPS; this host is local, so the same path is fetched over HTTP, with no redirects.
     fetchAuthorLog: async (url) => {
       const path = new URL(url).pathname;
-      const r = await fetch(`http://127.0.0.1:${httpPort}${path}`);
+      const r = await fetch(`http://127.0.0.1:${httpPort}${path}`, { redirect: 'error' });
       return r.ok ? r.text() : null;
     },
   };

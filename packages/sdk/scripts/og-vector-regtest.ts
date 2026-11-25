@@ -3,7 +3,9 @@
 // sat), read it back through ord 0.29.x with this SDK's reader, and compare the report this
 // SDK computes with the vector's expected report, substituting only chain-dependent values.
 // Part 1 is the vector's envelope byte for byte; the vector's sat is synthetic, so entry 4,
-// the anchoring entry, is re-signed with the vector's test key for the real sat.
+// the anchoring entry, is re-signed with the vector's test key for the real sat. The
+// inscriptions carry no signer history (D22): the author's log is the vector's resolved
+// signer-history input, exactly as its evidence set states it (bytes via resolved.json).
 // Run: bun packages/sdk/scripts/og-vector-regtest.ts
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -58,7 +60,13 @@ async function main() {
     await rt.mine(8);
     await rt.ordSync();
     const read = await readSatEvidence({ original: vjson('index.json').original, network: 'regtest', sat, ord: rt.ord, chain: rt.core });
-    const report = await verifyOriginal(read.evidence);
+    // D22: the vector's resolved signer-history inputs and notes, exactly as its evidence set states them.
+    const vectorSet = vjson('bitcoin/evidence-set.json');
+    const files = new Map(vjson('bitcoin/resolved.json').responses.map((r: { source: string; file: string }) => [r.source, `bitcoin/${r.file}`]));
+    const histories = vectorSet.inputs.filter((i: { kind: string }) => i.kind === 'signer-history')
+      .map((i: { source: string; digest: string }) => ({ kind: 'signer-history' as const, source: i.source, digest: i.digest, bytes: vread(files.get(i.source) as string) }));
+    const evidence = { ...read.evidence, inputs: [...read.evidence.inputs, ...histories], signerHistories: vectorSet.signerHistories };
+    const report = await verifyOriginal(evidence);
 
     // The expected report, with only chain-dependent values substituted.
     const expected = vjson('bitcoin/expected-report.json');

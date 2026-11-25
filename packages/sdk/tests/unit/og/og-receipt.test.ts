@@ -12,15 +12,14 @@ import { generateKeyFile } from '../../../src/og/keys.js';
 import { createAuthorDid } from '../../../src/og/author-did.js';
 import { anchoringPublication, createAnchoringEntry, createGenesis, type AuthorRef } from '../../../src/og/original.js';
 import { scureNetwork, signChain } from '../../../src/og/inscribe.js';
-import { loadState, saveState, stepBroadcast, stepVerify, type AnchorState, type Ctx } from '../../../src/og/anchor.js';
+import { authorWarnings, loadState, saveState, stepBroadcast, stepVerify, type AnchorState, type Ctx } from '../../../src/og/anchor.js';
 import type { ChainBackend, OrdExplorer } from '../../../src/og/chain.js';
 
 const addr = (fill: number) => btc.p2tr(schnorr.getPublicKey(new Uint8Array(32).fill(fill)), undefined, scureNetwork('regtest')).address!;
 
 describe('anchoring receipt (P9.11, T7-074)', () => {
-  test('reveal destination A, observed holder B: the run passes and records the two roles distinctly', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'og-receipt-'));
-    try {
+  /** An anchored Original read back through stub backends; `served` is what the author's URL returns. */
+  async function receipt(dir: string, served: (log: string) => string | null, ordHeight: () => number = () => 309) {
       const keyFile = join(dir, 'keys.json');
       const keys = generateKeyFile(keyFile);
       const a = await createAuthorDid(keys, { path: ['authors', 'receipt'], now: new Date('2026-11-22T00:00:00Z') });
@@ -31,7 +30,7 @@ describe('anchoring receipt (P9.11, T7-074)', () => {
       const sat = 5000n;
       const genesis = await createGenesis({ name: 'Receipt', bytes, mediaType: 'text/markdown', network: 'regtest', author });
       const anchoring = await createAnchoringEntry(genesis, { sat, network: 'regtest', body: 'full', author });
-      const parts = anchoringPublication([genesis, anchoring], author, bytes);
+      const parts = anchoringPublication([genesis, anchoring], bytes);
       const revealDestination = addr(2);
       const observedHolder = addr(3);
       const secret = new Uint8Array(32).fill(9);
@@ -60,7 +59,7 @@ describe('anchoring receipt (P9.11, T7-074)', () => {
       };
       const ids = signed.txids.slice(1).map((t) => `${t}i0`);
       const ord = {
-        base: 'stub-ord', version: async () => '0.29.1', height: async () => 309, blockhash: async () => 'f'.repeat(64),
+        base: 'stub-ord', version: async () => '0.29.1', height: async () => ordHeight(), blockhash: async () => 'f'.repeat(64),
         satInscriptions: async () => ids,
         inscription: async (id: string) => ({ id, height: 300, sat: Number(sat), satpoint: `${'cd'.repeat(32)}:0:0`, metaprotocol: 'og', content_type: id.startsWith(revealTxid) ? 'text/markdown' : null }),
         output: async () => ({ address: observedHolder }),
@@ -70,9 +69,20 @@ describe('anchoring receipt (P9.11, T7-074)', () => {
       const ctx: Ctx = {
         stateDir: dir, keyFile, network: 'regtest', chain, ord, pollMs: 1, timeoutMs: 5_000,
         io: { say: (l) => said.push(l), confirm: async () => true, sleep: async () => {} },
-        fetchAuthorLog: async () => a.log,
+        fetchAuthorLog: async () => served(a.log),
       };
       const run = await stepVerify(ctx, { out: join(dir, 'last-run.json') });
+      return { run, said, a, signed, revealTxid, revealDestination, observedHolder };
+  }
+
+  test('reveal destination A, observed holder B: the run passes and records the two roles distinctly', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'og-receipt-'));
+    try {
+      const { run, said, a, signed, revealTxid, revealDestination, observedHolder } = await receipt(dir, (log) => log);
+      // D22: the author's log comes from its URL, supplied as the resolved signer history.
+      expect(run.report.signers).toEqual([expect.objectContaining({ did: a.did, role: 'author', source: a.url, obtained: run.publicHost.obtained, freshness: 'not-established' })]);
+      expect(run.publicHost).toMatchObject({ served: true, verifies: true, reachesNamedVersions: true });
+      expect(run.warnings).toEqual([]);
       expect(parseTransaction(signed.hex.at(-1)!).txid).toBe(revealTxid);
       expect(run.report.bitcoin?.holder.address).toBe(observedHolder);
       expect(run.holder).toBe(observedHolder);
@@ -80,13 +90,79 @@ describe('anchoring receipt (P9.11, T7-074)', () => {
       expect(run.holder).not.toBe(run.revealDestination);
       expect(run.transferCheck).toBe(true);
       expect(run.passed).toBe(true);
-      const receipt = JSON.parse(readFileSync(join(dir, 'last-run.json'), 'utf8'));
-      expect(receipt).toMatchObject({ holder: observedHolder, revealDestination, passed: true });
+      const record = JSON.parse(readFileSync(join(dir, 'last-run.json'), 'utf8'));
+      expect(record).toMatchObject({ holder: observedHolder, revealDestination, passed: true });
       expect(said.some((l) => l.includes(`holder at the tip ${observedHolder}`))).toBe(true);
       expect(said.some((l) => l.includes(`no longer at the reveal destination ${revealDestination}`))).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test('the explorer trails the chain backend: verify waits for the publication to be 6 deep at the explorer\'s own tip', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'og-receipt-'));
+    try {
+      // The chain backend already reports 10 confirmations, but the explorer's first read is at 304, where the
+      // reveal (height 300) is only 5 deep; its second read is at 309.
+      let calls = 0;
+      const { run, said } = await receipt(dir, (log) => log, () => (calls++ < 2 ? 304 : 309));
+      expect(calls).toBeGreaterThanOrEqual(4);
+      expect(said.some((l) => l.includes('6 blocks deep'))).toBe(true);
+      expect(run.tip.height).toBe(309);
+      expect(run.transferCheck).toBe(true);
+      expect(run.passed).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('D22: the author log not served: signer-history-missing, the anchor undetermined, the run not passed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'og-receipt-'));
+    try {
+      const { run, a } = await receipt(dir, () => null);
+      expect(run.report.axes).toMatchObject({ outcome: 'incomplete', bitcoin: 'undetermined', identity: 'incomplete' });
+      expect(run.report.diagnostics).toContainEqual(expect.objectContaining({ code: 'signer-history-missing', item: { kind: 'signer', id: a.did } }));
+      expect(run.report.entries.some((e) => e.status === 'accepted')).toBe(false);
+      expect(run.publicHost).toMatchObject({ served: false, verifies: false });
+      expect(run.passed).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('D22: a served log that is not the author DID\'s is no evidence: never passed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'og-receipt-'));
+    try {
+      const { run } = await receipt(dir, (log) => log.replace('"versionTime":"', '"versionTime":"1'));
+      expect(run.report.axes).toMatchObject({ outcome: 'incomplete', bitcoin: 'undetermined' });
+      expect(run.publicHost).toMatchObject({ served: true, verifies: false });
+      expect(run.passed).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('author warnings beside the report (D22)', () => {
+  const doc = (keys: string[]) => ({ id: 'did:webvh:x:a', verificationMethod: keys.map((k, i) => ({ id: `did:webvh:x:a#key-${i + 1}`, type: 'Multikey', controller: 'did:webvh:x:a', publicKeyMultibase: k })), assertionMethod: keys.map((_, i) => `did:webvh:x:a#key-${i + 1}`) });
+  const v1 = { versionId: '1-a', document: doc(['zA']), deactivated: false };
+  test('none while the newest version lists the key', () => {
+    expect(authorWarnings({ ok: true, versions: [v1] }, 'did:webvh:x:a#key-1', '1-a')).toEqual([]);
+  });
+  test('a newer version that removes the key, or deactivates the DID, is a warning, never a failure', () => {
+    expect(authorWarnings({ ok: true, versions: [v1, { versionId: '2-b', document: doc(['zB']), deactivated: false }] }, 'did:webvh:x:a#key-1', '1-a')).toEqual(['The latest resolved version of the author DID (2-b) no longer lists the key did:webvh:x:a#key-1. Inscribed entries are verified against the DID version each entry names.']);
+    expect(authorWarnings({ ok: true, versions: [v1, { versionId: '2-b', document: doc(['zA']), deactivated: true }] }, 'did:webvh:x:a#key-1', '1-a')).toEqual(['The latest resolved version of the author DID (2-b) is deactivated. Inscribed entries are verified against the DID version each entry names.']);
+  });
+  test('a served log without the version the entries name: a clear message (the run does not pass on it)', () => {
+    expect(authorWarnings({ ok: true, versions: [v1] }, 'did:webvh:x:a#key-1', '2-z')).toEqual(['The resolved author log does not contain the version the entries name (2-z). The report cannot verify the inscribed entries against it, so the run does not pass.']);
+  });
+  test('every message is sentences: a capital first letter and a final full stop', () => {
+    const all = [
+      ...authorWarnings({ ok: true, versions: [v1, { versionId: '2-b', document: doc(['zB']), deactivated: false }] }, 'did:webvh:x:a#key-1', '1-a'),
+      ...authorWarnings({ ok: true, versions: [v1, { versionId: '2-b', document: doc(['zA']), deactivated: true }] }, 'did:webvh:x:a#key-1', '9-z'),
+    ];
+    expect(all.length).toBe(3);
+    for (const m of all) expect(m).toMatch(/^[A-Z].*\.$/);
   });
 });
 

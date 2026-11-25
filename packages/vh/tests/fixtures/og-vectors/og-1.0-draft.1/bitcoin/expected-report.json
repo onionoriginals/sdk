@@ -13,12 +13,17 @@
       {
         "kind": "inscription",
         "source": "index:bcbdc0375c141a6ae45685da65010aa15f92401baf8c3cdb36a290b97d3a08dbi0",
-        "digest": "zQmTwFMNvRhKoF3oB7E1s5SnJqdXXHkyeswFz7mVQyGVvoh"
+        "digest": "zQmPxaVJjs5mN3oJUKbQVxfSro7WZpqJ2hYWNNS4yYE7drV"
       },
       {
         "kind": "inscription",
         "source": "index:53455ef2c9378bbc138bd1264b8ec7cfd50d8bb5bafade2e034c2eca22ddcdc5i0",
         "digest": "zQmcgTvTsQco2KbDpvpecY7kcvSNYJ3weHqB1ikX9oYzgM8"
+      },
+      {
+        "kind": "signer-history",
+        "source": "https://author.example/.well-known/did.jsonl",
+        "digest": "zQmfXJB3kVg7jeL7HjvrTvwy5bcPEyPQP5bkLjTEEUJxorv"
       }
     ],
     "network": "regtest",
@@ -78,8 +83,9 @@
       "did": "did:webvh:QmZ3f6CT8tzVfdx22EhRFEYbyh6VXc22hYCEk7xoQM17YQ:author.example",
       "role": "author",
       "latestVersionId": "1-QmNjhx8xG4JD9hCswSc1nSZncxuSGzex37ica8BoyHEmrq",
-      "source": "inscribed:bcbdc0375c141a6ae45685da65010aa15f92401baf8c3cdb36a290b97d3a08dbi0",
-      "freshness": "established"
+      "source": "https://author.example/.well-known/did.jsonl",
+      "obtained": "2026-01-06T00:00:00Z",
+      "freshness": "not-established"
     }
   ],
   "diagnostics": [

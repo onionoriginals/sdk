@@ -6,11 +6,25 @@ import { encodeCbor } from '../src/originals/cbor.js';
 import { bitcoinEvidence, bytesEqual, pjson, priorEvidence, vbytes, vectorEvidence, vjson, withSatRead } from './helpers/og-vectors.js';
 
 describe('bitcoin vector (T14-075, T9-030, T14-102, P9.18)', () => {
-  test('the expected report from exactly the P9.18 evidence set', async () => {
+  test('the expected report from exactly the P9.18 evidence set, with the author log as resolved (D22)', async () => {
     const r = await verifyOriginal(bitcoinEvidence());
     const want = vjson('bitcoin/expected-report.json');
-    expect(sameReport(r, want)).toBe(true);
     expect({ ...r, diagnostics: r.diagnostics.map(({ reason: _r, ...d }) => d) }).toEqual({ ...want, diagnostics: want.diagnostics.map(({ reason: _r, ...d }: any) => d) });
+    expect(sameReport(r, want)).toBe(true);
+  });
+
+  test('D22: without the resolved author log the anchor is undetermined, nothing accepted', async () => {
+    const e = bitcoinEvidence();
+    e.inputs = e.inputs.filter((i) => i.kind !== 'signer-history');
+    e.signerHistories = [];
+    const r = await verifyOriginal(e);
+    expect(r.axes).toMatchObject({ bitcoin: 'undetermined', identity: 'incomplete', outcome: 'incomplete' });
+    expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'signer-history-missing', rule: 'P5.6', item: { kind: 'signer', id: vjson('index.json').author } }));
+    expect(r.entries.some((x) => x.status === 'accepted')).toBe(false);
+  });
+
+  test('D22: the vector inscriptions carry no signers member', () => {
+    for (const k of [1, 2]) expect(Object.keys(decodeCbor(vbytes(`bitcoin/inscriptions/part-${k}.metadata.cbor`), { shortest: false }) as object)).not.toContain('signers');
   });
 });
 
@@ -88,7 +102,7 @@ describe('metadata member order (P14.12, T14-097, T14-098)', () => {
     if (r.kind !== 'originals') throw new Error('part');
     const rev = (v: any): any => (Array.isArray(v) ? v.map(rev) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).reverse().map((x) => [x, rev(v[x])])) : v);
     const m = r.metadata as any;
-    const value = order === 'reverse' ? { ...(m.part ? { part: m.part } : {}), ...(m.signers ? { signers: rev(m.signers) } : {}), entries: rev(m.entries) } : m;
+    const value = order === 'reverse' ? { ...(m.part ? { part: m.part } : {}), entries: rev(m.entries) } : m;
     const metadata = order === 'reverse' ? encodeCbor(value) : encodeMetadata(m);
     return encodeEnvelope({ contentType: r.contentType, metadata, body: r.body });
   };
@@ -109,21 +123,47 @@ describe('metadata member order (P14.12, T14-097, T14-098)', () => {
   }
 });
 
+describe('metadata members on the bitcoin vector (P14.12, T14-003, owner decision D)', () => {
+  /** The vector with part 1's metadata given one more member, its other fields and body kept. */
+  const withMember = (member: Record<string, unknown>) => {
+    const e = bitcoinEvidence();
+    const env = vbytes('bitcoin/inscriptions/part-1.envelope.bin');
+    const r = readInscription(env);
+    if (r.kind !== 'originals') throw new Error('part 1');
+    const changed = encodeEnvelope({ contentType: r.contentType, metadata: encodeCbor({ ...(r.metadata as any), ...member }), body: r.body });
+    let k = 0;
+    e.inputs = e.inputs.map((i) => (i.kind === 'inscription' && k++ === 0 ? { kind: i.kind, source: i.source, bytes: changed } : i));
+    return e;
+  };
+
+  test('T14-003: an unknown member makes the publication rejected: outcome invalid, as the reference checker gives', async () => {
+    const r = await verifyOriginal(withMember({ extra: 1 }));
+    expect(r.axes).toMatchObject({ outcome: 'invalid', history: 'invalid', bitcoin: 'not-anchored' });
+    expect(r.entries.length).toBe(4);
+    expect(r.entries.every((x) => x.status === 'rejected' && x.rule === 'P14.12')).toBe(true);
+  });
+
+  test('owner decision D: a signers member on regtest is an unknown member too: invalid', async () => {
+    const r = await verifyOriginal(withMember({ signers: [{ did: vjson('index.json').author, log: [] }] }));
+    expect(r.axes).toMatchObject({ outcome: 'invalid', bitcoin: 'not-anchored' });
+  });
+});
+
 describe('inscription bytes (T14-076, T14-078)', () => {
   for (const k of [1, 2]) {
     test(`part ${k}: the vector envelope is a read fixture: the codec reproduces it from its decoded key order, and other orders decode to the same values`, () => {
       const meta = vbytes(`bitcoin/inscriptions/part-${k}.metadata.cbor`);
       const env = vbytes(`bitcoin/inscriptions/part-${k}.envelope.bin`);
-      const decoded = decodeCbor(meta, { shortest: false }) as never;
-      const asWritten = encodeMetadata(decoded, { keepOrder: true });
+      const decoded = decodeCbor(meta, { shortest: false }) as Record<string, unknown>;
+      const asWritten = encodeMetadata(decoded as never, { keepOrder: true });
       expect(bytesEqual(asWritten, meta)).toBe(true);
       const r = readInscription(env);
       if (r.kind !== 'originals') throw new Error(r.kind);
       expect(bytesEqual(encodeEnvelope({ contentType: r.contentType, metadata: asWritten, body: r.body }), env)).toBe(true);
       // Any member order conforms (P14.12, b4f3604): JCS member order gives other bytes, the same JSON values.
-      const jcs = encodeMetadata(decoded);
+      const jcs = encodeMetadata(decoded as never);
       expect(bytesEqual(jcs, meta)).toBe(false);
-      expect(decodeCbor(jcs, { shortest: false })).toEqual(decodeCbor(meta, { shortest: false }));
+      expect(decodeCbor(jcs, { shortest: false })).toEqual(decoded as never);
     });
   }
 });

@@ -128,7 +128,7 @@ describe('commit and reveal (P14.12, P9.32)', () => {
     const bytes = new TextEncoder().encode('x'.repeat(300));
     const g = await createGenesis({ name: 'Big', bytes, mediaType: 'text/plain', network: 'regtest', author: ref });
     const a = await createAnchoringEntry(g, { sat: 5n, network: 'regtest', body: 'full', author: ref });
-    const parts = anchoringPublication([g, a], ref, bytes);
+    const parts = anchoringPublication([g, a], bytes);
     const secret = new Uint8Array(32).fill(9);
     const holder = btc.p2tr(new Uint8Array(32).fill(2), undefined, scureNetwork('regtest')).address!;
     const p = plan({ secret, network: 'regtest', envelopes: parts.map((x) => x.envelope), holder, feeRate: 2, postage: 1000n });
@@ -140,7 +140,10 @@ describe('commit and reveal (P14.12, P9.32)', () => {
       expect(txs[k].inputs[0]).toMatchObject({ txid: txs[k - 1].txid, vout: 0 });
       expect(txs[k].inputs).toHaveLength(1);
       const [env] = envelopesInWitness(txs[k].inputs[0].witness);
-      expect(readInscription(env).kind).toBe('originals');
+      const read = readInscription(env);
+      expect(read.kind).toBe('originals');
+      // D22: the writer inscribes the entries (and part) only, never the author's history.
+      expect(read.kind === 'originals' && Object.keys(read.metadata).filter((m) => m !== 'part')).toEqual(['entries']);
     }
     expect(txs.map((t) => t.txid)).toEqual(signed.txids);
     expect(btc.Address(scureNetwork('regtest')).encode(btc.OutScript.decode(txs.at(-1)!.outputs[0].script))).toBe(holder);
