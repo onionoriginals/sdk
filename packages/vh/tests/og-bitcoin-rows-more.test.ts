@@ -1,7 +1,7 @@
 // More §9 rows on Bitcoin (P9.15, P9.16, P9.17, P9.30, P9.31, P9.36): bodies after the anchor,
 // competing anchors, the P9.15 table's rows for unverifiable and mismatched signer versions.
 import { describe, expect, test } from 'bun:test';
-import { buildPublication, encodeEnvelope, encodeMetadata, resourceDigest, verifyOriginal, type OgEntry } from '../src/og/index.js';
+import { buildPublication, encodeEnvelope, encodeMetadata, presentationWarnings, resourceDigest, verifyOriginal, type OgEntry } from '../src/og/index.js';
 import { anchoring, Chain, history, publication } from './helpers/og-chain.js';
 import { seeded, WebvhAuthor } from './helpers/originals.js';
 import { axes, enc, labelOf, res, webvhSigner, World, type Signer } from './helpers/og-world.js';
@@ -240,8 +240,11 @@ describe('competing anchors (P9.16)', () => {
     expect(r.bitcoin?.holder.uniqueness).toBe('provisional');
     expect(r.diagnostics.map((d) => d.code)).not.toContain('inscription-unverifiable');
     expect(r.diagnostics.map((d) => d.code)).not.toContain('signer-sat-not-read');
+    // T9-153: the ignored earlier claim is shown beside the report, with the sat it lacks.
+    expect(presentationWarnings(r)).toEqual([expect.objectContaining({ code: 'earlier-claim-unchecked', sat: SAT, inscription: first.id, missing: [expect.objectContaining({ missing: 'sat' })] })]);
     const decided = await verifyOriginal(chain.evidence(w.did));
     expect(decided.bitcoin?.sat).toBe(SAT);
+    expect(presentationWarnings(decided)).toEqual([]);
   });
 
   test('T9-106: after anchoring, an editor entry and the revoking author entry with the same parent: the first in chain order is accepted, the other ignored', async () => {
