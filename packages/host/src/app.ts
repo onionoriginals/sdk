@@ -11,6 +11,7 @@ import {
   type SocketPeerSource,
 } from './client-ip.js';
 import { servedWebvhHosts } from './webvh-hosts.js';
+import type { TspInboxHost } from './tsp-inbox.js';
 
 // Minimal surface buildFetch depends on; the real store (webvh-host.ts)
 // implements exactly these two methods. `handlePut` takes the resolved client
@@ -125,6 +126,8 @@ export function buildFetch(deps: {
   // The deployed revision (RAILWAY_GIT_COMMIT_SHA), reported by /api/version.
   revision?: string | null;
   log?: (message: string) => void;
+  /** Opt-in did:webvh TSP inbox POST routes (PROVISIONAL). */
+  tspInbox?: TspInboxHost | null;
 }): (req: Request, server?: BunServerLike) => Promise<Response> {
   const { apiRoutes, hostStore, distDir, originals } = deps;
   // Lowercased once, not per request: `URL` lowercases the host it parses, so
@@ -267,6 +270,11 @@ export function buildFetch(deps: {
     // resolved first and the write path refuses the key (see webvh-host.ts).
     const context = serveContextDocument(req, url);
     if (context) return context;
+
+    if (deps.tspInbox) {
+      const tsp = await deps.tspInbox.serve(req, url);
+      if (tsp) return tsp;
+    }
 
     // 4. WebVH log/resource GETs served at the resolver's exact URLs.
     if (req.method === 'GET' || req.method === 'HEAD') {
