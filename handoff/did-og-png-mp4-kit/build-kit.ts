@@ -5,8 +5,12 @@
  * - `createAuthorDid` (`@originals/sdk/og`): a new did:webvh author DID, signed by its update key;
  * - `createGenesis` (`@originals/sdk/og`): each Original's genesis entry, signed by the author's
  *   assertion key;
- * - `buildPackage` (`@originals/vh/og`): the P14.10 evidence package (manifest, asset log, signer
- *   history, resource), and `writePackageZip`, its deterministic ZIP writer, to add SHA256SUMS.
+ * - `buildPackage` (`@originals/vh/og`): the P14.10 evidence package. Each ZIP is exactly the
+ *   archive it returns, with only the members P14.10 defines.
+ *
+ * Checksums are written next to each ZIP, never inside it:
+ * - `<zip>.sha256`: the ZIP itself;
+ * - `<zip>.contents.sha256`: each member, by its path inside the ZIP.
  *
  * The author's secret keys are generated into a temporary directory outside the repository and
  * deleted when the build ends. They are never printed or written to the kit.
@@ -19,18 +23,27 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAuthorDid, createGenesis } from "../../packages/sdk/src/og/index.js";
 import { generateKeyFile } from "../../packages/sdk/src/og/keys.js";
-import { buildPackage, resourceDigest, serializeLog, writePackageZip } from "../../packages/vh/src/og/index.js";
+import { buildPackage, resourceDigest, serializeLog } from "../../packages/vh/src/og/index.js";
 
 const KIT = import.meta.dir;
 const sha256 = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
 const enc = new TextEncoder();
+const byName = (a: string, b: string) => Buffer.compare(Buffer.from(a), Buffer.from(b));
 
-/** One time for every signature, so a rebuild with the same keys would give the same bytes. */
-const NOW = new Date("2026-11-25T08:00:00Z");
+/** One time for every signature. */
+const NOW = new Date("2026-11-25T09:00:00Z");
 
 const ORIGINALS = [
-  { slug: "png", file: "media/test-pattern-1280x720.png", mediaType: "image/png", name: "did:og handoff kit: PNG test pattern (1280x720)" },
-  { slug: "mp4", file: "media/test-pattern-4s.mp4", mediaType: "video/mp4", name: "did:og handoff kit: MP4 test pattern (640x360, 4 s, H.264/AAC)" },
+  {
+    slug: "png", file: "media/mars-curiosity-hazcam-2012-08-07.png", mediaType: "image/png",
+    name: "Mars, Gale Crater: one of the first Curiosity rear Hazcam images (NASA/JPL-Caltech, 2012-08-07)",
+    metadata: { source: "https://commons.wikimedia.org/wiki/File:Landscape-MarsCuriosity.png", author: "NASA/JPL-Caltech", licence: "Public domain (PD-NASA)" },
+  },
+  {
+    slug: "mp4", file: "media/pangong-tso-waves-720p.mp4", mediaType: "video/mp4",
+    name: "Small waves on the shore of Pangong Tso (Satalah, July 2021), 3.8 s",
+    metadata: { source: "https://commons.wikimedia.org/wiki/File:Pangong_Tso_Waves.webm", author: "Satalah", licence: "CC0 1.0", note: "transcoded from the source WebM (VP9, 1080p) to H.264 MP4, 720p; no trim" },
+  },
 ] as const;
 
 const secrets = mkdtempSync(join(tmpdir(), "og-handoff-keys-"));
@@ -44,7 +57,7 @@ try {
   for (const o of ORIGINALS) {
     const bytes = new Uint8Array(readFileSync(join(KIT, o.file)));
     const genesis = await createGenesis({
-      name: o.name, bytes, mediaType: o.mediaType, network: "mainnet",
+      name: o.name, bytes, mediaType: o.mediaType, network: "mainnet", metadata: { ...o.metadata },
       author: { did: author.did, verificationMethod: author.verificationMethod, versionId: author.versionId, log: author.log, signer: keys.assertion },
       now: () => NOW,
     });
@@ -58,14 +71,12 @@ try {
       resources: { [digest]: bytes },
       missing: [],
     });
-    // SHA256SUMS: one "<hex>  <name>" line per member, in the archive's own (byte) order.
-    const names = Object.keys(pkg.files).sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
-    const sums = names.map((n) => `${sha256(pkg.files[n])}  ${n}\n`).join("");
-    const archive = writePackageZip({ ...pkg.files, SHA256SUMS: enc.encode(sums) });
     const zipName = `did-og-${o.slug}-evidence.zip`;
-    writeFileSync(join(KIT, zipName), archive);
-    writeFileSync(join(KIT, `${zipName}.sha256`), `${sha256(archive)}  ${zipName}\n`);
-    summary[o.slug] = { zip: zipName, original, versionId: genesis.versionId, resource: { mediaType: o.mediaType, size: bytes.length, digest, sha256: sha256(bytes) }, manifest: pkg.manifest };
+    writeFileSync(join(KIT, zipName), pkg.archive);
+    writeFileSync(join(KIT, `${zipName}.sha256`), `${sha256(pkg.archive)}  ${zipName}\n`);
+    const members = Object.keys(pkg.files).sort(byName);
+    writeFileSync(join(KIT, `${zipName}.contents.sha256`), members.map((n) => `${sha256(pkg.files[n])}  ${n}\n`).join(""));
+    summary[o.slug] = { zip: zipName, original, versionId: genesis.versionId, members, resource: { file: o.file, mediaType: o.mediaType, size: bytes.length, digest, sha256: sha256(bytes) }, manifest: pkg.manifest };
   }
   writeFileSync(join(KIT, "kit.json"), `${JSON.stringify(summary, null, 2)}\n`);
   console.log(JSON.stringify(summary, null, 2));

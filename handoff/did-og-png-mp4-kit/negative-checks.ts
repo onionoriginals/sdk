@@ -1,34 +1,106 @@
 /**
- * Shows the verifier is not rubber-stamping the kit: two altered copies of the PNG package must
- * not verify. Offline; reads only the kit's files. Run from the repository root:
+ * Tamper tests: altered copies of each evidence package must FAIL the same pass criteria
+ * `verify-kit.ts` applies, each with a clear reason. Offline; reads only the kit's files. The ZIPs
+ * on disk are never modified: each tamper works on a copy in memory, rewritten with the SDK's own
+ * ZIP writer.
+ *
+ * 1. media byte flipped: one byte of `resources/<digest>` changed;
+ * 2. did:og log entry altered: the asset name in the genesis entry of `asset/did.jsonl` changed;
+ * 3. DID log entry altered: the `versionTime` of the author's did:webvh log entry changed;
+ * 4. signer history swapped: the author's did:webvh log replaced by another valid did:webvh log,
+ *    of a different DID made for this test with throwaway keys (deleted afterwards).
+ *
+ * Exit 0 only if every tampered package fails. Run from the repository root:
  *   bun handoff/did-og-png-mp4-kit/negative-checks.ts
  */
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readPackageZip, verifyOriginal, writePackageZip } from "../../packages/vh/src/og/index.js";
+import { createAuthorDid } from "../../packages/sdk/src/og/index.js";
+import { generateKeyFile } from "../../packages/sdk/src/og/keys.js";
+import { readPackageZip, verifyOriginal, writePackageZip, type Report } from "../../packages/vh/src/og/index.js";
 
-const K = import.meta.dir;
-const kit = JSON.parse(readFileSync(join(K, "kit.json"), "utf8")) as Record<string, { zip: string; original: string }>;
-const files = readPackageZip(new Uint8Array(readFileSync(join(K, kit.png.zip))));
+const KIT = import.meta.dir;
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+const kit = JSON.parse(readFileSync(join(KIT, "kit.json"), "utf8")) as Record<string, { zip: string; original: string }>;
+
+/** What `verify-kit.ts` requires of a passing report. */
+const EXPECTED: Record<string, string> = { outcome: "verified", binding: "bound", history: "valid", identity: "complete", availability: "complete", offline: "self-contained", state: "valid-as-of", bitcoin: "not-read" };
+
+/** Why a report fails the pass criteria: each axis off its expected value, each diagnostic, each entry not accepted. */
+function failures(r: Report): string[] {
+  const axes = r.axes as Record<string, string>;
+  const out = Object.entries(EXPECTED).filter(([k, v]) => axes[k] !== v).map(([k, v]) => `${k} ${axes[k] ?? "(absent)"} (expected ${v})`);
+  for (const d of r.diagnostics) out.push(`diagnostic ${d.code} (rule ${d.rule})${d.reason ? `: ${d.reason}` : ""}`);
+  for (const e of r.entries) if (e.status !== "accepted") out.push(`entry ${e.versionId} ${e.status}${"rule" in e && e.rule ? ` (rule ${e.rule})` : ""}${"reason" in e && e.reason ? `: ${e.reason}` : ""}`);
+  if (r.entries.length === 0) out.push("no entry accepted");
+  return out;
+}
+
+// A valid did:webvh log of a different DID, for the swap.
+const secrets = mkdtempSync(join(tmpdir(), "og-handoff-tamper-"));
+let other: { did: string; log: string };
+try {
+  other = await createAuthorDid(generateKeyFile(join(secrets, "keys.json")), { domain: "example.com", path: ["authors", "someone-else"] });
+} finally {
+  rmSync(secrets, { recursive: true, force: true });
+}
+
+const TAMPERS: Array<{ name: string; apply: (f: Record<string, Uint8Array>) => void }> = [
+  {
+    name: "1. media byte flipped",
+    apply: (f) => {
+      const k = Object.keys(f).find((n) => n.startsWith("resources/"))!;
+      const b = new Uint8Array(f[k]);
+      b[Math.floor(b.length / 2)] ^= 0xff;
+      f[k] = b;
+    },
+  },
+  {
+    name: "2. did:og log entry altered (asset name in the genesis entry)",
+    apply: (f) => {
+      const text = dec.decode(f["asset/did.jsonl"]);
+      const changed = text.replace(/"name":"([^"]*)"/, (_m, n: string) => `"name":"${n} (altered)"`);
+      if (changed === text) throw new Error("no asset name to alter");
+      f["asset/did.jsonl"] = enc.encode(changed);
+    },
+  },
+  {
+    name: "3. DID log entry altered (versionTime of the author's did:webvh entry)",
+    apply: (f) => {
+      const k = Object.keys(f).find((n) => n.startsWith("signers/") && n.endsWith("/did.jsonl"))!;
+      const text = dec.decode(f[k]);
+      const changed = text.replace(/"versionTime":"(\d{4})/, (_m, y: string) => `"versionTime":"${Number(y) - 1}`);
+      if (changed === text) throw new Error("no versionTime to alter");
+      f[k] = enc.encode(changed);
+    },
+  },
+  {
+    name: "4. signer history swapped (another valid did:webvh log, of a different DID)",
+    apply: (f) => {
+      const k = Object.keys(f).find((n) => n.startsWith("signers/") && n.endsWith("/did.jsonl"))!;
+      f[k] = enc.encode(other.log);
+    },
+  },
+];
+
 let ok = true;
-
-// 1. One bit of the PNG flipped: the resource no longer matches the signed digest. The signed
-//    history is still intact, so `outcome` can stay `verified`; the bad bytes are reported
-//    separately, as `availability` and a `resource-mismatch` diagnostic (P7.3, P7.4). A consumer
-//    must check `availability`, not `outcome` alone.
-const res = Object.keys(files).find((n) => n.startsWith("resources/"))!;
-const bad = new Uint8Array(files[res]);
-bad[5000] ^= 1;
-const r1 = await verifyOriginal({ original: kit.png.original, inputs: [{ kind: "package", source: "tampered-resource", bytes: writePackageZip({ ...files, [res]: bad }) }] });
-console.log(`one PNG bit flipped -> ${JSON.stringify(r1.axes)} diagnostics: ${r1.diagnostics.map((d) => d.code).join(",") || "none"}`);
-if ((r1.axes as { outcome: string }).outcome === "verified" && (r1.axes as { availability: string }).availability === "complete") ok = false;
-
-// 2. The author's assertion key swapped in the packaged did:webvh log: the signer binding must fail.
-const signer = Object.keys(files).find((n) => n.startsWith("signers/"))!;
-const forged = new TextDecoder().decode(files[signer]).replace(/"publicKeyMultibase":"z6Mk[^"]+"/, '"publicKeyMultibase":"z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"');
-const r2 = await verifyOriginal({ original: kit.png.original, inputs: [{ kind: "package", source: "forged-author", bytes: writePackageZip({ ...files, [signer]: new TextEncoder().encode(forged) }) }] });
-console.log(`author key swapped in did:webvh log -> ${JSON.stringify(r2.axes)} diagnostics: ${r2.diagnostics.map((d) => d.code).join(",") || "none"}`);
-if ((r2.axes as { outcome: string }).outcome === "verified") ok = false;
-
-console.log(`\nRESULT: ${ok ? "PASS (neither altered package passes: the flipped bit is availability none with resource-mismatch; the forged key is identity incomplete)" : "FAIL (an altered package passed)"}`);
+for (const slug of ["png", "mp4"]) {
+  const { zip, original } = kit[slug];
+  const pristine = readPackageZip(new Uint8Array(readFileSync(join(KIT, zip))));
+  console.log(`\n=== ${slug}: ${zip} ===`);
+  for (const t of TAMPERS) {
+    const files = { ...pristine };
+    t.apply(files);
+    const r = await verifyOriginal({ original, inputs: [{ kind: "package", source: `tampered:${zip}`, bytes: writePackageZip(files) }] });
+    const why = failures(r);
+    console.log(`${why.length > 0 ? "FAIL (as expected)" : "PASSED (NOT expected)"}  ${t.name}`);
+    for (const w of why) console.log(`      - ${w}`);
+    console.log(`      axes: ${JSON.stringify(r.axes)}`);
+    if (why.length === 0) ok = false;
+  }
+}
+console.log(`\nswap source: ${other!.did}`);
+console.log(`\nRESULT: ${ok ? "PASS (every tampered package fails, with the reasons above)" : "FAIL (a tampered package passed)"}`);
 process.exit(ok ? 0 : 1);

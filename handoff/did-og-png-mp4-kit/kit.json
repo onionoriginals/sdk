@@ -1,45 +1,59 @@
 {
   "author": {
-    "did": "did:webvh:QmXQ7agTs2JXgUxpMizieRC2Ky3xfZTY1G7ceEbFcSRunb:example.com:authors:og-handoff-kit",
-    "versionId": "1-QmeYCqsiWDShFTRWmXNTQf6ZXsxFhR7bU5vaLoQ569WfcZ",
+    "did": "did:webvh:QmVKFZxQYpQN2KZxxcfKz287W7exDaxmBjbLwK6YhqS1AX:example.com:authors:og-handoff-kit",
+    "versionId": "1-QmTcPVoFRUYmgp49uPsMELMFMgiYT9ngq6yhojKGMCNsGF",
     "url": "https://example.com/authors/og-handoff-kit/did.jsonl"
   },
   "png": {
     "zip": "did-og-png-evidence.zip",
-    "original": "did:og:QmVhbTsUBUazRmzY7traJrmEde72fhwib5ZXAzDNQjS9JW",
-    "versionId": "1-QmWSYacozGaQyzvn3aEU9qCzmEJ8Q1iKM7U7vaFg5BoFq6",
+    "original": "did:og:QmPwutjnV1PoiVnLmpJnxT1y7ko11HfLRbnYur1cPMydy3",
+    "versionId": "1-QmS13vt5vxFk5aEfTNvh7waeFyZQC5zgimfPdX2XYtjhQk",
+    "members": [
+      "asset/did.jsonl",
+      "originals-evidence.json",
+      "resources/zQmPJrHiXpBrYixJUce3vNYrrzrMznWgWDWVqggwLDKPGZr",
+      "signers/6e897e66781c2a941fc403b98cd139f4eb7fafbd79997a0e3b5ecaa8a041225b/did.jsonl"
+    ],
     "resource": {
+      "file": "media/mars-curiosity-hazcam-2012-08-07.png",
       "mediaType": "image/png",
-      "size": 96453,
-      "digest": "zQmWPs48KpHyf87TumLjWe2CnBZXxCNgWMJX4Gc1tP1yc2r",
-      "sha256": "77b03252ee8f7cbfcfa3013c6a9cc9c3e95235be40ad162835d87c1a165bd497"
+      "size": 587443,
+      "digest": "zQmPJrHiXpBrYixJUce3vNYrrzrMznWgWDWVqggwLDKPGZr",
+      "sha256": "0e659e474fcb324d1ffb189711bd273c4d66ac53f24d5003b4b7949cc110155d"
     },
     "manifest": {
       "format": "originals-evidence/0.1",
       "profile": "og:1.0-draft.1",
-      "original": "did:og:QmVhbTsUBUazRmzY7traJrmEde72fhwib5ZXAzDNQjS9JW",
-      "checkpoint": "1-QmWSYacozGaQyzvn3aEU9qCzmEJ8Q1iKM7U7vaFg5BoFq6",
-      "head": "1-QmWSYacozGaQyzvn3aEU9qCzmEJ8Q1iKM7U7vaFg5BoFq6",
+      "original": "did:og:QmPwutjnV1PoiVnLmpJnxT1y7ko11HfLRbnYur1cPMydy3",
+      "checkpoint": "1-QmS13vt5vxFk5aEfTNvh7waeFyZQC5zgimfPdX2XYtjhQk",
+      "head": "1-QmS13vt5vxFk5aEfTNvh7waeFyZQC5zgimfPdX2XYtjhQk",
       "completeness": "complete",
       "missing": []
     }
   },
   "mp4": {
     "zip": "did-og-mp4-evidence.zip",
-    "original": "did:og:QmTD2bUxsR7NBnUcxfnChVUddMA3G3DK8V1qTCjroBsK2i",
-    "versionId": "1-QmW7vbWsUP1vk4kGZNkqQUhNLrqrzUvfpRypBt5xB9H5XF",
+    "original": "did:og:QmPjvSn6gPBX14Vz1EPac5oRVsRHoBPfx1xvToc98L1CWx",
+    "versionId": "1-QmRu1Mykx28p3wJ6FC6AHCFJ5aMorYusQnXPPSqTLzkayi",
+    "members": [
+      "asset/did.jsonl",
+      "originals-evidence.json",
+      "resources/zQmZ6Xjnd9HphxJYbSqEdTQHSxtfxM5Ev8F8mZPZZ5RvPDm",
+      "signers/6e897e66781c2a941fc403b98cd139f4eb7fafbd79997a0e3b5ecaa8a041225b/did.jsonl"
+    ],
     "resource": {
+      "file": "media/pangong-tso-waves-720p.mp4",
       "mediaType": "video/mp4",
-      "size": 422871,
-      "digest": "zQmebLFSd3gKYZTQMp53U6ifUbNeGLVfGxKNV8Jtv87gUB9",
-      "sha256": "f17dd49a5130877b2bd43c07406d366553604df0e04d6dbc9a770842b9fb68b0"
+      "size": 3630532,
+      "digest": "zQmZ6Xjnd9HphxJYbSqEdTQHSxtfxM5Ev8F8mZPZZ5RvPDm",
+      "sha256": "9fd28aeeaa8711340d1fc18488ee0c596d9b0f326e83aa8c2863f7f7f2377444"
     },
     "manifest": {
       "format": "originals-evidence/0.1",
       "profile": "og:1.0-draft.1",
-      "original": "did:og:QmTD2bUxsR7NBnUcxfnChVUddMA3G3DK8V1qTCjroBsK2i",
-      "checkpoint": "1-QmW7vbWsUP1vk4kGZNkqQUhNLrqrzUvfpRypBt5xB9H5XF",
-      "head": "1-QmW7vbWsUP1vk4kGZNkqQUhNLrqrzUvfpRypBt5xB9H5XF",
+      "original": "did:og:QmPjvSn6gPBX14Vz1EPac5oRVsRHoBPfx1xvToc98L1CWx",
+      "checkpoint": "1-QmRu1Mykx28p3wJ6FC6AHCFJ5aMorYusQnXPPSqTLzkayi",
+      "head": "1-QmRu1Mykx28p3wJ6FC6AHCFJ5aMorYusQnXPPSqTLzkayi",
       "completeness": "complete",
       "missing": []
     }
