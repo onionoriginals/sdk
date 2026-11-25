@@ -61,7 +61,16 @@ export function png(p: Pixels, text?: string): Uint8Array {
 const wasm = async (spec: string) => WebAssembly.compile(await readFile(fileURLToPath(import.meta.resolve(spec))));
 
 type Encoder = { encode(data: Uint8ClampedArray, width: number, height: number, options: Record<string, unknown>): Uint8Array | null };
-async function emscripten(factoryModule: string, wasmSpec: string): Promise<Encoder> {
+// One instance per encoder for the whole run, as the generator keeps one per codec: a fresh WASM
+// instance per fixture held memory the runtime frees only later, and under a full suite on CI that
+// left the generator's own codecs short of memory (C12-360).
+const encoders = new Map<string, Promise<Encoder>>();
+function emscripten(factoryModule: string, wasmSpec: string): Promise<Encoder> {
+  let e = encoders.get(wasmSpec);
+  if (!e) encoders.set(wasmSpec, (e = freshEncoder(factoryModule, wasmSpec)));
+  return e;
+}
+async function freshEncoder(factoryModule: string, wasmSpec: string): Promise<Encoder> {
   const factory = ((await import(factoryModule)) as { default: (o: Record<string, unknown>) => Promise<Encoder> }).default;
   const module = await wasm(wasmSpec);
   return factory({

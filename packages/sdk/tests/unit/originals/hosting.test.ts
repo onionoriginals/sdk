@@ -9,7 +9,7 @@ import { localSigner } from "@originals/vh/crypto";
 import { createLog, serializeLog, signWith } from "@originals/vh/log";
 import { resourceDigest, type AliasEvidence } from "@originals/vh/originals";
 import { didWebvhFilesUrl } from "@originals/vh/webvh";
-import { MemoryStore, OriginalsSDK, RETRIEVAL_LIMITS, hostedFiles, servingHeaders, type HostedFetch, type HostedFetchOptions } from "../../../src/originals/index.js";
+import { MemoryStore, OriginalsSDK, RETRIEVAL_LIMITS, assertHostable, hostedFiles, hostedResourceLimit, servingHeaders, type HostedFetch, type HostedFetchOptions } from "../../../src/originals/index.js";
 import { Author, bytes, clock, seed } from "./helpers.js";
 import { Retrieval } from "../../../src/originals/retrieval.js";
 
@@ -557,18 +557,40 @@ describe("identity retrieval in loadPublished stays inside its budget (08b revie
 });
 
 describe("a resource over the 64 MiB fetch cap is never published (P8.5; P14.13)", () => {
-  const big = () => new Uint8Array(RETRIEVAL_LIMITS.maxResourceBytes + 1);
+  // The cap is checked against the size each entry's descriptor declares, so the 64 MiB boundary
+  // is tested on descriptors alone; the SDK flows run with a lowered cap (`hostedResourceLimit`)
+  // and a resource just over it, so nothing near 64 MiB is materialised or hashed.
+  const LIMIT = 1024;
+  const big = () => new Uint8Array(LIMIT + 1).fill(7);
+  const line = (size: number) => JSON.stringify({ state: { asset: { resource: { mediaType: "image/tiff", size, digest: "zQmStub" } } } });
+
+  test("the cap is 64 MiB: a version of exactly 64 MiB is hostable, one byte more is refused, naming the version", () => {
+    const cap = RETRIEVAL_LIMITS.maxResourceBytes;
+    expect(cap).toBe(64 * 1024 * 1024);
+    expect(() => assertHostable(`${line(1)}\n${line(cap)}\n`)).not.toThrow();
+    expect(() => assertHostable(`${line(1)}\n${line(cap + 1)}\n${line(1)}\n`)).toThrow(expect.objectContaining({ category: "limit-exceeded", code: "RESOURCE_OVER_FETCH_LIMIT", details: { digest: "zQmStub", size: cap + 1, limit: cap } }));
+  });
+
+  test("a lowered cap applies; a cap above 64 MiB is held to 64 MiB", () => {
+    const cap = RETRIEVAL_LIMITS.maxResourceBytes;
+    expect(hostedResourceLimit()).toBe(cap);
+    expect(hostedResourceLimit(LIMIT)).toBe(LIMIT);
+    expect(hostedResourceLimit(cap * 4)).toBe(cap);
+    expect(() => assertHostable(line(LIMIT), LIMIT)).not.toThrow();
+    expect(() => assertHostable(line(LIMIT + 1), LIMIT)).toThrow(expect.objectContaining({ code: "RESOURCE_OVER_FETCH_LIMIT" }));
+    expect(() => assertHostable(line(cap + 1), cap * 4)).toThrow(expect.objectContaining({ details: expect.objectContaining({ limit: cap }) }));
+  });
 
   test("it can be created and edited locally, but publication and a shared host refuse it, naming the version", async () => {
     const alice = await Author.create([{ fragment: "orig", secret: KEY }]);
-    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: clock() });
+    const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: async () => alice.evidence(), clock: clock(), hostedResourceLimit: LIMIT });
     const signer = alice.signer("orig", KEY);
     // Local: a package is never fetched, so the cap does not apply to it.
     const c = await sdk.create({ name: "Harbor, full size", resource: { mediaType: "image/tiff", bytes: big() }, author: alice.ref("orig"), signer });
     if (c.kind !== "original") throw new Error("expected an Original");
     const alias = await aliasFor(c.original.did);
     const refused = sdk.publish(c.original.did, { parent: c.original.checkpoint, author: alice.ref("orig"), signer, alias });
-    await expect(refused).rejects.toMatchObject({ category: "limit-exceeded", code: "RESOURCE_OVER_FETCH_LIMIT", details: { digest: c.original.resources[0].digest, size: RETRIEVAL_LIMITS.maxResourceBytes + 1, limit: RETRIEVAL_LIMITS.maxResourceBytes } });
+    await expect(refused).rejects.toMatchObject({ category: "limit-exceeded", code: "RESOURCE_OVER_FETCH_LIMIT", details: { digest: c.original.resources[0].digest, size: LIMIT + 1, limit: LIMIT } });
     expect((await sdk.get(c.original.did)).head).toBe(c.original.checkpoint);
     // A shared host serves what it accepts: the candidate is refused before it is sent.
     let sent = 0;
@@ -584,8 +606,8 @@ describe("a resource over the 64 MiB fetch cap is never published (P8.5; P14.13)
     const { sdk, did, alias, alice, signer, head } = await published();
     const e = await sdk.edit(did, { parent: head, resource: { bytes: big() }, author: alice.ref("orig"), signer });
     expect(e.status).toBe("committed");
-    await expect(hostedFiles(sdk, did, alias)).rejects.toMatchObject({ category: "limit-exceeded", code: "RESOURCE_OVER_FETCH_LIMIT", details: { digest: resourceDigest(big()) } });
+    await expect(hostedFiles(sdk, did, alias, { hostedResourceLimit: LIMIT })).rejects.toMatchObject({ category: "limit-exceeded", code: "RESOURCE_OVER_FETCH_LIMIT", details: { digest: resourceDigest(big()), limit: LIMIT } });
     // An earlier checkpoint, from before it, is still hosted.
-    expect((await hostedFiles(sdk, did, alias, { checkpoint: head })).size).toBeGreaterThan(0);
+    expect((await hostedFiles(sdk, did, alias, { checkpoint: head, hostedResourceLimit: LIMIT })).size).toBeGreaterThan(0);
   });
 });

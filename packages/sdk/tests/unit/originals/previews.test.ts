@@ -7,7 +7,7 @@
  * chosen. Real pairs are built and read back as an index would report them.
  * The journey on Bitcoin Core and ord is scripts/regtest/originals-preview.ts.
  */
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import * as btc from "@scure/btc-signer";
 import { hex } from "@scure/base";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
@@ -22,7 +22,7 @@ import {
   InscriptionClock, MANIFEST, MemoryStore, OriginalsSDK, PREVIEW_MAX_BYTES, btcoAlias, generateImagePreview, readManifest, readZip, satEvidence, describeEntry,
 } from "../../../src/originals/index.js";
 import { prepareEntryInscription, readAnchored, waitForFeeRate, type EntryInscriptionParams } from "../../../src/originals/bitcoin-writer.js";
-import { firstWebpFrame, sniff } from "../../../src/originals/preview.js";
+import { PREVIEW_CODEC_ATTEMPTS, PREVIEW_CODEC_RETRY_DELAYS_MS, configurePreviewCodecs, firstWebpFrame, setPreviewCodecFault, sniff } from "../../../src/originals/preview.js";
 import { Author, bytes, clock, seed } from "./helpers.js";
 import { animatedWebp, avif, busy, gif, grayPng, jpeg, png, svg, webp } from "./preview-fixtures.js";
 
@@ -111,7 +111,7 @@ describe("generated previews of image versions (P9.30)", () => {
     ];
     for (const [mediaType, content, animated] of cases) {
       const r = await generateImagePreview(content, mediaType);
-      expect(r.status, mediaType).toBe("generated");
+      expect(r.status, `${mediaType}: ${r.status === "failed" ? r.failure.message : ""}`).toBe("generated");
       if (r.status !== "generated") continue;
       const p = r.preview;
       expect(p.descriptor).toEqual({ mediaType: "image/webp", size: p.bytes.length, digest: resourceDigest(p.bytes) });
@@ -461,3 +461,123 @@ describe("the body chosen when an entry is committed is the body inscribed (P9.1
       .rejects.toMatchObject({ code: "PAIR_BODY_MISMATCH" });
   });
 });
+
+describe("C12-360: an AVIF gets the same preview however the process is loaded (P9.30)", () => {
+  afterEach(() => {
+    setPreviewCodecFault(undefined);
+    configurePreviewCodecs({ retryDelaysMs: undefined });
+  });
+  // CI saw image/avif come back `failed` at random: the WASM runtime had no memory left for the
+  // decoder's instance, and that was reported as an undecodable image. The generator has no time
+  // budget; these tests pin what it does instead.
+  // The fault tests inject immediate retries; the default waits are what a loaded machine gets.
+  const immediate = PREVIEW_CODEC_RETRY_DELAYS_MS.map(() => 0);
+  const withFaults = async (fault: (key: string) => void, run: () => Promise<void>) => {
+    configurePreviewCodecs({ retryDelaysMs: immediate });
+    setPreviewCodecFault(fault);
+    try {
+      await run();
+    } finally {
+      setPreviewCodecFault(undefined);
+      configurePreviewCodecs({ retryDelaysMs: undefined });
+    }
+  };
+  const digestOf = (r: Awaited<ReturnType<typeof generateImagePreview>>) => (r.status === "generated" ? r.preview.descriptor.digest : `failed: ${r.failure.message}`);
+
+  test("ten times in a row and sixteen at once, the same preview", async () => {
+    const a = await avif(busy(160, 120, 3));
+    const first = digestOf(await generateImagePreview(a, "image/avif"));
+    expect(first).toStartWith("z");
+    for (let i = 0; i < 10; i++) expect(digestOf(await generateImagePreview(a, "image/avif"))).toBe(first);
+    const all = await Promise.all(Array.from({ length: 16 }, () => generateImagePreview(a, "image/avif")));
+    expect(new Set(all.map(digestOf))).toEqual(new Set([first]));
+  });
+
+  test("WASM memory running out is retried with a fresh codec instance, and gives the same preview", async () => {
+    const a = await avif(busy(160, 120, 3));
+    const expected = digestOf(await generateImagePreview(a, "image/avif"));
+    let faults = PREVIEW_CODEC_ATTEMPTS - 1;
+    const seen: string[] = [];
+    await withFaults((key) => { seen.push(key); if (key === "avif" && faults-- > 0) throw new RangeError("Out of memory"); }, async () => {
+      expect(digestOf(await generateImagePreview(a, "image/avif"))).toBe(expected);
+      expect(seen.filter((k) => k === "avif")).toHaveLength(PREVIEW_CODEC_ATTEMPTS);
+    });
+    // The encoder too: an Emscripten OOM abort while encoding.
+    let encodeFaults = 2;
+    await withFaults((key) => { if (key === "webp-enc" && encodeFaults-- > 0) throw new Error("Aborted(OOM)"); }, async () => {
+      expect(digestOf(await generateImagePreview(a, "image/avif"))).toBe(expected);
+    });
+  });
+
+  test("memory that stays short is an error, never a failed preview", async () => {
+    const a = await avif(busy(160, 120, 3));
+    await withFaults((key) => { if (key === "avif") throw new RangeError("Out of memory"); }, async () => {
+      await expect(generateImagePreview(a, "image/avif")).rejects.toMatchObject({ category: "limit-exceeded", code: "PREVIEW_RUNTIME_EXHAUSTED" });
+    });
+    expect((await generateImagePreview(a, "image/avif")).status).toBe("generated");
+  });
+
+  test("the default retry waits are explicit and add up to about 5 seconds", () => {
+    expect(PREVIEW_CODEC_RETRY_DELAYS_MS).toEqual([250, 1000, 4000]);
+    expect(PREVIEW_CODEC_ATTEMPTS).toBe(4);
+  });
+
+  test("a WASM trap is retried on a fresh instance and gives the same preview (CI: unreachable in the AVIF decoder)", async () => {
+    const a = await avif(busy(160, 120, 3));
+    const expected = digestOf(await generateImagePreview(a, "image/avif"));
+    const Trap = (WebAssembly as unknown as { RuntimeError: new (m: string) => Error }).RuntimeError;
+    let traps = 1;
+    const seen: string[] = [];
+    await withFaults((key) => { if (key === "avif") { seen.push(key); if (traps-- > 0) throw new Trap("Unreachable code should not be executed (evaluating 'getWasmTableEntry(index)(a1, a2, a3, a4)')"); } }, async () => {
+      expect(digestOf(await generateImagePreview(a, "image/avif"))).toBe(expected);
+      expect(seen).toHaveLength(2);
+    });
+    // The instance after it is fresh and works: nothing leaks into the next call.
+    expect(digestOf(await generateImagePreview(a, "image/avif"))).toBe(expected);
+  });
+
+  test("an error is the image's only when it recurs identically on a fresh instance", async () => {
+    const a = await avif(busy(160, 120, 3));
+    const expected = digestOf(await generateImagePreview(a, "image/avif"));
+    // Once: retried, and the preview is made.
+    let first = true;
+    await withFaults((key) => { if (key === "avif" && first) { first = false; throw new Error("Aborted(corrupt input)"); } }, async () => {
+      expect(digestOf(await generateImagePreview(a, "image/avif"))).toBe(expected);
+    });
+    // Every time, identically: confirmed on a fresh instance, so the image is undecodable.
+    const seen: string[] = [];
+    await withFaults((key) => { if (key === "avif") { seen.push(key); throw new Error("Aborted(corrupt input)"); } }, async () => {
+      expect(await generateImagePreview(a, "image/avif")).toMatchObject({ status: "failed", failure: { reason: "undecodable" } });
+      expect(seen).toHaveLength(2);
+    });
+    // Differently on every fresh instance: never taken as the image's; an error, not a failed preview.
+    let n = 0;
+    await withFaults((key) => { if (key === "avif") throw new Error(`Aborted(fault ${n++})`); }, async () => {
+      await expect(generateImagePreview(a, "image/avif")).rejects.toMatchObject({ code: "PREVIEW_RUNTIME_FAULT" });
+    });
+    expect(digestOf(await generateImagePreview(a, "image/avif"))).toBe(expected);
+  });
+
+  test("a real undecodable AVIF is still failed, identically each time", async () => {
+    const a = await avif(busy(32, 32, 3));
+    const broken = new Uint8Array(a);
+    // Keep the header (so it is sized) and garble the coded data.
+    for (let i = broken.length - 40; i < broken.length; i++) broken[i] ^= 0x5a;
+    const results = [];
+    for (let i = 0; i < 3; i++) results.push(await generateImagePreview(broken, "image/avif").then((r) => r.status === "generated" ? "generated" : `failed:${r.failure.reason}`, (e: { code?: string }) => `threw:${e.code}`));
+    expect(new Set(results).size).toBe(1);
+    expect(results[0]).not.toStartWith("threw:");
+  });
+
+  test("an AVIF is sized by its ipco ispe properties only, not by bytes that look like one elsewhere", async () => {
+    const a = await avif(busy(160, 120, 3));
+    // A trailing free box holding what a byte scan would take for an ispe of 100,000 × 100,000.
+    const fake = Uint8Array.from([0, 0, 0, 28, ...Buffer.from("free"), 0, 0, 0, 20, ...Buffer.from("ispe"), 0, 0, 0, 0, 0, 1, 0x86, 0xa0, 0, 1, 0x86, 0xa0]);
+    const withFake = new Uint8Array([...a, ...fake]);
+    expect(Buffer.from(withFake).lastIndexOf("ispe")).toBeGreaterThan(a.length);
+    const r = await generateImagePreview(withFake, "image/avif");
+    expect(r.status, r.status === "failed" ? r.failure.message : "").toBe("generated");
+    if (r.status === "generated") expect(r.preview.source).toMatchObject({ format: "avif", width: 160, height: 120 });
+  });
+});
+

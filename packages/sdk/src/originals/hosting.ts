@@ -106,8 +106,16 @@ export function aliasLogPath(aliasDid: string): string {
  * published (limit-exceeded, RESOURCE_OVER_FETCH_LIMIT, naming the version's
  * digest). A local Original is never fetched, so creating and editing one are
  * not limited. One resource per Original (P4.1; originals-spec #53).
+ *
+ * `limit` may lower the cap, for a host that serves less, but never raise it:
+ * a value above 64 MiB is held to 64 MiB.
  */
-export function assertHostable(log: string): void {
+export function hostedResourceLimit(limit?: number): number {
+  return limit === undefined ? FETCH_LIMITS.maxResourceBytes : Math.min(Math.max(0, Math.floor(limit)), FETCH_LIMITS.maxResourceBytes);
+}
+
+export function assertHostable(log: string, limit?: number): void {
+  const cap = hostedResourceLimit(limit);
   for (const line of log.split("\n")) {
     let resource: unknown;
     try {
@@ -116,9 +124,9 @@ export function assertHostable(log: string): void {
       continue; // Verification reports a malformed line.
     }
     const r = resource as { digest?: unknown; size?: unknown } | null | undefined;
-    if (typeof r?.size === "number" && r.size > FETCH_LIMITS.maxResourceBytes) {
-      throw new OriginalsError("limit-exceeded", "RESOURCE_OVER_FETCH_LIMIT", `resource version ${String(r.digest)} is ${r.size} bytes; a hosted reader fetches at most ${FETCH_LIMITS.maxResourceBytes}`, {
-        digest: r.digest, size: r.size, limit: FETCH_LIMITS.maxResourceBytes,
+    if (typeof r?.size === "number" && r.size > cap) {
+      throw new OriginalsError("limit-exceeded", "RESOURCE_OVER_FETCH_LIMIT", `resource version ${String(r.digest)} is ${r.size} bytes; a hosted reader fetches at most ${cap}`, {
+        digest: r.digest, size: r.size, limit: cap,
       });
     }
   }
@@ -133,16 +141,16 @@ export async function hostedFiles(
   sdk: { package(did: string, options?: { checkpoint?: string }): Promise<{ bytes: Uint8Array }> },
   did: string,
   alias: AliasEvidence,
-  options: { checkpoint?: string } = {},
+  options: { checkpoint?: string; hostedResourceLimit?: number } = {},
 ): Promise<Map<string, Uint8Array>> {
   const files = new Map<string, Uint8Array>();
   const encoder = new TextEncoder();
   const logPath = aliasLogPath(alias.did);
   files.set(logPath, encoder.encode(typeof alias.log === "string" ? alias.log : alias.log.map((e) => `${JSON.stringify(e)}\n`).join("")));
   if (alias.witness !== undefined) files.set(logPath.replace(/did\.jsonl$/, "did-witness.json"), encoder.encode(JSON.stringify(alias.witness)));
-  const packaged = readZip((await sdk.package(did, options)).bytes);
+  const packaged = readZip((await sdk.package(did, options.checkpoint !== undefined ? { checkpoint: options.checkpoint } : {})).bytes);
   const log = packaged.get("asset/did.jsonl");
-  if (log) assertHostable(new TextDecoder().decode(log));
+  if (log) assertHostable(new TextDecoder().decode(log), options.hostedResourceLimit);
   for (const [path, data] of packaged) files.set(`${HOSTED_PREFIX}${path}`, data);
   return files;
 }

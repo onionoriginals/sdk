@@ -116,6 +116,13 @@ export interface PreviewCodecConfig {
    * previews; Node and Bun read it from `node_modules`.
    */
   resvgWasm?: string | URL | Response | ArrayBuffer | ArrayBufferView | WebAssembly.Module | Promise<Response>;
+  /**
+   * The waits, in milliseconds, before each retry of a codec step when WASM memory runs out
+   * (`PREVIEW_CODEC_RETRY_DELAYS_MS` by default). The runtime frees the memory of unreachable
+   * instances some time after a collection, not at once, so each retry waits. They are used only
+   * when memory runs out, and change only how long that takes, never the preview.
+   */
+  retryDelaysMs?: readonly number[];
 }
 
 let config: PreviewCodecConfig = {};
@@ -140,6 +147,19 @@ const fail = (reason: PreviewFailure["reason"], message: string): PreviewResult 
  * `failed` result the caller tells the author about. Throws `invalid-evidence`
  * for a `mediaType` that is not an `image/` type: the author supplies the
  * preview of any other version, or none.
+ *
+ * There is no time budget: no step reads a clock, so a slow or loaded machine
+ * gives the same result as a fast one, only later. What a loaded process can
+ * run out of is WASM memory (an instance, or the growth of one). That is never
+ * the image's fault, so it is never a `failed` result: the codec instance is
+ * discarded (its heap may be left mid-call), memory is reclaimed, and the step
+ * is retried with a fresh instance after the waits in `PREVIEW_CODEC_RETRY_DELAYS_MS`
+ * (`PREVIEW_CODEC_ATTEMPTS` tries in all; `configurePreviewCodecs` can change them). If
+ * memory is still short, this throws `limit-exceeded`
+ * `PREVIEW_RUNTIME_EXHAUSTED`, so no caller silently names no preview. A WASM
+ * trap is treated the same way: retried on a fresh instance, and taken as the
+ * image's only when it recurs identically there; otherwise this throws
+ * `PREVIEW_RUNTIME_FAULT`. A `failed` result is only ever the image's.
  */
 export async function generateImagePreview(bytes: Uint8Array, mediaType: string, options: GeneratePreviewOptions = {}): Promise<PreviewResult> {
   if (!isImageMediaType(mediaType)) {
@@ -156,6 +176,8 @@ export async function generateImagePreview(bytes: Uint8Array, mediaType: string,
     if (format !== "svg") checkPixels(format.toUpperCase(), dimensions(bytes, format));
     decoded = await decode(bytes, format);
   } catch (error) {
+    if (error instanceof OriginalsError && (error.code === "PREVIEW_RUNTIME_EXHAUSTED" || error.code === "PREVIEW_RUNTIME_FAULT")) throw error;
+    if (exhausted(error)) throw runtimeExhausted(error);
     if (error instanceof TooLarge) return fail("undecodable", `${error.message}; no preview is named (P9.30)`);
     if (error instanceof OriginalsError && error.code === "PREVIEW_CODEC_UNAVAILABLE") return fail("undecodable", error.message);
     return fail("undecodable", `the ${format.toUpperCase()} could not be decoded (${error instanceof Error ? error.message : String(error)}); no preview is named (P9.30)`);
@@ -170,20 +192,20 @@ export async function generateImagePreview(bytes: Uint8Array, mediaType: string,
   const avoid = new Set(options.avoid ?? []);
   const limit = Math.min(PREVIEW_MAX_BYTES, options.maxBytes ?? PREVIEW_MAX_BYTES);
   if (!(limit >= 1)) throw new OriginalsError("invalid-evidence", "INPUT_INVALID", "maxBytes is at least 1 (P9.30)");
-  const encoder = await webpEncoder();
   const longest = Math.max(image.width, image.height);
   // Never scale up: an image smaller than an edge is tried at its own size first.
   const edges = [...new Set([Math.min(longest, PREVIEW_EDGES[0]), ...PREVIEW_EDGES.filter((e) => e < longest)])];
   const lowest = PREVIEW_QUALITIES[PREVIEW_QUALITIES.length - 1];
   const scaledAt = new Map<number, Rgba>();
   const encoded = new Map<string, Uint8Array>();
-  const encode = (edge: number, quality: number) => {
+  const encode = async (edge: number, quality: number) => {
     const key = `${edge}:${quality}`;
     let out = encoded.get(key);
     if (!out) {
       let scaled = scaledAt.get(edge);
       if (!scaled) scaledAt.set(edge, (scaled = edge >= longest ? image : resize(image, edge)));
-      encoded.set(key, (out = encoder(scaled, quality)));
+      const input = scaled;
+      encoded.set(key, (out = await withCodec("webp-enc", loadWebpEncoder, (encoder) => encoder(input, quality))));
     }
     return out;
   };
@@ -192,9 +214,9 @@ export async function generateImagePreview(bytes: Uint8Array, mediaType: string,
   for (const tier of [PREVIEW_QUALITIES.filter((q) => q >= PREVIEW_FAIR_QUALITY), PREVIEW_QUALITIES.filter((q) => q < PREVIEW_FAIR_QUALITY)]) {
     for (const edge of edges) {
       // If the tier's lowest quality does not fit at this size, none of it does: go smaller.
-      if (encode(edge, tier[tier.length - 1]).length > limit) continue;
+      if ((await encode(edge, tier[tier.length - 1])).length > limit) continue;
       for (const quality of tier) {
-        const out = encode(edge, quality);
+        const out = await encode(edge, quality);
         if (out.length < 1 || out.length > limit) continue;
         const digest = resourceDigest(out);
         if (avoid.has(digest)) continue;
@@ -239,6 +261,26 @@ const u32be = (b: Uint8Array, at: number) => ((b[at] << 24) >>> 0) + (b[at + 1] 
 /** A raster that is too large to decode, or cannot be sized before decoding. */
 class TooLarge extends Error {}
 
+/** The ISO BMFF boxes directly inside `from`..`to`: each one's type, where its body starts and where it ends. */
+function childBoxes(b: Uint8Array, from: number, to: number): Array<{ type: string; body: number; end: number }> {
+  const out: Array<{ type: string; body: number; end: number }> = [];
+  for (let at = from; at + 8 <= to; ) {
+    let size = u32be(b, at);
+    let body = at + 8;
+    if (size === 1) {
+      if (at + 16 > to) break;
+      // A 64-bit size; the high half must be zero for anything this reader holds.
+      if (u32be(b, at + 8) !== 0) break;
+      size = u32be(b, at + 12);
+      body = at + 16;
+    } else if (size === 0) size = to - at;
+    if (size < body - at || at + size > to) break;
+    out.push({ type: ascii(b, at + 4, at + 8), body, end: at + size });
+    at += size;
+  }
+  return out;
+}
+
 /** Refuse an image of more than MAX_PIXELS pixels, or of no size its header gives, before decoding it. */
 function checkPixels(what: string, dims: { width: number; height: number } | undefined): void {
   if (!dims) throw new TooLarge(`the ${what} cannot be sized from its header, so it is not decoded`);
@@ -254,11 +296,17 @@ function dimensions(b: Uint8Array, format: ImageFormat): { width: number; height
   if (format === "png" && b.length >= 24 && ascii(b, 12, 16) === "IHDR") return { width: u32be(b, 16), height: u32be(b, 20) };
   if (format === "gif" && b.length >= 10) return { width: u16le(b, 6), height: u16le(b, 8) };
   if (format === "avif") {
+    // The ispe properties are read where ISO/IEC 23008-12 puts them, meta > iprp > ipco, never
+    // by scanning: the coded image data can hold the bytes "ispe" anywhere.
     let largest: { width: number; height: number } | undefined;
-    // An ispe box: size, "ispe", version and flags, then width and height (ISO/IEC 23008-12).
-    for (let at = 4; at + 16 <= b.length; at++) {
-      if (b[at] !== 0x69 || ascii(b, at, at + 4) !== "ispe") continue;
-      const dims = { width: u32be(b, at + 8), height: u32be(b, at + 12) };
+    const meta = childBoxes(b, 0, b.length).find((x) => x.type === "meta");
+    // meta is a FullBox: version and flags before its children.
+    const iprp = meta && childBoxes(b, meta.body + 4, meta.end).find((x) => x.type === "iprp");
+    const ipco = iprp && childBoxes(b, iprp.body, iprp.end).find((x) => x.type === "ipco");
+    for (const ispe of ipco ? childBoxes(b, ipco.body, ipco.end).filter((x) => x.type === "ispe") : []) {
+      // An ispe box: version and flags, then width and height.
+      if (ispe.body + 12 > ispe.end) continue;
+      const dims = { width: u32be(b, ispe.body + 4), height: u32be(b, ispe.body + 8) };
       if (!largest || dims.width * dims.height > largest.width * largest.height) largest = dims;
     }
     return largest;
@@ -364,37 +412,112 @@ async function emscripten<T>(factory: EmscriptenFactory, wasm: string): Promise<
   return (await factory({ noInitialRun: true, ...(instantiateWasm ? { instantiateWasm } : {}) })) as T;
 }
 
-let encoderPromise: Promise<(image: Rgba, quality: number) => Uint8Array> | undefined;
-
 /** The scalar libwebp encoder, the same build everywhere (deterministic output). */
-function webpEncoder(): Promise<(image: Rgba, quality: number) => Uint8Array> {
-  encoderPromise ??= (async () => {
-    const [{ default: factory }, { defaultOptions }] = await Promise.all([
-      import("@jsquash/webp/codec/enc/webp_enc.js"),
-      import("@jsquash/webp/meta.js"),
-    ]);
-    const module = await emscripten<{ encode(data: ArrayBuffer | ArrayBufferView, width: number, height: number, options: Record<string, number>): Uint8Array | null }>(
-      factory, "@jsquash/webp/codec/enc/webp_enc.wasm",
-    );
-    return (image: Rgba, quality: number) => {
-      const out = module.encode(image.data, image.width, image.height, { ...(defaultOptions as unknown as Record<string, number>), quality, method: 4, exact: 0 });
-      if (!out) throw new Error("WebP encoding failed");
-      return new Uint8Array(out);
-    };
-  })();
-  encoderPromise.catch(() => { encoderPromise = undefined; });
-  return encoderPromise;
+async function loadWebpEncoder(): Promise<(image: Rgba, quality: number) => Uint8Array> {
+  const [{ default: factory }, { defaultOptions }] = await Promise.all([
+    import("@jsquash/webp/codec/enc/webp_enc.js"),
+    import("@jsquash/webp/meta.js"),
+  ]);
+  const module = await emscripten<{ encode(data: ArrayBuffer | ArrayBufferView, width: number, height: number, options: Record<string, number>): Uint8Array | null }>(
+    factory, "@jsquash/webp/codec/enc/webp_enc.wasm",
+  );
+  return (image: Rgba, quality: number) => {
+    const out = module.encode(image.data, image.width, image.height, { ...(defaultOptions as unknown as Record<string, number>), quality, method: 4, exact: 0 });
+    if (!out) throw new Error("WebP encoding failed");
+    return new Uint8Array(out);
+  };
 }
 
-const decoders = new Map<string, Promise<unknown>>();
+/** Each codec instance, loaded once and kept while it works. */
+const codecs = new Map<string, Promise<unknown>>();
 function once<T>(key: string, load: () => Promise<T>): Promise<T> {
-  let p = decoders.get(key) as Promise<T> | undefined;
+  let p = codecs.get(key) as Promise<T> | undefined;
   if (!p) {
     p = load();
-    decoders.set(key, p);
-    p.catch(() => decoders.delete(key));
+    codecs.set(key, p);
+    p.catch(() => { if (codecs.get(key) === p) codecs.delete(key); });
   }
   return p;
+}
+
+/**
+ * The default waits before each retry of a codec step on a fresh instance: 250 ms, 1 s, then 4 s,
+ * about 5 s in all. Generous for a loaded machine (a runtime that had run out of WASM memory was
+ * seen to free it about half a second after a collection), and never spent when a step succeeds.
+ */
+export const PREVIEW_CODEC_RETRY_DELAYS_MS: readonly number[] = Object.freeze([250, 1000, 4000]);
+/** How many times a codec step is tried by default, each retry on a fresh instance. */
+export const PREVIEW_CODEC_ATTEMPTS = PREVIEW_CODEC_RETRY_DELAYS_MS.length + 1;
+
+const messageOf = (error: unknown) => (error instanceof Error ? `${error.name}: ${error.message}` : String(error));
+
+/**
+ * Whether an error is the WASM runtime running out of memory: no memory for a new
+ * instance, or a failed growth of one (an Emscripten OOM abort). A property of the
+ * process at that moment, never of the image.
+ */
+export function exhausted(error: unknown): boolean {
+  return /out of memory|cannot allocate|allocation failed|Aborted\(OOM\)|enlarge memory|Memory\.grow|WebAssembly\.Memory/i.test(messageOf(error));
+}
+
+const retryDelays = () => config.retryDelaysMs ?? PREVIEW_CODEC_RETRY_DELAYS_MS;
+
+function runtimeExhausted(error: unknown): OriginalsError {
+  return new OriginalsError("limit-exceeded", "PREVIEW_RUNTIME_EXHAUSTED", `the WASM runtime ran out of memory making the preview (${error instanceof Error ? error.message : String(error)}), after ${retryDelays().length + 1} attempts with fresh codec instances; this is not a property of the image: try again with more memory free (P9.30)`);
+}
+
+function runtimeFault(errors: unknown[]): OriginalsError {
+  return new OriginalsError("unavailable-bytes", "PREVIEW_RUNTIME_FAULT", `the preview codec failed differently on ${errors.length} fresh instances (${errors.map(messageOf).join("; ")}), so the failure is not taken as the image's; no preview is chosen silently: try again (P9.30)`);
+}
+
+/** Collect garbage where the runtime allows it, then wait `ms`, so unreachable WASM instances are freed before a retry. */
+async function reclaim(ms: number): Promise<void> {
+  const g = globalThis as { Bun?: { gc?: (sync: boolean) => void }; gc?: () => void };
+  if (typeof g.Bun?.gc === "function") g.Bun.gc(true);
+  else if (typeof g.gc === "function") g.gc();
+  await new Promise((r) => setTimeout(r, Math.max(0, ms)));
+}
+
+/** Test seam: what a codec step runs before using its instance (none by default). */
+let beforeCodecStep: ((key: string) => void) | undefined;
+/** @internal For tests only: make codec steps fail, to exercise the retries. */
+export function setPreviewCodecFault(fault: ((key: string) => void) | undefined): void {
+  beforeCodecStep = fault;
+}
+
+/**
+ * Run `use` on the codec `key`, so that the same input gives the same result whatever ran before.
+ *
+ * - An instance that threw, for any reason, is discarded: it may be left mid-call (an Emscripten
+ *   abort or a WASM trap leaves it unusable), so what one image did never reaches the next.
+ * - WASM memory running out is retried on a fresh instance after each wait in
+ *   `PREVIEW_CODEC_RETRY_DELAYS_MS`; still short after the last, it throws
+ *   `PREVIEW_RUNTIME_EXHAUSTED`.
+ * - Any other error, a trap included, is the image's only when it recurs identically on a fresh
+ *   instance: it is then thrown as it is (the caller reports the image undecodable). Errors that
+ *   differ on every fresh instance throw `PREVIEW_RUNTIME_FAULT`: no `failed` result is reported
+ *   for a fault that was never shown to be the image's.
+ */
+async function withCodec<M, T>(key: string, load: () => Promise<M>, use: (codec: M) => T | Promise<T>): Promise<T> {
+  const delays = retryDelays();
+  const errors: unknown[] = [];
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    const fresh = !codecs.has(key);
+    try {
+      const codec = await once(key, load);
+      beforeCodecStep?.(key);
+      return await use(codec);
+    } catch (error) {
+      codecs.delete(key);
+      const previous = errors[errors.length - 1];
+      errors.push(error);
+      if (!exhausted(error) && fresh && previous !== undefined && !exhausted(previous) && messageOf(previous) === messageOf(error)) throw error;
+      if (attempt < delays.length) await reclaim(delays[attempt]);
+    }
+  }
+  const last = errors[errors.length - 1];
+  if (exhausted(last)) throw runtimeExhausted(last);
+  throw runtimeFault(errors);
 }
 
 type DecodeModule = { decode(data: ArrayBuffer | ArrayBufferView, ...rest: unknown[]): Rgba | null };
@@ -402,28 +525,31 @@ type DecodeModule = { decode(data: ArrayBuffer | ArrayBufferView, ...rest: unkno
 async function decode(bytes: Uint8Array, format: ImageFormat): Promise<{ image: Rgba; firstFrameOnly: boolean }> {
   const copy = new Uint8Array(bytes);
   if (format === "png") {
-    const png = await once("png", async () => {
+    // wasm-bindgen keeps one PNG instance per process, so a retry here runs on that same instance;
+    // the Emscripten decoders (JPEG, WebP, AVIF) and the encoder get a fresh one each time.
+    const load = async () => {
       const m = await import("@jsquash/png/decode.js");
       await m.init((await nodeWasm("@jsquash/png/codec/pkg/squoosh_png_bg.wasm")));
       return m;
-    });
-    return { image: await png.decode(copy.buffer), firstFrameOnly: false };
+    };
+    return { image: await withCodec("png", load, (png) => png.decode(copy.buffer)), firstFrameOnly: false };
   }
   if (format === "jpeg") {
-    const jpeg = await once("jpeg", async () => emscripten<DecodeModule>((await import("@jsquash/jpeg/codec/dec/mozjpeg_dec.js")).default as unknown as EmscriptenFactory, "@jsquash/jpeg/codec/dec/mozjpeg_dec.wasm"));
+    const load = async () => emscripten<DecodeModule>((await import("@jsquash/jpeg/codec/dec/mozjpeg_dec.js")).default, "@jsquash/jpeg/codec/dec/mozjpeg_dec.wasm");
     // Honour the EXIF orientation, as a viewer shows it.
-    return { image: required(jpeg.decode(copy, true)), firstFrameOnly: false };
+    return { image: await withCodec("jpeg", load, (jpeg) => required(jpeg.decode(new Uint8Array(copy), true))), firstFrameOnly: false };
   }
   if (format === "webp") {
-    const webp = await once("webp", async () => emscripten<DecodeModule>((await import("@jsquash/webp/codec/dec/webp_dec.js")).default as unknown as EmscriptenFactory, "@jsquash/webp/codec/dec/webp_dec.wasm"));
+    const load = async () => emscripten<DecodeModule>((await import("@jsquash/webp/codec/dec/webp_dec.js")).default, "@jsquash/webp/codec/dec/webp_dec.wasm");
     const frame = firstWebpFrame(copy);
     // The first frame is sized on its own: the canvas does not bound it.
     if (frame) checkPixels("WebP frame", dimensions(frame, "webp"));
-    return { image: required(webp.decode(frame ?? copy)), firstFrameOnly: frame !== undefined };
+    const input = frame ?? copy;
+    return { image: await withCodec("webp", load, (webp) => required(webp.decode(new Uint8Array(input)))), firstFrameOnly: frame !== undefined };
   }
   if (format === "avif") {
-    const avif = await once("avif", async () => emscripten<DecodeModule>((await import("@jsquash/avif/codec/dec/avif_dec.js")).default as unknown as EmscriptenFactory, "@jsquash/avif/codec/dec/avif_dec.wasm"));
-    return { image: required(avif.decode(copy, 8)), firstFrameOnly: false };
+    const load = async () => emscripten<DecodeModule>((await import("@jsquash/avif/codec/dec/avif_dec.js")).default, "@jsquash/avif/codec/dec/avif_dec.wasm");
+    return { image: await withCodec("avif", load, (avif) => required(avif.decode(new Uint8Array(copy), 8))), firstFrameOnly: false };
   }
   if (format === "gif") return decodeGif(copy);
   return rasteriseSvg(copy);
