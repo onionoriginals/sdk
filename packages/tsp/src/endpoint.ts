@@ -1,6 +1,7 @@
 import type { LocalVid, OpenedMessage } from './message.js';
 import { keysFromRev3Vid, openTspMessage, sealTspPayload } from './message.js';
 import type { Payload } from './cesr/packet.js';
+import { postTspWire } from './http/client.js';
 import { peerFromKeys, MemoryTspRouter } from './transport.js';
 
 export type RelationshipState =
@@ -30,6 +31,18 @@ export class TspEndpoint {
 
   async sendApplication(peer: LocalVid, data: Uint8Array): Promise<Uint8Array> {
     return this.sendRaw(peer, { type: 'generic', data }, { confidential: true });
+  }
+
+  async sendApplicationHttp(
+    peer: LocalVid,
+    data: Uint8Array,
+    options?: { fetch?: typeof fetch },
+  ): Promise<Uint8Array> {
+    const transport = peer.transport;
+    if (!transport) throw new Error('peer has no TSP transport URL');
+    const wire = await this.sendApplication(peer, data);
+    await postTspWire(transport, wire, { fetch: options?.fetch });
+    return wire;
   }
 
   async sendRelationshipInvite(peer: LocalVid, nonce?: Uint8Array): Promise<Uint8Array> {

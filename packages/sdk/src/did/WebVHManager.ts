@@ -8,6 +8,7 @@ import { isWebVHPathSegment } from './webvh-names.js';
 import { assertEd25519WebVHUpdateKeys, computeNextKeyHash, normalizeUpdateKey, requireWebVHPaths } from './webvh-rules.js';
 export { assertEd25519WebVHUpdateKeys, computeNextKeyHash, normalizeUpdateKey, requireWebVHPaths } from './webvh-rules.js';
 import { buildWebVHCreateDocument, buildWebVHUpdateDocument, type WebVHDocumentFields } from './webvh-document.js';
+import { generateTspWebvhKeyMaterial, tspWebvhDocumentFields } from '../tsp/webvh-fields.js';
 /**
  * Node-only modules, loaded on first use. Only saveDIDLog/loadDIDLog touch the
  * filesystem, but a static import here made every entry point that reaches
@@ -159,6 +160,8 @@ export interface CreateWebVHOptions {
   alsoKnownAs?: string[];
   /** Service endpoints to carry into the DID document. */
   services?: Array<Record<string, unknown>>;
+  /** When set, publish X25519 keyAgreement + TSPTransport (Multikey only). */
+  tsp?: { transport: string };
 }
 
 export interface CreateWebVHResult {
@@ -180,6 +183,11 @@ export interface CreateWebVHResult {
    * next `rotateDIDWebVHKeys` call to execute a valid pre-rotation.
    */
   nextKeyPair?: KeyPair;
+  /** Present when `tsp` was requested at creation; retain the encryption private key. */
+  tspEncryption?: {
+    encryptionPrivateMultibase: string;
+    encryptionPublicMultibase: string;
+  };
 }
 
 export interface RotateWebVHKeysOptions {
@@ -288,9 +296,13 @@ export class WebVHManager {
       additionalVerificationMethods,
       alsoKnownAs,
       services,
+      tsp,
     } = options;
 
     const canonicalPaths = requireWebVHPaths(paths);
+    let tspMaterial: ReturnType<typeof generateTspWebvhKeyMaterial> | undefined;
+    let mergedServices = services ?? [];
+    let keyAgreementForTsp: string[] | undefined;
 
     // Dynamically import didwebvh-ts to avoid module resolution issues
     const mod = await import('didwebvh-ts') as unknown as {
@@ -421,8 +433,16 @@ export class WebVHManager {
 
     // Publish any carried-over verification methods after the signing key.
     // They are verification-only: updateKeys stays restricted to the signing key(s).
-    if (additionalVerificationMethods && additionalVerificationMethods.length > 0) {
-      verificationMethods = [...verificationMethods, ...additionalVerificationMethods];
+    let extraVerificationMethods = additionalVerificationMethods ?? [];
+    if (tsp) {
+      tspMaterial = generateTspWebvhKeyMaterial();
+      const tspFields = tspWebvhDocumentFields(tsp.transport, tspMaterial);
+      extraVerificationMethods = [...extraVerificationMethods, ...tspFields.additionalVerificationMethods];
+      mergedServices = [...mergedServices, ...tspFields.services];
+      keyAgreementForTsp = tspFields.keyAgreement;
+    }
+    if (extraVerificationMethods.length > 0) {
+      verificationMethods = [...verificationMethods, ...extraVerificationMethods];
     }
 
     // The authentication/assertionMethod relationships must reference a
@@ -454,7 +474,8 @@ export class WebVHManager {
         authentication: [signingVmId],
         assertionMethod: [signingVmId],
         ...(alsoKnownAs && alsoKnownAs.length > 0 ? { alsoKnownAs } : {}),
-        ...(services && services.length > 0 ? { services } : {}),
+        ...(mergedServices.length > 0 ? { services: mergedServices } : {}),
+        ...(keyAgreementForTsp ? { keyAgreement: keyAgreementForTsp } : {}),
       }),
     };
     if (nextKeyHashes) {
@@ -483,6 +504,14 @@ export class WebVHManager {
       ...(keyPair ? { keyPair } : {}),
       logPath,
       ...(nextKeyPairForPrerotation ? { nextKeyPair: nextKeyPairForPrerotation } : {}),
+      ...(tspMaterial
+        ? {
+            tspEncryption: {
+              encryptionPrivateMultibase: tspMaterial.encryptionPrivateMultibase,
+              encryptionPublicMultibase: tspMaterial.encryptionPublicMultibase,
+            },
+          }
+        : {}),
     };
   }
 
@@ -625,8 +654,15 @@ export class WebVHManager {
     signer: ExternalSigner | { privateKey: string; publicKey: string };
     verifier?: ExternalVerifier;
     outputDir?: string;
-  }): Promise<{ didDocument: DIDDocument; log: DIDLog; logPath?: string }> {
-    const { did, currentLog, updates, signer: providedSigner, verifier: providedVerifier, outputDir } = options;
+    /** Add or replace TSP keyAgreement + TSPTransport on this update (Multikey only). */
+    tsp?: { transport: string };
+  }): Promise<{
+    didDocument: DIDDocument;
+    log: DIDLog;
+    logPath?: string;
+    tspEncryption?: { encryptionPrivateMultibase: string; encryptionPublicMultibase: string };
+  }> {
+    const { did, currentLog, updates, signer: providedSigner, verifier: providedVerifier, outputDir, tsp } = options;
 
     // updateDIDWebVH appends an ordinary (non-pre-rotation) entry. On a
     // pre-rotation chain that would set an un-committed updateKey and break
@@ -706,10 +742,39 @@ export class WebVHManager {
     const currentEntry = currentLog[currentLog.length - 1];
     const currentDoc = currentEntry.state as unknown as DIDDocument;
 
+    let tspMaterial: ReturnType<typeof generateTspWebvhKeyMaterial> | undefined;
+    let tspMerged = { ...updates };
+    if (tsp) {
+      tspMaterial = generateTspWebvhKeyMaterial();
+      const tspFields = tspWebvhDocumentFields(tsp.transport, tspMaterial);
+      const vms = [
+        ...(currentDoc.verificationMethod ?? []),
+        ...(updates.verificationMethod ?? []).filter(
+          (u) => !(currentDoc.verificationMethod ?? []).some((e) => e.id === (u as { id?: string }).id),
+        ),
+        ...tspFields.additionalVerificationMethods,
+      ];
+      const svc = [
+        ...(currentDoc.service ?? []).filter(
+          (s) => (s as { type?: string }).type !== 'TSPTransport',
+        ),
+        ...(updates.service ?? []).filter(
+          (s) => (s as { type?: string }).type !== 'TSPTransport',
+        ),
+        ...tspFields.services,
+      ];
+      tspMerged = {
+        ...updates,
+        verificationMethod: vms as DidDocVerificationMethod[],
+        service: svc as DIDDocument['service'],
+        keyAgreement: tspFields.keyAgreement,
+      };
+    }
+
     // Merge updates with current document
     const updatedDoc: DIDDocument = {
       ...currentDoc,
-      ...updates,
+      ...tspMerged,
       id: did, // Ensure ID doesn't change
     };
 
@@ -718,7 +783,7 @@ export class WebVHManager {
     // didwebvh-ts 2.8.0 rules this API has always applied. (2.8.0 ignored a
     // `doc` option, so passing the merged document made every update a signed
     // no-op, issue #338.)
-    const namedOptions = this.deriveUpdateOptions(updatedDoc, updates);
+    const namedOptions = this.deriveUpdateOptions(updatedDoc, tspMerged);
 
     // Update the DID using didwebvh-ts
     const result = await updateDID({
@@ -743,6 +808,14 @@ export class WebVHManager {
       didDocument: result.doc,
       log: result.log,
       logPath,
+      ...(tspMaterial
+        ? {
+            tspEncryption: {
+              encryptionPrivateMultibase: tspMaterial.encryptionPrivateMultibase,
+              encryptionPublicMultibase: tspMaterial.encryptionPublicMultibase,
+            },
+          }
+        : {}),
     };
   }
 
