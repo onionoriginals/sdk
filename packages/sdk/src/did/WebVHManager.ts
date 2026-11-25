@@ -439,7 +439,15 @@ export class WebVHManager {
     if (transportUrl) {
       tspMaterial = generateTspWebvhKeyMaterial();
       const tspFields = tspWebvhDocumentFields(transportUrl, tspMaterial);
-      extraVerificationMethods = [...extraVerificationMethods, ...tspFields.additionalVerificationMethods];
+      const tspVms: VerificationMethod[] = tspFields.additionalVerificationMethods.map((vm) => ({
+        id: vm.id,
+        type: vm.type,
+        controller: vm.controller,
+        publicKeyMultibase: vm.publicKeyMultibase!,
+        secretKeyMultibase: vm.secretKeyMultibase,
+        purpose: vm.purpose,
+      }));
+      extraVerificationMethods = [...extraVerificationMethods, ...tspVms];
       mergedServices = [...mergedServices, ...tspFields.services];
       keyAgreementForTsp = tspFields.keyAgreement;
     }

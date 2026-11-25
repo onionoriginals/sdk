@@ -1,5 +1,6 @@
 import { Chacha20Poly1305 } from '@hpke/chacha20poly1305';
-import { CipherSuite, DhkemX25519HkdfSha256, HkdfSha256 } from '@hpke/core';
+import { CipherSuite } from '@hpke/core';
+import { DhkemX25519HkdfSha256, HkdfSha256 } from '@hpke/dhkem-x25519';
 
 export const HPKE_INFO = new TextEncoder().encode('YTSP-');
 

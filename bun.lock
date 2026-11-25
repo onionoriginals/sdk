@@ -182,6 +182,7 @@
       "dependencies": {
         "@hpke/chacha20poly1305": "^1.7.5",
         "@hpke/core": "^1.7.5",
+        "@hpke/dhkem-x25519": "^1.8.0",
         "@noble/curves": "^2.2.0",
         "@noble/ed25519": "^3.0.0",
         "@noble/hashes": "^2.0.1",
