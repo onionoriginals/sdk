@@ -1,5 +1,41 @@
 # @originals/landing
 
+## 0.5.2
+
+### Patch Changes
+
+- Updated dependencies [fd15702]
+- Updated dependencies [874555b]
+- Updated dependencies [874555b]
+- Updated dependencies [0d1a2b3]
+- Updated dependencies [939a0d9]
+- Updated dependencies [2e8c053]
+- Updated dependencies [37e7ee5]
+- Updated dependencies [431defb]
+- Updated dependencies [4248e63]
+- Updated dependencies [1fdd945]
+- Updated dependencies [3edd470]
+- Updated dependencies [11b25a8]
+- Updated dependencies [b5a95d0]
+- Updated dependencies [8295681]
+- Updated dependencies [2a41ca4]
+- Updated dependencies [f5de8cd]
+- Updated dependencies [b021bd3]
+- Updated dependencies [b6f626e]
+- Updated dependencies [037d167]
+- Updated dependencies [4619848]
+- Updated dependencies [1aad0f3]
+- Updated dependencies [900ed2a]
+- Updated dependencies [1eb52a9]
+- Updated dependencies [ebc6308]
+- Updated dependencies [296a969]
+- Updated dependencies [e5a3e3d]
+- Updated dependencies [0f4790b]
+- Updated dependencies [a0153f0]
+  - @originals/vh@0.5.0
+  - @originals/sdk@6.2.0
+  - @originals/host@0.4.0
+
 ## 0.5.1
 
 ### Patch Changes
