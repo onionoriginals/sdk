@@ -23,8 +23,14 @@ export interface InscriptionRead {
   inscriptionIndex: number;
   /** 0 while unconfirmed (P9.5). */
   confirmations: number;
-  /** The ord envelope, from OP_FALSE OP_IF to OP_ENDIF (P14.12). */
+  /** The ord envelope, from OP_FALSE OP_IF to OP_ENDIF (P14.12). Empty when `unread`. */
   envelope: Uint8Array;
+  /**
+   * The index lists the inscription but the verifier did not read its envelope or
+   * metadata. On a did:btco signer's sat the DID's history ends before it (P5.13);
+   * on an anchoring sat it is missing evidence (P9.17).
+   */
+  unread?: boolean;
   /** The metaprotocol the index reports, when it reports one; checked against the envelope. */
   metaprotocol?: string | null;
   /** The content type the index reports, when it reports one; checked against the envelope. */
@@ -79,6 +85,8 @@ export interface EvidenceSet {
   depth?: number | null;
   /** The sats the index read (P9.18): the anchoring sat and each did:btco signer's. */
   sats?: SatRead[];
+  /** An index of Originals inscriptions the verifier trusts, and the block through which it lists every one (P9.16). */
+  originalsIndex?: { name: string; through: number } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,8 +193,8 @@ export interface Report {
   checkpoint: string | null;
   evidence: { inputs: ReportInput[]; network: BitcoinNetwork | null; tip: Tip | null; depth: number | null };
   axes: Axes | { outcome: "unsupported" };
-  entries?: EntryLabel[];
-  signers?: SignerLabel[];
+  entries: EntryLabel[];
+  signers: SignerLabel[];
   diagnostics: Diagnostic[];
   bitcoin?: {
     sat: string;
