@@ -157,7 +157,7 @@ describe('owner decision A: other sats never block the anchor', () => {
     expect(r.diagnostics.some((d) => d.code === 'signer-history-missing' || d.code === 'anchoring-sat-not-read')).toBe(false);
   });
 
-  test('T9-145(a): the same did:og undecidable on another sat, earlier than our valid anchor, is ignored: ours is anchored, nothing listed, uniqueness provisional', async () => {
+  test('T9-145(a), T9-146: the same did:og undecidable on another sat, earlier than our valid anchor, is ignored: ours is anchored, nothing listed, uniqueness provisional; once it verifies, it is the anchor', async () => {
     const w = await World.create();
     const genesis = w.head;
     const v1 = w.author.ref().versionId;
