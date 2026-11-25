@@ -37,13 +37,13 @@ export const site = {
   wordmark: 'Originals',
   github: 'https://github.com/onionoriginals/sdk',
   /**
-   * Pinned to the `next` tag on purpose. npm's `latest` is still 2.1.0, a major
-   * behind everything this page describes — the SDK this page runs is newer
-   * than `latest` — so a bare
-   * `npm install @originals/sdk` hands a developer a different SDK than the one
-   * they just watched run. Drop the tag only when 3.0.0 is on `latest`.
+   * Untagged on purpose: npm `latest` is 6.2.0, the release this page runs
+   * (packages/sdk/package.json), so a plain install hands a developer the SDK
+   * they just watched work. Never `@next`: that tag still points at
+   * 3.0.0-next.1, an old pre-release with no `./og` export.
+   * `developers.versionNote` says so; install-line-honesty.test.ts checks both.
    */
-  install: 'npm install @originals/sdk@next'
+  install: 'npm install @originals/sdk'
 };
 
 export const nav = {
@@ -821,7 +821,7 @@ export const developers = {
   sdkNote:
     'This page uses @originals/sdk, available under the MIT license.',
   versionNote:
-    'This page runs the Originals Protocol SDK, which ships under the `next` tag with its next release. Until that release is published, `next` installs the previous line.',
+    'This page runs the Originals Protocol SDK 6.2.0, the latest release on npm. Don’t use the `next` tag: it points at an old 3.0 pre-release.',
   docsLink: {
     label: 'Quickstart and docs on GitHub',
     href: 'https://github.com/onionoriginals/sdk#readme'

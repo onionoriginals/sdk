@@ -793,7 +793,7 @@ The last two auth files are here because the non-extractable path reaches furthe
 
 **Approach:**
 1. De-emphasize the developer section for a product-first launch, per the settled decision.
-2. Fix the install line and quickstart. `npm install @originals/sdk` resolves to 2.1.0, whose exports map has no `./testing` subpath — so the very first import in the quickstart fails for anyone who follows it. Point both at the prerelease tag the site actually runs.
+2. Fix the install line and quickstart. *(Historical: written when `latest` was 2.1.0. Since 25 November 2026 `latest` is 6.2.0, the release the site runs, and the install line is untagged again.)* `npm install @originals/sdk` resolves to 2.1.0, whose exports map has no `./testing` subpath — so the very first import in the quickstart fails for anyone who follows it. Point both at the prerelease tag the site actually runs.
 3. Make `content.quickstart.test.ts` resolve the snippet's specifiers against the published package rather than the workspace, so this class of drift fails CI instead of passing.
 
 **Test scenarios:**

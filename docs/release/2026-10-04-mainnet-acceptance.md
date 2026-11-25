@@ -1,5 +1,7 @@
 # Existing owner Original: clean-browser mainnet acceptance
 
+> **Superseded.** This acceptance ran on the 3.0 line, before `@originals/sdk` 6.2.0 (`onionoriginals/sdk@1e42d3cc`, 25 November 2026). Originals written then are in an encoding 6.x no longer verifies (`packages/sdk/CHANGELOG.md`, 6.0.0), and the `@next` install line it mentions is gone: install `@originals/sdk` untagged. Kept as a historical record.
+
 **PASS** for the shared #525/#527/#540 cold-start acceptance requirement on
 October 4, 2026 UTC (October 3 in Vancouver). The owner’s existing September 7
 mainnet PNG verifies from a newly created, empty Chromium profile with no
