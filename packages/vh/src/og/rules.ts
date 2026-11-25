@@ -22,6 +22,8 @@ export const OG_LIMITS = Object.freeze({
   fetchMs: 15_000,
   /** P9.17: metadata and body of one inscription together. */
   inscriptionBytes: 350_000,
+  /** P7.22: confirmations a publication needs for the transfer check. */
+  transferDepth: 6,
   /** P14.3, P5.7. */
   depth: 64,
 });

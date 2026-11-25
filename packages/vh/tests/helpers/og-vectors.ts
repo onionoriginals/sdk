@@ -28,3 +28,57 @@ export function vtree(dir: string): Record<string, Uint8Array> {
 
 export const bytesEqual = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
 export const utf8 = (s: string) => new TextEncoder().encode(s);
+
+/** Where a resolved input's bytes are in a vector (its `resolved.json`, D22): source URL to file. */
+function resolvedFiles(dir: string): Map<string, string> {
+  try {
+    return new Map(vjson(`${dir}/resolved.json`).responses.map((r: { source: string; file: string }) => [r.source, `${dir}/${r.file}`]));
+  } catch {
+    return new Map();
+  }
+}
+
+/** A vector's evidence-set.json, with each input's bytes read from the vector (P7.17). */
+export function vectorEvidence(dir: string): import('../../src/og/index.js').EvidenceSet {
+  const e = vjson(`${dir}/evidence-set.json`);
+  const resolved = resolvedFiles(dir);
+  return {
+    original: e.original, checkpoint: e.checkpoint, network: e.network, tip: e.tip, depth: e.depth,
+    signerHistories: e.signerHistories,
+    // Each input with the digest the evidence set states for it (P7.17); index reads are supplied separately.
+    inputs: e.inputs.map((i: { kind: string; source: string; digest: string }) => (i.source.startsWith('index:') ? { kind: i.kind, source: i.source, bytes: new Uint8Array() } : { kind: i.kind, source: i.source, digest: i.digest, bytes: vbytes(resolved.get(i.source) ?? i.source) })),
+  } as never;
+}
+
+/**
+ * The bitcoin vector's evidence set (P9.18, T14-102): exactly its evidence-set.json, the sat-read input
+ * and the inscription inputs; chain.json only says where each envelope's bytes are.
+ */
+export function bitcoinEvidence(): import('../../src/og/index.js').EvidenceSet {
+  const e = vectorEvidence('bitcoin');
+  const where = new Map(vjson('bitcoin/chain.json').inscriptions.map((x: any) => [`index:${x.id}`, `bitcoin/${x.envelope}`]));
+  e.inputs = e.inputs.map((i: any) => (i.kind === 'inscription' ? { ...i, digest: vjson('bitcoin/evidence-set.json').inputs.find((x: any) => x.source === i.source).digest, bytes: vbytes(where.get(i.source) as string) } : i));
+  return e;
+}
+
+/** Replace the evidence set's sat-read with an edited copy (its digest dropped, since the bytes change). */
+export function withSatRead(e: import('../../src/og/index.js').EvidenceSet, edit: (r: any) => void): import('../../src/og/index.js').EvidenceSet {
+  return {
+    ...e,
+    inputs: e.inputs.map((i: any) => {
+      if (i.kind !== 'sat-read') return i;
+      const r = JSON.parse(new TextDecoder().decode(i.bytes));
+      edit(r);
+      return { kind: i.kind, source: i.source, bytes: new TextEncoder().encode(JSON.stringify(r)) };
+    }),
+  };
+}
+
+/** The prior-format fixture as an evidence set: its two reveal transactions' raw bytes, as mempool.space served them (hex decoded). */
+export function priorEvidence(): import('../../src/og/index.js').EvidenceSet {
+  const chain = pjson('chain.json');
+  return {
+    original: null as never, checkpoint: null, network: 'mainnet', tip: null, depth: null,
+    inputs: chain.inscriptions.map((x: any) => ({ kind: 'transaction', source: `mempool.space:${x.revealTxid}`, bytes: new Uint8Array(Buffer.from(new TextDecoder().decode(pbytes(x.transaction)).trim(), 'hex')) })),
+  };
+}
