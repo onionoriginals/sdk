@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="218" viewBox="0 0 800 218" role="img" aria-labelledby="title desc">
+<title id="title">What a check returns</title>
+<desc id="desc">get, load and loadPublished return a report; isVerified(report, reasons) gives true or false. Each part is reported separately: history, authorBinding, identityEvidence, resources, ordering, fork, ownership, validAsOf, and current, which is true only for an anchored Original, read from its sat.</desc>
+<style>svg{--fg:#1f2328;--muted:#59636e;--card:#f6f8fa;--border:#d1d9e0;--code:#eaeef2;--accent:#0969da;--yes:#1a7f37;--no:#cf222e;--warn:#9a6700;--warnbg:#fff8c5;--author:#8250df;--zip:#1b7c83;--web:#1a7f37;--btc:#bc4c00}
+@media (prefers-color-scheme: dark){svg{--fg:#e6edf3;--muted:#9198a1;--card:#151b23;--border:#3d444d;--code:#262c36;--accent:#4493f8;--yes:#3fb950;--no:#f85149;--warn:#d29922;--warnbg:#2e2614;--author:#ab7df8;--zip:#39c5cf;--web:#3fb950;--btc:#f0883e}}
+text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;font-size:12px;fill:var(--fg)}
+.mono{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;font-size:11px}
+.muted{fill:var(--muted)}
+.small{font-size:11px}
+.h{font-size:15px;font-weight:600}
+.b{font-weight:600}
+.cap{font-size:10.5px;font-weight:600;letter-spacing:.06em;fill:var(--muted)}
+.accent{fill:var(--accent)}
+.yes{fill:var(--yes)}
+.no{fill:var(--no)}
+.card{fill:var(--card);stroke:var(--border)}
+.code{fill:var(--code)}
+.dash{stroke:var(--border);stroke-dasharray:4 3;fill:none}
+.arrow{fill:var(--accent)}</style>
+<text x="0" y="14" class="cap">WHAT A CHECK RETURNS · EACH PART REPORTED SEPARATELY</text>
+<text x="0" y="40" class="mono" data-api="OriginalsSDK#get">get</text>
+<text x="26" y="40" class="muted">·</text>
+<text x="38" y="40" class="mono" data-api="OriginalsSDK#load">load</text>
+<text x="70" y="40" class="muted">·</text>
+<text x="82" y="40" class="mono" data-api="OriginalsSDK#loadPublished">loadPublished</text>
+<text x="178" y="40" class="muted">→ report</text>
+<text x="300" y="40" class="mono" data-api="root:isVerified">isVerified(report, reasons)</text>
+<text x="488" y="40" class="muted">→ true or false</text>
+<rect x="0.5" y="56.5" width="259" height="46" rx="6" class="card"/>
+<text x="12" y="76" class="mono b" data-report="history">history</text>
+<text x="12" y="93" class="muted">Is the chain of entries valid?</text>
+<rect x="270.5" y="56.5" width="259" height="46" rx="6" class="card"/>
+<text x="282" y="76" class="mono b" data-report="authorBinding">authorBinding</text>
+<text x="282" y="93" class="muted">Did the right keys sign?</text>
+<rect x="540.5" y="56.5" width="259" height="46" rx="6" class="card"/>
+<text x="552" y="76" class="mono b" data-report="identityEvidence">identityEvidence</text>
+<text x="552" y="93" class="muted">Signer DID histories, how fresh</text>
+<rect x="0.5" y="110.5" width="259" height="46" rx="6" class="card"/>
+<text x="12" y="130" class="mono b" data-report="resources">resources</text>
+<text x="12" y="147" class="muted">Bytes present, and matching</text>
+<rect x="270.5" y="110.5" width="259" height="46" rx="6" class="card"/>
+<text x="282" y="130" class="mono b" data-report="ordering">ordering</text>
+<text x="282" y="147" class="muted">Claimed, or anchored on Bitcoin</text>
+<rect x="540.5" y="110.5" width="259" height="46" rx="6" class="card"/>
+<text x="552" y="130" class="mono b" data-report="fork">fork</text>
+<text x="552" y="147" class="muted">Divergent branches, if any</text>
+<rect x="0.5" y="164.5" width="259" height="46" rx="6" class="card"/>
+<text x="12" y="184" class="mono b" data-report="ownership">ownership</text>
+<text x="12" y="201" class="muted">Who holds the sat (provisional)</text>
+<rect x="270.5" y="164.5" width="259" height="46" rx="6" class="card"/>
+<text x="282" y="184" class="mono b" data-report="validAsOf">validAsOf</text>
+<text x="282" y="201" class="muted">The checkpoint it's valid as of</text>
+<rect x="540.5" y="164.5" width="259" height="46" rx="6" class="card" style="stroke:var(--warn);stroke-width:1.5"/>
+<text x="552" y="184" class="mono b" data-report="current">current</text>
+<text x="552" y="201" class="muted">True only when anchored, from the sat</text>
+</svg>

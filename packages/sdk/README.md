@@ -11,6 +11,8 @@ says which parts are implemented.
 Everything comes from `@originals/sdk`. The SDK makes the author, signs each
 entry, links it to the one before and hashes the bytes.
 
+![The guided path: Create, Add a version, Export, Verify](docs/diagrams/guided.svg)
+
 ```ts
 import { writeFile } from 'node:fs/promises';
 import { OriginalsStudio } from '@originals/sdk';
@@ -57,6 +59,10 @@ For anything else, such as editors, signer sets, publishing or anchoring, use
 [ORIGINALS.md](ORIGINALS.md).
 
 ## The full workflow
+
+For a map of the whole SDK (where an Original lives, how a change is made,
+who may sign and what a check returns), see
+[The SDK at a glance](ORIGINALS.md#the-sdk-at-a-glance).
 
 ```ts
 import { OriginalsSDK, MemoryStore, createLocalAuthor, isVerified } from '@originals/sdk';

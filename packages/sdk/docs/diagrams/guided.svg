@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="461" viewBox="0 0 800 461" role="img" aria-labelledby="title desc">
+<title id="title">The guided path: Create, Add a version, Export, Verify</title>
+<desc id="desc">Four calls from @originals/sdk. OriginalsStudio.start and studio.create make a local did:vh author and sign entry 1. app.addVersion with bytes, a label and a note signs entry 2, linked to entry 1. app.export packs the asset log, the author's DID log and the resource bytes into an evidence ZIP with no private key. studio.verify, or npx originals verify, reads the ZIP offline and returns verified, the versions and the report. A verified Original is not current until it is anchored on Bitcoin.</desc>
+<style>svg{--fg:#1f2328;--muted:#59636e;--card:#f6f8fa;--border:#d1d9e0;--code:#eaeef2;--accent:#0969da;--yes:#1a7f37;--no:#cf222e;--warn:#9a6700;--warnbg:#fff8c5;--author:#8250df;--zip:#1b7c83;--web:#1a7f37;--btc:#bc4c00}
+@media (prefers-color-scheme: dark){svg{--fg:#e6edf3;--muted:#9198a1;--card:#151b23;--border:#3d444d;--code:#262c36;--accent:#4493f8;--yes:#3fb950;--no:#f85149;--warn:#d29922;--warnbg:#2e2614;--author:#ab7df8;--zip:#39c5cf;--web:#3fb950;--btc:#f0883e}}
+text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;font-size:12px;fill:var(--fg)}
+.mono{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;font-size:11px}
+.muted{fill:var(--muted)}
+.small{font-size:11px}
+.h{font-size:15px;font-weight:600}
+.b{font-weight:600}
+.cap{font-size:10.5px;font-weight:600;letter-spacing:.06em;fill:var(--muted)}
+.accent{fill:var(--accent)}
+.yes{fill:var(--yes)}
+.no{fill:var(--no)}
+.card{fill:var(--card);stroke:var(--border)}
+.code{fill:var(--code)}
+.dash{stroke:var(--border);stroke-dasharray:4 3;fill:none}
+.arrow{fill:var(--accent)}</style>
+<text x="0" y="14" class="cap">THE GUIDED PATH · EVERYTHING FROM @originals/sdk</text>
+<rect x="0.5" y="26.5" width="187" height="238" rx="6" class="card"/>
+<text x="12" y="46" class="cap" style="fill:var(--accent)">STEP 1</text>
+<text x="12" y="66" class="h">Create</text>
+<rect x="10" y="76" width="168" height="40" rx="6" class="code"/>
+<text x="16" y="92" class="mono" data-api="OriginalsStudio.start">OriginalsStudio.start()</text>
+<text x="16" y="108" class="mono" data-api="OriginalsStudio#create">studio.create({…})</text>
+<text x="12" y="136" class="cap">SDK DOES</text>
+<text x="12" y="153" class="muted">Makes a did:vh author</text><text x="12" y="169" class="muted">and its key. Hashes the</text><text x="12" y="185" class="muted">bytes, signs entry 1.</text>
+<line x1="12" y1="198" x2="176" y2="198" class="dash"/>
+<text x="12" y="216" class="cap">YOU GET</text>
+<text x="12" y="233">app: a handle at</text><text x="12" y="249">checkpoint 1</text>
+<path class="arrow" d="M192 56 L200 62 L192 68 Z"/>
+<rect x="204.5" y="26.5" width="187" height="238" rx="6" class="card"/>
+<text x="216" y="46" class="cap" style="fill:var(--accent)">STEP 2</text>
+<text x="216" y="66" class="h">Add a version</text>
+<rect x="214" y="76" width="168" height="40" rx="6" class="code"/>
+<text x="220" y="92" class="mono" data-api="OriginalHandle#addVersion">app.addVersion({</text>
+<text x="220" y="108" class="mono">  bytes, label, note })</text>
+<text x="216" y="136" class="cap">SDK DOES</text>
+<text x="216" y="153" class="muted">Hashes the new bytes,</text><text x="216" y="169" class="muted">links entry 2 to entry 1,</text><text x="216" y="185" class="muted">adds label + note, signs.</text>
+<line x1="216" y1="198" x2="380" y2="198" class="dash"/>
+<text x="216" y="216" class="cap">YOU GET</text>
+<text x="216" y="233" class="mono">{ version: 2,</text><text x="216" y="249" class="mono">  label, note }</text>
+<path class="arrow" d="M396 56 L404 62 L396 68 Z"/>
+<rect x="408.5" y="26.5" width="187" height="238" rx="6" class="card"/>
+<text x="420" y="46" class="cap" style="fill:var(--accent)">STEP 3</text>
+<text x="420" y="66" class="h">Export</text>
+<rect x="418" y="76" width="168" height="40" rx="6" class="code"/>
+<text x="424" y="92" class="mono" data-api="OriginalHandle#export">app.export()</text>
+<text x="420" y="136" class="cap">SDK DOES</text>
+<text x="420" y="153" class="muted">Packs both logs and the</text><text x="420" y="169" class="muted">bytes into one ZIP. No</text><text x="420" y="185" class="muted">private key goes in.</text>
+<line x1="420" y1="198" x2="584" y2="198" class="dash"/>
+<text x="420" y="216" class="cap">YOU GET</text>
+<text x="420" y="233" class="mono">my-app-v2.originals.zip</text>
+<path class="arrow" d="M600 56 L608 62 L600 68 Z"/>
+<rect x="612.5" y="26.5" width="187" height="238" rx="6" class="card"/>
+<text x="624" y="46" class="cap" style="fill:var(--accent)">STEP 4</text>
+<text x="624" y="66" class="h">Verify</text>
+<rect x="622" y="76" width="168" height="40" rx="6" class="code"/>
+<text x="628" y="92" class="mono" data-api="OriginalsStudio#verify">studio.verify(bytes)</text>
+<text x="628" y="108" class="mono">npx originals verify</text>
+<text x="624" y="136" class="cap">SDK DOES</text>
+<text x="624" y="153" class="muted">Reads the ZIP the way a</text><text x="624" y="169" class="muted">stranger would: offline,</text><text x="624" y="185" class="muted">no key, no local state.</text>
+<line x1="624" y1="198" x2="788" y2="198" class="dash"/>
+<text x="624" y="216" class="cap">YOU GET</text>
+<text x="624" y="233" class="mono">verified, versions,</text><text x="624" y="249" class="mono">report</text>
+<text x="0" y="294" class="cap">WHAT GETS BUILT</text>
+<rect x="0.5" y="306.5" width="178" height="84" rx="6" class="card" style="stroke:var(--author);stroke-width:1.5"/>
+<text x="12" y="328" class="b">Author DID log</text>
+<text x="12" y="346" class="muted">did:vh, made by start().</text><text x="12" y="362" class="muted">Its author key signs</text><text x="12" y="378" class="muted">every entry.</text>
+<path class="arrow" d="M189 342 L197 348 L189 354 Z"/>
+<rect x="207.5" y="306.5" width="178" height="84" rx="6" class="card"/>
+<text x="219" y="328" class="b">Entry 1 · v1</text>
+<text x="219" y="346" class="muted">name, resource digest</text><text x="219" y="362" class="muted">label: optional</text>
+<path class="arrow" d="M396 342 L404 348 L396 354 Z"/>
+<rect x="414.5" y="306.5" width="178" height="84" rx="6" class="card"/>
+<text x="426" y="328" class="b">Entry 2 · v2</text>
+<text x="426" y="346" class="muted">new digest, linked to</text><text x="426" y="362" class="muted">entry 1. label: &quot;New UI&quot;,</text><text x="426" y="378" class="muted">note: what changed</text>
+<path class="arrow" d="M603 342 L611 348 L603 354 Z"/>
+<rect x="621.5" y="306.5" width="178" height="84" rx="6" class="card" style="stroke:var(--zip);stroke-width:1.5"/>
+<text x="633" y="328" class="b">Evidence ZIP</text>
+<text x="633" y="346" class="muted">asset log, author log</text><text x="633" y="362" class="muted">and resource bytes</text>
+<text x="0" y="414" class="muted small">Labels and notes are signed metadata of the entry that adds the version: metadata[&quot;originals:version&quot;] (PROVISIONAL).</text>
+<rect x="0" y="428" width="800" height="32" rx="6" class="card" style="fill:var(--warnbg);stroke:none"/>
+<rect x="0" y="428" width="3" height="32" style="fill:var(--warn)"/>
+<text x="14" y="448"><tspan class="b">Verified ≠ current.</tspan> Until it's anchored on Bitcoin, an Original is valid only as of its checkpoint.</text>
+</svg>
