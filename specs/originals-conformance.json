@@ -19,6 +19,7 @@
       "coveredBy": [
         "packages/sdk/tests/unit/originals/cli.test.ts",
         "packages/sdk/tests/unit/originals/evidence.test.ts",
+        "packages/sdk/tests/unit/originals/guided.test.ts",
         "packages/vh/tests/originals.test.ts"
       ]
     },
@@ -33,6 +34,7 @@
       "status": "covered",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/checked-resources.test.ts",
+        "packages/sdk/tests/unit/originals/guided.test.ts",
         "packages/sdk/tests/unit/originals/native-digest.test.ts",
         "packages/vh/tests/native-digest.test.ts",
         "packages/vh/tests/originals.test.ts"
@@ -178,6 +180,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/guided.test.ts",
         "packages/sdk/tests/unit/originals/sdk.test.ts"
       ]
     },
@@ -244,6 +247,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/guided.test.ts",
         "packages/sdk/tests/unit/originals/sdk.test.ts",
         "packages/vh/tests/originals.test.ts"
       ]
@@ -272,6 +276,7 @@
       ],
       "status": "covered",
       "coveredBy": [
+        "packages/sdk/tests/unit/originals/guided.test.ts",
         "packages/sdk/tests/unit/originals/resources.test.ts",
         "packages/sdk/tests/unit/originals/sdk.test.ts",
         "packages/vh/tests/originals.test.ts"
@@ -315,6 +320,7 @@
       "status": "covered",
       "coveredBy": [
         "packages/sdk/tests/unit/originals/freshness.test.ts",
+        "packages/sdk/tests/unit/originals/guided.test.ts",
         "packages/vh/tests/freshness.test.ts",
         "packages/vh/tests/unanchored.test.ts"
       ],
