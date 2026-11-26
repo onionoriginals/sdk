@@ -13,8 +13,9 @@ export * from "./shared.js";
 // Browser-safe helpers web apps used to copy: hosted reads, shared-host transport, publication, reasons.
 export * from "./web.js";
 export * from "./bitcoin.js";
-// The guided path: Create → Add a version → Export → Verify, with a local author (OriginalsStudio).
-export * from "./guided.js";
+// An author DID made on this device, so a first Original needs nothing from @originals/vh.
+export * from "./local-author.js";
+// The `originals verify` verdict, for apps that check a package themselves.
 export { isVerified, verdictLine } from "./verdict.js";
 // What callers of this module need from @originals/vh, so they import from the SDK alone.
 export { OriginalsError, type ErrorCategory } from "@originals/vh";

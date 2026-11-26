@@ -7,7 +7,7 @@
 import type { OriginalsReport } from "@originals/vh/originals";
 
 /**
- * The verdict of `originals verify` and of `OriginalsStudio.verify`: history,
+ * The verdict of `originals verify`, for apps that check a package: history,
  * author binding and identity evidence verify, no served bytes fail their
  * digest, and the manifest agrees. Missing bytes are unavailable content, not
  * a failure (P7.3, P7.4). Verified is never current for an unanchored

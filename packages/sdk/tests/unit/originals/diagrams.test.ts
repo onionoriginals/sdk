@@ -9,7 +9,6 @@ import { join } from "node:path";
 import { DIAGRAM_DIR, diagrams } from "../../../scripts/diagrams.ts";
 import * as root from "../../../src/index.js";
 import * as bitcoin from "../../../src/originals/bitcoin-writer.js";
-import { OriginalsStudio } from "../../../src/originals/index.js";
 import { bytes, clock } from "./helpers.js";
 
 const drawn = diagrams();
@@ -49,15 +48,18 @@ describe("SDK diagrams", () => {
     expect(refs.length).toBeGreaterThan(20);
     expect(refs.filter((r) => !exists(r))).toEqual([]);
     // The check itself catches a renamed or removed name.
-    for (const missing of ["OriginalsSDK#noSuchMethod", "OriginalsStudio.noSuch", "root:noSuch", "bitcoin:noSuch", "NoSuchClass#edit"]) {
+    for (const missing of ["OriginalsSDK#noSuchMethod", "OriginalsSDK.noSuch", "root:noSuch", "bitcoin:noSuch", "NoSuchClass#edit"]) {
       expect(exists(missing), missing).toBe(false);
     }
   });
 
   test("every report part drawn is still in a report", async () => {
-    const studio = await OriginalsStudio.start({ clock: clock() });
-    const app = await studio.create({ name: "x", resource: { mediaType: "text/plain", bytes: bytes("x") } });
-    const { report } = await studio.verify((await app.export()).bytes);
+    const start = Date.parse("2026-10-18T12:00:00Z");
+    const author = await root.createLocalAuthor(start);
+    const sdk = root.OriginalsSDK.create({ authors: [author.evidence], clock: clock(start) });
+    const created = await sdk.create({ name: "x", resource: { mediaType: "text/plain", bytes: bytes("x") }, author: author.ref, signer: author.signer });
+    if (created.kind !== "original") throw new Error("unreachable");
+    const { report } = await root.OriginalsSDK.create({ authors: [] }).load((await sdk.package(created.original.did)).bytes);
     const parts = attr("data-report");
     expect(parts.length).toBe(9);
     expect(parts.filter((p) => !(p in report))).toEqual([]);

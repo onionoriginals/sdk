@@ -40,14 +40,11 @@ import SDK, {
   type OrdinalsProvider,
   type SatSnapshot,
   type InscribeOnSatResult,
-  OriginalsStudio,
   OriginalsError,
   createLocalAuthor,
+  restoreLocalAuthor,
   isVerified,
   type LocalAuthor,
-  type OriginalHandle,
-  type StudioVerification,
-  type VersionInfo,
   type AuthorRef,
   type AuthorDidEvidence,
   type OriginalsReport,
@@ -101,18 +98,18 @@ declare const result: InscribeOnSatResult;
 const validator = createBitcoinCoreChainValidator({ endpoint: "http://127.0.0.1:8332" });
 const fileStore: Promise<FileStore> = FileStore.open("/tmp/originals");
 
-// The guided path, with nothing imported from @originals/vh.
-const guided = async (): Promise<boolean> => {
-  const studio = await OriginalsStudio.start();
-  const author: LocalAuthor = studio.author;
+// The README quick start, with nothing imported from @originals/vh.
+const quickStart = async (): Promise<boolean> => {
+  const author: LocalAuthor = await createLocalAuthor();
   const ref: AuthorRef = author.ref;
-  const evidence: AuthorDidEvidence = author.evidence;
-  const app: OriginalHandle = await studio.create({ name: "My app", resource: { mediaType: "text/html", bytes: new Uint8Array([1]) } });
-  const added: VersionInfo = await app.addVersion({ bytes: new Uint8Array([2]), label: "New UI", note: "What changed." });
-  const checked: StudioVerification = await studio.verify((await app.export()).bytes);
-  const report: OriginalsReport = checked.report;
-  void [ref, evidence, added, createLocalAuthor];
-  return isVerified(report, checked.reasons) || new OriginalsError("invalid-evidence", "X", "y").category === "fork";
+  const evidence: AuthorDidEvidence = restoreLocalAuthor(author).evidence;
+  const local = OriginalsSDK.create({ authors: [evidence] });
+  const created = await local.create({ name: "My app", resource: { mediaType: "text/html", bytes: new Uint8Array([1]) }, author: ref, signer: author.signer });
+  if (created.kind !== "original") return false;
+  const { original } = await local.edit(created.original.did, { parent: created.original.checkpoint, resource: { bytes: new Uint8Array([2]) }, metadata: { note: "New UI" }, author: ref, signer: author.signer });
+  const { report, reasons } = await OriginalsSDK.create({ authors: [] }).load((await local.package(original.did)).bytes);
+  const typed: OriginalsReport = report;
+  return isVerified(typed, reasons) || new OriginalsError("invalid-evidence", "X", "y").category === "fork";
 };
 
-void [guided, hostAdapter, sameClass, sameSubpath, subpathOptions, signer, maybeView, files, head, created, updated, verified, prepared, code, vm, preimage, bytes, mk, sat, address, id, satpoint, custody, verifier, storage, provider, fees, snapshot, bitcoinSigner, result, validator, fileStore, prepareInscriptionOnSat, validateInscriptionReveal, RegtestProvider, QuickNodeProvider];
+void [quickStart, hostAdapter, sameClass, sameSubpath, subpathOptions, signer, maybeView, files, head, created, updated, verified, prepared, code, vm, preimage, bytes, mk, sat, address, id, satpoint, custody, verifier, storage, provider, fees, snapshot, bitcoinSigner, result, validator, fileStore, prepareInscriptionOnSat, validateInscriptionReveal, RegtestProvider, QuickNodeProvider];

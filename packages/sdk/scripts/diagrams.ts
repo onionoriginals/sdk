@@ -78,68 +78,12 @@ function svg(h: number, title: string, desc: string, body: string[]): string {
 }
 
 /** A call in a code-coloured chip: its name, and a short note right-aligned. */
-function chip(x: number, y: number, w: number, name: string, note: string, api: string, highlight = false): string {
+function chip(x: number, y: number, w: number, name: string, note: string, api: string): string {
   return [
-    box(x, y, w, 20, "code", highlight ? "stroke:var(--accent);stroke-width:1.5" : ""),
+    box(x, y, w, 20, "code"),
     t(x + 8, y + 14, name, "mono", { api }),
     note ? t(x + w - 8, y + 14, note, "muted small", { anchor: "end" }) : "",
   ].join("");
-}
-
-// ------------------------------------------------------------------ guided
-
-function guided(): string {
-  const out: string[] = [t(0, 14, "THE GUIDED PATH · EVERYTHING FROM @originals/sdk", "cap")];
-  const BW = 188, G = 16, y0 = 26, BH = 238;
-  const steps: Array<{ title: string; code: Array<[string, string]>; does: string[]; get: string[]; mono: boolean }> = [
-    { title: "Create", code: [["OriginalsStudio.start()", "OriginalsStudio.start"], ["studio.create({…})", "OriginalsStudio#create"]],
-      does: ["Makes a did:vh author", "and its key. Hashes the", "bytes, signs entry 1."], get: ["app: a handle at", "checkpoint 1"], mono: false },
-    { title: "Add a version", code: [["app.addVersion({", "OriginalHandle#addVersion"], ["  bytes, label, note })", ""]],
-      does: ["Hashes the new bytes,", "links entry 2 to entry 1,", "adds label + note, signs."], get: ["{ version: 2,", "  label, note }"], mono: true },
-    { title: "Export", code: [["app.export()", "OriginalHandle#export"]],
-      does: ["Packs both logs and the", "bytes into one ZIP. No", "private key goes in."], get: ["my-app-v2.originals.zip"], mono: true },
-    { title: "Verify", code: [["studio.verify(bytes)", "OriginalsStudio#verify"], ["npx originals verify", ""]],
-      does: ["Reads the ZIP the way a", "stranger would: offline,", "no key, no local state."], get: ["verified, versions,", "report"], mono: true },
-  ];
-  steps.forEach((s, i) => {
-    const x = i * (BW + G);
-    out.push(box(x + 0.5, y0 + 0.5, BW - 1, BH));
-    out.push(t(x + 12, y0 + 20, `STEP ${i + 1}`, "cap", { style: "fill:var(--accent)" }));
-    out.push(t(x + 12, y0 + 40, s.title, "h"));
-    out.push(box(x + 10, y0 + 50, BW - 20, 40, "code"));
-    s.code.forEach(([code, api], j) => out.push(t(x + 16, y0 + 66 + j * 16, code, "mono", api ? { api } : {})));
-    out.push(t(x + 12, y0 + 110, "SDK DOES", "cap"));
-    out.push(lines(x + 12, y0 + 127, s.does, "muted"));
-    out.push(hline(x + 12, x + BW - 12, y0 + 172));
-    out.push(t(x + 12, y0 + 190, "YOU GET", "cap"));
-    out.push(lines(x + 12, y0 + 207, s.get, s.mono ? "mono" : ""));
-    if (i < steps.length - 1) out.push(arrow(x + BW + 4, y0 + 36));
-  });
-
-  const y1 = 294, B2 = 179, G2 = 28, H2 = 84;
-  out.push(t(0, y1, "WHAT GETS BUILT", "cap"));
-  const built: Array<{ title: string; text: string[]; color?: string }> = [
-    { title: "Author DID log", text: ["did:vh, made by start().", "Its author key signs", "every entry."], color: "--author" },
-    { title: "Entry 1 · v1", text: ["name, resource digest", "label: optional"] },
-    { title: "Entry 2 · v2", text: ["new digest, linked to", "entry 1. label: \"New UI\",", "note: what changed"] },
-    { title: "Evidence ZIP", text: ["asset log, author log", "and resource bytes"], color: "--zip" },
-  ];
-  built.forEach((b, i) => {
-    const x = i * (B2 + G2);
-    out.push(box(x + 0.5, y1 + 12.5, B2 - 1, H2, "card", b.color ? `stroke:var(${b.color});stroke-width:1.5` : ""));
-    out.push(t(x + 12, y1 + 34, b.title, "b"));
-    out.push(lines(x + 12, y1 + 52, b.text, "muted"));
-    if (i < built.length - 1) out.push(arrow(x + B2 + 10, y1 + 12 + H2 / 2));
-  });
-  out.push(t(0, y1 + 120, "Labels and notes are signed metadata of the entry that adds the version: metadata[\"originals:version\"] (PROVISIONAL).", "muted small"));
-
-  const y2 = y1 + 134;
-  out.push(box(0, y2, W, 32, "card", "fill:var(--warnbg);stroke:none"));
-  out.push(`<rect x="0" y="${y2}" width="3" height="32" style="fill:var(--warn)"/>`);
-  out.push(`<text x="14" y="${y2 + 20}"><tspan class="b">Verified ≠ current.</tspan> Until it's anchored on Bitcoin, an Original is valid only as of its checkpoint.</text>`);
-  return svg(y2 + 33, "The guided path: Create, Add a version, Export, Verify",
-    "Four calls from @originals/sdk. OriginalsStudio.start and studio.create make a local did:vh author and sign entry 1. app.addVersion with bytes, a label and a note signs entry 2, linked to entry 1. app.export packs the asset log, the author's DID log and the resource bytes into an evidence ZIP with no private key. studio.verify, or npx originals verify, reads the ZIP offline and returns verified, the versions and the report. A verified Original is not current until it is anchored on Bitcoin.",
-    out);
 }
 
 // ------------------------------------------------------------------ layers
@@ -147,15 +91,15 @@ function guided(): string {
 function layers(): string {
   const out: string[] = [t(0, 14, "WHERE AN ORIGINAL LIVES · IT ONLY MOVES RIGHT", "cap")];
   const LW = 248, G = 28, y0 = 26, LH = 330, CW = LW - 20;
-  type Chip = [string, string, string, boolean?];
+  type Chip = [string, string, string];
   const lanes: Array<{ title: string; sub: string; color: string; groups: Array<{ cap?: string; chips: Chip[] }>; notes: string[]; from: string }> = [
     { title: "Local", sub: "your store, your author", color: "--accent", from: "@originals/sdk",
       groups: [{ chips: [
-        ["create", "v1, genesis", "OriginalsSDK#create", true],
-        ["edit", "new version, metadata", "OriginalsSDK#edit", true],
+        ["create", "v1, genesis", "OriginalsSDK#create"],
+        ["edit", "new version, metadata", "OriginalsSDK#edit"],
         ["deactivate", "terminal", "OriginalsSDK#deactivate"],
-        ["package", "→ evidence ZIP", "OriginalsSDK#package", true],
-        ["load", "verify a ZIP", "OriginalsSDK#load", true],
+        ["package", "→ evidence ZIP", "OriginalsSDK#package"],
+        ["load", "verify a ZIP", "OriginalsSDK#load"],
         ["import", "take in a ZIP", "OriginalsSDK#import"],
         ["carry", "log inside the file", "OriginalsSDK#carry"],
       ] }],
@@ -194,7 +138,7 @@ function layers(): string {
     let y = y0 + 58;
     for (const g of lane.groups) {
       if (g.cap) { out.push(t(x + 12, y + 14, g.cap, "cap")); y += 22; }
-      for (const [name, note, api, hi] of g.chips) { out.push(chip(x + 10, y, CW, name, note, api, hi === true)); y += 26; }
+      for (const [name, note, api] of g.chips) { out.push(chip(x + 10, y, CW, name, note, api)); y += 26; }
     }
     out.push(lines(x + 12, y0 + 262, lane.notes, "muted small", 15));
     out.push(hline(x + 12, x + LW - 12, y0 + 302));
@@ -206,11 +150,8 @@ function layers(): string {
   out.push(hline(272, 724, y1 - 4, "dash", "stroke:var(--btc);stroke-width:1.5"));
   out.push(`<path d="M724 ${y1 - 10} L732 ${y1 - 4} L724 ${y1 + 2} Z" style="fill:var(--btc)"/>`);
   out.push(t(W, y1, "Bitcoin", "muted", { anchor: "end" }));
-  const y2 = y1 + 26;
-  out.push(box(0, y2 - 12, 22, 14, "code", "stroke:var(--accent);stroke-width:1.5"));
-  out.push(`<text x="32" y="${y2}" class="muted small">Outlined: what <tspan class="mono" data-api="OriginalsStudio.start">OriginalsStudio</tspan> wraps. Everything else is on <tspan class="mono">studio.sdk</tspan>, the full OriginalsSDK.</text>`);
-  return svg(y2 + 8, "Where an Original lives: Local, Web, Bitcoin",
-    "An Original moves one way: from Local to Web, and from either to Bitcoin. Local, in @originals/sdk: create, edit, deactivate, package, load, import and carry, with a MemoryStore or a FileStore. Web, in @originals/sdk: publish, hostedFiles and loadPublished, and for a shared host with several signers submit, sync and reconcile; an alias counts only if it points back. Bitcoin, in @originals/sdk/originals/bitcoin: anchor, prepareEntryInscription, submitEntryInscription, catchUp, readAnchored and transferHandoff; after anchoring a change counts only once it is inscribed on the sat. OriginalsStudio wraps create, edit, package and load.",
+  return svg(y1 + 10, "Where an Original lives: Local, Web, Bitcoin",
+    "An Original moves one way: from Local to Web, and from either to Bitcoin. Local, in @originals/sdk: create, edit, deactivate, package, load, import and carry, with a MemoryStore or a FileStore. Web, in @originals/sdk: publish, hostedFiles and loadPublished, and for a shared host with several signers submit, sync and reconcile; an alias counts only if it points back. Bitcoin, in @originals/sdk/originals/bitcoin: anchor, prepareEntryInscription, submitEntryInscription, catchUp, readAnchored and transferHandoff; after anchoring a change counts only once it is inscribed on the sat.",
     out);
 }
 
@@ -312,7 +253,6 @@ function report(): string {
 /** File name → SVG text. */
 export function diagrams(): Record<string, string> {
   return {
-    "guided.svg": guided(),
     "layers.svg": layers(),
     "change.svg": change(),
     "authority.svg": authority(),

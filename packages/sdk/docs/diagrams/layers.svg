@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="800" height="416" viewBox="0 0 800 416" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="392" viewBox="0 0 800 392" role="img" aria-labelledby="title desc">
 <title id="title">Where an Original lives: Local, Web, Bitcoin</title>
-<desc id="desc">An Original moves one way: from Local to Web, and from either to Bitcoin. Local, in @originals/sdk: create, edit, deactivate, package, load, import and carry, with a MemoryStore or a FileStore. Web, in @originals/sdk: publish, hostedFiles and loadPublished, and for a shared host with several signers submit, sync and reconcile; an alias counts only if it points back. Bitcoin, in @originals/sdk/originals/bitcoin: anchor, prepareEntryInscription, submitEntryInscription, catchUp, readAnchored and transferHandoff; after anchoring a change counts only once it is inscribed on the sat. OriginalsStudio wraps create, edit, package and load.</desc>
+<desc id="desc">An Original moves one way: from Local to Web, and from either to Bitcoin. Local, in @originals/sdk: create, edit, deactivate, package, load, import and carry, with a MemoryStore or a FileStore. Web, in @originals/sdk: publish, hostedFiles and loadPublished, and for a shared host with several signers submit, sync and reconcile; an alias counts only if it points back. Bitcoin, in @originals/sdk/originals/bitcoin: anchor, prepareEntryInscription, submitEntryInscription, catchUp, readAnchored and transferHandoff; after anchoring a change counts only once it is inscribed on the sat.</desc>
 <style>svg{--fg:#1f2328;--muted:#59636e;--card:#f6f8fa;--border:#d1d9e0;--code:#eaeef2;--accent:#0969da;--yes:#1a7f37;--no:#cf222e;--warn:#9a6700;--warnbg:#fff8c5;--author:#8250df;--zip:#1b7c83;--web:#1a7f37;--btc:#bc4c00}
 @media (prefers-color-scheme: dark){svg{--fg:#e6edf3;--muted:#9198a1;--card:#151b23;--border:#3d444d;--code:#262c36;--accent:#4493f8;--yes:#3fb950;--no:#f85149;--warn:#d29922;--warnbg:#2e2614;--author:#ab7df8;--zip:#39c5cf;--web:#3fb950;--btc:#f0883e}}
 text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;font-size:12px;fill:var(--fg)}
@@ -22,11 +22,11 @@ text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Hel
 <rect x="0.5" y="26.5" width="247" height="4" rx="2" style="fill:var(--accent)"/>
 <text x="12" y="54" class="h">Local</text>
 <text x="12" y="71" class="muted small">your store, your author</text>
-<rect x="10" y="84" width="228" height="20" rx="6" class="code" style="stroke:var(--accent);stroke-width:1.5"/><text x="18" y="98" class="mono" data-api="OriginalsSDK#create">create</text><text x="230" y="98" class="muted small" text-anchor="end">v1, genesis</text>
-<rect x="10" y="110" width="228" height="20" rx="6" class="code" style="stroke:var(--accent);stroke-width:1.5"/><text x="18" y="124" class="mono" data-api="OriginalsSDK#edit">edit</text><text x="230" y="124" class="muted small" text-anchor="end">new version, metadata</text>
+<rect x="10" y="84" width="228" height="20" rx="6" class="code"/><text x="18" y="98" class="mono" data-api="OriginalsSDK#create">create</text><text x="230" y="98" class="muted small" text-anchor="end">v1, genesis</text>
+<rect x="10" y="110" width="228" height="20" rx="6" class="code"/><text x="18" y="124" class="mono" data-api="OriginalsSDK#edit">edit</text><text x="230" y="124" class="muted small" text-anchor="end">new version, metadata</text>
 <rect x="10" y="136" width="228" height="20" rx="6" class="code"/><text x="18" y="150" class="mono" data-api="OriginalsSDK#deactivate">deactivate</text><text x="230" y="150" class="muted small" text-anchor="end">terminal</text>
-<rect x="10" y="162" width="228" height="20" rx="6" class="code" style="stroke:var(--accent);stroke-width:1.5"/><text x="18" y="176" class="mono" data-api="OriginalsSDK#package">package</text><text x="230" y="176" class="muted small" text-anchor="end">→ evidence ZIP</text>
-<rect x="10" y="188" width="228" height="20" rx="6" class="code" style="stroke:var(--accent);stroke-width:1.5"/><text x="18" y="202" class="mono" data-api="OriginalsSDK#load">load</text><text x="230" y="202" class="muted small" text-anchor="end">verify a ZIP</text>
+<rect x="10" y="162" width="228" height="20" rx="6" class="code"/><text x="18" y="176" class="mono" data-api="OriginalsSDK#package">package</text><text x="230" y="176" class="muted small" text-anchor="end">→ evidence ZIP</text>
+<rect x="10" y="188" width="228" height="20" rx="6" class="code"/><text x="18" y="202" class="mono" data-api="OriginalsSDK#load">load</text><text x="230" y="202" class="muted small" text-anchor="end">verify a ZIP</text>
 <rect x="10" y="214" width="228" height="20" rx="6" class="code"/><text x="18" y="228" class="mono" data-api="OriginalsSDK#import">import</text><text x="230" y="228" class="muted small" text-anchor="end">take in a ZIP</text>
 <rect x="10" y="240" width="228" height="20" rx="6" class="code"/><text x="18" y="254" class="mono" data-api="OriginalsSDK#carry">carry</text><text x="230" y="254" class="muted small" text-anchor="end">log inside the file</text>
 <text x="12" y="288" class="muted small">Store: MemoryStore, or</text><text x="12" y="303" class="muted small">FileStore in Node.</text>
@@ -65,6 +65,4 @@ text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Hel
 <line x1="272" y1="378" x2="724" y2="378" class="dash" style="stroke:var(--btc);stroke-width:1.5"/>
 <path d="M724 372 L732 378 L724 384 Z" style="fill:var(--btc)"/>
 <text x="800" y="382" class="muted" text-anchor="end">Bitcoin</text>
-<rect x="0" y="396" width="22" height="14" rx="6" class="code" style="stroke:var(--accent);stroke-width:1.5"/>
-<text x="32" y="408" class="muted small">Outlined: what <tspan class="mono" data-api="OriginalsStudio.start">OriginalsStudio</tspan> wraps. Everything else is on <tspan class="mono">studio.sdk</tspan>, the full OriginalsSDK.</text>
 </svg>
