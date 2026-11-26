@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="226" viewBox="0 0 800 226" role="img" aria-labelledby="title desc">
+<title id="title">Who may sign a change</title>
+<desc id="desc">The author, one DID fixed at genesis whose keys rotate in the DID only, can sign. A signer set, several DIDs and a threshold, can sign. An editor can sign only what its grant allows. A child Original honours editor grants in its parent, and the parent's author has no say. The owner, who holds the sat, cannot sign changes.</desc>
+<style>svg{--fg:#1f2328;--muted:#59636e;--card:#f6f8fa;--border:#d1d9e0;--code:#eaeef2;--accent:#0969da;--yes:#1a7f37;--no:#cf222e;--warn:#9a6700;--warnbg:#fff8c5;--author:#8250df;--zip:#1b7c83;--web:#1a7f37;--btc:#bc4c00}
+@media (prefers-color-scheme: dark){svg{--fg:#e6edf3;--muted:#9198a1;--card:#151b23;--border:#3d444d;--code:#262c36;--accent:#4493f8;--yes:#3fb950;--no:#f85149;--warn:#d29922;--warnbg:#2e2614;--author:#ab7df8;--zip:#39c5cf;--web:#3fb950;--btc:#f0883e}}
+text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;font-size:12px;fill:var(--fg)}
+.mono{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;font-size:11px}
+.muted{fill:var(--muted)}
+.small{font-size:11px}
+.h{font-size:15px;font-weight:600}
+.b{font-weight:600}
+.cap{font-size:10.5px;font-weight:600;letter-spacing:.06em;fill:var(--muted)}
+.accent{fill:var(--accent)}
+.yes{fill:var(--yes)}
+.no{fill:var(--no)}
+.card{fill:var(--card);stroke:var(--border)}
+.code{fill:var(--code)}
+.dash{stroke:var(--border);stroke-dasharray:4 3;fill:none}
+.arrow{fill:var(--accent)}</style>
+<text x="0" y="14" class="cap">WHO MAY SIGN A CHANGE</text>
+<rect x="0.5" y="26.5" width="799" height="34" rx="6" class="card"/>
+<text x="12" y="48" class="b">Author</text>
+<text x="132" y="48" class="small b yes">✓ can sign</text>
+<text x="236" y="48" class="muted">One DID, fixed at genesis. Its keys rotate in the DID, never in the Original.</text>
+<rect x="0.5" y="66.5" width="799" height="34" rx="6" class="card"/>
+<text x="12" y="88" class="b">Signer set</text>
+<text x="132" y="88" class="small b yes">✓ can sign</text>
+<text x="236" y="88" class="muted">Several DIDs and a threshold, instead of one author.</text>
+<rect x="0.5" y="106.5" width="799" height="34" rx="6" class="card"/>
+<text x="12" y="128" class="b">Editor</text>
+<text x="132" y="128" class="small b yes">✓ can sign</text>
+<text x="236" y="128" class="muted">Only what its grant allows: the name, metadata, the resource, or a scope.</text>
+<rect x="0.5" y="146.5" width="799" height="34" rx="6" class="card"/>
+<text x="12" y="168" class="b">Parent's editors</text>
+<text x="132" y="168" class="small b yes">✓ can sign</text>
+<text x="236" y="168" class="muted">A child Original honours editor grants in its parent. The parent's author has no say.</text>
+<rect x="0.5" y="186.5" width="799" height="34" rx="6" class="card"/>
+<text x="12" y="208" class="b">Owner</text>
+<text x="132" y="208" class="small b no">✗ cannot sign</text>
+<text x="236" y="208" class="muted">Holds the sat. Owns the Original, but can't sign changes.</text>
+</svg>

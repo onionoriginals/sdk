@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="392" viewBox="0 0 800 392" role="img" aria-labelledby="title desc">
+<title id="title">Where an Original lives: Local, Web, Bitcoin</title>
+<desc id="desc">An Original moves one way: from Local to Web, and from either to Bitcoin. Local, in @originals/sdk: create, edit, deactivate, package, load, import and carry, with a MemoryStore or a FileStore. Web, in @originals/sdk: publish, hostedFiles and loadPublished, and for a shared host with several signers submit, sync and reconcile; an alias counts only if it points back. Bitcoin, in @originals/sdk/originals/bitcoin: anchor, prepareEntryInscription, submitEntryInscription, catchUp, readAnchored and transferHandoff; after anchoring a change counts only once it is inscribed on the sat.</desc>
+<style>svg{--fg:#1f2328;--muted:#59636e;--card:#f6f8fa;--border:#d1d9e0;--code:#eaeef2;--accent:#0969da;--yes:#1a7f37;--no:#cf222e;--warn:#9a6700;--warnbg:#fff8c5;--author:#8250df;--zip:#1b7c83;--web:#1a7f37;--btc:#bc4c00}
+@media (prefers-color-scheme: dark){svg{--fg:#e6edf3;--muted:#9198a1;--card:#151b23;--border:#3d444d;--code:#262c36;--accent:#4493f8;--yes:#3fb950;--no:#f85149;--warn:#d29922;--warnbg:#2e2614;--author:#ab7df8;--zip:#39c5cf;--web:#3fb950;--btc:#f0883e}}
+text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;font-size:12px;fill:var(--fg)}
+.mono{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;font-size:11px}
+.muted{fill:var(--muted)}
+.small{font-size:11px}
+.h{font-size:15px;font-weight:600}
+.b{font-weight:600}
+.cap{font-size:10.5px;font-weight:600;letter-spacing:.06em;fill:var(--muted)}
+.accent{fill:var(--accent)}
+.yes{fill:var(--yes)}
+.no{fill:var(--no)}
+.card{fill:var(--card);stroke:var(--border)}
+.code{fill:var(--code)}
+.dash{stroke:var(--border);stroke-dasharray:4 3;fill:none}
+.arrow{fill:var(--accent)}</style>
+<text x="0" y="14" class="cap">WHERE AN ORIGINAL LIVES · IT ONLY MOVES RIGHT</text>
+<rect x="0.5" y="26.5" width="247" height="330" rx="6" class="card"/>
+<rect x="0.5" y="26.5" width="247" height="4" rx="2" style="fill:var(--accent)"/>
+<text x="12" y="54" class="h">Local</text>
+<text x="12" y="71" class="muted small">your store, your author</text>
+<rect x="10" y="84" width="228" height="20" rx="6" class="code"/><text x="18" y="98" class="mono" data-api="OriginalsSDK#create">create</text><text x="230" y="98" class="muted small" text-anchor="end">v1, genesis</text>
+<rect x="10" y="110" width="228" height="20" rx="6" class="code"/><text x="18" y="124" class="mono" data-api="OriginalsSDK#edit">edit</text><text x="230" y="124" class="muted small" text-anchor="end">new version, metadata</text>
+<rect x="10" y="136" width="228" height="20" rx="6" class="code"/><text x="18" y="150" class="mono" data-api="OriginalsSDK#deactivate">deactivate</text><text x="230" y="150" class="muted small" text-anchor="end">terminal</text>
+<rect x="10" y="162" width="228" height="20" rx="6" class="code"/><text x="18" y="176" class="mono" data-api="OriginalsSDK#package">package</text><text x="230" y="176" class="muted small" text-anchor="end">→ evidence ZIP</text>
+<rect x="10" y="188" width="228" height="20" rx="6" class="code"/><text x="18" y="202" class="mono" data-api="OriginalsSDK#load">load</text><text x="230" y="202" class="muted small" text-anchor="end">verify a ZIP</text>
+<rect x="10" y="214" width="228" height="20" rx="6" class="code"/><text x="18" y="228" class="mono" data-api="OriginalsSDK#import">import</text><text x="230" y="228" class="muted small" text-anchor="end">take in a ZIP</text>
+<rect x="10" y="240" width="228" height="20" rx="6" class="code"/><text x="18" y="254" class="mono" data-api="OriginalsSDK#carry">carry</text><text x="230" y="254" class="muted small" text-anchor="end">log inside the file</text>
+<text x="12" y="288" class="muted small">Store: MemoryStore, or</text><text x="12" y="303" class="muted small">FileStore in Node.</text>
+<line x1="12" y1="328" x2="236" y2="328" class="dash"/>
+<text x="12" y="346" class="mono muted">@originals/sdk</text>
+<path class="arrow" d="M258 44 L266 50 L258 56 Z"/>
+<rect x="276.5" y="26.5" width="247" height="330" rx="6" class="card"/>
+<rect x="276.5" y="26.5" width="247" height="4" rx="2" style="fill:var(--web)"/>
+<text x="288" y="54" class="h">Web</text>
+<text x="288" y="71" class="muted small">published on a did:webvh domain</text>
+<rect x="286" y="84" width="228" height="20" rx="6" class="code"/><text x="294" y="98" class="mono" data-api="OriginalsSDK#publish">publish</text><text x="506" y="98" class="muted small" text-anchor="end">adds the alias</text>
+<rect x="286" y="110" width="228" height="20" rx="6" class="code"/><text x="294" y="124" class="mono" data-api="root:hostedFiles">hostedFiles</text><text x="506" y="124" class="muted small" text-anchor="end">files to serve</text>
+<rect x="286" y="136" width="228" height="20" rx="6" class="code"/><text x="294" y="150" class="mono" data-api="OriginalsSDK#loadPublished">loadPublished</text><text x="506" y="150" class="muted small" text-anchor="end">reader's check</text>
+<text x="288" y="176" class="cap">SHARED HOST · SEVERAL SIGNERS</text>
+<rect x="286" y="184" width="228" height="20" rx="6" class="code"/><text x="294" y="198" class="mono" data-api="OriginalsSDK#submit">submit</text><text x="506" y="198" class="muted small" text-anchor="end">host accepts or refuses</text>
+<rect x="286" y="210" width="228" height="20" rx="6" class="code"/><text x="294" y="224" class="mono" data-api="OriginalsSDK#sync">sync</text><text x="506" y="224" class="muted small" text-anchor="end">pull the host's log</text>
+<rect x="286" y="236" width="228" height="20" rx="6" class="code"/><text x="294" y="250" class="mono" data-api="OriginalsSDK#reconcile">reconcile</text><text x="506" y="250" class="muted small" text-anchor="end">redo a refused change</text>
+<text x="288" y="288" class="muted small">An alias counts only if it</text><text x="288" y="303" class="muted small">points back to the Original.</text>
+<line x1="288" y1="328" x2="512" y2="328" class="dash"/>
+<text x="288" y="346" class="mono muted">@originals/sdk</text>
+<path class="arrow" d="M534 44 L542 50 L534 56 Z"/>
+<rect x="552.5" y="26.5" width="247" height="330" rx="6" class="card"/>
+<rect x="552.5" y="26.5" width="247" height="4" rx="2" style="fill:var(--btc)"/>
+<text x="564" y="54" class="h">Bitcoin</text>
+<text x="564" y="71" class="muted small">anchored to one sat, once</text>
+<rect x="562" y="84" width="228" height="20" rx="6" class="code"/><text x="570" y="98" class="mono" data-api="OriginalsSDK#anchor">anchor</text><text x="782" y="98" class="muted small" text-anchor="end">the anchoring entry</text>
+<rect x="562" y="110" width="228" height="20" rx="6" class="code"/><text x="570" y="124" class="mono" data-api="bitcoin:prepareEntryInscription">prepareEntryInscription</text>
+<rect x="562" y="136" width="228" height="20" rx="6" class="code"/><text x="570" y="150" class="mono" data-api="bitcoin:submitEntryInscription">submitEntryInscription</text>
+<rect x="562" y="162" width="228" height="20" rx="6" class="code"/><text x="570" y="176" class="mono" data-api="bitcoin:catchUp">catchUp</text><text x="782" y="176" class="muted small" text-anchor="end">what to do next</text>
+<rect x="562" y="188" width="228" height="20" rx="6" class="code"/><text x="570" y="202" class="mono" data-api="bitcoin:readAnchored">readAnchored</text><text x="782" y="202" class="muted small" text-anchor="end">what Bitcoin shows</text>
+<rect x="562" y="214" width="228" height="20" rx="6" class="code"/><text x="570" y="228" class="mono" data-api="bitcoin:transferHandoff">transferHandoff</text><text x="782" y="228" class="muted small" text-anchor="end">to a new holder</text>
+<text x="564" y="288" class="muted small">After anchoring, a change</text><text x="564" y="303" class="muted small">counts only once it's</text><text x="564" y="318" class="muted small">inscribed on that sat.</text>
+<line x1="564" y1="328" x2="788" y2="328" class="dash"/>
+<text x="564" y="346" class="mono muted">@originals/sdk/originals/bitcoin</text>
+<text x="0" y="382" class="muted">Local can also anchor directly, skipping Web</text>
+<line x1="272" y1="378" x2="724" y2="378" class="dash" style="stroke:var(--btc);stroke-width:1.5"/>
+<path d="M724 372 L732 378 L724 384 Z" style="fill:var(--btc)"/>
+<text x="800" y="382" class="muted" text-anchor="end">Bitcoin</text>
+</svg>

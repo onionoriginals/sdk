@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="192" viewBox="0 0 800 192" role="img" aria-labelledby="title desc">
+<title id="title">Making one change: prepare, sign, commit</title>
+<desc id="desc">prepareEdit makes a Draft: unsigned, never history, never packaged. sign, or cosign for each member of a signer set, makes a SignedCandidate; each signer sees what it approves. commit moves local history on an exact parent; submit sends it to a shared host and commits only when the host accepts. edit with a signer does all three in one call. If the Original moved meanwhile, it is a stale-parent conflict, never rebased.</desc>
+<style>svg{--fg:#1f2328;--muted:#59636e;--card:#f6f8fa;--border:#d1d9e0;--code:#eaeef2;--accent:#0969da;--yes:#1a7f37;--no:#cf222e;--warn:#9a6700;--warnbg:#fff8c5;--author:#8250df;--zip:#1b7c83;--web:#1a7f37;--btc:#bc4c00}
+@media (prefers-color-scheme: dark){svg{--fg:#e6edf3;--muted:#9198a1;--card:#151b23;--border:#3d444d;--code:#262c36;--accent:#4493f8;--yes:#3fb950;--no:#f85149;--warn:#d29922;--warnbg:#2e2614;--author:#ab7df8;--zip:#39c5cf;--web:#3fb950;--btc:#f0883e}}
+text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;font-size:12px;fill:var(--fg)}
+.mono{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;font-size:11px}
+.muted{fill:var(--muted)}
+.small{font-size:11px}
+.h{font-size:15px;font-weight:600}
+.b{font-weight:600}
+.cap{font-size:10.5px;font-weight:600;letter-spacing:.06em;fill:var(--muted)}
+.accent{fill:var(--accent)}
+.yes{fill:var(--yes)}
+.no{fill:var(--no)}
+.card{fill:var(--card);stroke:var(--border)}
+.code{fill:var(--code)}
+.dash{stroke:var(--border);stroke-dasharray:4 3;fill:none}
+.arrow{fill:var(--accent)}</style>
+<text x="0" y="14" class="cap">MAKING ONE CHANGE</text>
+<rect x="0.5" y="26.5" width="210" height="110" rx="6" class="card"/>
+<text x="12" y="50" class="mono b" data-api="OriginalsSDK#prepareEdit">prepareEdit</text>
+<text x="12" y="68" class="mono muted">→ Draft</text>
+<text x="12" y="90" class="muted">Unsigned. Never part of</text><text x="12" y="106" class="muted">history, never packaged.</text>
+<path class="arrow" d="M216 75 L224 81 L216 87 Z"/>
+<rect x="234.5" y="26.5" width="230" height="110" rx="6" class="card"/>
+<text x="246" y="50" class="mono b" data-api="OriginalsSDK#sign">sign</text>
+<text x="278" y="50" class="muted">·</text>
+<text x="290" y="50" class="mono b" data-api="OriginalsSDK#cosign">cosign</text>
+<text x="246" y="68" class="mono muted">→ SignedCandidate</text>
+<text x="246" y="90" class="muted">Each signer sees what it</text><text x="246" y="106" class="muted">approves. A signer set signs</text><text x="246" y="122" class="muted">one member at a time.</text>
+<path class="arrow" d="M470 75 L478 81 L470 87 Z"/>
+<rect x="488.5" y="26.5" width="311" height="51" rx="6" class="card" style="stroke:var(--yes);stroke-width:1.5"/>
+<text x="500" y="48" class="mono b" data-api="OriginalsSDK#commit">commit</text>
+<text x="500" y="66" class="muted">Local history moves, on an exact parent.</text>
+<rect x="488.5" y="85.5" width="311" height="51" rx="6" class="card" style="stroke:var(--yes);stroke-width:1.5"/>
+<text x="500" y="107" class="mono b" data-api="OriginalsSDK#submit">submit</text>
+<text x="550" y="107" class="muted small">to a shared host</text>
+<text x="500" y="125" class="muted">Committed only when the host accepts.</text>
+<text x="0" y="164"><tspan class="mono" data-api="OriginalsSDK#edit">edit(did, { …, signer })</tspan> does all three in one call.</text>
+<text x="0" y="184" class="muted">If the Original moved meanwhile, it's a <tspan class="b" style="fill:var(--fg)">stale-parent</tspan> conflict. It is never rebased.</text>
+</svg>

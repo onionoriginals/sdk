@@ -14,6 +14,33 @@ IDs (P5.3) refer to the Originals Protocol.
 This contract replaces the CEL 3 guide, deleted with the CEL 3 code in plan
 011 PR 5. Nothing written under CEL 3 is read, converted or migrated.
 
+## The SDK at a glance
+
+Four diagrams of the whole workflow. To start with one Original, follow the
+[README quick start](README.md#quick-start-create-edit-export-verify). The
+diagrams are drawn by `scripts/diagrams.ts`; after an API change, run
+`bun scripts/diagrams.ts`. A test fails if a diagram is out of date or names
+something the SDK no longer exports.
+
+![Where an Original lives: Local, Web and Bitcoin, and the calls for each](docs/diagrams/layers.svg)
+
+![Making one change: prepareEdit, then sign or cosign, then commit or submit](docs/diagrams/change.svg)
+
+![Who may sign a change: the author, a signer set, editors and a parent's editors, but not the owner](docs/diagrams/authority.svg)
+
+![What a check returns: each part of the report, reported separately](docs/diagrams/report.svg)
+
+Rules that surprise people:
+
+- **Verified is not current.** Until it is anchored on Bitcoin, an Original
+  is valid only as of its checkpoint (P7.10).
+- **Forks stay open off-chain.** No branch wins by timestamp. Only anchoring
+  settles a fork (P9.16).
+- **Missing bytes are not a failure.** They are reported as unavailable, but
+  bytes that don't match their digest fail (P7.3).
+- **One resource per Original.** New bytes are its next version, never a
+  second file (P4.1).
+
 ## Model
 
 - An Original is `did:vh:<SCID>`. Its asset log is a did:vh log under the

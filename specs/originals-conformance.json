@@ -19,6 +19,7 @@
       "coveredBy": [
         "packages/sdk/tests/unit/originals/cli.test.ts",
         "packages/sdk/tests/unit/originals/evidence.test.ts",
+        "packages/sdk/tests/unit/originals/quick-start.test.ts",
         "packages/vh/tests/originals.test.ts"
       ]
     },
