@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 import { OriginalsError } from "@originals/vh";
 import { describeFreshness } from "@originals/vh/originals";
 import { MemoryStore, OriginalsSDK, readEvidence } from "./index.js";
-import { noticeLines, verdictLine } from "./verdict.js";
+import { isVerified, noticeLines, verdictLine } from "./verdict.js";
 
 const USAGE = "usage: originals verify <package.zip> [--json] [--now <ISO time>]\n       originals inspect <package.zip>\n";
 
@@ -54,10 +54,8 @@ async function main(argv: string[]): Promise<number> {
     }
     const sdk = OriginalsSDK.create({ store: new MemoryStore(), authors: [], clock: () => at });
     const { manifest, report, reasons } = await sdk.load(zip);
-    const verified = report.history.status === "valid" && report.authorBinding.status === "valid" &&
-      // Missing bytes are unavailable content, not a failure (P7.3, P7.4); served bytes must match.
-      report.identityEvidence.status === "complete" && report.resources.status !== "digest-failure" &&
-      !reasons.some((r) => r.startsWith("manifest-"));
+    // Missing bytes are unavailable content, not a failure (P7.3, P7.4); served bytes must match.
+    const verified = isVerified(report, reasons);
     if (rest.includes("--json")) {
       process.stdout.write(`${JSON.stringify({ ...report, reasons, manifest, verified })}\n`);
     } else {

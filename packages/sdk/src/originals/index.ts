@@ -13,6 +13,14 @@ export * from "./shared.js";
 // Browser-safe helpers web apps used to copy: hosted reads, shared-host transport, publication, reasons.
 export * from "./web.js";
 export * from "./bitcoin.js";
+// The guided path: Create → Add a version → Export → Verify, with a local author (OriginalsStudio).
+export * from "./guided.js";
+export { isVerified, verdictLine } from "./verdict.js";
+// What callers of this module need from @originals/vh, so they import from the SDK alone.
+export { OriginalsError, type ErrorCategory } from "@originals/vh";
+export type {
+  AssetState, AuthorDidEvidence, AuthorRef, AuthorSet, EditorGrant, EditorRef, OriginalsReport, ParentRef, ResourceVersion, ValidAsOf,
+} from "@originals/vh/originals";
 // What an Originals inscription carries and what the author is told before one (P9.17, P9.18, P14.12).
 export {
   inscriptionMetadata, descriptorOfLine, previewOfLine, isActiveContent, inscriptionNotice,

@@ -6,6 +6,19 @@
  */
 import type { OriginalsReport } from "@originals/vh/originals";
 
+/**
+ * The verdict of `originals verify` and of `OriginalsStudio.verify`: history,
+ * author binding and identity evidence verify, no served bytes fail their
+ * digest, and the manifest agrees. Missing bytes are unavailable content, not
+ * a failure (P7.3, P7.4). Verified is never current for an unanchored
+ * Original (P7.10): see `report.validAsOf`.
+ */
+export function isVerified(report: Pick<OriginalsReport, "history" | "authorBinding" | "identityEvidence" | "resources">, reasons: readonly string[]): boolean {
+  return report.history.status === "valid" && report.authorBinding.status === "valid" &&
+    report.identityEvidence.status === "complete" && report.resources.status !== "digest-failure" &&
+    !reasons.some((r) => r.startsWith("manifest-"));
+}
+
 /** The summary line: never a bare `verified` while a notice stands. */
 export function verdictLine(report: Pick<OriginalsReport, "original" | "checkpoint" | "notices">, verified: boolean): string {
   const notes = report.notices.length > 0 ? ` (with notices: ${report.notices.join(", ")})` : "";

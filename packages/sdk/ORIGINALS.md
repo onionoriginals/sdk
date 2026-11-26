@@ -42,6 +42,45 @@ This contract replaces the CEL 3 guide, deleted with the CEL 3 code in plan
 - The DID document of the did:vh is derived from the log. It is never stored or
   taken from a host.
 
+## Guided path (implemented; `@originals/sdk`)
+
+`OriginalsStudio` covers Create → Add a version → Export → Verify in four
+calls, with nothing imported from `@originals/vh`. It is a thin layer over
+the workflow below: `create`, `edit`, `package` and `load`, with the same
+signing, history checks and verdict.
+
+```ts
+import { OriginalsStudio } from "@originals/sdk";
+
+const studio = await OriginalsStudio.start();      // options: { store, author, clock }
+const app = await studio.create({ name, resource: { mediaType, bytes }, label?, note?, metadata? });
+const v2 = await app.addVersion({ bytes, label: "New UI", note: "What changed." });
+const file = await app.export();                   // { bytes, fileName, manifest }
+const result = await studio.verify(file.bytes);    // { verified, line, versions, validAsOf, current, reasons, report, manifest }
+```
+
+- **Author.** `createLocalAuthor(at?)` makes a did:vh author whose only
+  `assertionMethod` is its author key, kept apart from its update key
+  (P5.3, P5.11). The update key's secret is discarded, so this DID never
+  rotates. Save `{ ref, evidence, secret }`; `restoreLocalAuthor`, or
+  `start({ author })`, rebuilds the signer. A caller with its own DID uses
+  `OriginalsSDK` directly.
+- **Versions.** `addVersion` needs new bytes and a label. The same bytes are
+  refused (`VERSION_UNCHANGED`, invalid-evidence; C12-19), and nothing is
+  relabeled silently. The handle builds on the checkpoint it last saw, so a
+  moved Original is a `stale-parent` conflict, never a rebase (P4.5, C12-12).
+  Use `refresh()` to read the head again.
+- **Labels and notes (PROVISIONAL).** These are signed metadata of the entry
+  that adds the version: `metadata["originals:version"] = { label, note?, digest }`
+  (`VERSION_NOTE_KEY`), merged with the caller's metadata. `digest` names the
+  version, so a note that a later plain `edit` carries over is not credited
+  to the next version.
+- **Verify.** `studio.verify` reads the package with a fresh store and no
+  author evidence, as a recipient does (P7.3). `verified` is `isVerified`,
+  the `originals verify` verdict. Each part stays in `report`, and an
+  unanchored Original is never `current` (P7.10). Labels and notes are
+  returned only for a verified package.
+
 ## Local use — phase 1 (implemented; `@originals/sdk/originals`)
 
 ```ts

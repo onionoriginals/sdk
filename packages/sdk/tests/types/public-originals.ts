@@ -40,6 +40,17 @@ import SDK, {
   type OrdinalsProvider,
   type SatSnapshot,
   type InscribeOnSatResult,
+  OriginalsStudio,
+  OriginalsError,
+  createLocalAuthor,
+  isVerified,
+  type LocalAuthor,
+  type OriginalHandle,
+  type StudioVerification,
+  type VersionInfo,
+  type AuthorRef,
+  type AuthorDidEvidence,
+  type OriginalsReport,
 } from "@originals/sdk";
 import type { OriginalsSDKOptions as SubpathOptions, SatSnapshot as SubpathSnapshot } from "@originals/sdk/types";
 import { OrdMockProvider, FeeOracleMock } from "@originals/sdk/testing";
@@ -90,4 +101,18 @@ declare const result: InscribeOnSatResult;
 const validator = createBitcoinCoreChainValidator({ endpoint: "http://127.0.0.1:8332" });
 const fileStore: Promise<FileStore> = FileStore.open("/tmp/originals");
 
-void [hostAdapter, sameClass, sameSubpath, subpathOptions, signer, maybeView, files, head, created, updated, verified, prepared, code, vm, preimage, bytes, mk, sat, address, id, satpoint, custody, verifier, storage, provider, fees, snapshot, bitcoinSigner, result, validator, fileStore, prepareInscriptionOnSat, validateInscriptionReveal, RegtestProvider, QuickNodeProvider];
+// The guided path, with nothing imported from @originals/vh.
+const guided = async (): Promise<boolean> => {
+  const studio = await OriginalsStudio.start();
+  const author: LocalAuthor = studio.author;
+  const ref: AuthorRef = author.ref;
+  const evidence: AuthorDidEvidence = author.evidence;
+  const app: OriginalHandle = await studio.create({ name: "My app", resource: { mediaType: "text/html", bytes: new Uint8Array([1]) } });
+  const added: VersionInfo = await app.addVersion({ bytes: new Uint8Array([2]), label: "New UI", note: "What changed." });
+  const checked: StudioVerification = await studio.verify((await app.export()).bytes);
+  const report: OriginalsReport = checked.report;
+  void [ref, evidence, added, createLocalAuthor];
+  return isVerified(report, checked.reasons) || new OriginalsError("invalid-evidence", "X", "y").category === "fork";
+};
+
+void [guided, hostAdapter, sameClass, sameSubpath, subpathOptions, signer, maybeView, files, head, created, updated, verified, prepared, code, vm, preimage, bytes, mk, sat, address, id, satpoint, custody, verifier, storage, provider, fees, snapshot, bitcoinSigner, result, validator, fileStore, prepareInscriptionOnSat, validateInscriptionReveal, RegtestProvider, QuickNodeProvider];
