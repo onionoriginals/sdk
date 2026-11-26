@@ -49,6 +49,11 @@ export interface Gathered {
 
 const decoder = new TextDecoder("utf-8", { fatal: true });
 
+/** Read an evidence set's inputs into log copies, signer histories, resources and packages, as verification does (P7.17). */
+export function gatherEvidence(evidence: EvidenceSet): Gathered {
+  return gather(evidence);
+}
+
 function gather(evidence: EvidenceSet): Gathered {
   const g: Gathered = { copies: [], histories: [], resources: new Map(), mismatched: [], packages: [], invalidInputs: [] };
   const notes = evidence.signerHistories ?? [];
