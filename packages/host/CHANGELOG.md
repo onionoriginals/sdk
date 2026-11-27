@@ -1,5 +1,17 @@
 # @originals/host
 
+## 0.4.1
+
+### Patch Changes
+
+- b56a9ef: TSP 1.0 direct mode for Multikey did:webvh handoff: new `@originals/tsp`, optional `tsp` transport on WebVH create/update, and opt-in host inbox POST routes. Published documents stay Multikey-only (no JsonWebKey2020 emission).
+- Updated dependencies [d93e225]
+- Updated dependencies [6524009]
+- Updated dependencies [b56a9ef]
+  - @originals/vh@0.6.0
+  - @originals/sdk@6.3.0
+  - @originals/tsp@0.2.0
+
 ## 0.4.0
 
 ### Minor Changes
