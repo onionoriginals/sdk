@@ -1,0 +1,75 @@
+# Tamper tests: altered copies of each package must FAIL
+# SDK commit: b83272a4c6938f78ce2e27031f5c619940046f4f (kit files on top of it, not yet committed)
+# Command: sandbox-exec -p '(version 1)(allow default)(deny network*)' bun handoff/did-og-png-mp4-kit/negative-checks.ts
+# Sandbox self-test (bun fetch https://example.com inside the same sandbox): blocked: ConnectionRefused
+# Runtime: bun 1.2.22, Darwin arm64
+# Run at: 2026-11-25T08:56:15Z
+
+
+=== png: did-og-png-evidence.zip ===
+FAIL (as expected)  1. media byte flipped
+      - availability none (expected complete)
+      - offline needs-external (expected self-contained)
+      - diagnostic resource-mismatch (rule P7.4): The bytes supplied for this resource version do not match its descriptor.
+      axes: {"outcome":"verified","binding":"bound","history":"valid","identity":"complete","authority":"current","state":"valid-as-of","availability":"none","offline":"needs-external","bitcoin":"not-read"}
+FAIL (as expected)  2. did:og log entry altered (asset name in the genesis entry)
+      - outcome invalid (expected verified)
+      - binding unbound (expected bound)
+      - history invalid (expected valid)
+      - state none (expected valid-as-of)
+      - diagnostic entry-rejected (rule P14.28): the SCID is not the hash of the genesis entry with placeholders (P14.28)
+      - entry 1-QmS13vt5vxFk5aEfTNvh7waeFyZQC5zgimfPdX2XYtjhQk rejected (rule P14.28)
+      axes: {"outcome":"invalid","binding":"unbound","history":"invalid","identity":"complete","authority":"current","state":"none","availability":"complete","offline":"self-contained","bitcoin":"not-read"}
+FAIL (as expected)  3. DID log entry altered (versionTime of the author's did:webvh entry)
+      - outcome incomplete (expected verified)
+      - identity incomplete (expected complete)
+      - offline needs-external (expected self-contained)
+      - diagnostic signer-history-missing (rule P5.6): The signer DID's history is not in the evidence set.
+      - diagnostic proof-unchecked (rule P7.19): The entry's proof could not be checked: the evidence it needs is not in the evidence set.
+      - entry 1-QmS13vt5vxFk5aEfTNvh7waeFyZQC5zgimfPdX2XYtjhQk unchecked
+      axes: {"outcome":"incomplete","binding":"bound","history":"valid","identity":"incomplete","authority":"current","state":"valid-as-of","availability":"complete","offline":"needs-external","bitcoin":"not-read"}
+FAIL (as expected)  4. signer history swapped (another valid did:webvh log, of a different DID)
+      - outcome incomplete (expected verified)
+      - identity incomplete (expected complete)
+      - offline needs-external (expected self-contained)
+      - diagnostic signer-history-missing (rule P5.6): The signer DID's history is not in the evidence set.
+      - diagnostic proof-unchecked (rule P7.19): The entry's proof could not be checked: the evidence it needs is not in the evidence set.
+      - entry 1-QmS13vt5vxFk5aEfTNvh7waeFyZQC5zgimfPdX2XYtjhQk unchecked
+      axes: {"outcome":"incomplete","binding":"bound","history":"valid","identity":"incomplete","authority":"current","state":"valid-as-of","availability":"complete","offline":"needs-external","bitcoin":"not-read"}
+
+=== mp4: did-og-mp4-evidence.zip ===
+FAIL (as expected)  1. media byte flipped
+      - availability none (expected complete)
+      - offline needs-external (expected self-contained)
+      - diagnostic resource-mismatch (rule P7.4): The bytes supplied for this resource version do not match its descriptor.
+      axes: {"outcome":"verified","binding":"bound","history":"valid","identity":"complete","authority":"current","state":"valid-as-of","availability":"none","offline":"needs-external","bitcoin":"not-read"}
+FAIL (as expected)  2. did:og log entry altered (asset name in the genesis entry)
+      - outcome invalid (expected verified)
+      - binding unbound (expected bound)
+      - history invalid (expected valid)
+      - state none (expected valid-as-of)
+      - diagnostic entry-rejected (rule P14.28): the SCID is not the hash of the genesis entry with placeholders (P14.28)
+      - entry 1-QmRu1Mykx28p3wJ6FC6AHCFJ5aMorYusQnXPPSqTLzkayi rejected (rule P14.28)
+      axes: {"outcome":"invalid","binding":"unbound","history":"invalid","identity":"complete","authority":"current","state":"none","availability":"complete","offline":"self-contained","bitcoin":"not-read"}
+FAIL (as expected)  3. DID log entry altered (versionTime of the author's did:webvh entry)
+      - outcome incomplete (expected verified)
+      - identity incomplete (expected complete)
+      - offline needs-external (expected self-contained)
+      - diagnostic signer-history-missing (rule P5.6): The signer DID's history is not in the evidence set.
+      - diagnostic proof-unchecked (rule P7.19): The entry's proof could not be checked: the evidence it needs is not in the evidence set.
+      - entry 1-QmRu1Mykx28p3wJ6FC6AHCFJ5aMorYusQnXPPSqTLzkayi unchecked
+      axes: {"outcome":"incomplete","binding":"bound","history":"valid","identity":"incomplete","authority":"current","state":"valid-as-of","availability":"complete","offline":"needs-external","bitcoin":"not-read"}
+FAIL (as expected)  4. signer history swapped (another valid did:webvh log, of a different DID)
+      - outcome incomplete (expected verified)
+      - identity incomplete (expected complete)
+      - offline needs-external (expected self-contained)
+      - diagnostic signer-history-missing (rule P5.6): The signer DID's history is not in the evidence set.
+      - diagnostic proof-unchecked (rule P7.19): The entry's proof could not be checked: the evidence it needs is not in the evidence set.
+      - entry 1-QmRu1Mykx28p3wJ6FC6AHCFJ5aMorYusQnXPPSqTLzkayi unchecked
+      axes: {"outcome":"incomplete","binding":"bound","history":"valid","identity":"incomplete","authority":"current","state":"valid-as-of","availability":"complete","offline":"needs-external","bitcoin":"not-read"}
+
+swap source: did:webvh:QmdyRFbkj5KUeEdyYhtTMD6dkf5vkHPmVhxhmaLohLot8G:example.com:authors:someone-else
+
+RESULT: PASS (every tampered package fails, with the reasons above)
+
+# exit status: 0
