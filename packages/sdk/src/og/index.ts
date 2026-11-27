@@ -7,5 +7,6 @@ export * from "./original.js";
 export * from "./chain.js";
 export * from "./inscribe.js";
 export * from "./evidence.js";
+export * from "./alias.js";
 // The key file and the anchoring command's steps (keys.ts, anchor.ts) are Node-only and are used by the
 // `originals-og` command (cli.ts); they are not exported here, so this entry stays browser-safe.

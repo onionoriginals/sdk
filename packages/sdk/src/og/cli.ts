@@ -6,6 +6,14 @@
  *
  *   originals-og keygen --out <key file>
  *   originals-og anchor <author|prepare|fund|broadcast|verify|run> --state <dir> --key <key file> --network <mainnet|signet|regtest> [options]
+ *   originals-og alias <inspect|unsigned|verify> --bundle <bundle.zip> [options]
+ *
+ * Alias (a did:webvh alias for an existing did:og, from logs signed elsewhere; P3.6, P14.29). Takes no key,
+ * signs nothing, writes nothing and reads no network; a verified check is not a hosted alias:
+ *   alias inspect  --bundle <zip>                                   the bundle's verification and checkpoint
+ *   alias unsigned --bundle <zip> --alias <did:webvh> [--time <ISO>] the exact entry for the existing author key to sign
+ *   alias verify   --bundle <zip> --entry <one-line .jsonl> --alias-log <did.jsonl> [--json]   exit 0 only when verified
+ * See OG-ALIAS.md.
  *
  * Options:
  *   --name <author name>          path segment: did:webvh:<SCID>:<domain>:authors:<name>   (author, run)
@@ -21,11 +29,13 @@
  *                                 history meets the transfer check's depth, P7.22; the sat transfer is not checked)
  *   --yes                         do not ask before signing (never used for mainnet by default)
  */
+import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import type { BitcoinNetwork, BodyMode } from "@originals/vh/og";
 import { CoreRpcBackend, EsploraBackend, MEMPOOL_SPACE, ORD_EXPLORER, OrdExplorer, type ChainBackend } from "./chain.js";
 import { generateKeyFile } from "./keys.js";
 import { stepAuthor, stepBroadcast, stepFund, stepPrepare, stepVerify, type Ctx } from "./anchor.js";
+import { aliasSigningRequest, bundleEvidence, checkBundleAlias, describeAliasCheck, inspectBundle } from "./alias.js";
 
 function args(argv: string[]): { positional: string[]; flags: Map<string, string | true> } {
   const positional: string[] = [];
@@ -75,8 +85,9 @@ export async function main(argv: string[]): Promise<number> {
     console.log(`Wrote a new author key file to ${out} (mode 0600). Keep it out of any repository; it is never printed.`);
     return 0;
   }
+  if (command === "alias") return aliasCommand(step, flags);
   if (command !== "anchor" || !step) {
-    console.error("usage: originals-og keygen --out <file> | originals-og anchor <author|prepare|fund|broadcast|verify|run> --state <dir> --key <file> --network <network> ...");
+    console.error("usage: originals-og keygen --out <file> | originals-og anchor <author|prepare|fund|broadcast|verify|run> --state <dir> --key <file> --network <network> ... | originals-og alias <inspect|unsigned|verify> --bundle <zip> ...");
     return 2;
   }
   const network = need(flags, "network") as BitcoinNetwork;
@@ -123,6 +134,31 @@ export async function main(argv: string[]): Promise<number> {
   } finally {
     answers.close();
   }
+}
+
+/** `originals-og alias …`: read-only, key-free checks of a did:webvh alias for an existing did:og (alias.ts). */
+export async function aliasCommand(step: string | undefined, flags: Map<string, string | true>, out: (line: string) => void = (l) => console.log(l)): Promise<number> {
+  const bundlePath = need(flags, "bundle");
+  const evidence = bundleEvidence(new Uint8Array(readFileSync(bundlePath)), bundlePath.split("/").pop());
+  if (step === "inspect") {
+    const b = await inspectBundle(evidence);
+    out(JSON.stringify({ original: evidence.original, axes: b.report.axes, entries: b.report.entries.map((e) => `${e.versionId} ${e.status}`), checkpoint: b.checkpoint, author: b.author, aliases: b.aliases, resource: b.resource, aliasable: b.problem ?? true }, null, 2));
+    return b.report.axes.outcome === "invalid" || b.report.axes.outcome === "unsupported" ? 1 : 0;
+  }
+  if (step === "unsigned") {
+    const time = flags.get("time");
+    const req = await aliasSigningRequest(evidence, need(flags, "alias"), typeof time === "string" ? () => new Date(time) : undefined);
+    console.error(`# extends ${req.checkpoint}; the existing author key signs it as ${req.verificationMethod}`);
+    out(JSON.stringify(req.unsigned));
+    return 0;
+  }
+  if (step === "verify") {
+    const r = await checkBundleAlias({ evidence, entry: readFileSync(need(flags, "entry")), aliasLog: readFileSync(need(flags, "alias-log")) });
+    const { report: _r, ...summary } = r;
+    out(flags.get("json") === true ? JSON.stringify(summary, null, 2) : describeAliasCheck(r));
+    return r.status === "verified" ? 0 : 1;
+  }
+  throw new Error("usage: originals-og alias <inspect|unsigned|verify> --bundle <zip> [--alias <did:webvh>] [--entry <file> --alias-log <file>]");
 }
 
 /**
