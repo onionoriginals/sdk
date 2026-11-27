@@ -1,5 +1,15 @@
 # @originals/code
 
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [d93e225]
+- Updated dependencies [6524009]
+- Updated dependencies [b56a9ef]
+  - @originals/vh@0.6.0
+  - @originals/sdk@6.3.0
+
 ## 0.2.0
 
 ### Minor Changes

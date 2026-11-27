@@ -1,5 +1,23 @@
 # @originals/sdk
 
+## 6.3.0
+
+### Minor Changes
+
+- d93e225: did:og: check a did:webvh alias for an existing Original from logs signed elsewhere (P3.6, P14.29).
+
+  `@originals/vh/og` adds `checkAliasUpdate`, `aliasCheckpoint` and `prepareAliasEntry`, and exports `gatherEvidence`. The check confirms four things: the signed entry extends the exact checkpoint, the existing author key signed it, it changes nothing but the alias list, and the alias's did:webvh log points back through `alsoKnownAs`. Anchored Originals are refused (P9.10). `@originals/sdk/og` adds `bundleEvidence`, `aliasSigningRequest`, `inspectBundle` and `checkBundleAlias`, plus `originals-og alias <inspect|unsigned|verify>`. None of these takes a key or signs anything, and a verified result is not a hosted alias.
+
+- 6524009: A first Original now needs nothing from `@originals/vh`: `createLocalAuthor` and `restoreLocalAuthor` make and restore an author DID on this device, `isVerified` gives the `originals verify` verdict, and `OriginalsError` and the report and author types are exported from `@originals/sdk`. The README has a tested quick start (create, edit, export, verify) and ORIGINALS.md has diagrams of the whole workflow. The landing app now uses the SDK's `createLocalAuthor`.
+- b56a9ef: TSP 1.0 direct mode for Multikey did:webvh handoff: new `@originals/tsp`, optional `tsp` transport on WebVH create/update, and opt-in host inbox POST routes. Published documents stay Multikey-only (no JsonWebKey2020 emission).
+
+### Patch Changes
+
+- Updated dependencies [d93e225]
+- Updated dependencies [b56a9ef]
+  - @originals/vh@0.6.0
+  - @originals/tsp@0.2.0
+
 ## 6.2.0
 
 ### Minor Changes

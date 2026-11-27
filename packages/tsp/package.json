@@ -1,6 +1,6 @@
 {
   "name": "@originals/tsp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "TSP 1.0 direct mode with Multikey VIDs — CESR wire format, HPKE-Base, Ed25519",
   "type": "module",
   "main": "./dist/index.js",

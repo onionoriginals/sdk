@@ -1,5 +1,17 @@
 # @originals/landing
 
+## 0.5.3
+
+### Patch Changes
+
+- 6524009: A first Original now needs nothing from `@originals/vh`: `createLocalAuthor` and `restoreLocalAuthor` make and restore an author DID on this device, `isVerified` gives the `originals verify` verdict, and `OriginalsError` and the report and author types are exported from `@originals/sdk`. The README has a tested quick start (create, edit, export, verify) and ORIGINALS.md has diagrams of the whole workflow. The landing app now uses the SDK's `createLocalAuthor`.
+- Updated dependencies [d93e225]
+- Updated dependencies [6524009]
+- Updated dependencies [b56a9ef]
+  - @originals/vh@0.6.0
+  - @originals/sdk@6.3.0
+  - @originals/host@0.4.1
+
 ## 0.5.2
 
 ### Patch Changes
