@@ -23,7 +23,7 @@ The CEL 3 code and documents were deleted in its PR 5.
 | [Data Integrity BIP340 Cryptosuite](https://dcdpr.github.io/data-integrity-schnorr-secp256k1/) | v0.1 draft | `bip340-jcs-2025`. Its draft inconsistencies are recorded as S6 in the plan. |
 | [Data Integrity EdDSA Cryptosuites](https://www.w3.org/TR/vc-di-eddsa/) | W3C Recommendation | `eddsa-jcs-2022`. |
 
-The SDK baseline cited by the Originals spec is `onionoriginals/sdk@00fc683`.
+The SDK baseline cited by the Originals spec is `onionoriginals/sdk@1e42d3cc`, the merge that released `@originals/sdk` 6.2.0 (`@originals/vh` 0.5.0, `@originals/host` 0.4.0). It was `00fc683` before that release.
 
 ### Provisional choices
 
