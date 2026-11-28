@@ -126,14 +126,17 @@ export interface Disclosure {
 }
 
 /** What the author must be told before an entry is inscribed (P9.18, T9-083). */
-export function disclosure(input: { name: string; mediaType: string; bytes: number; body: BodyMode; previewMessage: string; parts: number; feeSats: bigint; feeRate: number; network: BitcoinNetwork; author: string }): Disclosure {
+export function disclosure(input: { name: string; mediaType: string; bytes: number; body: BodyMode; previewMessage: string; previewMediaType?: string; parts: number; feeSats: bigint; feeRate: number; network: BitcoinNetwork; author: string }): Disclosure {
   const lines = [
     `Body: ${input.body === "preview" ? `a preview (${input.previewMessage})` : input.body === "full" ? `the full version (${input.bytes} bytes)` : "none"}.`,
     `Public and permanent on Bitcoin ${input.network}, and no later entry can remove it: this body, and the log with its name "${input.name}", its metadata and its author DID ${input.author}. The author DID's own history is not inscribed: verifiers resolve it from its URL, so keep it served.`,
     input.body === "full" ? "Bitcoin will hold the current version." : `Bitcoin will NOT hold the version itself (${input.mediaType}, ${input.bytes} bytes); keep it, and give it to whoever receives the sat.`,
     `Inscriptions: ${input.parts}. Cost: about ${input.feeSats} sats in fees at ${input.feeRate} sat/vB, plus the postage the sat keeps.`,
   ];
-  if (isActiveContent(input.body === "full" ? input.mediaType : "")) lines.push("Warning: the body is active content (HTML or SVG); Bitcoin explorers may render it outside the profile's isolation (P9.7).");
+  // The body is what is inscribed: the version itself, or a preview, which for a version that
+  // is not an image may be the author's own, of any media type (P9.18, P9.30).
+  const bodyType = input.body === "full" ? input.mediaType : input.body === "preview" ? input.previewMediaType ?? "" : "";
+  if (isActiveContent(bodyType)) lines.push("Warning: the body is active content (HTML or SVG); Bitcoin explorers may render it outside the profile's isolation (P9.7).");
   return { lines };
 }
 

@@ -179,7 +179,7 @@ export async function stepPrepare(ctx: Ctx, opts: { file: string; name?: string;
   s.reveal = { secretHex: hex.encode(secret), fundingAddress: funding.address, fundingAmount: p.fundingAmount.toString(), holder: opts.holder, feeRate, postage: postage.toString(), estimatedParts: parts.length, estimatedFees: p.fees.map(String) };
   saveState(ctx.stateDir, s);
   const fees = p.fees.reduce((a, b) => a + b, 0n);
-  for (const l of disclosure({ name, mediaType: opts.mediaType, bytes: bytes.length, body: choice.body, previewMessage: choice.message, parts: parts.length, feeSats: fees, feeRate, network: ctx.network, author: author.did }).lines) ctx.io.say(l);
+  for (const l of disclosure({ name, mediaType: opts.mediaType, bytes: bytes.length, body: choice.body, previewMessage: choice.message, previewMediaType: choice.preview?.descriptor.mediaType, parts: parts.length, feeSats: fees, feeRate, network: ctx.network, author: author.did }).lines) ctx.io.say(l);
   ctx.io.say(`Fund this taproot address with EXACTLY ${p.fundingAmount} sats (${Number(p.fundingAmount) / 1e8} BTC), in one output, from any wallet:`);
   ctx.io.say(`  ${funding.address}`);
   ctx.io.say(`The first sat of that output becomes the anchoring sat. Do not fund it from an output holding inscriptions or rare sats you want to keep.`);
@@ -233,7 +233,7 @@ export async function stepFund(ctx: Ctx, opts: { yes?: boolean } = {}): Promise<
   const parts = anchoringPublication([s.original.genesis, anchoring], bodyBytes(s, bytes));
   const p = plan({ secret: hex.decode(s.reveal.secretHex), network: ctx.network, envelopes: parts.map((x) => x.envelope), holder: s.reveal.holder, feeRate: s.reveal.feeRate, postage: 0n });
   const fees = p.fees.reduce((a, b) => a + b, 0n);
-  for (const l of disclosure({ name: s.original.name, mediaType: s.original.mediaType, bytes: s.original.size, body: s.original.body, previewMessage: s.original.previewMessage, parts: parts.length, feeSats: fees, feeRate: s.reveal.feeRate, network: ctx.network, author: author.did }).lines) ctx.io.say(l);
+  for (const l of disclosure({ name: s.original.name, mediaType: s.original.mediaType, bytes: s.original.size, body: s.original.body, previewMessage: s.original.previewMessage, previewMediaType: s.original.preview?.descriptor.mediaType, parts: parts.length, feeSats: fees, feeRate: s.reveal.feeRate, network: ctx.network, author: author.did }).lines) ctx.io.say(l);
   ctx.io.say(`The final reveal sends the sat to ${s.reveal.holder}, in an output of ${BigInt(s.funding.amount) - fees} sats.`);
   if (!opts.yes && !(await ctx.io.confirm(`Sign the anchoring entry for ${btcoDid(ctx.network, sat)} and inscribe ${parts.length} inscription(s) on ${ctx.network}?`))) throw new Error("stopped before signing");
   s.anchoringEntry = anchoring;
