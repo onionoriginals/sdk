@@ -119,6 +119,11 @@ describe('the anchoring entry, the local copy and the disclosure (P9.10, P9.18)'
     expect(text).toMatch(/will NOT hold the version/);
     expect(text).toMatch(/2500 sats/);
     expect(disclosure({ name: 'x', mediaType: 'image/svg+xml', bytes: 10, body: 'full', previewMessage: '', parts: 1, feeSats: 1n, feeRate: 1, network: 'mainnet', author: 'a' }).lines.join()).toMatch(/active content/);
+    // An author's own preview of a version that is not an image is the inscribed body too (P9.18, P9.30).
+    const own = (previewMediaType: string) => disclosure({ name: 'x', mediaType: 'text/markdown', bytes: 10, body: 'preview', previewMessage: 'your preview', previewMediaType, parts: 1, feeSats: 1n, feeRate: 1, network: 'mainnet', author: 'a' }).lines.join();
+    expect(own('image/svg+xml')).toMatch(/active content/);
+    expect(own('text/html')).toMatch(/active content/);
+    expect(own('image/webp')).not.toMatch(/active content/);
   });
 });
 
